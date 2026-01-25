@@ -381,6 +381,7 @@ For each feature, in order:
 | `behavior/message-framing.md` | Wire-level encoding, CBOR rules, size limits, compatibility | Complete |
 | `behavior/commissioning-pase.md` | SPAKE2+ commissioning, certificate flow, admin delegation | Complete |
 | `behavior/discovery.md` | mDNS/DNS-SD, QR code format, discriminator handling | Complete |
+| `behavior/zone-lifecycle.md` | Zone creation, device add/remove, cert renewal, revocation | Complete |
 
 ### Completed Test Cases
 
@@ -411,6 +412,12 @@ For each feature, in order:
 | TC-DISC | 4 | Discriminator handling |
 | TC-DISC-STATE | 5 | Discovery state transitions |
 | TC-BROWSE | 4 | Service browsing |
+| TC-ZONE-CREATE | 3 | Zone creation |
+| TC-ZONE-ADD | 5 | Adding devices to zone |
+| TC-CERT-RENEW | 5 | Certificate renewal |
+| TC-ZONE-REMOVE | 5 | Removing devices from zone |
+| TC-D2D | 3 | Device-to-device verification |
+| TC-QR-GEN | 4 | QR code generation |
 
 ### Gaps Remaining (from testability-analysis.md)
 
