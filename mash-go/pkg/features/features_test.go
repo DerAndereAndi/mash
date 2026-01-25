@@ -523,3 +523,608 @@ func TestNullableAttributes(t *testing.T) {
 		t.Error("expected ACActivePower to return ok after setting")
 	}
 }
+
+func TestStatus(t *testing.T) {
+	status := NewStatus()
+
+	t.Run("Type", func(t *testing.T) {
+		if status.Type() != model.FeatureStatus {
+			t.Errorf("expected type Status, got %v", status.Type())
+		}
+	})
+
+	t.Run("DefaultState", func(t *testing.T) {
+		if status.OperatingState() != OperatingStateUnknown {
+			t.Errorf("expected default state UNKNOWN, got %v", status.OperatingState())
+		}
+	})
+
+	t.Run("SetOperatingState", func(t *testing.T) {
+		states := []struct {
+			state OperatingState
+			name  string
+		}{
+			{OperatingStateOffline, "OFFLINE"},
+			{OperatingStateStandby, "STANDBY"},
+			{OperatingStateStarting, "STARTING"},
+			{OperatingStateRunning, "RUNNING"},
+			{OperatingStatePaused, "PAUSED"},
+			{OperatingStateShuttingDown, "SHUTTING_DOWN"},
+			{OperatingStateFault, "FAULT"},
+			{OperatingStateMaintenance, "MAINTENANCE"},
+		}
+
+		for _, tc := range states {
+			err := status.SetOperatingState(tc.state)
+			if err != nil {
+				t.Fatalf("SetOperatingState(%s) failed: %v", tc.name, err)
+			}
+			if status.OperatingState() != tc.state {
+				t.Errorf("expected state %s, got %v", tc.name, status.OperatingState())
+			}
+			if tc.state.String() != tc.name {
+				t.Errorf("expected String() %s, got %s", tc.name, tc.state.String())
+			}
+		}
+	})
+
+	t.Run("SetFault", func(t *testing.T) {
+		err := status.SetFault(1001, "Overcurrent detected")
+		if err != nil {
+			t.Fatalf("SetFault failed: %v", err)
+		}
+
+		if status.OperatingState() != OperatingStateFault {
+			t.Error("expected FAULT state after SetFault")
+		}
+
+		code, ok := status.FaultCode()
+		if !ok || code != 1001 {
+			t.Errorf("expected fault code 1001, got %d (ok=%v)", code, ok)
+		}
+
+		msg := status.FaultMessage()
+		if msg != "Overcurrent detected" {
+			t.Errorf("expected fault message 'Overcurrent detected', got '%s'", msg)
+		}
+	})
+
+	t.Run("ClearFault", func(t *testing.T) {
+		_ = status.SetFault(1001, "Test fault")
+		err := status.ClearFault()
+		if err != nil {
+			t.Fatalf("ClearFault failed: %v", err)
+		}
+
+		// Fault attributes should be cleared
+		_, ok := status.FaultCode()
+		if ok {
+			t.Error("expected fault code to be cleared")
+		}
+
+		msg := status.FaultMessage()
+		if msg != "" {
+			t.Errorf("expected empty fault message, got '%s'", msg)
+		}
+	})
+
+	t.Run("HelperMethods", func(t *testing.T) {
+		_ = status.SetOperatingState(OperatingStateFault)
+		if !status.IsFaulted() {
+			t.Error("expected IsFaulted to be true")
+		}
+
+		_ = status.SetOperatingState(OperatingStateRunning)
+		if !status.IsRunning() {
+			t.Error("expected IsRunning to be true")
+		}
+		if !status.IsReady() {
+			t.Error("expected IsReady to be true for RUNNING")
+		}
+
+		_ = status.SetOperatingState(OperatingStateStandby)
+		if !status.IsReady() {
+			t.Error("expected IsReady to be true for STANDBY")
+		}
+
+		_ = status.SetOperatingState(OperatingStateOffline)
+		if !status.IsOffline() {
+			t.Error("expected IsOffline to be true")
+		}
+	})
+
+	t.Run("SetStateDetail", func(t *testing.T) {
+		err := status.SetStateDetail(42)
+		if err != nil {
+			t.Fatalf("SetStateDetail failed: %v", err)
+		}
+
+		detail, ok := status.StateDetail()
+		if !ok || detail != 42 {
+			t.Errorf("expected state detail 42, got %d (ok=%v)", detail, ok)
+		}
+
+		err = status.ClearStateDetail()
+		if err != nil {
+			t.Fatalf("ClearStateDetail failed: %v", err)
+		}
+
+		_, ok = status.StateDetail()
+		if ok {
+			t.Error("expected state detail to be cleared")
+		}
+	})
+}
+
+func TestEnergyControl(t *testing.T) {
+	ec := NewEnergyControl()
+
+	t.Run("Type", func(t *testing.T) {
+		if ec.Type() != model.FeatureEnergyControl {
+			t.Errorf("expected type EnergyControl, got %v", ec.Type())
+		}
+	})
+
+	t.Run("DefaultValues", func(t *testing.T) {
+		if ec.DeviceType() != DeviceTypeOther {
+			t.Errorf("expected default device type OTHER, got %v", ec.DeviceType())
+		}
+		if ec.ControlState() != ControlStateAutonomous {
+			t.Errorf("expected default control state AUTONOMOUS, got %v", ec.ControlState())
+		}
+		if ec.ProcessState() != ProcessStateNone {
+			t.Errorf("expected default process state NONE, got %v", ec.ProcessState())
+		}
+	})
+
+	t.Run("SetDeviceType", func(t *testing.T) {
+		types := []struct {
+			dt   DeviceType
+			name string
+		}{
+			{DeviceTypeEVSE, "EVSE"},
+			{DeviceTypeHeatPump, "HEAT_PUMP"},
+			{DeviceTypeWaterHeater, "WATER_HEATER"},
+			{DeviceTypeBattery, "BATTERY"},
+			{DeviceTypeInverter, "INVERTER"},
+			{DeviceTypeFlexibleLoad, "FLEXIBLE_LOAD"},
+		}
+
+		for _, tc := range types {
+			err := ec.SetDeviceType(tc.dt)
+			if err != nil {
+				t.Fatalf("SetDeviceType(%s) failed: %v", tc.name, err)
+			}
+			if ec.DeviceType() != tc.dt {
+				t.Errorf("expected type %s, got %v", tc.name, ec.DeviceType())
+			}
+			if tc.dt.String() != tc.name {
+				t.Errorf("expected String() %s, got %s", tc.name, tc.dt.String())
+			}
+		}
+	})
+
+	t.Run("SetControlState", func(t *testing.T) {
+		states := []struct {
+			cs   ControlState
+			name string
+		}{
+			{ControlStateAutonomous, "AUTONOMOUS"},
+			{ControlStateControlled, "CONTROLLED"},
+			{ControlStateLimited, "LIMITED"},
+			{ControlStateFailsafe, "FAILSAFE"},
+			{ControlStateOverride, "OVERRIDE"},
+		}
+
+		for _, tc := range states {
+			err := ec.SetControlState(tc.cs)
+			if err != nil {
+				t.Fatalf("SetControlState(%s) failed: %v", tc.name, err)
+			}
+			if ec.ControlState() != tc.cs {
+				t.Errorf("expected state %s, got %v", tc.name, ec.ControlState())
+			}
+		}
+	})
+
+	t.Run("SetProcessState", func(t *testing.T) {
+		states := []struct {
+			ps   ProcessState
+			name string
+		}{
+			{ProcessStateNone, "NONE"},
+			{ProcessStateAvailable, "AVAILABLE"},
+			{ProcessStateScheduled, "SCHEDULED"},
+			{ProcessStateRunning, "RUNNING"},
+			{ProcessStatePaused, "PAUSED"},
+			{ProcessStateCompleted, "COMPLETED"},
+			{ProcessStateAborted, "ABORTED"},
+		}
+
+		for _, tc := range states {
+			err := ec.SetProcessState(tc.ps)
+			if err != nil {
+				t.Fatalf("SetProcessState(%s) failed: %v", tc.name, err)
+			}
+			if ec.ProcessState() != tc.ps {
+				t.Errorf("expected state %s, got %v", tc.name, ec.ProcessState())
+			}
+		}
+	})
+
+	t.Run("SetCapabilities", func(t *testing.T) {
+		ec.SetCapabilities(true, true, false, false, true, false, true)
+
+		if !ec.AcceptsLimits() {
+			t.Error("expected acceptsLimits to be true")
+		}
+		if !ec.IsPausable() {
+			t.Error("expected isPausable to be true")
+		}
+	})
+
+	t.Run("SetEffectiveLimits", func(t *testing.T) {
+		limit := int64(11_000_000) // 11 kW
+		err := ec.SetEffectiveConsumptionLimit(&limit)
+		if err != nil {
+			t.Fatalf("SetEffectiveConsumptionLimit failed: %v", err)
+		}
+
+		readLimit, ok := ec.EffectiveConsumptionLimit()
+		if !ok || readLimit != limit {
+			t.Errorf("expected limit %d, got %d (ok=%v)", limit, readLimit, ok)
+		}
+
+		// Clear limit
+		err = ec.SetEffectiveConsumptionLimit(nil)
+		if err != nil {
+			t.Fatalf("SetEffectiveConsumptionLimit(nil) failed: %v", err)
+		}
+
+		_, ok = ec.EffectiveConsumptionLimit()
+		if ok {
+			t.Error("expected limit to be cleared")
+		}
+	})
+
+	t.Run("HelperMethods", func(t *testing.T) {
+		_ = ec.SetControlState(ControlStateLimited)
+		if !ec.IsLimited() {
+			t.Error("expected IsLimited to be true")
+		}
+
+		_ = ec.SetControlState(ControlStateFailsafe)
+		if !ec.IsFailsafe() {
+			t.Error("expected IsFailsafe to be true")
+		}
+	})
+}
+
+func TestChargingSession(t *testing.T) {
+	cs := NewChargingSession()
+
+	t.Run("Type", func(t *testing.T) {
+		if cs.Type() != model.FeatureChargingSession {
+			t.Errorf("expected type ChargingSession, got %v", cs.Type())
+		}
+	})
+
+	t.Run("DefaultState", func(t *testing.T) {
+		if cs.State() != ChargingStateNotPluggedIn {
+			t.Errorf("expected default state NOT_PLUGGED_IN, got %v", cs.State())
+		}
+		if cs.EVDemandMode() != EVDemandModeNone {
+			t.Errorf("expected default demand mode NONE, got %v", cs.EVDemandMode())
+		}
+		if cs.CurrentChargingMode() != ChargingModeOff {
+			t.Errorf("expected default charging mode OFF, got %v", cs.CurrentChargingMode())
+		}
+	})
+
+	t.Run("ChargingStateEnum", func(t *testing.T) {
+		states := []struct {
+			state ChargingState
+			name  string
+		}{
+			{ChargingStateNotPluggedIn, "NOT_PLUGGED_IN"},
+			{ChargingStatePluggedInNoDemand, "PLUGGED_IN_NO_DEMAND"},
+			{ChargingStatePluggedInDemand, "PLUGGED_IN_DEMAND"},
+			{ChargingStatePluggedInCharging, "PLUGGED_IN_CHARGING"},
+			{ChargingStatePluggedInDischarging, "PLUGGED_IN_DISCHARGING"},
+			{ChargingStateSessionComplete, "SESSION_COMPLETE"},
+			{ChargingStateFault, "FAULT"},
+		}
+
+		for _, tc := range states {
+			err := cs.SetState(tc.state)
+			if err != nil {
+				t.Fatalf("SetState(%s) failed: %v", tc.name, err)
+			}
+			if cs.State() != tc.state {
+				t.Errorf("expected state %s, got %v", tc.name, cs.State())
+			}
+			if tc.state.String() != tc.name {
+				t.Errorf("expected String() %s, got %s", tc.name, tc.state.String())
+			}
+		}
+	})
+
+	t.Run("EVDemandModeEnum", func(t *testing.T) {
+		modes := []struct {
+			mode EVDemandMode
+			name string
+		}{
+			{EVDemandModeNone, "NONE"},
+			{EVDemandModeSingleDemand, "SINGLE_DEMAND"},
+			{EVDemandModeScheduled, "SCHEDULED"},
+			{EVDemandModeDynamic, "DYNAMIC"},
+			{EVDemandModeDynamicBidirectional, "DYNAMIC_BIDIRECTIONAL"},
+		}
+
+		for _, tc := range modes {
+			if tc.mode.String() != tc.name {
+				t.Errorf("expected EVDemandMode String() %s, got %s", tc.name, tc.mode.String())
+			}
+		}
+	})
+
+	t.Run("EVIDTypeEnum", func(t *testing.T) {
+		types := []struct {
+			idType EVIDType
+			name   string
+		}{
+			{EVIDTypePCID, "PCID"},
+			{EVIDTypeMACEUI48, "MAC_EUI48"},
+			{EVIDTypeMACEUI64, "MAC_EUI64"},
+			{EVIDTypeRFID, "RFID"},
+			{EVIDTypeVIN, "VIN"},
+			{EVIDTypeContractID, "CONTRACT_ID"},
+			{EVIDTypeEVCCID, "EVCC_ID"},
+			{EVIDTypeOther, "OTHER"},
+		}
+
+		for _, tc := range types {
+			if tc.idType.String() != tc.name {
+				t.Errorf("expected EVIDType String() %s, got %s", tc.name, tc.idType.String())
+			}
+		}
+	})
+
+	t.Run("ChargingModeEnum", func(t *testing.T) {
+		modes := []struct {
+			mode ChargingMode
+			name string
+		}{
+			{ChargingModeOff, "OFF"},
+			{ChargingModePVSurplusOnly, "PV_SURPLUS_ONLY"},
+			{ChargingModePVSurplusThreshold, "PV_SURPLUS_THRESHOLD"},
+			{ChargingModePriceOptimized, "PRICE_OPTIMIZED"},
+			{ChargingModeScheduled, "SCHEDULED"},
+		}
+
+		for _, tc := range modes {
+			if tc.mode.String() != tc.name {
+				t.Errorf("expected ChargingMode String() %s, got %s", tc.name, tc.mode.String())
+			}
+		}
+	})
+
+	t.Run("StartEndSession", func(t *testing.T) {
+		err := cs.StartSession(12345, 1706180400)
+		if err != nil {
+			t.Fatalf("StartSession failed: %v", err)
+		}
+
+		if cs.SessionID() != 12345 {
+			t.Errorf("expected session ID 12345, got %d", cs.SessionID())
+		}
+		if cs.State() != ChargingStatePluggedInNoDemand {
+			t.Errorf("expected state PLUGGED_IN_NO_DEMAND, got %v", cs.State())
+		}
+		if cs.SessionEnergyCharged() != 0 {
+			t.Errorf("expected initial energy 0, got %d", cs.SessionEnergyCharged())
+		}
+		if !cs.IsPluggedIn() {
+			t.Error("expected IsPluggedIn to be true")
+		}
+
+		err = cs.EndSession(1706190000)
+		if err != nil {
+			t.Fatalf("EndSession failed: %v", err)
+		}
+
+		if cs.State() != ChargingStateNotPluggedIn {
+			t.Errorf("expected state NOT_PLUGGED_IN, got %v", cs.State())
+		}
+		if cs.IsPluggedIn() {
+			t.Error("expected IsPluggedIn to be false after EndSession")
+		}
+	})
+
+	t.Run("SessionEnergy", func(t *testing.T) {
+		err := cs.SetSessionEnergyCharged(5_500_000) // 5.5 kWh
+		if err != nil {
+			t.Fatalf("SetSessionEnergyCharged failed: %v", err)
+		}
+
+		if cs.SessionEnergyCharged() != 5_500_000 {
+			t.Errorf("expected energy 5500000, got %d", cs.SessionEnergyCharged())
+		}
+
+		err = cs.SetSessionEnergyDischarged(1_000_000) // 1 kWh V2G
+		if err != nil {
+			t.Fatalf("SetSessionEnergyDischarged failed: %v", err)
+		}
+
+		if cs.SessionEnergyDischarged() != 1_000_000 {
+			t.Errorf("expected discharged 1000000, got %d", cs.SessionEnergyDischarged())
+		}
+	})
+
+	t.Run("EVBatteryState", func(t *testing.T) {
+		err := cs.SetEVStateOfCharge(72)
+		if err != nil {
+			t.Fatalf("SetEVStateOfCharge failed: %v", err)
+		}
+
+		soc, ok := cs.EVStateOfCharge()
+		if !ok || soc != 72 {
+			t.Errorf("expected SoC 72, got %d (ok=%v)", soc, ok)
+		}
+
+		err = cs.SetEVBatteryCapacity(82_000_000) // 82 kWh
+		if err != nil {
+			t.Fatalf("SetEVBatteryCapacity failed: %v", err)
+		}
+
+		cap, ok := cs.EVBatteryCapacity()
+		if !ok || cap != 82_000_000 {
+			t.Errorf("expected capacity 82000000, got %d (ok=%v)", cap, ok)
+		}
+	})
+
+	t.Run("EVDemandMode", func(t *testing.T) {
+		err := cs.SetEVDemandMode(EVDemandModeDynamicBidirectional)
+		if err != nil {
+			t.Fatalf("SetEVDemandMode failed: %v", err)
+		}
+
+		if cs.EVDemandMode() != EVDemandModeDynamicBidirectional {
+			t.Errorf("expected DYNAMIC_BIDIRECTIONAL, got %v", cs.EVDemandMode())
+		}
+	})
+
+	t.Run("EVEnergyRequests", func(t *testing.T) {
+		min := int64(-26_240_000)   // Can discharge to 40%
+		max := int64(22_960_000)    // To 100%
+		target := int64(16_000_000) // To 80%
+
+		err := cs.SetEVEnergyRequests(&min, &max, &target)
+		if err != nil {
+			t.Fatalf("SetEVEnergyRequests failed: %v", err)
+		}
+
+		readTarget, ok := cs.EVTargetEnergyRequest()
+		if !ok || readTarget != target {
+			t.Errorf("expected target %d, got %d (ok=%v)", target, readTarget, ok)
+		}
+	})
+
+	t.Run("EVIdentifications", func(t *testing.T) {
+		ids := []EVIdentification{
+			{Type: EVIDTypePCID, Value: "PCID-VW-2024-ABC123"},
+			{Type: EVIDTypeVIN, Value: "WVWZZZ3CZWE123456"},
+		}
+
+		err := cs.SetEVIdentifications(ids)
+		if err != nil {
+			t.Fatalf("SetEVIdentifications failed: %v", err)
+		}
+	})
+
+	t.Run("ChargingMode", func(t *testing.T) {
+		err := cs.SetSupportedChargingModes([]ChargingMode{
+			ChargingModeOff,
+			ChargingModePVSurplusOnly,
+			ChargingModePVSurplusThreshold,
+			ChargingModePriceOptimized,
+		})
+		if err != nil {
+			t.Fatalf("SetSupportedChargingModes failed: %v", err)
+		}
+
+		if !cs.SupportsMode(ChargingModePVSurplusOnly) {
+			t.Error("expected PV_SURPLUS_ONLY to be supported")
+		}
+		if cs.SupportsMode(ChargingModeScheduled) {
+			t.Error("expected SCHEDULED to not be supported")
+		}
+
+		err = cs.SetChargingMode(ChargingModePVSurplusThreshold)
+		if err != nil {
+			t.Fatalf("SetChargingMode failed: %v", err)
+		}
+
+		if cs.CurrentChargingMode() != ChargingModePVSurplusThreshold {
+			t.Errorf("expected PV_SURPLUS_THRESHOLD, got %v", cs.CurrentChargingMode())
+		}
+
+		err = cs.SetSurplusThreshold(1_400_000) // 1.4 kW
+		if err != nil {
+			t.Fatalf("SetSurplusThreshold failed: %v", err)
+		}
+	})
+
+	t.Run("StartStopDelays", func(t *testing.T) {
+		err := cs.SetStartDelay(60)
+		if err != nil {
+			t.Fatalf("SetStartDelay failed: %v", err)
+		}
+
+		err = cs.SetStopDelay(120)
+		if err != nil {
+			t.Fatalf("SetStopDelay failed: %v", err)
+		}
+	})
+
+	t.Run("IsChargingDischarging", func(t *testing.T) {
+		_ = cs.SetState(ChargingStatePluggedInCharging)
+		if !cs.IsCharging() {
+			t.Error("expected IsCharging to be true")
+		}
+		if cs.IsDischarging() {
+			t.Error("expected IsDischarging to be false")
+		}
+
+		_ = cs.SetState(ChargingStatePluggedInDischarging)
+		if cs.IsCharging() {
+			t.Error("expected IsCharging to be false")
+		}
+		if !cs.IsDischarging() {
+			t.Error("expected IsDischarging to be true")
+		}
+	})
+
+	t.Run("CanDischarge", func(t *testing.T) {
+		// Setup for V2G: minDischarge < 0, maxDischarge >= 0, target <= 0
+		minDischarge := int64(-16_400_000)
+		maxDischarge := int64(8_200_000)
+		target := int64(-8_200_000) // Already above target
+		_ = cs.SetEVEnergyRequests(&minDischarge, nil, &target)
+		_ = cs.SetEVDischargeConstraints(&minDischarge, &maxDischarge, nil)
+
+		if !cs.CanDischarge() {
+			t.Error("expected CanDischarge to be true when target <= 0")
+		}
+	})
+}
+
+func TestEnergyControlEnums(t *testing.T) {
+	t.Run("LimitCause", func(t *testing.T) {
+		// Test that enum values are defined correctly
+		if LimitCauseGridEmergency != 0 {
+			t.Error("LimitCauseGridEmergency should be 0")
+		}
+		if LimitCauseLocalProtection != 2 {
+			t.Error("LimitCauseLocalProtection should be 2")
+		}
+	})
+
+	t.Run("SetpointCause", func(t *testing.T) {
+		if SetpointCauseGridRequest != 0 {
+			t.Error("SetpointCauseGridRequest should be 0")
+		}
+		if SetpointCauseSelfConsumption != 1 {
+			t.Error("SetpointCauseSelfConsumption should be 1")
+		}
+	})
+
+	t.Run("OptOutState", func(t *testing.T) {
+		if OptOutNone != 0 {
+			t.Error("OptOutNone should be 0")
+		}
+		if OptOutAll != 3 {
+			t.Error("OptOutAll should be 3")
+		}
+	})
+}
