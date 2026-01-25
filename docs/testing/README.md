@@ -382,6 +382,7 @@ For each feature, in order:
 | `behavior/commissioning-pase.md` | SPAKE2+ commissioning, certificate flow, admin delegation | Complete |
 | `behavior/discovery.md` | mDNS/DNS-SD, QR code format, discriminator handling | Complete |
 | `behavior/zone-lifecycle.md` | Zone creation, device add/remove, cert renewal, revocation | Complete |
+| `behavior/connection-establishment.md` | mDNS records, TLS handshake, PASE→operational transition, cert validation | Complete |
 
 ### Completed Test Cases
 
