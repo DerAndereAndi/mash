@@ -39,6 +39,8 @@ MASH.<Side>.<Feature>[.<Type><ID>][.<Qualifier>]
 
 ### 2.2 Feature Identifiers
 
+#### Application Layer Features
+
 | ID | Feature | Description |
 |----|---------|-------------|
 | ELEC | Electrical | Electrical characteristics |
@@ -50,6 +52,22 @@ MASH.<Side>.<Feature>[.<Type><ID>][.<Qualifier>]
 | SIG | Signals | Time-slotted signals |
 | TAR | Tariff | Price structure |
 | PLAN | Plan | Device's intended behavior |
+
+#### Pairing/Connection Layer Features
+
+| ID | Feature | Description |
+|----|---------|-------------|
+| TRANS | Transport | TLS, framing, keep-alive |
+| COMM | Commissioning | SPAKE2+/PASE, setup codes |
+| CERT | Certificate | X.509 management, renewal |
+| ZONE | Zone | Multi-zone, priority, admin |
+| CONN | Connection | Lifecycle, reconnection |
+| FAILSAFE | Failsafe | Connection loss handling |
+| SUB | Subscription | Notifications, coalescing |
+| DURATION | Duration | Timer semantics |
+| DISC | Discovery | mDNS, QR codes |
+
+See [Pairing/Connection PICS Registry](pics/pairing-connection-registry.md) for complete code definitions.
 
 ### 2.3 Type Identifiers
 
@@ -568,3 +586,13 @@ steps:
 | [Conformance Rules](../conformance/README.md) | Attribute conformance |
 | [Testing README](README.md) | Test approach overview |
 | [Testability Analysis](../testability-analysis.md) | Gap analysis |
+| [Pairing/Connection PICS Registry](pics/pairing-connection-registry.md) | PICS codes for pairing and connection layer |
+
+### Example PICS Files
+
+| Example | Description |
+|---------|-------------|
+| [Minimal Device](pics/examples/minimal-device-pairing.pics) | Constrained device with mandatory features only |
+| [Full-Featured Device](pics/examples/full-featured-device-pairing.pics) | High-end device with all optional features |
+| [Home Manager Controller](pics/examples/home-manager-controller.pics) | HOME_MANAGER zone controller |
+| [Grid Operator Controller](pics/examples/grid-operator-controller.pics) | GRID_OPERATOR zone controller (highest priority) |

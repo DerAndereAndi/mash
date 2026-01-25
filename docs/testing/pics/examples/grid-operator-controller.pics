@@ -1,0 +1,166 @@
+# MASH PICS File - Grid Operator Controller (Pairing/Connection)
+# Device: Smart Meter Gateway / DSO Controller
+# Version: 1.0
+# Date: 2025-01-25
+#
+# This PICS file represents a GRID_OPERATOR controller (highest priority).
+# Typically deployed as SMGW (Smart Meter Gateway) or DSO system.
+# Has authority to override lower-priority zones.
+
+#=============================================================================
+# PROTOCOL SUPPORT
+#=============================================================================
+MASH.C=1
+MASH.C.VERSION=1
+
+#=============================================================================
+# TRANSPORT LAYER (Client)
+#=============================================================================
+
+# Protocol Stack
+MASH.C.TRANS=1
+MASH.C.TRANS.IPV6=1
+MASH.C.TRANS.TLS13=1
+MASH.C.TRANS.DEFAULT_PORT=8443
+
+# TLS Cipher Suites (security-focused selection)
+MASH.C.TRANS.TLS_AES_128_GCM=1
+MASH.C.TRANS.TLS_AES_256_GCM=1
+MASH.C.TRANS.TLS_CHACHA20=0
+
+# Key Exchange
+MASH.C.TRANS.ECDHE_P256=1
+MASH.C.TRANS.ECDHE_X25519=1
+
+# Keep-Alive
+MASH.C.TRANS.PING_INTERVAL=30
+MASH.C.TRANS.PONG_TIMEOUT=5
+MASH.C.TRANS.MAX_MISSED_PONGS=3
+
+#=============================================================================
+# COMMISSIONING (Client)
+#=============================================================================
+
+# PASE Support
+MASH.C.COMM=1
+MASH.C.COMM.PASE=1
+MASH.C.COMM.PASE_GROUP="P-256"
+MASH.C.COMM.PASE_HASH="SHA-256"
+
+# Commissioning Methods (typically pre-provisioned, but supports manual)
+MASH.C.COMM.QR_SCAN=1
+MASH.C.COMM.MANUAL_ENTRY=1
+MASH.C.COMM.MDNS_DISCOVERY=1
+MASH.C.COMM.PRE_PROVISIONED=1
+
+# Attestation Verification (REQUIRED for grid operator)
+MASH.C.COMM.VERIFY_ATTESTATION=1
+MASH.C.COMM.REQUIRE_ATTESTATION=1
+
+#=============================================================================
+# ZONE MANAGEMENT (Client as Zone Owner - GRID_OPERATOR)
+#=============================================================================
+
+MASH.C.ZONE=1
+MASH.C.ZONE.TYPE="GRID_OPERATOR"
+MASH.C.ZONE.PRIORITY=1
+
+# Zone CA Management
+MASH.C.ZONE.CA_GENERATE=1
+MASH.C.ZONE.CA_VALIDITY=99
+MASH.C.ZONE.OP_CERT_ISSUE=1
+MASH.C.ZONE.OP_CERT_RENEW=1
+
+# Admin Delegation (grid operators typically don't delegate)
+MASH.C.ZONE.ADMIN_DELEGATION=0
+
+# Device Management (grid operator manages many devices)
+MASH.C.ZONE.MAX_DEVICES=1000
+MASH.C.ZONE.DEVICE_ADD=1
+MASH.C.ZONE.DEVICE_REMOVE=1
+MASH.C.ZONE.DEVICE_LIST=1
+
+# Priority Override (grid operator can remove lower priority zones)
+MASH.C.ZONE.FORCED_REMOVAL=1
+MASH.C.ZONE.CAN_OVERRIDE_BUILDING_MANAGER=1
+MASH.C.ZONE.CAN_OVERRIDE_HOME_MANAGER=1
+MASH.C.ZONE.CAN_OVERRIDE_USER_APP=1
+
+#=============================================================================
+# CONNECTION MANAGEMENT (Client)
+#=============================================================================
+
+MASH.C.CONN=1
+MASH.C.CONN.MAX_CONNECTIONS=1000
+MASH.C.CONN.PARALLEL_CONNECTIONS=100
+
+# Reconnection Strategy (more aggressive for grid reliability)
+MASH.C.CONN.BACKOFF_INITIAL=1
+MASH.C.CONN.BACKOFF_MAX=30
+MASH.C.CONN.BACKOFF_MULTIPLIER=2
+MASH.C.CONN.JITTER=1
+MASH.C.CONN.JITTER_FACTOR=0.25
+
+# Connection State Tracking
+MASH.C.CONN.STATE_PERSIST=1
+MASH.C.CONN.AUTO_RECONNECT=1
+
+#=============================================================================
+# SUBSCRIPTION MANAGEMENT (Client)
+#=============================================================================
+
+MASH.C.SUB=1
+MASH.C.SUB.MAX_SUBSCRIPTIONS_PER_DEVICE=10
+
+# Subscription Preferences (less frequent updates for scale)
+MASH.C.SUB.DEFAULT_MIN_INTERVAL=5
+MASH.C.SUB.DEFAULT_MAX_INTERVAL=300
+
+# Subscription Restoration
+MASH.C.SUB.RESTORE_ON_RECONNECT=1
+MASH.C.SUB.TRACK_MISSED_EVENTS=1
+
+#=============================================================================
+# DISCOVERY (Client)
+#=============================================================================
+
+MASH.C.DISC=1
+MASH.C.DISC.MDNS_BROWSE=1
+MASH.C.DISC.SERVICE_TYPE="_mash._tcp"
+
+# Grid operator typically uses pre-provisioning, not QR
+MASH.C.DISC.QR_SCAN=0
+MASH.C.DISC.PRE_PROVISIONED_LIST=1
+
+# Manual Entry (backup method)
+MASH.C.DISC.MANUAL_CODE=1
+MASH.C.DISC.MANUAL_DISCRIMINATOR=1
+
+#=============================================================================
+# CERTIFICATE MANAGEMENT (Client as Zone CA)
+#=============================================================================
+
+MASH.C.CERT=1
+MASH.C.CERT.CA_STORAGE=1
+MASH.C.CERT.OP_CERT_STORAGE=1
+
+# Renewal Management
+MASH.C.CERT.AUTO_RENEW=1
+MASH.C.CERT.RENEWAL_ADVANCE_DAYS=30
+MASH.C.CERT.EXPIRY_NOTIFICATION=1
+
+# HSM Support (grid operators use hardware security)
+MASH.C.CERT.HSM_SUPPORT=1
+
+#=============================================================================
+# MULTI-ZONE AWARENESS (Client)
+#=============================================================================
+
+# Grid operator is highest priority, always effective
+MASH.C.ZONE.MULTI_ZONE_AWARE=1
+MASH.C.ZONE.PRIORITY_RESPECT=1
+MASH.C.ZONE.EFFECTIVE_VALUE_TRACKING=1
+
+# Grid-specific: can see all zones for coordination
+MASH.C.ZONE.VIEW_ALL_ZONES=1
+MASH.C.ZONE.COORDINATE_WITH_LOWER=1

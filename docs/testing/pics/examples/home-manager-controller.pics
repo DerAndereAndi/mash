@@ -1,0 +1,153 @@
+# MASH PICS File - Home Manager Controller (Pairing/Connection)
+# Device: Home Energy Management System Controller
+# Version: 1.0
+# Date: 2025-01-25
+#
+# This PICS file represents a HOME_MANAGER controller (client-side).
+# Controllers connect to devices, not the other way around.
+# This file declares what the controller supports when pairing with devices.
+
+#=============================================================================
+# PROTOCOL SUPPORT
+#=============================================================================
+MASH.C=1
+MASH.C.VERSION=1
+
+#=============================================================================
+# TRANSPORT LAYER (Client)
+#=============================================================================
+
+# Protocol Stack
+MASH.C.TRANS=1
+MASH.C.TRANS.IPV6=1
+MASH.C.TRANS.TLS13=1
+MASH.C.TRANS.DEFAULT_PORT=8443
+
+# TLS Cipher Suites (full support for compatibility)
+MASH.C.TRANS.TLS_AES_128_GCM=1
+MASH.C.TRANS.TLS_AES_256_GCM=1
+MASH.C.TRANS.TLS_CHACHA20=1
+
+# Key Exchange
+MASH.C.TRANS.ECDHE_P256=1
+MASH.C.TRANS.ECDHE_X25519=1
+
+# Keep-Alive (client sends pings)
+MASH.C.TRANS.PING_INTERVAL=30
+MASH.C.TRANS.PONG_TIMEOUT=5
+MASH.C.TRANS.MAX_MISSED_PONGS=3
+
+#=============================================================================
+# COMMISSIONING (Client)
+#=============================================================================
+
+# PASE Support (client initiates)
+MASH.C.COMM=1
+MASH.C.COMM.PASE=1
+MASH.C.COMM.PASE_GROUP="P-256"
+MASH.C.COMM.PASE_HASH="SHA-256"
+
+# Commissioning Methods
+MASH.C.COMM.QR_SCAN=1
+MASH.C.COMM.MANUAL_ENTRY=1
+MASH.C.COMM.MDNS_DISCOVERY=1
+
+# Attestation Verification
+MASH.C.COMM.VERIFY_ATTESTATION=1
+
+#=============================================================================
+# ZONE MANAGEMENT (Client as Zone Owner)
+#=============================================================================
+
+MASH.C.ZONE=1
+MASH.C.ZONE.TYPE="HOME_MANAGER"
+MASH.C.ZONE.PRIORITY=3
+
+# Zone CA Management
+MASH.C.ZONE.CA_GENERATE=1
+MASH.C.ZONE.CA_VALIDITY=99
+MASH.C.ZONE.OP_CERT_ISSUE=1
+MASH.C.ZONE.OP_CERT_RENEW=1
+
+# Admin Delegation (can delegate to installers)
+MASH.C.ZONE.ADMIN_DELEGATION=1
+MASH.C.ZONE.TEMP_TOKEN_GENERATE=1
+MASH.C.ZONE.TEMP_TOKEN_DURATION=300
+
+# Device Management
+MASH.C.ZONE.MAX_DEVICES=50
+MASH.C.ZONE.DEVICE_ADD=1
+MASH.C.ZONE.DEVICE_REMOVE=1
+MASH.C.ZONE.DEVICE_LIST=1
+
+#=============================================================================
+# CONNECTION MANAGEMENT (Client)
+#=============================================================================
+
+MASH.C.CONN=1
+MASH.C.CONN.MAX_CONNECTIONS=50
+MASH.C.CONN.PARALLEL_CONNECTIONS=10
+
+# Reconnection Strategy
+MASH.C.CONN.BACKOFF_INITIAL=1
+MASH.C.CONN.BACKOFF_MAX=60
+MASH.C.CONN.BACKOFF_MULTIPLIER=2
+MASH.C.CONN.JITTER=1
+MASH.C.CONN.JITTER_FACTOR=0.25
+
+# Connection State Tracking
+MASH.C.CONN.STATE_PERSIST=1
+MASH.C.CONN.AUTO_RECONNECT=1
+
+#=============================================================================
+# SUBSCRIPTION MANAGEMENT (Client)
+#=============================================================================
+
+MASH.C.SUB=1
+MASH.C.SUB.MAX_SUBSCRIPTIONS_PER_DEVICE=20
+
+# Subscription Preferences
+MASH.C.SUB.DEFAULT_MIN_INTERVAL=1
+MASH.C.SUB.DEFAULT_MAX_INTERVAL=60
+
+# Subscription Restoration
+MASH.C.SUB.RESTORE_ON_RECONNECT=1
+MASH.C.SUB.TRACK_MISSED_EVENTS=1
+
+#=============================================================================
+# DISCOVERY (Client)
+#=============================================================================
+
+MASH.C.DISC=1
+MASH.C.DISC.MDNS_BROWSE=1
+MASH.C.DISC.SERVICE_TYPE="_mash._tcp"
+
+# QR Code Scanning
+MASH.C.DISC.QR_SCAN=1
+MASH.C.DISC.QR_CAMERA=1
+
+# Manual Entry
+MASH.C.DISC.MANUAL_CODE=1
+MASH.C.DISC.MANUAL_DISCRIMINATOR=1
+
+#=============================================================================
+# CERTIFICATE MANAGEMENT (Client as Zone CA)
+#=============================================================================
+
+MASH.C.CERT=1
+MASH.C.CERT.CA_STORAGE=1
+MASH.C.CERT.OP_CERT_STORAGE=1
+
+# Renewal Management
+MASH.C.CERT.AUTO_RENEW=1
+MASH.C.CERT.RENEWAL_ADVANCE_DAYS=30
+MASH.C.CERT.EXPIRY_NOTIFICATION=1
+
+#=============================================================================
+# MULTI-ZONE AWARENESS (Client)
+#=============================================================================
+
+# Controller is aware of other zones on devices
+MASH.C.ZONE.MULTI_ZONE_AWARE=1
+MASH.C.ZONE.PRIORITY_RESPECT=1
+MASH.C.ZONE.EFFECTIVE_VALUE_TRACKING=1

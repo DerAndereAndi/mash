@@ -1,0 +1,196 @@
+# MASH PICS File - Minimal Device (Pairing/Connection)
+# Device: Generic Energy Device - Minimal Implementation
+# Version: 1.0
+# Date: 2025-01-25
+#
+# This PICS file represents a device with minimal pairing/connection
+# capabilities - only mandatory features, no optional enhancements.
+# Suitable for constrained devices (ESP32-class, 256KB RAM).
+
+#=============================================================================
+# PROTOCOL SUPPORT
+#=============================================================================
+MASH.S=1
+MASH.S.VERSION=1
+
+#=============================================================================
+# TRANSPORT LAYER
+#=============================================================================
+
+# Protocol Stack
+MASH.S.TRANS=1
+MASH.S.TRANS.IPV6=1
+MASH.S.TRANS.TLS13=1
+MASH.S.TRANS.PORT=8443
+
+# TLS Cipher Suites (only mandatory)
+MASH.S.TRANS.TLS_AES_128_GCM=1
+MASH.S.TRANS.TLS_AES_256_GCM=0
+MASH.S.TRANS.TLS_CHACHA20=0
+
+# Key Exchange (only mandatory)
+MASH.S.TRANS.ECDHE_P256=1
+MASH.S.TRANS.ECDHE_X25519=0
+
+# Framing
+MASH.S.TRANS.MAX_MSG_SIZE=65536
+MASH.S.TRANS.LENGTH_PREFIX=1
+
+# Keep-Alive
+MASH.S.TRANS.PING_INTERVAL=30
+MASH.S.TRANS.PONG_TIMEOUT=5
+MASH.S.TRANS.MAX_MISSED_PONGS=3
+MASH.S.TRANS.DETECTION_DELAY_MAX=95
+
+#=============================================================================
+# COMMISSIONING
+#=============================================================================
+
+# PASE Support
+MASH.S.COMM=1
+MASH.S.COMM.PASE=1
+MASH.S.COMM.PASE_GROUP="P-256"
+MASH.S.COMM.PASE_HASH="SHA-256"
+MASH.S.COMM.PASE_KDF="HKDF-SHA256"
+MASH.S.COMM.PASE_MAC="HMAC-SHA256"
+
+# Commissioning Window
+MASH.S.COMM.WINDOW_DURATION=120
+MASH.S.COMM.SETUP_CODE_BITS=27
+MASH.S.COMM.DISCRIMINATOR_BITS=12
+
+# Timeouts
+MASH.S.COMM.PASE_TIMEOUT=30
+MASH.S.COMM.CSR_TIMEOUT=10
+MASH.S.COMM.CERT_TIMEOUT=30
+
+# Attestation (not supported on minimal device)
+MASH.S.COMM.ATTESTATION=0
+MASH.S.COMM.ATTESTATION_CERT=0
+
+#=============================================================================
+# CERTIFICATE MANAGEMENT
+#=============================================================================
+
+MASH.S.CERT=1
+MASH.S.CERT.X509V3=1
+MASH.S.CERT.ECDSA_P256=1
+
+# Storage
+MASH.S.CERT.MAX_ZONES=5
+MASH.S.CERT.PERSISTENT=1
+
+# Lifecycle
+MASH.S.CERT.OP_VALIDITY=365
+MASH.S.CERT.RENEWAL_WINDOW=30
+MASH.S.CERT.IN_SESSION_RENEWAL=1
+MASH.S.CERT.GRACE_PERIOD=0
+
+#=============================================================================
+# ZONE MANAGEMENT
+#=============================================================================
+
+MASH.S.ZONE=1
+MASH.S.ZONE.MAX_ZONES=5
+
+# Zone Types (accepts all)
+MASH.S.ZONE.GRID_OPERATOR=1
+MASH.S.ZONE.BUILDING_MANAGER=1
+MASH.S.ZONE.HOME_MANAGER=1
+MASH.S.ZONE.USER_APP=1
+
+# Zone Operations
+MASH.S.ZONE.ADD=1
+MASH.S.ZONE.REMOVE=1
+MASH.S.ZONE.LIST=1
+MASH.S.ZONE.FORCED_REMOVAL=1
+
+# Admin Delegation (not supported on minimal)
+MASH.S.ZONE.ADMIN_DELEGATION=0
+
+#=============================================================================
+# CONNECTION LIFECYCLE
+#=============================================================================
+
+MASH.S.CONN=1
+MASH.S.CONN.GRACEFUL_CLOSE=1
+MASH.S.CONN.CLOSE_TIMEOUT=5
+
+#=============================================================================
+# FAILSAFE BEHAVIOR
+#=============================================================================
+
+MASH.S.FAILSAFE=1
+MASH.S.FAILSAFE.DURATION_MIN=7200
+MASH.S.FAILSAFE.DURATION_MAX=86400
+MASH.S.FAILSAFE.DURATION_DEFAULT=14400
+
+# Failsafe Limits
+MASH.S.FAILSAFE.CONSUMPTION_LIMIT=1
+MASH.S.FAILSAFE.PRODUCTION_LIMIT=0
+MASH.S.FAILSAFE.LIMIT_CONFIGURABLE=0
+
+# Behavior (minimal - no persistence)
+MASH.S.FAILSAFE.TIMER_PERSISTENT=0
+MASH.S.FAILSAFE.TIMER_ACCURACY="1%"
+MASH.S.FAILSAFE.GRACE_PERIOD=0
+MASH.S.FAILSAFE.RECONNECT_WINS=1
+
+#=============================================================================
+# SUBSCRIPTION HANDLING
+#=============================================================================
+
+MASH.S.SUB=1
+MASH.S.SUB.MAX_SUBSCRIPTIONS=10
+MASH.S.SUB.MAX_ATTRS_PER_SUB=20
+
+# Intervals
+MASH.S.SUB.MIN_INTERVAL_MIN=0
+MASH.S.SUB.MIN_INTERVAL_MAX=3600
+MASH.S.SUB.MAX_INTERVAL_MIN=1
+MASH.S.SUB.MAX_INTERVAL_MAX=86400
+
+# Behavior
+MASH.S.SUB.COALESCE="last_value"
+MASH.S.SUB.BOUNCE_BACK=0
+MASH.S.SUB.HEARTBEAT_CONTENT="empty"
+MASH.S.SUB.PRIMING=1
+MASH.S.SUB.DELTA_ONLY=1
+MASH.S.SUB.INTERVAL_AUTOCORRECT=0
+
+#=============================================================================
+# DURATION TIMERS
+#=============================================================================
+
+MASH.S.DURATION=1
+MASH.S.DURATION.MAX=86400
+MASH.S.DURATION.START_ON="receipt"
+MASH.S.DURATION.EXPIRY_ACTION="clear"
+MASH.S.DURATION.PERSIST_RECONNECT=0
+MASH.S.DURATION.ACCURACY="1%"
+
+#=============================================================================
+# DISCOVERY
+#=============================================================================
+
+MASH.S.DISC=1
+MASH.S.DISC.MDNS=1
+MASH.S.DISC.SERVICE_TYPE="_mash._tcp"
+
+# Pre-Commissioning
+MASH.S.DISC.PRE_COMM=1
+MASH.S.DISC.TXT_D=1
+MASH.S.DISC.TXT_VP=1
+MASH.S.DISC.TXT_CM=1
+MASH.S.DISC.TXT_DT=1
+
+# Post-Commissioning
+MASH.S.DISC.POST_COMM=1
+MASH.S.DISC.TXT_DI=1
+MASH.S.DISC.TXT_FW=1
+MASH.S.DISC.TXT_EP=1
+MASH.S.DISC.TXT_FM=1
+
+# QR Code (not supported on minimal)
+MASH.S.DISC.QR=0
+MASH.S.DISC.MANUAL_ENTRY=1
