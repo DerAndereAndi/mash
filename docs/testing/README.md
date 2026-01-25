@@ -383,6 +383,7 @@ For each feature, in order:
 | `behavior/discovery.md` | mDNS/DNS-SD, QR code format, discriminator handling | Complete |
 | `behavior/zone-lifecycle.md` | Zone creation, device add/remove, cert renewal, revocation | Complete |
 | `behavior/connection-establishment.md` | mDNS records, TLS handshake, PASE→operational transition, cert validation | Complete |
+| `behavior/tls-profile.md` | TLS 1.3 cipher suites, extensions, key exchange, alerts, session handling | Complete |
 
 ### Completed Test Cases
 
@@ -425,6 +426,13 @@ For each feature, in order:
 | TC-SUB-RESTORE | 5 | Subscription restoration after reconnection |
 | TC-INFLIGHT | 5 | In-flight command handling on connection loss |
 | TC-NOTFOUND | 6 | Device not found error handling |
+| TC-TLS-VERSION | 3 | TLS version negotiation |
+| TC-TLS-CIPHER | 4 | Cipher suite selection |
+| TC-TLS-KX | 4 | Key exchange groups |
+| TC-TLS-ALPN | 3 | ALPN protocol negotiation |
+| TC-TLS-CHAIN | 4 | Certificate chain validation |
+| TC-TLS-RESUME | 3 | Session resumption (prohibited) |
+| TC-TLS-ALERT | 4 | TLS alert handling |
 
 ### Gaps Remaining (from testability-analysis.md)
 

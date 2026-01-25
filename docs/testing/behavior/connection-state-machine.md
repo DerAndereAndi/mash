@@ -840,7 +840,7 @@ TCP_KEEPCNT = 3           # Probes before failure
 ### 12.2 TLS Configuration
 
 - TLS 1.3 only (no fallback)
-- Cipher suites: See transport.md section 3.2
+- Cipher suites: See tls-profile.md section 3
 - ALPN: "mash/1" (protocol identifier)
 - SNI: Device ID or IP (for certificate selection)
 
