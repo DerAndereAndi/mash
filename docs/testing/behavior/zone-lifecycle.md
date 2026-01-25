@@ -124,21 +124,16 @@ Zone owner maintains:
 │   ┌────────────────┐                                                     │
 │   │  SCAN_QR_CODE  │  User scans device QR code                          │
 │   └───────┬────────┘                                                     │
-│           │ Parse MASH:<version>:<D>:<setupcode>:<VP>                    │
+│           │ Parse MASH:<version>:<D>:<setupcode>                         │
 │           ▼                                                              │
 │   ┌────────────────┐                                                     │
-│   │ BROWSE_MDNS    │  Look for MASH-<D>._mash._tcp                       │
+│   │ BROWSE_MDNS    │  Look for MASH-<D>._mashc._udp                      │
 │   │   (10s max)    │                                                     │
 │   └───────┬────────┘                                                     │
 │           │ Device found with matching discriminator                     │
 │           ▼                                                              │
 │   ┌────────────────┐                                                     │
-│   │ VERIFY_VP      │  Check VP matches QR code                           │
-│   └───────┬────────┘                                                     │
-│           │ VP matches                                                   │
-│           ▼                                                              │
-│   ┌────────────────┐                                                     │
-│   │  CONNECT       │  TCP + TLS to device                                │
+│   │  CONNECT       │  TCP + TLS to device (port from SRV)                │
 │   └───────┬────────┘                                                     │
 │           │ TLS established (no client cert)                             │
 │           ▼                                                              │
@@ -191,7 +186,7 @@ When a phone app (admin) commissions on behalf of EMS (owner):
 App (Admin)                    EMS (Owner)                    Device
     │                              │                             │
     │─── SCAN_QR_CODE ────────────────────────────────────────────►
-    │    (gets D, setupcode, VP)   │                             │
+    │    (gets D, setupcode)       │                             │
     │                              │                             │
     │─── BROWSE + CONNECT ────────────────────────────────────────►
     │                              │                             │
@@ -543,8 +538,6 @@ def generate_qr_content(device: Device) -> str:
     """Generate MASH QR code content."""
     # Fixed at manufacturing or boot
     version = 1
-    vendor_id = device.vendor_id       # From device identity
-    product_id = device.product_id     # From device identity
 
     # Generated at manufacturing or reset
     discriminator = random.randint(0, 4095)
@@ -554,9 +547,11 @@ def generate_qr_content(device: Device) -> str:
     device.store_setup_code(setup_code)
     device.store_discriminator(discriminator)
 
-    # Format QR content
-    return f"MASH:{version}:{discriminator}:{setup_code}:0x{vendor_id:X}:0x{product_id:X}"
+    # Format QR content (simplified - no vendor/product IDs)
+    return f"MASH:{version}:{discriminator}:{setup_code}"
 ```
+
+**Note:** Device identification (brand, model, serial) is provided via mDNS TXT records, not in the QR code. This simplifies the QR code and removes dependency on vendor ID registration.
 
 ### 7.3 Setup Code Security
 
@@ -721,7 +716,7 @@ MASH.S.D2D.PUBLISHES_ZONE_ID=0        # Zone ID in mDNS TXT
 |----|-------------|-------|----------|
 | TC-ZONE-ADD-1 | Direct commissioning | Full workflow | Device in zone.members |
 | TC-ZONE-ADD-2 | Admin commissioning | Delegated flow | Device commissioned |
-| TC-ZONE-ADD-3 | VP mismatch | QR VP != device VP | Error reported |
+| TC-ZONE-ADD-3 | Wrong setup code | QR setupcode != device | PASE VERIFICATION_FAILED |
 | TC-ZONE-ADD-4 | Discriminator collision | Two devices same D | Correct device found |
 | TC-ZONE-ADD-5 | Second zone | Add to already-commissioned device | Both zones active |
 

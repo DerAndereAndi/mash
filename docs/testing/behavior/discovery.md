@@ -301,7 +301,7 @@ DC=5
 ### 4.1 Content Format
 
 ```
-MASH:<version>:<discriminator>:<setupcode>:<vendorid>:<productid>
+MASH:<version>:<discriminator>:<setupcode>
 ```
 
 | Field | Format | Range | Example |
@@ -309,13 +309,20 @@ MASH:<version>:<discriminator>:<setupcode>:<vendorid>:<productid>
 | version | Decimal | 1-255 | `1` |
 | discriminator | Decimal | 0-4095 | `1234` |
 | setupcode | Decimal | 00000000-99999999 | `12345678` |
-| vendorid | Hex (0x prefix) | 0x0000-0xFFFF | `0x1234` |
-| productid | Hex (0x prefix) | 0x0000-0xFFFF | `0x5678` |
 
 **Complete example:**
 ```
-MASH:1:1234:12345678:0x1234:0x5678
+MASH:1:1234:12345678
 ```
+
+**Design rationale:** The QR code contains only the minimum needed for commissioning:
+- **discriminator**: Find the device via mDNS (`MASH-<D>._mashc._udp`)
+- **setupcode**: Authenticate via SPAKE2+
+
+Device identification (brand, model, serial) is available in the mDNS TXT records, eliminating the need for vendor/product IDs in the QR code. This:
+- Simplifies the QR code (smaller, easier to scan)
+- Removes dependency on vendor ID registration
+- Works for open-source implementations
 
 ### 4.2 Numeric Formatting Rules
 
@@ -324,19 +331,17 @@ MASH:1:1234:12345678:0x1234:0x5678
 | version | No | None |
 | discriminator | No | None |
 | setupcode | **Yes** (8 digits) | None |
-| vendorid | **No** | `0x` |
-| productid | **No** | `0x` |
 
 **Correct:**
 ```
-MASH:1:1234:00001234:0x1234:0x5678   // setupcode has leading zeros
-MASH:1:0:99999999:0x0:0x0           // zero values without leading zeros
+MASH:1:1234:00001234   // setupcode has leading zeros
+MASH:1:0:99999999      // discriminator 0 without leading zeros
 ```
 
 **Incorrect:**
 ```
-MASH:01:1234:1234:0x1234:0x5678     // version has leading zero
-MASH:1:1234:1234:0x001234:0x5678    // vendorid has leading zeros
+MASH:01:1234:12345678  // version has leading zero
+MASH:1:1234:1234       // setupcode missing leading zeros (must be 8 digits)
 ```
 
 ### 4.3 QR Code Parameters
@@ -356,13 +361,11 @@ MASH:1:1234:1234:0x001234:0x5678    // vendorid has leading zeros
 
 The QR code encodes the string directly. No binary encoding.
 
-**Content length:** 38-50 characters typical
+**Content length:** 18-22 characters typical
 - `MASH:` = 5
 - Version + colon = 2-4
 - Discriminator + colon = 2-5
-- Setup code + colon = 9
-- Vendor ID + colon = 3-7
-- Product ID = 3-7
+- Setup code = 8
 
 ### 4.5 Parsing Algorithm
 
@@ -373,10 +376,10 @@ def parse_qr(content: str) -> dict:
         raise ValueError("Invalid prefix")
 
     parts = content.split(":")
-    if len(parts) != 6:
+    if len(parts) != 4:
         raise ValueError("Invalid field count")
 
-    _, version, discriminator, setupcode, vendorid, productid = parts
+    _, version, discriminator, setupcode = parts
 
     # Validate version
     version = int(version)
@@ -392,24 +395,10 @@ def parse_qr(content: str) -> dict:
     if len(setupcode) != 8 or not setupcode.isdigit():
         raise ValueError("Invalid setup code format")
 
-    # Validate vendor/product IDs
-    if not vendorid.startswith("0x") or not productid.startswith("0x"):
-        raise ValueError("Missing 0x prefix")
-
-    vendorid = int(vendorid, 16)
-    productid = int(productid, 16)
-
-    if vendorid < 0 or vendorid > 0xFFFF:
-        raise ValueError("Vendor ID out of range")
-    if productid < 0 or productid > 0xFFFF:
-        raise ValueError("Product ID out of range")
-
     return {
         "version": version,
         "discriminator": discriminator,
-        "setupcode": setupcode,  # Keep as string (preserve leading zeros)
-        "vendorid": vendorid,
-        "productid": productid
+        "setupcode": setupcode  # Keep as string (preserve leading zeros)
     }
 ```
 
@@ -447,14 +436,99 @@ If multiple devices have the same discriminator:
 Pre-commissioning instance name includes discriminator:
 
 ```
-MASH-<discriminator>._mash._tcp.local
+MASH-<discriminator>._mashc._udp.local
 ```
 
 This allows DNS-SD PTR query filtering:
 ```
 ; Query for specific discriminator
-MASH-1234._mash._tcp.local
+MASH-1234._mashc._udp.local
 ```
+
+### 5.5 UI Fallback Flow (Without QR Code)
+
+When QR code scanning is not available (no camera, QR damaged, remote pairing), the controller uses a UI-based pairing flow:
+
+**Step 1: Browse for commissionable devices**
+```
+Controller browses _mashc._udp.local
+```
+
+**Step 2: Filter by device category**
+```
+User selects category filter (e.g., "E-mobility" = cat=3)
+Controller filters results where cat contains "3"
+```
+
+**Step 3: Display device list**
+```
+┌─────────────────────────────────────────────────────┐
+│  Available Devices (E-mobility)                      │
+├─────────────────────────────────────────────────────┤
+│  ○ ChargePoint Home Flex                            │
+│    Serial: WB-2024-001234                           │
+│    Discriminator: 1234                              │
+│                                                     │
+│  ○ ChargePoint Home Flex                            │
+│    Serial: WB-2024-005678                           │
+│    Discriminator: 5678                              │
+│                                                     │
+│  ○ Wallbox Pulsar Plus                              │
+│    Serial: PLS-2024-999888                          │
+│    Discriminator: 9988                              │
+└─────────────────────────────────────────────────────┘
+```
+
+User identifies physical device by matching serial number (printed on device label).
+
+**Step 4: User selects device and enters setup code**
+```
+┌─────────────────────────────────────────────────────┐
+│  Pair: ChargePoint Home Flex                         │
+│  Serial: WB-2024-001234                              │
+│                                                     │
+│  Enter 8-digit setup code from device label:        │
+│  ┌───┬───┬───┬───┬───┬───┬───┬───┐                  │
+│  │ 1 │ 2 │ 3 │ 4 │ 5 │ 6 │ 7 │ 8 │                  │
+│  └───┴───┴───┴───┴───┴───┴───┴───┘                  │
+│                                                     │
+│  [Cancel]                          [Pair]           │
+└─────────────────────────────────────────────────────┘
+```
+
+**Step 5: Commission using discriminator + setup code**
+```
+Controller has:
+  - discriminator (from mDNS: D=1234)
+  - setupcode (from user input: "12345678")
+
+Proceeds with normal commissioning flow (PASE, CSR, etc.)
+```
+
+**Complete UI fallback sequence:**
+
+```
+Controller                                              Device
+    │                                                      │
+    │─── Browse _mashc._udp.local ────────────────────────►│
+    │                                                      │
+    │◄── PTR: MASH-1234._mashc._udp.local ─────────────────│
+    │◄── TXT: D=1234 cat=3 serial=WB-001234                │
+    │        brand=ChargePoint model=Home Flex             │
+    │                                                      │
+    │  [Display to user: brand, model, serial]             │
+    │  [User matches serial to physical device label]      │
+    │  [User selects device]                               │
+    │  [User enters setup code from device label]          │
+    │                                                      │
+    │═══ TCP Connect (from SRV record) ═══════════════════►│
+    │                                                      │
+    │─── TLS + PASE (with user-entered setup code) ───────►│
+    │                                                      │
+    │    ... normal commissioning continues ...            │
+```
+
+**Security consideration:** The setup code is the only secret. The mDNS TXT records (serial, brand, model) are public information that help identify the device but don't grant pairing access.
 
 ---
 
@@ -713,7 +787,7 @@ MASH.S.DISC.COMMISSION_WINDOW=120       # Commissioning window timeout (seconds)
 | ID | Description | Steps | Expected |
 |----|-------------|-------|----------|
 | TC-MASHD-1 | Register on zone create | Create zone | `_mashd._udp` zone-name instance appears |
-| TC-MASHD-2 | TXT record format | Inspect TXT | ZN, ZI, VP fields present |
+| TC-MASHD-2 | TXT record format | Inspect TXT | ZN, ZI fields present |
 | TC-MASHD-3 | Multiple zones | Controller has 2 zones | Two `_mashd._udp` instances |
 | TC-MASHD-4 | Device count update | Add device to zone | DC field updated |
 | TC-MASHD-5 | Deregister on zone delete | Delete zone | That instance removed |
@@ -723,12 +797,12 @@ MASH.S.DISC.COMMISSION_WINDOW=120       # Commissioning window timeout (seconds)
 
 | ID | Description | Input | Expected |
 |----|-------------|-------|----------|
-| TC-QR-1 | Valid QR | `MASH:1:1234:12345678:0x1234:0x5678` | Parse success |
-| TC-QR-2 | Leading zeros setupcode | `MASH:1:0:00000001:0x0:0x0` | Parse success, setupcode="00000001" |
-| TC-QR-3 | Invalid prefix | `EEBUS:1:1234:...` | Error: Invalid prefix |
-| TC-QR-4 | Short setupcode | `MASH:1:1234:1234:0x1234:0x5678` | Error: Invalid setup code |
-| TC-QR-5 | Missing 0x prefix | `MASH:1:1234:12345678:1234:5678` | Error: Missing 0x prefix |
-| TC-QR-6 | Discriminator overflow | `MASH:1:9999:12345678:0x1234:0x5678` | Error: Discriminator out of range |
+| TC-QR-1 | Valid QR | `MASH:1:1234:12345678` | Parse success |
+| TC-QR-2 | Leading zeros setupcode | `MASH:1:0:00000001` | Parse success, setupcode="00000001" |
+| TC-QR-3 | Invalid prefix | `EEBUS:1:1234:12345678` | Error: Invalid prefix |
+| TC-QR-4 | Short setupcode | `MASH:1:1234:1234` | Error: Invalid setup code |
+| TC-QR-5 | Wrong field count | `MASH:1:1234` | Error: Invalid field count |
+| TC-QR-6 | Discriminator overflow | `MASH:1:9999:12345678` | Error: Discriminator out of range |
 
 ### TC-DISC-*: Discriminator Handling
 

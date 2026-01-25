@@ -47,7 +47,7 @@ MASH-1234._mashc._udp.local.  SRV  0 0 8443 evse-001.local.
 
 **TXT Record:**
 ```
-MASH-1234._mashc._udp.local.  TXT  "D=1234" "VP=1234:5678" "DT=EVSE"
+MASH-1234._mashc._udp.local.  TXT  "D=1234" "cat=3" "serial=WB-001234" "brand=ChargePoint" "model=Home Flex"
 ```
 
 **AAAA Record:**
@@ -482,9 +482,9 @@ Connect to: fe80::1234:5678:9abc:def0%eth0
 │      │     PTR MASH-1234._mashc._udp    │                            │     │
 │      │     SRV 0 0 8443 evse.local      │                            │     │
 │      │     AAAA fe80::1234              │                            │     │
-│      │     TXT D=1234 VP=...            │                            │     │
+│      │     TXT D=1234 cat=3 serial=...  │                            │     │
 │      │                                  │                            │     │
-│  3.  │     [Verify: D matches, VP matches]                           │     │
+│  3.  │     [Verify: D matches QR discriminator]                       │     │
 │      │                                  │                            │     │
 │  4.  │ ═══ TCP Connect ════════════════════════════════════════════►│     │
 │      │     [fe80::1234]:8443            │                            │     │
