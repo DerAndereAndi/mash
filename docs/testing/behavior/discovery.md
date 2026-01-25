@@ -67,8 +67,8 @@ Port:          8443 (TCP/TLS WebSocket)
 **Instance name:** `<zone-id>-<device-id>`
 
 Where:
-- `zone-id`: First 8 hex chars of SHA-256(Zone CA certificate DER)
-- `device-id`: First 8 hex chars of SHA-256(device operational cert public key DER)
+- `zone-id`: First 16 hex chars (64 bits) of SHA-256(Zone CA certificate DER)
+- `device-id`: First 16 hex chars (64 bits) of SHA-256(device operational cert public key DER)
 
 Both IDs are **fingerprint-derived** - no assignment or vendor registration needed.
 
@@ -76,12 +76,12 @@ Both IDs are **fingerprint-derived** - no assignment or vendor registration need
 
 **Example (device in two zones):**
 ```
-_mash._tcp.local.                         PTR   A1B2C3D4-F9E8D7C6._mash._tcp.local.
-_mash._tcp.local.                         PTR   E5F6A7B8-B3A29180._mash._tcp.local.
-A1B2C3D4-F9E8D7C6._mash._tcp.local.       SRV   0 0 8443 evse-001.local.
-A1B2C3D4-F9E8D7C6._mash._tcp.local.       TXT   "ZI=A1B2C3D4" "DI=F9E8D7C6" "VP=1234:5678"
-E5F6A7B8-B3A29180._mash._tcp.local.       SRV   0 0 8443 evse-001.local.
-E5F6A7B8-B3A29180._mash._tcp.local.       TXT   "ZI=E5F6A7B8" "DI=B3A29180" "VP=1234:5678"
+_mash._tcp.local.                                                 PTR   A1B2C3D4E5F6A7B8-F9E8D7C6B5A49382._mash._tcp.local.
+_mash._tcp.local.                                                 PTR   1234567890ABCDEF-FEDCBA0987654321._mash._tcp.local.
+A1B2C3D4E5F6A7B8-F9E8D7C6B5A49382._mash._tcp.local.               SRV   0 0 8443 evse-001.local.
+A1B2C3D4E5F6A7B8-F9E8D7C6B5A49382._mash._tcp.local.               TXT   "ZI=A1B2C3D4E5F6A7B8" "DI=F9E8D7C6B5A49382"
+1234567890ABCDEF-FEDCBA0987654321._mash._tcp.local.               SRV   0 0 8443 evse-001.local.
+1234567890ABCDEF-FEDCBA0987654321._mash._tcp.local.               TXT   "ZI=1234567890ABCDEF" "DI=FEDCBA0987654321"
 ```
 
 ### 2.3 Commissioner Discovery (`_mashd._udp`)
@@ -104,7 +104,7 @@ Port:          8443
 ```
 _mashd._udp.local.                   PTR   Home Energy._mashd._udp.local.
 Home Energy._mashd._udp.local.       SRV   0 0 8443 ems-controller.local.
-Home Energy._mashd._udp.local.       TXT   "ZN=Home Energy" "VP=ABCD:0001" "ZI=A1B2C3D4"
+Home Energy._mashd._udp.local.       TXT   "ZN=Home Energy" "ZI=A1B2C3D4E5F6A7B8"
 ems-controller.local.                AAAA  2001:db8::1
 ```
 
@@ -133,8 +133,8 @@ ems-controller.local.                AAAA  2001:db8::1
 
 **ID derivation:**
 ```
-Zone ID   = hex(SHA-256(Zone CA certificate DER)[0:4])     // 8 hex chars
-Device ID = hex(SHA-256(device op cert public key DER)[0:4]) // 8 hex chars
+Zone ID   = hex(SHA-256(Zone CA certificate DER)[0:8])       // 16 hex chars, 64 bits
+Device ID = hex(SHA-256(device op cert public key DER)[0:8]) // 16 hex chars, 64 bits
 ```
 
 **Benefits of fingerprint-derived IDs:**
@@ -143,6 +143,7 @@ Device ID = hex(SHA-256(device op cert public key DER)[0:4]) // 8 hex chars
 - Cryptographically bound to certificates
 - Device can compute its own ID
 - Verifiable by anyone with the certificate
+- 64 bits provides negligible collision probability
 
 ---
 
@@ -186,8 +187,8 @@ DN=Garage Charger
 
 | Key | Type | Required | Max Len | Description |
 |-----|------|----------|---------|-------------|
-| `ZI` | string | Yes | 8 | Zone ID (first 8 hex chars of SHA-256(Zone CA cert DER)) |
-| `DI` | string | Yes | 8 | Device ID (first 8 hex chars of SHA-256(device op cert pubkey DER)) |
+| `ZI` | string | Yes | 16 | Zone ID (first 64 bits of SHA-256(Zone CA cert DER)) |
+| `DI` | string | Yes | 16 | Device ID (first 64 bits of SHA-256(device op cert pubkey DER)) |
 | `VP` | string | No | 11 | Vendor:Product ID (optional, for debugging) |
 | `FW` | string | No | 20 | Firmware version (semver) |
 | `EP` | uint8 | No | 3 | Endpoint count |
@@ -195,15 +196,12 @@ DN=Garage Charger
 
 **Example:**
 ```
-ZI=A1B2C3D4
-DI=F9E8D7C6
-VP=1234:5678
+ZI=A1B2C3D4E5F6A7B8
+DI=F9E8D7C6B5A49382
 FW=1.2.3
-EP=2
-FM=0x001B
 ```
 
-**Total size:** ~60 bytes typical, 100 bytes maximum
+**Total size:** ~70 bytes typical, 120 bytes maximum
 
 **Note:** Both ZI and DI are fingerprint-derived. VP is optional (useful for debugging but not required for open source implementations).
 
@@ -212,21 +210,20 @@ FM=0x001B
 | Key | Type | Required | Max Len | Description |
 |-----|------|----------|---------|-------------|
 | `ZN` | string | Yes | 32 | Zone name (user-friendly) |
-| `ZI` | string | Yes | 8 | Zone ID (first 8 hex chars of Zone CA fingerprint) |
-| `VP` | string | Yes | 11 | Vendor:Product ID of controller |
+| `ZI` | string | Yes | 16 | Zone ID (first 64 bits of Zone CA fingerprint) |
+| `VP` | string | No | 11 | Vendor:Product ID of controller (optional) |
 | `DN` | string | No | 32 | Controller name (user-friendly) |
 | `DC` | uint8 | No | 3 | Device count in zone |
 
 **Example:**
 ```
 ZN=Home Energy
-ZI=A1B2C3D4
-VP=ABCD:0001
+ZI=A1B2C3D4E5F6A7B8
 DN=Smart EMS Pro
 DC=5
 ```
 
-**Total size:** ~70 bytes typical, 120 bytes maximum
+**Total size:** ~80 bytes typical, 130 bytes maximum
 
 ### 3.5 TXT Record Update Rules
 

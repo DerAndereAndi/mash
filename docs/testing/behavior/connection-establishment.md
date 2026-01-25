@@ -60,23 +60,23 @@ evse-001.local.  AAAA  2001:db8::1234:5678:9abc:def0
 
 After commissioning, device publishes (one per zone):
 
-**Instance name:** `<zone-id>-<device-id>` where both are fingerprint-derived:
-- Zone ID: First 8 hex chars of SHA-256(Zone CA cert DER)
-- Device ID: First 8 hex chars of SHA-256(device op cert public key DER)
+**Instance name:** `<zone-id>-<device-id>` where both are fingerprint-derived (64 bits each):
+- Zone ID: First 16 hex chars of SHA-256(Zone CA cert DER)
+- Device ID: First 16 hex chars of SHA-256(device op cert public key DER)
 
 **PTR Record:**
 ```
-_mash._tcp.local.  PTR  A1B2C3D4-F9E8D7C6._mash._tcp.local.
+_mash._tcp.local.  PTR  A1B2C3D4E5F6A7B8-F9E8D7C6B5A49382._mash._tcp.local.
 ```
 
 **SRV Record:**
 ```
-A1B2C3D4-F9E8D7C6._mash._tcp.local.  SRV  0 0 8443 evse-001.local.
+A1B2C3D4E5F6A7B8-F9E8D7C6B5A49382._mash._tcp.local.  SRV  0 0 8443 evse-001.local.
 ```
 
 **TXT Record:**
 ```
-A1B2C3D4-F9E8D7C6._mash._tcp.local.  TXT  "ZI=A1B2C3D4" "DI=F9E8D7C6"
+A1B2C3D4E5F6A7B8-F9E8D7C6B5A49382._mash._tcp.local.  TXT  "ZI=A1B2C3D4E5F6A7B8" "DI=F9E8D7C6B5A49382"
 ```
 
 | Field | Value | Description |
@@ -265,7 +265,7 @@ Controller                                    Device
 5. Close TCP connection
 6. Update mDNS:
    - Deregister `_mashc._udp` service instance
-   - Compute device ID: `hex(SHA-256(op cert public key DER)[0:4])`
+   - Compute device ID: `hex(SHA-256(op cert public key DER)[0:8])` (16 hex chars)
    - Register `_mash._tcp` service instance with `<zone-id>-<device-id>` name
    - Update TXT records for operational mode (ZI, DI)
 7. Listen for new connection

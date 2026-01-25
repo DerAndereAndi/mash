@@ -49,7 +49,7 @@ Key Usage: Certificate Sign, CRL Sign
 
 **Step 3: Generate Zone ID**
 ```
-Zone ID = SHA-256(Zone CA Public Key)[0:8]  // First 8 bytes
+Zone ID = SHA-256(Zone CA Certificate DER)[0:8]  // First 8 bytes = 64 bits
 Format: 16 hex characters (e.g., "a1b2c3d4e5f6a7b8")
 ```
 
