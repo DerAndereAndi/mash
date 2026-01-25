@@ -198,7 +198,7 @@ func (d *DeviceInfo) SetVendorID(id uint32) error {
 }
 
 // SetProductID sets the vendor's product ID.
-func (d *DeviceInfo) SetProductID(id uint16) error {
+func (d *DeviceInfo) SetProductID(id uint32) error {
 	attr, err := d.GetAttribute(DeviceInfoAttrProductID)
 	if err != nil {
 		return err
@@ -292,9 +292,9 @@ func (d *DeviceInfo) VendorID() uint32 {
 }
 
 // ProductID returns the product ID.
-func (d *DeviceInfo) ProductID() uint16 {
+func (d *DeviceInfo) ProductID() uint32 {
 	val, _ := d.ReadAttribute(DeviceInfoAttrProductID)
-	if v, ok := val.(uint16); ok {
+	if v, ok := val.(uint32); ok {
 		return v
 	}
 	return 0

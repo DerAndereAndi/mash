@@ -20,11 +20,11 @@ type Device struct {
 	// DeviceID is the unique device identifier (from certificate SKI).
 	deviceID string
 
-	// VendorID identifies the device manufacturer.
-	vendorID uint16
+	// VendorID identifies the device manufacturer (IANA PEN or registry-assigned).
+	vendorID uint32
 
 	// ProductID identifies the device product within the vendor.
-	productID uint16
+	productID uint32
 
 	// SerialNumber is the device serial number.
 	serialNumber string
@@ -37,7 +37,7 @@ type Device struct {
 }
 
 // NewDevice creates a new device with the given identity.
-func NewDevice(deviceID string, vendorID, productID uint16) *Device {
+func NewDevice(deviceID string, vendorID, productID uint32) *Device {
 	d := &Device{
 		deviceID:  deviceID,
 		vendorID:  vendorID,
@@ -58,12 +58,12 @@ func (d *Device) DeviceID() string {
 }
 
 // VendorID returns the vendor identifier.
-func (d *Device) VendorID() uint16 {
+func (d *Device) VendorID() uint32 {
 	return d.vendorID
 }
 
 // ProductID returns the product identifier.
-func (d *Device) ProductID() uint16 {
+func (d *Device) ProductID() uint32 {
 	return d.productID
 }
 
@@ -186,8 +186,8 @@ func (d *Device) InvokeCommand(ctx context.Context, endpointID uint8, featureTyp
 // DeviceInfo returns a summary of the device for discovery.
 type DeviceInfo struct {
 	DeviceID        string          `cbor:"1,keyasint"`
-	VendorID        uint16          `cbor:"2,keyasint"`
-	ProductID       uint16          `cbor:"3,keyasint"`
+	VendorID        uint32          `cbor:"2,keyasint"`
+	ProductID       uint32          `cbor:"3,keyasint"`
 	SerialNumber    string          `cbor:"4,keyasint,omitempty"`
 	FirmwareVersion string          `cbor:"5,keyasint,omitempty"`
 	Endpoints       []*EndpointInfo `cbor:"6,keyasint"`
