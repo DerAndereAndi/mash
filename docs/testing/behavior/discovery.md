@@ -46,7 +46,7 @@ Port:          8443 (UDP for PASE, then TCP for operational)
 ```
 _mashc._udp.local.            PTR   MASH-1234._mashc._udp.local.
 MASH-1234._mashc._udp.local.  SRV   0 0 8443 evse-001.local.
-MASH-1234._mashc._udp.local.  TXT   "D=1234" "VP=1234:5678" "DT=EVSE"
+MASH-1234._mashc._udp.local.  TXT   "D=1234" "cat=3" "serial=WB-2024-001234" "brand=ChargePoint" "model=Home Flex"
 evse-001.local.               AAAA  fe80::1234:5678:9abc:def0
 ```
 
@@ -167,21 +167,54 @@ key=value
 | Key | Type | Required | Max Len | Description |
 |-----|------|----------|---------|-------------|
 | `D` | uint16 | Yes | 4 | Discriminator (0-4095 as decimal) |
-| `VP` | string | Yes | 11 | Vendor:Product ID (hex:hex, e.g., "1234:5678") |
-| `DT` | string | No | 20 | Device type label (e.g., "EVSE", "HeatPump") |
-| `DN` | string | No | 32 | Device name (user-friendly) |
+| `cat` | string | Yes | 15 | Device categories (comma-separated list, e.g., "2,5") |
+| `serial` | string | Yes | 32 | Serial number (printed on device label) |
+| `brand` | string | Yes | 32 | Vendor/brand name (human-readable) |
+| `model` | string | Yes | 32 | Model name (human-readable) |
+| `DN` | string | No | 32 | Device name (user-configurable friendly name) |
 
-**Example:**
+**Device Categories (cat):**
+
+| Value | Category | Examples |
+|-------|----------|----------|
+| 1 | Grid Connection Point Hub (GCPH) | Control unit from public grid operator |
+| 2 | Energy Management System (EMS) | Home energy manager, building EMS |
+| 3 | E-mobility | Charging station, wallbox |
+| 4 | HVAC | Heat pump, air conditioner |
+| 5 | Inverter | PV inverter, battery inverter, hybrid |
+| 6 | Domestic appliance | Washing machine, dryer, fridge, dishwasher |
+| 7 | Metering | Smart meter, sub-meter |
+
+**Note:** Category numbers align with EEBUS "SHIP Requirements for Installation Process" v1.1.0. Numbers are stable - new categories will be added at the end, existing numbers will not change.
+
+**Zone controllers:** Category 2 (EMS) devices are typically zone controllers - they create zones, commission other devices, and coordinate energy management. An EMS advertises `_mashd._udp` (commissioner discovery) and browses `_mashc._udp` to find devices to commission. Category 1 (GCPH) may also act as a zone controller in grid operator scenarios.
+
+**Multiple categories:** A device may belong to multiple categories. For example, a hybrid inverter with integrated EMS functionality uses `cat=2,5`. If functionality changes (e.g., user deactivates EMS because a separate EMS is used), the device updates its `cat` value dynamically.
+
+**Example (wallbox):**
 ```
 D=1234
-VP=1234:5678
-DT=EVSE
+cat=3
+serial=WB-2024-001234
+brand=ChargePoint
+model=Home Flex
 DN=Garage Charger
 ```
 
-**Total size:** ~60 bytes typical, 100 bytes maximum
+**Example (hybrid inverter with EMS):**
+```
+D=5678
+cat=2,5
+serial=INV-2024-567890
+brand=SolarEdge
+model=Home Hub
+```
+
+**Total size:** ~120 bytes typical, 180 bytes maximum
 
 **Note:** No `CM` flag needed - presence of `_mashc._udp` service indicates commissioning mode.
+
+**UI pairing flow:** When QR scanning is unavailable, the controller browses `_mashc._udp`, filters by `cat` to show compatible devices, and displays `serial`, `brand`, `model` to help the user identify the physical device (e.g., by matching serial number on label).
 
 ### 3.3 Operational TXT Records (`_mash._tcp`)
 
@@ -251,13 +284,15 @@ DC=5
 | Field | Encoding | Allowed Characters |
 |-------|----------|--------------------|
 | Keys | ASCII | a-z, A-Z, 0-9 |
-| Discriminator | Decimal | 0-9 |
-| Vendor/Product ID | Hex | 0-9, a-f, A-F, colon |
-| Zone ID | Hex | 0-9, A-F |
-| Device ID | ASCII | A-Z, a-z, 0-9, hyphen |
-| Device/Zone Name | UTF-8 | Any Unicode (avoid control chars) |
-| Firmware | ASCII | 0-9, period, hyphen |
-| Feature Map | Hex | 0-9, a-f, A-F, x |
+| Discriminator (D) | Decimal | 0-9 |
+| Categories (cat) | ASCII | 0-9, comma |
+| Zone ID (ZI) | Hex | 0-9, A-F |
+| Device ID (DI) | Hex | 0-9, A-F |
+| Serial number | ASCII | A-Z, a-z, 0-9, hyphen |
+| Brand/Model/Device name | UTF-8 | Any Unicode (avoid control chars) |
+| Zone name (ZN) | UTF-8 | Any Unicode (avoid control chars) |
+| Firmware (FW) | ASCII | 0-9, period, hyphen |
+| Feature Map (FM) | Hex | 0-9, a-f, A-F, x |
 
 ---
 
@@ -616,8 +651,10 @@ MASH.S.DISC.TXT_MAX_LEN=400             # Maximum TXT record size
 
 # Commissionable (_mashc._udp)
 MASH.S.DISC.COMM_TXT_D=1                # Discriminator in TXT
-MASH.S.DISC.COMM_TXT_VP=1               # Vendor:Product in TXT
-MASH.S.DISC.COMM_TXT_DT=1               # Device type in TXT (optional)
+MASH.S.DISC.COMM_TXT_CAT=1              # Device categories in TXT (comma-separated)
+MASH.S.DISC.COMM_TXT_SERIAL=1           # Serial number in TXT
+MASH.S.DISC.COMM_TXT_BRAND=1            # Brand name in TXT
+MASH.S.DISC.COMM_TXT_MODEL=1            # Model name in TXT
 MASH.S.DISC.COMM_TXT_DN=1               # Device name in TXT (optional)
 
 # Operational (_mash._tcp)
@@ -656,7 +693,7 @@ MASH.S.DISC.COMMISSION_WINDOW=120       # Commissioning window timeout (seconds)
 | TC-MASHC-1 | Register on button press | Press commissioning button | `_mashc._udp` MASH-D instance appears |
 | TC-MASHC-2 | Deregister on timeout | Wait 120s in commissioning | `_mashc._udp` instance removed |
 | TC-MASHC-3 | Deregister on success | Complete commissioning | `_mashc._udp` instance removed |
-| TC-MASHC-4 | TXT record format | Enter commissioning | D, VP fields present |
+| TC-MASHC-4 | TXT record format | Enter commissioning | D, cat, serial, brand, model fields present |
 | TC-MASHC-5 | Instance conflict | Two devices same D | Suffix added (-2) |
 | TC-MASHC-6 | Already operational | Device in zone, press button | `_mashc._udp` added, `_mash._tcp` kept |
 
