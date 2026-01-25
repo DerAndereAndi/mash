@@ -1,0 +1,425 @@
+# TC-SUB: Subscription Tests
+#
+# Tests for subscription behavior: priming, deltas, heartbeats, intervals
+# Reference: interaction-model.md Section 6.5
+
+---
+id: TC-SUB-1
+name: Priming Report Contains All Subscribed Attributes
+description: Verify Subscribe Response includes current values of ALL requested attributes
+
+pics:
+  required:
+    - MASH.S
+    - MASH.S.MEAS  # Measurement feature
+
+preconditions:
+  - Device commissioned to controller
+  - Measurement feature has known values:
+    - acActivePower = 5000000
+    - acReactivePower = 200000
+    - acApparentPower = 5004000
+
+steps:
+  - id: 1
+    action: |
+      Controller sends Subscribe:
+        endpointId: 1
+        featureId: 2 (Measurement)
+        attributeIds: [1, 2, 3]  # acActivePower, acReactivePower, acApparentPower
+        minInterval: 1000
+        maxInterval: 60000
+    expected:
+      - Response status = SUCCESS (0)
+      - subscriptionId is returned (non-zero)
+      - Priming report contains ALL 3 attributes with current values
+    verify:
+      - response.status == 0
+      - response.payload.subscriptionId != 0
+      - response.payload.values[1] == 5000000
+      - response.payload.values[2] == 200000
+      - response.payload.values[3] == 5004000
+
+---
+id: TC-SUB-2
+name: Delta Notification Contains Only Changed Attributes
+description: Verify subsequent notifications only include attributes that changed
+
+pics:
+  required:
+    - MASH.S
+    - MASH.S.MEAS
+
+preconditions:
+  - Controller has active subscription to Measurement [1, 2, 3]
+  - Priming report received
+
+steps:
+  - id: 1
+    action: Device changes acActivePower from 5000000 to 5500000 (attributes 2, 3 unchanged)
+    note: This may require a simulated load change or test harness control
+
+  - id: 2
+    action: Wait for notification (within maxInterval)
+    expected:
+      - Notification received
+      - subscriptionId matches active subscription
+      - Notification contains ONLY attribute 1 (acActivePower)
+      - Notification does NOT contain attributes 2, 3
+    verify:
+      - notification.subscriptionId == active_sub_id
+      - notification.changes[1] == 5500000
+      - 2 not in notification.changes
+      - 3 not in notification.changes
+
+---
+id: TC-SUB-3
+name: Delta Notification With Multiple Changes
+description: Verify notification batches multiple changes when they occur together
+
+pics:
+  required:
+    - MASH.S
+    - MASH.S.MEAS
+
+preconditions:
+  - Controller has active subscription to Measurement [1, 2, 3]
+  - Priming report received
+
+steps:
+  - id: 1
+    action: Device changes acActivePower AND acReactivePower simultaneously
+    note: Both attributes change in same measurement cycle
+
+  - id: 2
+    action: Wait for notification
+    expected:
+      - Single notification received
+      - Contains both changed attributes
+      - Does NOT contain unchanged attribute 3
+    verify:
+      - len(notifications_received) == 1
+      - 1 in notification.changes
+      - 2 in notification.changes
+      - 3 not in notification.changes
+
+---
+id: TC-SUB-4
+name: Heartbeat Notification at maxInterval
+description: Verify device sends heartbeat when no changes occur within maxInterval
+
+pics:
+  required:
+    - MASH.S
+    - MASH.S.MEAS
+
+preconditions:
+  - Controller has active subscription with maxInterval = 5000 (5 seconds)
+  - Priming report received
+  - No attribute changes occurring
+
+steps:
+  - id: 1
+    action: Wait 6 seconds (> maxInterval) with no attribute changes
+    expected:
+      - Heartbeat notification received
+      - Contains current values of ALL subscribed attributes
+    verify:
+      - notification_received_within(6000)
+      - notification.changes[1] is not None
+      - notification.changes[2] is not None
+      - notification.changes[3] is not None
+
+---
+id: TC-SUB-5
+name: minInterval Coalescing
+description: Verify multiple rapid changes are coalesced within minInterval
+
+pics:
+  required:
+    - MASH.S
+    - MASH.S.MEAS
+
+preconditions:
+  - Controller has active subscription with minInterval = 2000 (2 seconds)
+  - Priming report received
+
+steps:
+  - id: 1
+    action: |
+      Device generates 3 rapid changes within 500ms:
+        T=0ms: acActivePower = 5000000
+        T=200ms: acActivePower = 5200000
+        T=400ms: acActivePower = 5500000
+    note: All changes occur within minInterval
+
+  - id: 2
+    action: Wait for notification
+    expected:
+      - Only ONE notification received (not 3)
+      - Notification contains FINAL value (5500000)
+      - Notification arrives approximately minInterval after first change
+    verify:
+      - total_notifications_received == 1
+      - notification.changes[1] == 5500000
+      - time_to_notification >= 2000  # minInterval
+
+---
+id: TC-SUB-6
+name: Subscription Lost on Disconnect
+description: Verify subscriptions are invalidated when connection is lost
+
+pics:
+  required:
+    - MASH.S
+    - MASH.S.MEAS
+
+preconditions:
+  - Controller has active subscription (subscriptionId = 5001)
+  - Priming report received
+
+steps:
+  - id: 1
+    action: Disconnect controller from device (simulate network loss)
+
+  - id: 2
+    action: Reconnect controller to device
+
+  - id: 3
+    action: Device changes acActivePower
+    expected:
+      - NO notification received (subscription was lost)
+    verify:
+      - no_notification_within(5000)
+
+  - id: 4
+    action: |
+      Controller re-subscribes:
+        same parameters as original subscription
+    expected:
+      - New subscriptionId (different from 5001)
+      - New priming report with current values
+    verify:
+      - response.payload.subscriptionId != 5001
+      - response.payload.values[1] is not None
+
+---
+id: TC-SUB-7
+name: Subscribe to All Attributes (Empty Array)
+description: Verify subscribing with empty attributeIds subscribes to ALL feature attributes
+
+pics:
+  required:
+    - MASH.S
+    - MASH.S.MEAS
+
+preconditions:
+  - Device commissioned to controller
+  - Measurement feature has attributes 1-10 defined
+
+steps:
+  - id: 1
+    action: |
+      Controller sends Subscribe:
+        attributeIds: []  # empty = all attributes
+    expected:
+      - Priming report contains ALL attributes of the feature
+    verify:
+      - len(response.payload.values) >= 5  # at least core attributes
+
+  - id: 2
+    action: Device changes any attribute (e.g., attribute 5)
+    expected:
+      - Notification received for that attribute
+    verify:
+      - notification.changes[5] is not None
+
+---
+id: TC-SUB-8
+name: Unsubscribe Stops Notifications
+description: Verify unsubscribe stops further notifications
+
+pics:
+  required:
+    - MASH.S
+    - MASH.S.MEAS
+
+preconditions:
+  - Controller has active subscription (subscriptionId = 5001)
+  - Priming report received
+
+steps:
+  - id: 1
+    action: |
+      Controller sends Unsubscribe:
+        subscriptionId: 5001
+    expected:
+      - status = SUCCESS
+    verify:
+      - response.status == 0
+
+  - id: 2
+    action: Device changes acActivePower
+    expected:
+      - NO notification received
+    verify:
+      - no_notification_within(5000)
+
+  - id: 3
+    action: Wait for maxInterval
+    expected:
+      - NO heartbeat notification
+    verify:
+      - no_notification_within(maxInterval + 1000)
+
+---
+id: TC-SUB-9
+name: Invalid Intervals Rejected
+description: Verify invalid interval parameters are rejected
+
+pics:
+  required:
+    - MASH.S
+
+steps:
+  - id: 1
+    action: |
+      Controller sends Subscribe with minInterval > maxInterval:
+        minInterval: 60000
+        maxInterval: 1000
+    expected:
+      - status = INVALID_PARAMETER (5)
+    verify:
+      - response.status == 5
+
+  - id: 2
+    action: |
+      Controller sends Subscribe with minInterval = 0:
+        minInterval: 0
+        maxInterval: 60000
+    expected:
+      - Either accepted (device uses minimum) or INVALID_PARAMETER
+    note: Implementation may define minimum minInterval
+
+---
+id: TC-SUB-10
+name: Multiple Concurrent Subscriptions
+description: Verify device supports multiple independent subscriptions
+
+pics:
+  required:
+    - MASH.S
+    - MASH.S.MEAS
+    - MASH.S.CTRL
+
+preconditions:
+  - Device commissioned to controller
+
+steps:
+  - id: 1
+    action: |
+      Controller subscribes to Measurement feature:
+        featureId: 2
+        attributeIds: [1, 2]
+    expected:
+      - subscriptionId A returned
+    verify:
+      - sub_a = response.payload.subscriptionId
+
+  - id: 2
+    action: |
+      Controller subscribes to EnergyControl feature:
+        featureId: 3
+        attributeIds: [20, 21]
+    expected:
+      - subscriptionId B returned (different from A)
+    verify:
+      - sub_b = response.payload.subscriptionId
+      - sub_b != sub_a
+
+  - id: 3
+    action: Device changes Measurement.acActivePower
+    expected:
+      - Notification with subscriptionId A received
+      - No notification for subscriptionId B
+    verify:
+      - notification.subscriptionId == sub_a
+
+  - id: 4
+    action: Device changes EnergyControl.effectiveConsumptionLimit
+    expected:
+      - Notification with subscriptionId B received
+      - No notification for subscriptionId A
+    verify:
+      - notification.subscriptionId == sub_b
+
+---
+id: TC-SUB-11
+name: Null Value in Delta Notification
+description: Verify explicit null is sent when attribute value changes TO null
+
+pics:
+  required:
+    - MASH.S
+    - MASH.S.CTRL
+
+preconditions:
+  - Controller subscribed to EnergyControl.myConsumptionLimit (attribute 21)
+  - Zone has set a limit: myConsumptionLimit = 5000000
+
+steps:
+  - id: 1
+    action: Controller sends ClearLimit() command
+    expected:
+      - Command succeeds
+      - myConsumptionLimit is now null
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Observe notification
+    expected:
+      - Notification contains myConsumptionLimit = null (explicit null, not absent)
+    verify:
+      - 21 in notification.changes           # Key IS present
+      - notification.changes[21] is None     # Value IS null
+
+---
+id: TC-SUB-12
+name: Absent vs Null Distinction
+description: Verify absent keys mean unchanged, null means explicitly null
+
+pics:
+  required:
+    - MASH.S
+    - MASH.S.CTRL
+
+preconditions:
+  - Controller subscribed to EnergyControl attributes [20, 21, 22, 23]
+  - Current values:
+    - effectiveConsumptionLimit (20) = 5000000
+    - myConsumptionLimit (21) = 5000000
+    - effectiveProductionLimit (22) = null
+    - myProductionLimit (23) = null
+
+steps:
+  - id: 1
+    action: |
+      Another zone sets a more restrictive consumption limit (4000000)
+      This changes effectiveConsumptionLimit but NOT myConsumptionLimit
+    expected:
+      - Notification contains effectiveConsumptionLimit = 4000000
+      - Notification does NOT contain myConsumptionLimit (unchanged)
+    verify:
+      - 20 in notification.changes
+      - notification.changes[20] == 4000000
+      - 21 not in notification.changes   # Absent = unchanged
+
+  - id: 2
+    action: This zone clears its limit (ClearLimit)
+    expected:
+      - Notification contains myConsumptionLimit = null (explicitly cleared)
+      - effectiveConsumptionLimit may or may not be in notification (depends on change)
+    verify:
+      - 21 in notification.changes
+      - notification.changes[21] is None  # Null = explicitly set to null

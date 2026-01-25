@@ -1,0 +1,550 @@
+# TC-PROCESS: ProcessState Transition Tests
+#
+# Tests for ProcessStateEnum transitions and optional process management.
+# Reference: behavior/state-machines.md
+
+---
+id: TC-PROCESS-1
+name: Initial ProcessState is NONE
+description: Verify device starts with no optional process available
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07  # PROCESS feature flag
+
+preconditions:
+  - Device supports optional processes (heat pump, washer, etc.)
+  - No process currently announced
+
+steps:
+  - id: 1
+    action: Read EnergyControl.processState
+    expected:
+      - processState = NONE (0x00)
+    verify:
+      - read_result == 0x00
+
+  - id: 2
+    action: Read EnergyControl.optionalProcess
+    expected:
+      - optionalProcess = null (no process details)
+    verify:
+      - read_result == null
+
+---
+id: TC-PROCESS-2
+name: NONE to AVAILABLE on Process Announcement
+description: Verify device announces optional process correctly
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in processState = NONE
+  - Controller subscribed to processState
+
+steps:
+  - id: 1
+    action: |
+      Trigger process announcement on device
+      (e.g., user selects wash program, hot water demand arises)
+    note: Device-specific trigger via test harness
+
+  - id: 2
+    action: Observe subscription notification
+    expected:
+      - processState changed to AVAILABLE (0x01)
+      - optionalProcess populated with process details
+    verify:
+      - notification.changes[80] == 0x01
+      - notification.changes[81] is not None
+
+  - id: 3
+    action: Read optionalProcess
+    expected:
+      - processId is set
+      - isPausable indicates if Pause() is supported
+      - estimatedDuration is set (if known)
+    verify:
+      - response.processId != null
+
+---
+id: TC-PROCESS-3
+name: AVAILABLE to SCHEDULED via ScheduleProcess
+description: Verify process can be scheduled for future start
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+    - MASH.S.CTRL.C13.Rsp  # ScheduleProcess accepted
+
+preconditions:
+  - Device in processState = AVAILABLE
+  - optionalProcess.processId = 1001
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends ScheduleProcess:
+        processId: 1001
+        requestedStart: now + 300  # 5 minutes from now
+        cause: PRICE_OPTIMIZATION
+    expected:
+      - success = true
+      - actualStart approximately equals requestedStart
+      - newState = SCHEDULED (0x02)
+    verify:
+      - response.success == true
+      - response.newState == 0x02
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = SCHEDULED (0x02)
+    verify:
+      - read_result == 0x02
+
+  - id: 3
+    action: Read optionalProcess.scheduledStart
+    expected:
+      - scheduledStart is set to actual scheduled time
+    verify:
+      - response.scheduledStart is not None
+
+---
+id: TC-PROCESS-4
+name: AVAILABLE to RUNNING via Immediate Start
+description: Verify process starts immediately when requestedStart is null
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+    - MASH.S.CTRL.C13.Rsp
+
+preconditions:
+  - Device in processState = AVAILABLE
+  - optionalProcess.processId = 1001
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends ScheduleProcess:
+        processId: 1001
+        requestedStart: null  # Start immediately
+        cause: SELF_CONSUMPTION
+    expected:
+      - success = true
+      - newState = RUNNING (0x03)
+    verify:
+      - response.success == true
+      - response.newState == 0x03
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = RUNNING (0x03)
+    verify:
+      - read_result == 0x03
+
+---
+id: TC-PROCESS-5
+name: SCHEDULED to RUNNING at Scheduled Time
+description: Verify process starts automatically at scheduled time
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in processState = SCHEDULED
+  - scheduledStart = now + 5 seconds
+
+steps:
+  - id: 1
+    action: Wait 6 seconds (past scheduled start)
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = RUNNING (0x03)
+    verify:
+      - read_result == 0x03
+
+---
+id: TC-PROCESS-6
+name: Scheduled Start Timing Accuracy
+description: Verify process starts within +/- 5 seconds of scheduled time
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in processState = AVAILABLE
+  - Controller subscribed to processState
+
+steps:
+  - id: 1
+    action: |
+      Record time T0
+      ScheduleProcess with requestedStart = T0 + 60
+
+  - id: 2
+    action: |
+      Wait for processState notification (SCHEDULED -> RUNNING)
+      Record notification time T1
+
+  - id: 3
+    action: Calculate actual start = T1 - T0
+    expected:
+      - Start time within +/- 5 seconds of scheduled
+      - i.e., between 55s and 65s
+    verify:
+      - abs(actual_start - 60) <= 5
+
+---
+id: TC-PROCESS-7
+name: RUNNING to PAUSED via Pause Command
+description: Verify pausable process can be paused
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+    - MASH.S.CTRL.A14  # isPausable attribute
+
+preconditions:
+  - Device in processState = RUNNING
+  - optionalProcess.isPausable = true
+  - Process has run longer than minRunDuration
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends Pause:
+        duration: 0  # Indefinite pause
+    expected:
+      - success = true
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = PAUSED (0x04)
+    verify:
+      - read_result == 0x04
+
+---
+id: TC-PROCESS-8
+name: Pause Rejected Before minRunDuration
+description: Verify Pause is rejected if process hasn't run long enough
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in processState = RUNNING
+  - optionalProcess.minRunDuration = 60 seconds
+  - Process started 10 seconds ago
+
+steps:
+  - id: 1
+    action: Zone 1 sends Pause()
+    expected:
+      - success = false
+      - status = CONSTRAINT_ERROR (11) or appropriate error
+    verify:
+      - response.success == false or response.status != 0
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = RUNNING (still running, pause rejected)
+    verify:
+      - read_result == 0x03
+
+---
+id: TC-PROCESS-9
+name: PAUSED to RUNNING via Resume Command
+description: Verify paused process can be resumed
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in processState = PAUSED
+  - Process has been paused longer than minPauseDuration
+
+steps:
+  - id: 1
+    action: Zone 1 sends Resume()
+    expected:
+      - success = true
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = RUNNING (0x03)
+    verify:
+      - read_result == 0x03
+
+---
+id: TC-PROCESS-10
+name: Resume Rejected Before minPauseDuration
+description: Verify Resume is rejected if paused too briefly
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in processState = PAUSED
+  - optionalProcess.minPauseDuration = 30 seconds
+  - Paused 5 seconds ago
+
+steps:
+  - id: 1
+    action: Zone 1 sends Resume()
+    expected:
+      - success = false
+      - status = CONSTRAINT_ERROR (11)
+    verify:
+      - response.success == false or response.status != 0
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = PAUSED (still paused)
+    verify:
+      - read_result == 0x04
+
+---
+id: TC-PROCESS-11
+name: RUNNING to COMPLETED on Natural Finish
+description: Verify process transitions to COMPLETED when finished
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in processState = RUNNING
+  - Controller subscribed to processState
+  - Process has short estimated duration (for testing)
+
+steps:
+  - id: 1
+    action: Wait for process to complete naturally
+    note: May need test harness to accelerate
+
+  - id: 2
+    action: Observe subscription notification
+    expected:
+      - processState changed to COMPLETED (0x05)
+    verify:
+      - notification.changes[80] == 0x05
+
+  - id: 3
+    action: Read processState
+    expected:
+      - processState = COMPLETED (0x05)
+    verify:
+      - read_result == 0x05
+
+---
+id: TC-PROCESS-12
+name: RUNNING to ABORTED via Stop Command
+description: Verify stoppable process can be aborted
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+    - MASH.S.CTRL.A16  # isStoppable attribute
+
+preconditions:
+  - Device in processState = RUNNING
+  - optionalProcess.isStoppable = true
+
+steps:
+  - id: 1
+    action: Zone 1 sends Stop()
+    expected:
+      - success = true
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = ABORTED (0x06)
+    verify:
+      - read_result == 0x06
+
+---
+id: TC-PROCESS-13
+name: SCHEDULED to ABORTED via CancelProcess
+description: Verify scheduled process can be cancelled
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+    - MASH.S.CTRL.C14.Rsp  # CancelProcess accepted
+
+preconditions:
+  - Device in processState = SCHEDULED
+  - optionalProcess.processId = 1001
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends CancelProcess:
+        processId: 1001
+    expected:
+      - success = true
+      - newState = ABORTED (0x06)
+    verify:
+      - response.success == true
+      - response.newState == 0x06
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = ABORTED (0x06)
+    verify:
+      - read_result == 0x06
+
+---
+id: TC-PROCESS-14
+name: Non-Pausable Process Rejects Pause
+description: Verify Pause is rejected for non-pausable processes
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in processState = RUNNING
+  - optionalProcess.isPausable = false
+
+steps:
+  - id: 1
+    action: Zone 1 sends Pause()
+    expected:
+      - success = false
+      - status = UNSUPPORTED (10)
+    verify:
+      - response.status == 10
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = RUNNING (unchanged)
+    verify:
+      - read_result == 0x03
+
+---
+id: TC-PROCESS-15
+name: Non-Stoppable Process Rejects Stop
+description: Verify Stop is rejected for non-stoppable processes
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in processState = RUNNING
+  - optionalProcess.isStoppable = false
+
+steps:
+  - id: 1
+    action: Zone 1 sends Stop()
+    expected:
+      - success = false
+      - status = UNSUPPORTED (10)
+    verify:
+      - response.status == 10
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = RUNNING (unchanged)
+    verify:
+      - read_result == 0x03
+
+---
+id: TC-PROCESS-16
+name: Invalid ProcessId Rejected
+description: Verify commands with wrong processId are rejected
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in processState = AVAILABLE
+  - optionalProcess.processId = 1001
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends ScheduleProcess:
+        processId: 9999  # Wrong ID
+        requestedStart: null
+        cause: SELF_CONSUMPTION
+    expected:
+      - success = false
+      - status = INVALID_PARAMETER (5)
+    verify:
+      - response.status == 5
+
+---
+id: TC-PROCESS-17
+name: COMPLETED to NONE Transition
+description: Verify device clears completed process state
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in processState = COMPLETED
+  - Controller subscribed to processState
+
+steps:
+  - id: 1
+    action: Wait for device to clear completed state
+    note: Device-specific timing, typically a few seconds
+
+  - id: 2
+    action: Read processState
+    expected:
+      - processState = NONE (0x00) or AVAILABLE if new process announced
+    verify:
+      - read_result in [0x00, 0x01]
+
+  - id: 3
+    action: Read optionalProcess
+    expected:
+      - optionalProcess = null (if NONE) or new process data (if AVAILABLE)

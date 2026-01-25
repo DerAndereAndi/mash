@@ -55,7 +55,87 @@ All CBOR maps use integer keys for efficiency:
 { 1: 5000000, 2: 200000 }
 ```
 
-### 2.3 Message Size Target
+### 2.3 Nullable vs Absent
+
+MASH distinguishes between **nullable values** and **absent keys**:
+
+| In a message | Meaning |
+|--------------|---------|
+| Key absent | Attribute not included in this message |
+| Key with value | Attribute has this value |
+| Key with `null` | Attribute value is explicitly null |
+
+**In delta notifications:**
+
+```cbor
+// Delta notification examples
+{
+  5: {
+    1: 5500000,    // acActivePower changed to 5500000
+    2: null,       // acReactivePower changed TO null (explicitly cleared)
+                   // acApparentPower (key 3) not present = unchanged
+  }
+}
+```
+
+**Important distinctions:**
+
+| Scenario | Representation |
+|----------|----------------|
+| "No limit is set" | `myConsumptionLimit: null` |
+| "Limit is zero" | `myConsumptionLimit: 0` |
+| "Limit unchanged" | Key absent from delta |
+
+**Attributes are never "deleted":**
+- Attributes exist or don't based on device capabilities (conformance)
+- What changes is the VALUE, not the attribute's existence
+- For nullable attributes, `null` is a valid value meaning "not set" or "cleared"
+
+**Full replacement on Write:**
+- Write operations replace the entire attribute value
+- To "clear" a nullable attribute, write `null` to it
+- There is no separate "delete" operation
+
+### 2.4 Command Parameters vs Attributes
+
+**Attributes:**
+- Stored on device
+- Readable via Read operation
+- Subscribable for change notifications
+- Can be nullable (value = `null` means "not set")
+
+**Command parameters:**
+- Sent with Invoke operation
+- NOT stored as readable values
+- NOT subscribable
+- Control behavior but are not exposed after command completes
+
+Example - the `duration` parameter in SetLimit:
+```cbor
+// SetLimit command
+{
+  1: 5000000,    // consumptionLimit - STORED as myConsumptionLimit attribute
+  3: 60,         // duration - NOT stored, starts internal timer
+  4: 2           // cause - NOT stored, for logging/audit
+}
+```
+
+After this command:
+- `myConsumptionLimit` = 5000000 (readable, subscribable)
+- `duration` = not accessible (timer running internally)
+- `cause` = not accessible (logged but not readable)
+
+**Omitting optional command parameters:**
+
+| In command | Meaning |
+|------------|---------|
+| Key absent | Use default value for this parameter |
+| Key with value | Use this value |
+| Key with `null` | Invalid - command parameters don't use null |
+
+To "change" a parameter like duration, re-send the entire command with new values.
+
+### 2.5 Message Size Target
 
 | Metric | Target |
 |--------|--------|
@@ -251,11 +331,81 @@ When subscribed attributes change:
 
 ### 6.5 Subscription Behavior
 
+#### Priming Report (Initial Response)
+
+When a subscription is established, the Subscribe Response includes **all** requested attributes' current values. This is the **priming report**:
+
+```cbor
+// Subscribe Response (priming report)
+{
+  1: 12348,            // messageId
+  2: 0,                // status: success
+  3: {
+    1: 5001,           // subscriptionId
+    2: {               // PRIMING REPORT: ALL subscribed attributes
+      1: 5000000,      // acActivePower (current value)
+      2: 200000,       // acReactivePower (current value)
+      3: 5004000       // acApparentPower (current value)
+    }
+  }
+}
+```
+
+**Why priming is required:**
+- Client gets consistent baseline state at subscription start
+- Without priming, client would only see future changes, not current state
+- Essential for late-joining controllers
+
+#### Subsequent Notifications (Deltas)
+
+After the priming report, notifications contain **only changed attributes**:
+
+```cbor
+// Notification (delta)
+{
+  1: 0,                // messageId 0 = notification
+  2: 5001,             // subscriptionId
+  3: 1,                // endpointId
+  4: 2,                // featureId
+  5: {                 // ONLY CHANGED attributes
+    1: 5500000         // acActivePower changed (others unchanged, not sent)
+  }
+}
+```
+
+#### Interval Parameters
+
 | Parameter | Description |
 |-----------|-------------|
-| minInterval | Minimum time between notifications (coalescing) |
-| maxInterval | Maximum time without notification (heartbeat) |
-| On reconnect | Subscriptions must be re-established |
+| minInterval | Minimum time between notifications (coalescing). Multiple changes within minInterval are batched into one notification. |
+| maxInterval | Maximum time without notification (heartbeat). If no changes occur, device sends notification with current values at maxInterval. |
+
+#### Heartbeat Notification
+
+If no changes occur within maxInterval, device sends a heartbeat notification containing the **current values** of all subscribed attributes (same format as priming report, but as a notification):
+
+```cbor
+// Heartbeat notification (no changes, but confirming device is alive)
+{
+  1: 0,                // messageId 0 = notification
+  2: 5001,             // subscriptionId
+  3: 1,                // endpointId
+  4: 2,                // featureId
+  5: {                 // Current values (heartbeat)
+    1: 5500000,
+    2: 200000,
+    3: 5700000
+  }
+}
+```
+
+#### Reconnection
+
+| Behavior | Description |
+|----------|-------------|
+| On reconnect | Subscriptions are lost; client must re-subscribe |
+| New priming | Re-subscription triggers new priming report |
+| Missed changes | Client should compare new priming data with last known state |
 
 ---
 

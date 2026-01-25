@@ -1,0 +1,558 @@
+# TC-ZONE-LIMIT: Multi-Zone Limit Resolution Tests
+#
+# Tests for limit resolution when multiple zones set limits on the same device.
+# Reference: behavior/multi-zone-resolution.md
+
+---
+id: TC-ZONE-LIMIT-1
+name: Basic Limit Setting
+description: Verify single zone can set and read back a limit
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp  # SetLimit accepted
+
+preconditions:
+  - Device commissioned to Zone 1 (HOME_MANAGER)
+  - No active limits (effectiveConsumptionLimit = null)
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends SetLimit:
+        consumptionLimit: 5000000
+        cause: LOCAL_PROTECTION
+    expected:
+      - success = true
+      - effectiveConsumptionLimit = 5000000
+    verify:
+      - response.success == true
+      - response.effectiveConsumptionLimit == 5000000
+
+  - id: 2
+    action: Zone 1 reads effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = 5000000
+    verify:
+      - read_result == 5000000
+
+  - id: 3
+    action: Zone 1 reads myConsumptionLimit
+    expected:
+      - myConsumptionLimit = 5000000
+    verify:
+      - read_result == 5000000
+
+  - id: 4
+    action: Zone 1 reads controlState
+    expected:
+      - controlState = LIMITED (0x02)
+    verify:
+      - read_result == 0x02
+
+---
+id: TC-ZONE-LIMIT-2
+name: Most Restrictive Wins
+description: Verify that when two zones set limits, the lower limit wins
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - Device commissioned to Zone 1 (GRID_OPERATOR) and Zone 2 (HOME_MANAGER)
+  - No active limits
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 (GRID_OPERATOR) sends SetLimit:
+        consumptionLimit: 6000000
+        cause: GRID_OPTIMIZATION
+    expected:
+      - effectiveConsumptionLimit = 6000000
+    verify:
+      - response.effectiveConsumptionLimit == 6000000
+
+  - id: 2
+    action: |
+      Zone 2 (HOME_MANAGER) sends SetLimit:
+        consumptionLimit: 5000000
+        cause: LOCAL_PROTECTION
+    expected:
+      - effectiveConsumptionLimit = 5000000 (lower value wins)
+    verify:
+      - response.effectiveConsumptionLimit == 5000000
+
+  - id: 3
+    action: Zone 1 reads effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = 5000000 (same for all zones)
+    verify:
+      - read_result == 5000000
+
+  - id: 4
+    action: Zone 1 reads myConsumptionLimit
+    expected:
+      - myConsumptionLimit = 6000000 (Zone 1's own limit)
+    verify:
+      - read_result == 6000000
+
+  - id: 5
+    action: Zone 2 reads myConsumptionLimit
+    expected:
+      - myConsumptionLimit = 5000000 (Zone 2's own limit)
+    verify:
+      - read_result == 5000000
+
+---
+id: TC-ZONE-LIMIT-3
+name: Clear Limit - Single Zone
+description: Verify clearing limit when only one zone has a limit
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+    - MASH.S.CTRL.C02.Rsp  # ClearLimit accepted
+
+preconditions:
+  - Device commissioned to Zone 1 (HOME_MANAGER)
+  - Zone 1 has set consumptionLimit = 5000000
+
+steps:
+  - id: 1
+    action: Zone 1 sends ClearLimit()
+    expected:
+      - success = true
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Zone 1 reads effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = null (no limit active)
+    verify:
+      - read_result == null
+
+  - id: 3
+    action: Zone 1 reads myConsumptionLimit
+    expected:
+      - myConsumptionLimit = null
+    verify:
+      - read_result == null
+
+  - id: 4
+    action: Zone 1 reads controlState
+    expected:
+      - controlState = CONTROLLED (0x01) not LIMITED
+    verify:
+      - read_result == 0x01
+
+---
+id: TC-ZONE-LIMIT-4
+name: Clear Limit - Multiple Zones
+description: Verify clearing one zone's limit promotes other zone's limit
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+    - MASH.S.CTRL.C02.Rsp
+
+preconditions:
+  - Device commissioned to Zone 1 (GRID_OPERATOR) and Zone 2 (HOME_MANAGER)
+  - Zone 1 has set consumptionLimit = 5000000
+  - Zone 2 has set consumptionLimit = 6000000
+  - effectiveConsumptionLimit = 5000000 (Zone 1 is more restrictive)
+
+steps:
+  - id: 1
+    action: Zone 1 sends ClearLimit()
+    expected:
+      - success = true
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Zone 2 reads effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = 6000000 (Zone 2's limit now active)
+    verify:
+      - read_result == 6000000
+
+  - id: 3
+    action: Zone 1 reads effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = 6000000 (same for all zones)
+    verify:
+      - read_result == 6000000
+
+  - id: 4
+    action: Zone 1 reads myConsumptionLimit
+    expected:
+      - myConsumptionLimit = null (Zone 1 has no limit)
+    verify:
+      - read_result == null
+
+---
+id: TC-ZONE-LIMIT-5
+name: Clear All Limits
+description: Verify behavior when all zones clear their limits
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+    - MASH.S.CTRL.C02.Rsp
+    - MASH.S.CTRL.B_LIMIT_CLEAR_ALL_NULL
+
+preconditions:
+  - Device commissioned to Zone 1 and Zone 2
+  - Zone 1 has set consumptionLimit = 5000000
+  - Zone 2 has set consumptionLimit = 6000000
+
+steps:
+  - id: 1
+    action: Zone 1 sends ClearLimit()
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Zone 2 sends ClearLimit()
+    verify:
+      - response.success == true
+
+  - id: 3
+    action: Zone 1 reads effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = null (no external limit)
+    verify:
+      - read_result == null
+
+  - id: 4
+    action: Zone 1 reads controlState
+    expected:
+      - controlState = CONTROLLED (0x01) not LIMITED
+    verify:
+      - read_result == 0x01
+
+---
+id: TC-ZONE-LIMIT-6
+name: Limit Duration Expiry
+description: Verify limit automatically clears when duration expires
+note: Duration is a command parameter, not a readable attribute
+
+---
+id: TC-ZONE-LIMIT-6a
+name: Replace Timed Limit with Indefinite
+description: Verify re-sending SetLimit replaces duration
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - Device commissioned to Zone 1
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends SetLimit:
+        consumptionLimit: 5000000
+        duration: 60
+        cause: GRID_OPTIMIZATION
+    expected:
+      - Limit set with 60s timer
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Wait 10 seconds
+
+  - id: 3
+    action: |
+      Zone 1 sends SetLimit (same limit, no duration):
+        consumptionLimit: 5000000
+        cause: GRID_OPTIMIZATION
+    note: Duration omitted = indefinite
+    expected:
+      - Previous 60s timer cancelled
+      - Limit now indefinite
+    verify:
+      - response.success == true
+
+  - id: 4
+    action: Wait 60 seconds (original duration would have expired)
+    expected:
+      - Limit still active (timer was replaced)
+    verify:
+      - read(effectiveConsumptionLimit) == 5000000
+
+---
+id: TC-ZONE-LIMIT-6b
+name: Replace Indefinite Limit with Timed
+description: Verify can add duration to previously indefinite limit
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - Device commissioned to Zone 1
+  - Zone 1 has indefinite limit: consumptionLimit = 5000000
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends SetLimit:
+        consumptionLimit: 5000000
+        duration: 5
+        cause: GRID_OPTIMIZATION
+    expected:
+      - Limit now has 5s timer
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Wait 6 seconds
+    expected:
+      - Limit expired
+      - effectiveConsumptionLimit = null
+    verify:
+      - read(effectiveConsumptionLimit) == null
+
+---
+id: TC-ZONE-LIMIT-6c
+name: Duration Parameter Not Readable
+description: Verify duration is not stored as a readable attribute
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - Device commissioned to Zone 1
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends SetLimit:
+        consumptionLimit: 5000000
+        duration: 60
+        cause: GRID_OPTIMIZATION
+
+  - id: 2
+    action: Read all EnergyControl attributes
+    expected:
+      - myConsumptionLimit = 5000000 (stored)
+      - No "duration" or "remainingDuration" attribute exists
+    note: Duration is a command parameter, not an attribute
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - Device commissioned to Zone 1 (HOME_MANAGER)
+  - No active limits
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends SetLimit:
+        consumptionLimit: 5000000
+        duration: 5  # 5 seconds
+        cause: LOCAL_OPTIMIZATION
+    expected:
+      - success = true
+      - effectiveConsumptionLimit = 5000000
+    verify:
+      - response.success == true
+      - response.effectiveConsumptionLimit == 5000000
+
+  - id: 2
+    action: Wait 2 seconds, then read effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = 5000000 (still active)
+    verify:
+      - read_result == 5000000
+
+  - id: 3
+    action: Wait 4 more seconds (total 6s), then read effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = null (duration expired)
+    verify:
+      - read_result == null
+
+  - id: 4
+    action: Read myConsumptionLimit
+    expected:
+      - myConsumptionLimit = null (cleared by expiry)
+    verify:
+      - read_result == null
+
+---
+id: TC-ZONE-LIMIT-7
+name: Subscription Notification on Limit Change
+description: Verify subscribed zones receive notification when effective limit changes
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - Device commissioned to Zone 1 and Zone 2
+  - Zone 1 subscribed to effectiveConsumptionLimit
+  - Zone 2 subscribed to effectiveConsumptionLimit
+  - No active limits
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends SetLimit:
+        consumptionLimit: 5000000
+        cause: LOCAL_PROTECTION
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Check Zone 2's notification queue
+    expected:
+      - Zone 2 received notification with effectiveConsumptionLimit = 5000000
+    verify:
+      - notification.changes[20] == 5000000  # attr 20 = effectiveConsumptionLimit
+
+  - id: 3
+    action: Zone 1 sends ClearLimit()
+    verify:
+      - response.success == true
+
+  - id: 4
+    action: Check Zone 2's notification queue
+    expected:
+      - Zone 2 received notification with effectiveConsumptionLimit = null
+    verify:
+      - notification.changes[20] == null
+
+---
+id: TC-ZONE-LIMIT-8
+name: Zero Limit Value
+description: Verify zero is a valid limit value meaning "stop consumption"
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - Device commissioned to Zone 1 (GRID_OPERATOR)
+  - Device is consuming power
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends SetLimit:
+        consumptionLimit: 0
+        cause: GRID_EMERGENCY
+    expected:
+      - success = true
+      - effectiveConsumptionLimit = 0
+    verify:
+      - response.success == true
+      - response.effectiveConsumptionLimit == 0
+
+  - id: 2
+    action: Wait 2 seconds, read Measurement.acActivePower
+    expected:
+      - acActivePower <= 0 (device stopped consuming, may have small standby)
+    note: Some standby power for communication is acceptable
+
+---
+id: TC-ZONE-LIMIT-9
+name: Negative Limit Value Rejected
+description: Verify negative consumption limit is rejected as invalid
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - Device commissioned to Zone 1
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends SetLimit:
+        consumptionLimit: -1000000
+        cause: LOCAL_PROTECTION
+    expected:
+      - success = false
+      - status = INVALID_PARAMETER (5)
+    verify:
+      - response.status == 5
+
+  - id: 2
+    action: Read effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit unchanged (null or previous value)
+    note: Verify limit was not applied
+
+---
+id: TC-ZONE-LIMIT-10
+name: Same Limit Value from Multiple Zones
+description: Verify behavior when two zones set identical limit values
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - Device commissioned to Zone 1 and Zone 2
+  - No active limits
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends SetLimit:
+        consumptionLimit: 5000000
+        cause: LOCAL_PROTECTION
+    verify:
+      - response.effectiveConsumptionLimit == 5000000
+
+  - id: 2
+    action: |
+      Zone 2 sends SetLimit:
+        consumptionLimit: 5000000
+        cause: LOCAL_OPTIMIZATION
+    expected:
+      - effectiveConsumptionLimit = 5000000 (no change in value)
+    verify:
+      - response.effectiveConsumptionLimit == 5000000
+
+  - id: 3
+    action: Zone 1 sends ClearLimit()
+    expected:
+      - effectiveConsumptionLimit = 5000000 (Zone 2's limit still active)
+    note: Even though values are same, Zone 2's limit persists
+
+  - id: 4
+    action: Read effectiveConsumptionLimit from Zone 1
+    verify:
+      - read_result == 5000000
+
+  - id: 5
+    action: Zone 2 sends ClearLimit()
+    expected:
+      - effectiveConsumptionLimit = null (now no limits)
+    verify:
+      - read_result_after_clear == null

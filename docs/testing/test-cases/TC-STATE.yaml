@@ -1,0 +1,520 @@
+# TC-STATE: ControlState Transition Tests
+#
+# Tests for ControlStateEnum transitions and failsafe behavior.
+# Reference: behavior/state-machines.md
+
+---
+id: TC-STATE-1
+name: Initial State is AUTONOMOUS
+description: Verify device starts in AUTONOMOUS state before any controller connects
+
+pics:
+  required:
+    - MASH.S.CTRL
+
+preconditions:
+  - Device powered on
+  - No controllers have ever connected (factory state)
+
+steps:
+  - id: 1
+    action: Read EnergyControl.controlState
+    expected:
+      - controlState = AUTONOMOUS (0x00)
+    verify:
+      - read_result == 0x00
+
+---
+id: TC-STATE-2
+name: AUTONOMOUS to CONTROLLED on First Connection
+description: Verify transition to CONTROLLED when first controller connects
+
+pics:
+  required:
+    - MASH.S.CTRL
+
+preconditions:
+  - Device in AUTONOMOUS state
+  - Device commissioned to Zone 1
+
+steps:
+  - id: 1
+    action: Zone 1 establishes connection (TLS handshake complete)
+    expected:
+      - Connection established
+
+  - id: 2
+    action: Read EnergyControl.controlState
+    expected:
+      - controlState = CONTROLLED (0x01)
+    verify:
+      - read_result == 0x01
+
+---
+id: TC-STATE-3
+name: CONTROLLED to LIMITED on SetLimit
+description: Verify transition to LIMITED when a limit is set
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - Device in CONTROLLED state
+  - Zone 1 connected
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends SetLimit:
+        consumptionLimit: 5000000
+        cause: LOCAL_PROTECTION
+    expected:
+      - success = true
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Read EnergyControl.controlState
+    expected:
+      - controlState = LIMITED (0x02)
+    verify:
+      - read_result == 0x02
+
+---
+id: TC-STATE-4
+name: LIMITED to CONTROLLED on ClearLimit
+description: Verify transition back to CONTROLLED when all limits cleared
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.C01.Rsp
+    - MASH.S.CTRL.C02.Rsp
+
+preconditions:
+  - Device in LIMITED state
+  - Only Zone 1 has a limit set
+
+steps:
+  - id: 1
+    action: Zone 1 sends ClearLimit()
+    expected:
+      - success = true
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Read EnergyControl.controlState
+    expected:
+      - controlState = CONTROLLED (0x01)
+    verify:
+      - read_result == 0x01
+
+---
+id: TC-STATE-5
+name: CONTROLLED to FAILSAFE on Connection Loss
+description: Verify device enters FAILSAFE when controller connection is lost
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.B_FAILSAFE_IMMEDIATE
+
+preconditions:
+  - Device in CONTROLLED state
+  - Zone 1 connected
+  - failsafeConsumptionLimit = 3000000
+  - failsafeDuration = 7200 (2 hours)
+
+steps:
+  - id: 1
+    action: Simulate connection loss (close TCP connection without proper close)
+    note: This triggers the connection loss detection mechanism
+
+  - id: 2
+    action: Wait for connection loss detection (max 95 seconds per spec)
+    expected:
+      - Device detects connection loss within 95 seconds
+
+  - id: 3
+    action: |
+      Reconnect briefly to read state, then disconnect
+      Read EnergyControl.controlState
+    expected:
+      - controlState = FAILSAFE (0x03)
+    verify:
+      - read_result == 0x03
+
+  - id: 4
+    action: Read effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = 3000000 (failsafe limit applied)
+    verify:
+      - read_result == 3000000
+
+---
+id: TC-STATE-6
+name: LIMITED to FAILSAFE on Connection Loss
+description: Verify failsafe limits override active limits when connection lost
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.B_FAILSAFE_IMMEDIATE
+
+preconditions:
+  - Device in LIMITED state
+  - Zone 1 has consumptionLimit = 6000000
+  - failsafeConsumptionLimit = 3000000
+
+steps:
+  - id: 1
+    action: Simulate connection loss
+
+  - id: 2
+    action: Wait for FAILSAFE detection
+
+  - id: 3
+    action: Read effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = 3000000 (failsafe overrides zone limit)
+    verify:
+      - read_result == 3000000
+    note: Failsafe limit (3MW) is more restrictive and always used in FAILSAFE
+
+---
+id: TC-STATE-7
+name: FAILSAFE to AUTONOMOUS After Duration Expires
+description: Verify device transitions to AUTONOMOUS after failsafeDuration
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.B_FAILSAFE_TIMER_PERSIST
+
+preconditions:
+  - Device in FAILSAFE state
+  - failsafeDuration = 10 (10 seconds for testing)
+  - Zone 1 was connected with consumptionLimit = 5000000
+
+steps:
+  - id: 1
+    action: Wait 11 seconds (failsafeDuration + 1s tolerance)
+    expected:
+      - Device transitions to AUTONOMOUS
+
+  - id: 2
+    action: Reconnect and read controlState
+    expected:
+      - controlState = AUTONOMOUS (0x00)
+    verify:
+      - read_result == 0x00
+
+  - id: 3
+    action: Read effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = null (no external limit)
+    verify:
+      - read_result == null
+
+  - id: 4
+    action: Read myConsumptionLimit
+    expected:
+      - myConsumptionLimit = null (zone limits cleared on AUTONOMOUS transition)
+    verify:
+      - read_result == null
+
+---
+id: TC-STATE-8
+name: FAILSAFE Timer Accuracy
+description: Verify failsafe timer is accurate within spec tolerance
+
+pics:
+  required:
+    - MASH.S.CTRL
+
+preconditions:
+  - Device can be put into FAILSAFE
+  - failsafeDuration = 60 (60 seconds for measurable test)
+
+steps:
+  - id: 1
+    action: |
+      Record start time T0
+      Trigger FAILSAFE (disconnect controller)
+
+  - id: 2
+    action: |
+      Poll device state every second until AUTONOMOUS
+      Record transition time T1
+
+  - id: 3
+    action: Calculate actual duration = T1 - T0
+    expected:
+      - Duration within +/- 1% of failsafeDuration
+      - For 60s: between 59.4s and 60.6s
+    verify:
+      - abs(actual_duration - 60) <= 0.6
+
+---
+id: TC-STATE-9
+name: Reconnection During FAILSAFE Restores Limits
+description: Verify zone limits are restored when controller reconnects during FAILSAFE
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.B_RECONNECT_RESTORE_LIMITS
+
+preconditions:
+  - Device in FAILSAFE state (failsafeDuration not yet expired)
+  - Zone 1 had consumptionLimit = 5000000 before disconnect
+  - failsafeConsumptionLimit = 3000000
+
+steps:
+  - id: 1
+    action: Zone 1 reconnects (TLS handshake completes)
+    expected:
+      - Connection established
+
+  - id: 2
+    action: Read controlState
+    expected:
+      - controlState = LIMITED (0x02) - restored to LIMITED since limit was active
+    verify:
+      - read_result == 0x02
+
+  - id: 3
+    action: Read effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = 5000000 (zone limit restored, not failsafe)
+    verify:
+      - read_result == 5000000
+
+  - id: 4
+    action: Read myConsumptionLimit
+    expected:
+      - myConsumptionLimit = 5000000 (zone's stored limit)
+    verify:
+      - read_result == 5000000
+
+---
+id: TC-STATE-10
+name: Reconnection After AUTONOMOUS Returns to CONTROLLED
+description: Verify reconnection after failsafe expiry starts fresh
+
+pics:
+  required:
+    - MASH.S.CTRL
+
+preconditions:
+  - Device in AUTONOMOUS state (failsafeDuration already expired)
+
+steps:
+  - id: 1
+    action: Zone 1 reconnects
+    expected:
+      - Connection established
+
+  - id: 2
+    action: Read controlState
+    expected:
+      - controlState = CONTROLLED (0x01) - no limits, fresh start
+    verify:
+      - read_result == 0x01
+
+  - id: 3
+    action: Read myConsumptionLimit
+    expected:
+      - myConsumptionLimit = null (no stored limit)
+    verify:
+      - read_result == null
+
+---
+id: TC-STATE-11
+name: OVERRIDE State Entry and Exit
+description: Verify device enters and exits OVERRIDE state correctly
+
+pics:
+  required:
+    - MASH.S.CTRL
+
+preconditions:
+  - Device in LIMITED state
+  - Zone 1 has consumptionLimit = 5000000
+  - Device supports OVERRIDE (e.g., battery with SoC protection)
+
+steps:
+  - id: 1
+    action: |
+      Trigger device self-protection condition
+      (e.g., battery SoC drops below minimum threshold)
+    note: This is device-specific, may require test harness control
+
+  - id: 2
+    action: Read controlState
+    expected:
+      - controlState = OVERRIDE (0x04)
+    verify:
+      - read_result == 0x04
+
+  - id: 3
+    action: Read effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = 5000000 (limit still stored, but not enforced)
+    note: Device is ignoring the limit for safety
+
+  - id: 4
+    action: |
+      Clear self-protection condition
+      (e.g., battery SoC rises above threshold)
+
+  - id: 5
+    action: Read controlState
+    expected:
+      - controlState = LIMITED (0x02) - returned to LIMITED
+    verify:
+      - read_result == 0x02
+
+---
+id: TC-STATE-12
+name: Connection Loss Detection Timing
+description: Verify connection loss is detected within specified time
+
+pics:
+  required:
+    - MASH.S.CTRL
+
+preconditions:
+  - Device in CONTROLLED or LIMITED state
+  - Zone 1 connected
+
+steps:
+  - id: 1
+    action: |
+      Record time T0
+      Simulate connection loss (abrupt close, no FIN)
+
+  - id: 2
+    action: |
+      Poll device state (via separate test connection) until FAILSAFE
+      Record time T1 when FAILSAFE detected
+
+  - id: 3
+    action: Calculate detection delay = T1 - T0
+    expected:
+      - Detection delay <= 95 seconds (per spec: 3 pings + timeout)
+    verify:
+      - detection_delay <= 95
+
+---
+id: TC-STATE-13
+name: Reconnection Race Condition
+description: Verify behavior when reconnection and failsafe expiry overlap
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.B_RECONNECT_RACE_WINDOW
+
+preconditions:
+  - Device in FAILSAFE state
+  - failsafeDuration = 10 seconds
+  - Zone 1 had consumptionLimit = 5000000
+
+steps:
+  - id: 1
+    action: |
+      At T = failsafeDuration - 2s (i.e., 8 seconds after FAILSAFE):
+      Start reconnection attempt (begin TLS handshake)
+
+  - id: 2
+    action: |
+      TLS handshake completes at approximately T = failsafeDuration + 1s
+      (i.e., within the 5-second race window)
+
+  - id: 3
+    action: Read controlState
+    expected:
+      - controlState = LIMITED (0x02) - reconnection won the race
+    verify:
+      - read_result == 0x02
+    note: |
+      Per spec, if handshake completes within 5 seconds of timer,
+      reconnection wins over AUTONOMOUS transition
+
+---
+id: TC-STATE-14
+name: Multiple Zones - FAILSAFE Behavior
+description: Verify FAILSAFE when one of multiple zones disconnects
+
+pics:
+  required:
+    - MASH.S.CTRL
+
+preconditions:
+  - Device commissioned to Zone 1 (GRID_OPERATOR) and Zone 2 (HOME_MANAGER)
+  - Zone 1 has consumptionLimit = 5000000
+  - Zone 2 has consumptionLimit = 6000000
+  - Both zones connected
+  - controlState = LIMITED
+
+steps:
+  - id: 1
+    action: Zone 1 disconnects (connection lost)
+    note: Zone 2 remains connected
+
+  - id: 2
+    action: Read controlState
+    expected:
+      - controlState = LIMITED (0x02) - still LIMITED, Zone 2 is connected
+    verify:
+      - read_result == 0x02
+    note: Device does NOT enter FAILSAFE when at least one zone is connected
+
+  - id: 3
+    action: Read effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = 5000000 (still min of both zone limits)
+    verify:
+      - read_result == 5000000
+    note: Zone 1's limit persists even though Zone 1 disconnected
+
+  - id: 4
+    action: Zone 2 disconnects (all zones now disconnected)
+
+  - id: 5
+    action: Wait for FAILSAFE detection
+
+  - id: 6
+    action: Read controlState
+    expected:
+      - controlState = FAILSAFE (0x03)
+    verify:
+      - read_result == 0x03
+
+---
+id: TC-STATE-15
+name: Invalid Transitions Rejected
+description: Verify device rejects invalid state transition attempts
+
+pics:
+  required:
+    - MASH.S.CTRL
+
+preconditions:
+  - Device in AUTONOMOUS state
+  - No controller connected
+
+steps:
+  - id: 1
+    action: |
+      Attempt to set controlState directly via Write:
+        controlState: 0x02 (LIMITED)
+    expected:
+      - status = READ_ONLY (6) or UNSUPPORTED (10)
+    verify:
+      - response.status in [6, 10]
+    note: controlState is read-only, cannot be set directly

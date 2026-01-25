@@ -1,0 +1,562 @@
+# TC-INTERACTION: ControlState + ProcessState Interaction Tests
+#
+# Tests for the interaction between ControlStateEnum and ProcessStateEnum.
+# These test the scenarios where both state machines are affected.
+# Reference: behavior/state-machines.md Section 4
+
+---
+id: TC-INTERACTION-1
+name: Connection Lost While Process SCHEDULED
+description: Verify scheduled process proceeds when connection is lost
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07  # PROCESS feature flag
+    - MASH.S.CTRL.B_PROCESS_CONTINUE_FAILSAFE
+
+preconditions:
+  - Device in controlState = CONTROLLED or LIMITED
+  - processState = SCHEDULED
+  - scheduledStart = now + 60 seconds
+  - Zone 1 connected
+
+steps:
+  - id: 1
+    action: Simulate connection loss (Zone 1 disconnects)
+
+  - id: 2
+    action: Wait for FAILSAFE detection
+
+  - id: 3
+    action: |
+      Reconnect briefly to check state
+      Read controlState and processState
+    expected:
+      - controlState = FAILSAFE (0x03)
+      - processState = SCHEDULED (0x02) - unchanged
+    verify:
+      - controlState == 0x03
+      - processState == 0x02
+
+  - id: 4
+    action: Wait until scheduledStart + 5 seconds
+
+  - id: 5
+    action: Read processState
+    expected:
+      - processState = RUNNING (0x03) - process started despite FAILSAFE
+    verify:
+      - read_result == 0x03
+
+---
+id: TC-INTERACTION-2
+name: Connection Lost While Process RUNNING
+description: Verify running process continues under failsafe limits
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+    - MASH.S.CTRL.B_PROCESS_CONTINUE_FAILSAFE
+
+preconditions:
+  - Device in controlState = LIMITED
+  - Zone 1 has consumptionLimit = 7000000
+  - failsafeConsumptionLimit = 3000000
+  - processState = RUNNING
+
+steps:
+  - id: 1
+    action: Simulate connection loss
+
+  - id: 2
+    action: Wait for FAILSAFE detection
+
+  - id: 3
+    action: Read controlState and processState
+    expected:
+      - controlState = FAILSAFE (0x03)
+      - processState = RUNNING (0x03) - process continues
+    verify:
+      - controlState == 0x03
+      - processState == 0x03
+
+  - id: 4
+    action: Read effectiveConsumptionLimit
+    expected:
+      - effectiveConsumptionLimit = 3000000 (failsafe limit)
+    verify:
+      - read_result == 3000000
+    note: Process is now constrained by more restrictive failsafe limit
+
+---
+id: TC-INTERACTION-3
+name: Connection Lost While Process PAUSED
+description: Verify paused process remains paused in FAILSAFE
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in controlState = LIMITED
+  - processState = PAUSED
+
+steps:
+  - id: 1
+    action: Simulate connection loss
+
+  - id: 2
+    action: Wait for FAILSAFE detection
+
+  - id: 3
+    action: Read controlState and processState
+    expected:
+      - controlState = FAILSAFE (0x03)
+      - processState = PAUSED (0x04) - remains paused
+    verify:
+      - controlState == 0x03
+      - processState == 0x04
+
+---
+id: TC-INTERACTION-4
+name: FAILSAFE Expires While Process PAUSED (Auto-Resume Enabled)
+description: Verify paused process auto-resumes when failsafe expires (if supported)
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+    - MASH.S.CTRL.B_PAUSED_AUTO_RESUME  # Device auto-resumes paused processes
+
+preconditions:
+  - Device in controlState = FAILSAFE
+  - processState = PAUSED
+  - failsafeDuration = 10 seconds
+
+steps:
+  - id: 1
+    action: Wait 11 seconds (failsafeDuration expires)
+
+  - id: 2
+    action: Read controlState and processState
+    expected:
+      - controlState = AUTONOMOUS (0x00)
+      - processState = RUNNING (0x03) - auto-resumed
+    verify:
+      - controlState == 0x00
+      - processState == 0x03
+
+---
+id: TC-INTERACTION-5
+name: FAILSAFE Expires While Process PAUSED (Auto-Resume Disabled)
+description: Verify paused process stays paused when failsafe expires (conservative)
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+  prohibited:
+    - MASH.S.CTRL.B_PAUSED_AUTO_RESUME  # Device does NOT auto-resume
+
+preconditions:
+  - Device in controlState = FAILSAFE
+  - processState = PAUSED
+  - failsafeDuration = 10 seconds
+
+steps:
+  - id: 1
+    action: Wait 11 seconds (failsafeDuration expires)
+
+  - id: 2
+    action: Read controlState and processState
+    expected:
+      - controlState = AUTONOMOUS (0x00)
+      - processState = PAUSED (0x04) - still paused
+    verify:
+      - controlState == 0x00
+      - processState == 0x04
+
+---
+id: TC-INTERACTION-6
+name: Process Completes During FAILSAFE
+description: Verify process can complete while device is in FAILSAFE
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+    - MASH.S.CTRL.B_PROCESS_CONTINUE_FAILSAFE
+
+preconditions:
+  - Device in controlState = FAILSAFE
+  - processState = RUNNING
+  - Process has short remaining duration
+
+steps:
+  - id: 1
+    action: Wait for process to complete naturally
+
+  - id: 2
+    action: Read controlState and processState
+    expected:
+      - controlState = FAILSAFE (0x03) - still in FAILSAFE
+      - processState = COMPLETED (0x05) - process finished
+    verify:
+      - controlState == 0x03
+      - processState == 0x05
+
+---
+id: TC-INTERACTION-7
+name: Reconnection With Active Process
+description: Verify controller sees active process state on reconnection
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in controlState = FAILSAFE
+  - processState = RUNNING
+  - Zone 1 disconnected
+
+steps:
+  - id: 1
+    action: Zone 1 reconnects and subscribes to EnergyControl
+
+  - id: 2
+    action: Verify priming report contents
+    expected:
+      - controlState in priming (LIMITED or CONTROLLED)
+      - processState = RUNNING (0x03)
+      - optionalProcess contains process details
+    verify:
+      - priming.processState == 0x03
+      - priming.optionalProcess.processId is not None
+
+  - id: 3
+    action: Zone 1 can interact with process (e.g., Pause)
+    expected:
+      - Commands are accepted
+    note: Verifies controller regains control of in-progress process
+
+---
+id: TC-INTERACTION-8
+name: OVERRIDE Does Not Affect ProcessState
+description: Verify OVERRIDE state doesn't change process lifecycle
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device in controlState = LIMITED
+  - processState = RUNNING
+
+steps:
+  - id: 1
+    action: Trigger device self-protection (OVERRIDE)
+    note: Device-specific trigger
+
+  - id: 2
+    action: Read controlState and processState
+    expected:
+      - controlState = OVERRIDE (0x04)
+      - processState = RUNNING (0x03) - unchanged
+    verify:
+      - controlState == 0x04
+      - processState == 0x03
+    note: Process continues; OVERRIDE affects power limits, not process lifecycle
+
+  - id: 3
+    action: Clear OVERRIDE condition
+
+  - id: 4
+    action: Read controlState and processState
+    expected:
+      - controlState = LIMITED (0x02)
+      - processState = RUNNING (0x03) - still running
+    verify:
+      - controlState == 0x02
+      - processState == 0x03
+
+---
+id: TC-INTERACTION-9
+name: Higher Priority Zone Takes Process Control
+description: Verify higher priority zone can take over process
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device commissioned to Zone 1 (HOME_MANAGER) and Zone 2 (GRID_OPERATOR)
+  - Zone 1 has scheduled process (processState = SCHEDULED)
+  - Zone 1 is process owner
+
+steps:
+  - id: 1
+    action: |
+      Zone 2 (GRID_OPERATOR, higher priority) sends ScheduleProcess:
+        processId: 1001
+        requestedStart: now + 600  # Different time
+        cause: GRID_REQUEST
+    expected:
+      - success = true
+      - Zone 2 takes ownership
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Read optionalProcess.scheduledStart
+    expected:
+      - scheduledStart reflects Zone 2's request
+    verify:
+      - scheduledStart is Zone 2's requested time
+
+  - id: 3
+    action: Zone 1 attempts ScheduleProcess (to regain control)
+    expected:
+      - Rejected (lower priority)
+    verify:
+      - response.success == false
+
+---
+id: TC-INTERACTION-10
+name: Pause Authority Based on Priority
+description: Verify only appropriate zones can pause/resume
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device commissioned to Zone 1 (HOME_MANAGER) and Zone 2 (USER_APP)
+  - Zone 1 scheduled and owns the running process
+  - processState = RUNNING
+  - Process has run past minRunDuration
+
+steps:
+  - id: 1
+    action: Zone 2 (USER_APP, lower priority than owner) sends Pause()
+    expected:
+      - Rejected (insufficient priority)
+    verify:
+      - response.success == false
+
+  - id: 2
+    action: Zone 1 (HOME_MANAGER, owner) sends Pause()
+    expected:
+      - success = true
+      - processState = PAUSED
+    verify:
+      - response.success == true
+
+  - id: 3
+    action: Read processState
+    verify:
+      - read_result == 0x04
+
+---
+id: TC-INTERACTION-11
+name: Zone Disconnect Does Not Cancel Process
+description: Verify owner disconnecting doesn't abort the process
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device commissioned to Zone 1 only
+  - Zone 1 is process owner
+  - processState = RUNNING
+
+steps:
+  - id: 1
+    action: Zone 1 disconnects (connection lost)
+
+  - id: 2
+    action: Wait for FAILSAFE detection
+
+  - id: 3
+    action: |
+      Reconnect with Zone 1
+      Read processState
+    expected:
+      - processState = RUNNING (0x03) - process continued
+    verify:
+      - read_result == 0x03
+    note: Process ownership persists across disconnection
+
+---
+id: TC-INTERACTION-12
+name: Concurrent Process Commands from Multiple Zones
+description: Verify proper handling of simultaneous commands
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+preconditions:
+  - Device commissioned to Zone 1 and Zone 2 (same priority)
+  - processState = AVAILABLE
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 and Zone 2 send ScheduleProcess simultaneously
+      (within network latency, actual order may vary)
+    note: Requires test harness to send near-simultaneous commands
+
+  - id: 2
+    action: Verify exactly one succeeds
+    expected:
+      - One zone gets success = true
+      - Other zone gets success = false or BUSY
+    verify:
+      - (zone1_success XOR zone2_success) or one_gets_busy
+
+  - id: 3
+    action: Read optionalProcess
+    expected:
+      - Process is scheduled/running with single owner
+    verify:
+      - process_owner is defined
+
+---
+id: TC-INTERACTION-13
+name: SetLimit During RUNNING Process
+description: Verify limits can be changed while process is running
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+    - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - Device in controlState = CONTROLLED
+  - processState = RUNNING
+  - No active limits
+
+steps:
+  - id: 1
+    action: |
+      Zone 1 sends SetLimit:
+        consumptionLimit: 3000000
+        cause: GRID_OPTIMIZATION
+    expected:
+      - success = true
+      - effectiveConsumptionLimit = 3000000
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Read controlState and processState
+    expected:
+      - controlState = LIMITED (0x02) - changed due to limit
+      - processState = RUNNING (0x03) - unchanged
+    verify:
+      - controlState == 0x02
+      - processState == 0x03
+    note: Both states update independently
+
+---
+id: TC-INTERACTION-14
+name: ClearLimit Does Not Affect Process
+description: Verify clearing limits doesn't affect running process
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+    - MASH.S.CTRL.C02.Rsp
+
+preconditions:
+  - Device in controlState = LIMITED
+  - processState = RUNNING
+
+steps:
+  - id: 1
+    action: Zone 1 sends ClearLimit()
+    expected:
+      - success = true
+    verify:
+      - response.success == true
+
+  - id: 2
+    action: Read controlState and processState
+    expected:
+      - controlState = CONTROLLED (0x01) - no more limit
+      - processState = RUNNING (0x03) - still running
+    verify:
+      - controlState == 0x01
+      - processState == 0x03
+
+---
+id: TC-INTERACTION-15
+name: All Valid ControlState + ProcessState Combinations
+description: Verify all documented combinations are reachable
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.F07
+
+steps:
+  - id: 1
+    description: Test AUTONOMOUS + NONE
+    action: Factory reset device
+    verify:
+      - controlState == 0x00
+      - processState == 0x00
+
+  - id: 2
+    description: Test CONTROLLED + AVAILABLE
+    action: Connect controller, trigger process announcement
+    verify:
+      - controlState == 0x01
+      - processState == 0x01
+
+  - id: 3
+    description: Test LIMITED + SCHEDULED
+    action: Set limit, schedule process
+    verify:
+      - controlState == 0x02
+      - processState == 0x02
+
+  - id: 4
+    description: Test LIMITED + RUNNING
+    action: Wait for scheduled time
+    verify:
+      - controlState == 0x02
+      - processState == 0x03
+
+  - id: 5
+    description: Test LIMITED + PAUSED
+    action: Pause the running process
+    verify:
+      - controlState == 0x02
+      - processState == 0x04
+
+  - id: 6
+    description: Test FAILSAFE + RUNNING
+    action: Disconnect while running, resume process first
+    verify:
+      - controlState == 0x03
+      - processState == 0x03
+
+  - id: 7
+    description: Test AUTONOMOUS + COMPLETED
+    action: Let failsafe expire and process complete
+    verify:
+      - controlState == 0x00
+      - processState == 0x05

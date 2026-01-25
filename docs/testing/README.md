@@ -1,0 +1,412 @@
+# MASH Test Specification
+
+> Test-Driven Specification: Tests and precise behavior defined together
+
+**Status:** Draft
+**Created:** 2025-01-25
+
+---
+
+## Philosophy
+
+MASH takes a **test-driven specification** approach:
+
+1. **Structure first** - Device model, features, message formats (done)
+2. **PICS + Tests + Precise behavior** - Defined together, iteratively
+3. **Implementation** - Against testable specification
+
+The test specification IS the precise specification. If behavior can't be tested, it's not specified.
+
+---
+
+## Directory Structure
+
+```
+docs/testing/
+├── README.md                    # This file
+├── pics/
+│   ├── pics-format.md           # PICS code format specification
+│   ├── mash-base.pics           # Base protocol PICS
+│   └── features/
+│       ├── electrical.pics      # Electrical feature PICS
+│       ├── measurement.pics     # Measurement feature PICS
+│       ├── energy-control.pics  # EnergyControl feature PICS
+│       └── ...
+├── conformance/
+│   ├── conformance-format.md    # Conformance rule format
+│   └── features/
+│       ├── electrical.xml       # Electrical conformance rules
+│       ├── energy-control.xml   # EnergyControl conformance rules
+│       └── ...
+├── test-cases/
+│   ├── format.md                # Test case format specification
+│   ├── TC-TRANS-*.md            # Transport layer tests
+│   ├── TC-STATE-*.md            # State machine tests
+│   ├── TC-ZONE-*.md             # Multi-zone tests
+│   ├── TC-CTRL-*.md             # EnergyControl tests
+│   └── ...
+└── behavior/
+    ├── state-machines.md        # Precise state machine definitions
+    ├── multi-zone-resolution.md # Precise resolution rules
+    ├── timing-requirements.md   # Precise timing specs
+    └── error-handling.md        # Precise error semantics
+```
+
+---
+
+## Workflow: Adding a Feature Behavior
+
+For each behavior that needs specification:
+
+### Step 1: Identify the Ambiguity
+
+From testability-analysis.md or new discovery.
+
+Example: "What happens when a zone clears its limit?"
+
+### Step 2: Define PICS Items
+
+What capability variations exist?
+
+```
+MASH.S.CTRL.LIMIT_DEFAULT_UNLIMITED=1  # When all limits cleared, device is unlimited
+MASH.S.CTRL.LIMIT_DEFAULT_ZERO=1       # When all limits cleared, device uses 0
+```
+
+### Step 3: Write Test Cases
+
+```yaml
+TC-CTRL-LIMIT-3: Behavior when all zones clear limits
+
+PICS: [MASH.S.CTRL]
+
+Preconditions:
+  - Device commissioned to Zone 1 and Zone 2
+  - Zone 1 has set consumptionLimit = 5000000 mW
+  - Zone 2 has set consumptionLimit = 6000000 mW
+  - effectiveConsumptionLimit = 5000000 mW
+
+Steps:
+  1. Zone 1 sends ClearLimit()
+     Expected: effectiveConsumptionLimit = 6000000 mW (Zone 2's limit)
+
+  2. Zone 2 sends ClearLimit()
+     Expected:
+       If MASH.S.CTRL.LIMIT_DEFAULT_UNLIMITED:
+         effectiveConsumptionLimit = null (no limit)
+       If MASH.S.CTRL.LIMIT_DEFAULT_ZERO:
+         effectiveConsumptionLimit = 0 (device stops)
+
+  3. Read myConsumptionLimit from Zone 1
+     Expected: null (Zone 1 has no active limit)
+```
+
+### Step 4: Document Precise Behavior
+
+In `behavior/multi-zone-resolution.md`:
+
+```markdown
+## Limit Clearing Behavior
+
+When a zone clears its limit:
+1. Device removes that zone's limit from internal tracking
+2. Device recalculates effectiveLimit = min(remaining zone limits)
+3. If no zone limits remain:
+   - Device behavior is implementation-defined (declare via PICS)
+   - LIMIT_DEFAULT_UNLIMITED: effectiveLimit = null (unlimited)
+   - LIMIT_DEFAULT_ZERO: effectiveLimit = 0 (full stop)
+4. Device notifies all subscribed zones of effectiveLimit change
+```
+
+### Step 5: Update Feature Spec
+
+Back-port precise wording to `docs/features/energy-control.md`.
+
+---
+
+## PICS Format
+
+### Code Structure
+
+```
+MASH.<Side>.<Feature>.<Type><ID>[.<Qualifier>]
+```
+
+| Component | Values | Description |
+|-----------|--------|-------------|
+| Side | S, C | Server (device), Client (controller) |
+| Feature | TRANS, ELEC, MEAS, CTRL, STAT, INFO, CHRG, SIG, TAR, PLAN | Feature code |
+| Type | F, A, C, E, B | Feature flag, Attribute, Command, Event, Behavior |
+| ID | Hex or name | Identifier |
+| Qualifier | Rsp, Tx | For commands: accepts, generates |
+
+### Examples
+
+```
+# Protocol support
+MASH.S=1                        # Device implements MASH protocol
+MASH.S.VERSION=1                # Protocol version 1
+
+# Feature presence
+MASH.S.CTRL=1                   # EnergyControl feature present
+MASH.S.CHRG=1                   # ChargingSession feature present
+
+# Feature flags (from featureMap)
+MASH.S.F00=1                    # CORE
+MASH.S.F03=1                    # EMOB
+MASH.S.F09=1                    # ASYMMETRIC
+
+# Attributes
+MASH.S.CTRL.A0001=1             # deviceType
+MASH.S.CTRL.A0014=1             # isPausable
+
+# Commands
+MASH.S.CTRL.C01.Rsp=1           # SetLimit accepted
+MASH.S.CTRL.C09.Rsp=1           # Pause accepted
+
+# Behavior options (for implementation-defined behavior)
+MASH.S.CTRL.B_LIMIT_CLEAR=UNLIMITED  # Behavior when all limits cleared
+MASH.S.CTRL.B_FAILSAFE_IMMEDIATE=1   # Failsafe applied immediately on disconnect
+```
+
+---
+
+## Conformance Format
+
+XML-based, following Matter's approach:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<conformance feature="EnergyControl" id="0x0003">
+
+  <!-- Feature flag conformance -->
+  <featureFlags>
+    <flag bit="0" name="CORE">
+      <mandatoryConform/>
+    </flag>
+    <flag bit="9" name="ASYMMETRIC">
+      <optionalConform>
+        <condition>
+          <attribute feature="Electrical" name="phaseCount">
+            <greaterThan value="1"/>
+          </attribute>
+        </condition>
+      </optionalConform>
+    </flag>
+  </featureFlags>
+
+  <!-- Attribute conformance -->
+  <attributes>
+    <attribute id="0x0001" name="deviceType">
+      <mandatoryConform/>
+    </attribute>
+    <attribute id="0x001E" name="effectiveCurrentLimitsConsumption">
+      <mandatoryConform>
+        <feature name="ASYMMETRIC"/>
+      </mandatoryConform>
+    </attribute>
+    <attribute id="0x003C" name="flexibility">
+      <optionalConform>
+        <feature name="FLEX"/>
+      </optionalConform>
+    </attribute>
+  </attributes>
+
+  <!-- Command conformance -->
+  <commands>
+    <command id="0x01" name="SetLimit">
+      <mandatoryConform>
+        <attribute name="acceptsLimits" value="true"/>
+      </mandatoryConform>
+    </command>
+    <command id="0x05" name="SetCurrentLimits">
+      <mandatoryConform>
+        <attribute name="acceptsCurrentLimits" value="true"/>
+      </mandatoryConform>
+    </command>
+  </commands>
+
+</conformance>
+```
+
+---
+
+## Test Case Format
+
+YAML-based for readability and tooling:
+
+```yaml
+id: TC-CTRL-LIMIT-1
+name: SetLimit Basic Operation
+description: Verify basic SetLimit command execution
+
+pics:
+  required:
+    - MASH.S.CTRL
+    - MASH.S.CTRL.A000A  # acceptsLimits = true
+
+preconditions:
+  - Device commissioned to test controller
+  - No active limits
+
+steps:
+  - id: 1
+    action: "Controller sends SetLimit(consumptionLimit: 5000000, cause: LOCAL_PROTECTION)"
+    expected:
+      - "Device returns success=true"
+      - "effectiveConsumptionLimit = 5000000"
+    verification: ReadAttribute(effectiveConsumptionLimit) == 5000000
+
+  - id: 2
+    action: "Controller reads myConsumptionLimit"
+    expected:
+      - "myConsumptionLimit = 5000000"
+
+  - id: 3
+    action: "Controller reads controlState"
+    expected:
+      - "controlState = LIMITED"
+
+postconditions:
+  - "Device is in LIMITED state with 5kW consumption limit"
+```
+
+---
+
+## Test Categories
+
+### TC-TRANS-*: Transport Layer
+- Connection establishment
+- Keep-alive behavior
+- Reconnection
+- Message framing
+
+### TC-STATE-*: State Machines
+- ControlState transitions
+- ProcessState transitions
+- State interaction (orthogonality)
+
+### TC-ZONE-*: Multi-Zone
+- Limit resolution
+- Setpoint resolution
+- Zone commissioning/removal
+- Priority handling
+
+### TC-CTRL-*: EnergyControl
+- Limit commands
+- Setpoint commands
+- Pause/Resume/Stop
+- Process scheduling
+
+### TC-SUB-*: Subscriptions
+- Subscription establishment
+- Change notifications
+- Interval behavior
+- Reconnection re-establishment
+
+### TC-DISC-*: Discovery
+- mDNS advertising
+- Capability discovery
+- QR code parsing
+
+### TC-SEC-*: Security
+- Commissioning (SPAKE2+)
+- Certificate handling
+- Zone isolation
+
+### TC-CONF-*: Conformance
+- PICS validation
+- Feature flag consistency
+- Attribute presence
+
+---
+
+## Iteration Plan
+
+### Phase 1: Foundation
+1. PICS format specification
+2. Conformance XML schema
+3. Test case YAML schema
+4. Basic tooling (PICS parser, conformance checker)
+
+### Phase 2: Core Features
+For each feature, in order:
+1. EnergyControl (most complex, most gaps)
+2. Electrical
+3. Measurement
+4. Status
+5. DeviceInfo
+
+### Phase 3: Advanced Features
+1. ChargingSession
+2. Signals
+3. Tariff
+4. Plan
+
+### Phase 4: Protocol Behavior
+1. Transport layer
+2. State machines
+3. Multi-zone resolution
+4. Error handling
+
+---
+
+## Tooling Requirements
+
+### PICS Tools
+- `pics-parse`: Parse PICS file to structured format
+- `pics-validate`: Validate PICS against conformance rules
+- `pics-generate`: Auto-generate PICS from device capabilities
+
+### Test Tools
+- `test-runner`: Execute test cases against device
+- `test-report`: Generate test results report
+- `test-coverage`: Analyze PICS coverage
+
+### Conformance Tools
+- `conformance-check`: Validate device against conformance rules
+- `conformance-report`: Generate conformance report
+
+---
+
+## Current Status
+
+### Completed Behavior Specifications
+
+| Document | Description | Status |
+|----------|-------------|--------|
+| `behavior/multi-zone-resolution.md` | Limit/setpoint resolution, duration semantics | Complete |
+| `behavior/state-machines.md` | ControlState/ProcessState transitions, interactions | Complete |
+
+### Completed Test Cases
+
+| Test Suite | Count | Description |
+|------------|-------|-------------|
+| TC-ZONE-LIMIT | 13 | Limit resolution across multiple zones |
+| TC-SUB | 12 | Subscription priming, deltas, heartbeats |
+| TC-STATE | 15 | ControlState transitions and failsafe |
+| TC-PROCESS | 17 | ProcessState transitions and commands |
+| TC-INTERACTION | 15 | ControlState + ProcessState interactions |
+
+### Gaps Remaining (from testability-analysis.md)
+
+| Area | Original | Addressed | Remaining |
+|------|----------|-----------|-----------|
+| State Machines | 4 | 4 | 0 |
+| Multi-Zone Resolution | 6 | 6 | 0 |
+| Timing/Ordering | 8 | 4 | 4 |
+| Feature Dependencies | 3 | 0 | 3 |
+| Protocol Encoding | 5 | 0 | 5 |
+| Security | 4 | 0 | 4 |
+| Feature Interaction | 5 | 0 | 5 |
+| Error Handling | 3 | 0 | 3 |
+| Discovery | 3 | 0 | 3 |
+
+---
+
+## Next Steps
+
+1. **Define PICS format precisely** - Create `pics/pics-format.md`
+2. **Address remaining gaps** - Timing, encoding, security, error handling
+3. **Build basic tooling** - PICS parser as first tool
+4. **Create conformance XML** - For EnergyControl feature

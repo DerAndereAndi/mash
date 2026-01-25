@@ -2029,6 +2029,155 @@ ChargingSession.evDemandMode: DYNAMIC_BIDIRECTIONAL
 
 ---
 
+### DEC-038: Command Parameters vs Stored Attributes
+
+**Date:** 2025-01-25
+**Status:** Accepted
+
+**Context:** Commands like `SetLimit` have parameters like `duration` that control behavior. Question: Are these stored and readable like attributes, or transient like Matter's command parameters?
+
+**Protocol Comparison:**
+
+| Protocol | Approach |
+|----------|----------|
+| **EEBUS** | All function data is stored and readable. Writing to a function persists all fields. No concept of "transient parameters." |
+| **Matter** | Commands have parameters that control execution but aren't stored. `transitionTime` in LevelControl is passed at invocation but not readable as an attribute. |
+
+**Options Evaluated:**
+
+1. **EEBUS model**: Store all command parameters as readable attributes (e.g., `limitDuration`, `limitCause`)
+2. **Matter model**: Command parameters are transient - control behavior but aren't persisted
+3. **Hybrid**: Some parameters stored, some transient
+
+**Decision:** Matter model - command parameters are transient, not stored attributes.
+
+**Design:**
+
+| Concept | Behavior | Example |
+|---------|----------|---------|
+| **Attribute** | Stored, readable, subscribable | `myConsumptionLimit`, `effectiveConsumptionLimit` |
+| **Command parameter** | Transient, not readable, controls execution | `duration`, `cause` |
+
+**After SetLimit(consumptionLimit: 5000000, duration: 60, cause: LOCAL_PROTECTION):**
+- `myConsumptionLimit` = 5000000 (readable, subscribable)
+- `duration` = not accessible (internal timer running)
+- `cause` = not accessible (logged but not queryable)
+
+**Implications:**
+
+1. **No "remaining duration" attribute**: Timer is internal, not exposed
+2. **Controller tracks expiry locally**: If controller needs to know, it calculates `now + duration`
+3. **To change duration**: Re-send entire SetLimit command
+4. **To remove timer**: Send SetLimit with `duration: 0` or omit duration
+5. **null invalid for command parameters**: Use omission for defaults, not null
+
+**Omitting Optional Parameters:**
+
+| In command | Meaning |
+|------------|---------|
+| Key absent | Use default value |
+| Key with value | Use this value |
+| Key with `null` | Invalid - don't use null for command parameters |
+
+**Rationale:**
+
+*Why Matter model over EEBUS model:*
+- **Simpler device implementation**: Don't need to store/manage every parameter
+- **Clearer semantics**: Attributes are state, commands are actions
+- **Less state to synchronize**: Transient parameters don't need notification
+- **Controller owns scheduling context**: Controller set the duration, controller knows when it expires
+- **Matter-aligned**: Familiar pattern for developers
+
+*Why no remaining duration attribute:*
+- Would require continuous updates or on-demand calculation
+- Adds complexity for marginal benefit
+- Controller can track locally (it set the duration)
+- Other zones don't need to know when a limit expires - they only care about the effective limit value
+
+**Test Implications:**
+- TC-ZONE-LIMIT-6c: Verify duration is NOT readable as an attribute
+- TC-ZONE-LIMIT-6a: Verify re-sending command replaces timer
+
+**Declined Alternatives:**
+
+- EEBUS model (all stored): Adds complexity, unclear benefit for transient control parameters
+- Hybrid model: Complicates the mental model - either it's state or it's control, not both
+- Adding `remainingDuration` attribute: Continuous change or on-demand calculation adds complexity
+
+---
+
+### DEC-039: State Machine Interaction Rules
+
+**Date:** 2025-01-25
+**Status:** Accepted
+
+**Context:** MASH has two orthogonal state machines: ControlStateEnum (controller relationship) and ProcessStateEnum (optional task lifecycle). The testability analysis identified that interaction rules were unspecified - what happens to ProcessState when ControlState changes?
+
+**Key Scenarios:**
+
+| Scenario | Question |
+|----------|----------|
+| Connection lost during RUNNING process | Does process pause or continue? |
+| Connection lost during PAUSED process | Does it stay paused or auto-resume on failsafe expiry? |
+| Failsafe expires during SCHEDULED process | Does scheduled process still start? |
+| Reconnection during active process | Who owns the process? |
+
+**Decision:** Process lifecycle continues independently of ControlState transitions.
+
+**Rules:**
+
+1. **RUNNING processes continue during FAILSAFE**
+   - Process operates under failsafe limits (more restrictive)
+   - Process can complete during FAILSAFE
+   - Rationale: Safer to complete (e.g., dishwasher cycle) than leave mid-operation
+
+2. **SCHEDULED processes start as planned during FAILSAFE**
+   - Device starts process at scheduledStart without controller confirmation
+   - Process runs under failsafe limits
+   - Rationale: User expectation is scheduled task runs
+
+3. **PAUSED processes remain paused during FAILSAFE**
+   - Device-specific behavior on failsafe expiry (PICS item)
+   - Conservative devices: stay paused
+   - Aggressive devices: auto-resume
+   - PICS: `MASH.S.CTRL.B_PAUSED_AUTO_RESUME`
+
+4. **Reconnection restores control, doesn't cancel**
+   - Controller sees process state in subscription priming
+   - Controller can interact (Pause, Cancel) but process continues by default
+   - Process ownership persists across disconnection
+
+**FAILSAFE Timing Precision:**
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Maximum detection delay | 95 seconds | 3 missed pongs @ 30s + 5s timeout |
+| Failsafe timer accuracy | +/- 1% | 24h failsafe = +/- 14 minutes |
+| Failsafe limit application | Immediate | Safety-critical, no gradual ramp |
+| Reconnection race window | 5 seconds | If handshake completes within 5s of timer, reconnection wins |
+
+**Rationale:**
+
+*Why continue processes:*
+- User scheduled the task expecting it to run
+- Mid-operation abort can cause problems (wet laundry, half-heated water)
+- Failsafe limits provide grid safety regardless
+- Controller regains control on reconnection
+
+*Why PAUSED is device-specific:*
+- Paused implies intentional stop - conservative to maintain that
+- But some devices may want to resume after extended disconnect
+- Make it explicit via PICS so controllers know what to expect
+
+**Test Cases:**
+- TC-INTERACTION-1 through TC-INTERACTION-15 cover all interaction scenarios
+- TC-STATE-5 through TC-STATE-9 cover FAILSAFE behavior
+- TC-PROCESS-* cover ProcessState transitions
+
+**Documentation:** See `docs/testing/behavior/state-machines.md` for complete specification.
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -2143,3 +2292,5 @@ Key learnings:
 | 2025-01-25 | Added DEC-036: Charging mode and responsibility model. ChargingModeEnum for optimization strategy (PV surplus, price optimized). "CEM suggests, EVSE decides" pattern with start/stop delays. Covers OSCEV 2.0 use cases. |
 | 2025-01-25 | Updated DEC-036: Electrical feature is dynamic - reflects current system capability including connected devices (e.g., EV). No separate EV constraint fields needed; Electrical updates when EV connects. Clean two-layer model: Electrical (capability) + EnergyControl (policy). |
 | 2025-01-25 | Added DEC-037: Two-level capability discovery. FeatureMap is 32-bit bitmap (aligned with Matter) for high-level category checks. Detailed capabilities in feature attributes (supportsAsymmetric, supportedDirections, supportedChargingModes). Pattern: featureMap for quick check, attributes for specifics. |
+| 2025-01-25 | Added DEC-038: Command parameters vs stored attributes. Duration, cause are transient command parameters (like Matter), not stored attributes (unlike EEBUS). No "remaining duration" attribute. |
+| 2025-01-25 | Added DEC-039: State machine interaction rules. Process continues during FAILSAFE, scheduled processes start as planned, PAUSED behavior is device-specific (PICS). Connection loss detection max 95s, failsafe timer accuracy +/- 1%. |
