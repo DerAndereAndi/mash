@@ -299,6 +299,107 @@ Any transition not listed above is INVALID. Implementation MUST NOT allow:
 - Timeout per-request, not global
 - On timeout: Mark request failed, DO NOT retry automatically (let application decide)
 
+### 5.4 In-Flight Command Handling on Connection Loss
+
+**Problem:** What happens to commands that were sent but not yet acknowledged when connection is lost?
+
+**In-flight command states:**
+
+| State | Description | Action on Connection Loss |
+|-------|-------------|--------------------------|
+| QUEUED | Not yet sent (in queue) | Keep in queue for replay |
+| SENT_AWAITING_RESPONSE | Sent, waiting for response | Mark as UNKNOWN_OUTCOME |
+| COMPLETED | Response received | No action needed |
+
+**UNKNOWN_OUTCOME handling:**
+
+Commands in SENT_AWAITING_RESPONSE state have uncertain outcomes:
+- Command may have been processed (device acted, but response lost)
+- Command may have been received but not processed (connection lost during processing)
+- Command may not have been received (lost in transit)
+
+**Command idempotency:**
+
+| Command Type | Idempotent | Safe to Retry |
+|--------------|------------|---------------|
+| Read operations | Yes | Always safe |
+| SetLimit | Yes | Safe (same limit value) |
+| ClearLimit | Yes | Safe (idempotent) |
+| SetSetpoint | Yes | Safe (same setpoint value) |
+| Pause | Yes | Safe (state machine) |
+| Resume | Yes | Safe (state machine) |
+| Start (with parameters) | **No** | **Dangerous** - may restart process |
+| Stop | Yes | Safe (state machine) |
+| Subscribe | Yes | Safe (device deduplicates) |
+
+**Controller retry policy:**
+
+```python
+def handle_in_flight_commands_after_reconnect(commands: List[Command], conn: Connection) -> None:
+    """Handle commands that were in-flight when connection was lost."""
+
+    for cmd in commands:
+        if cmd.state == CommandState.QUEUED:
+            # Never sent - safe to send now
+            conn.send(cmd)
+
+        elif cmd.state == CommandState.SENT_AWAITING_RESPONSE:
+            if cmd.is_idempotent:
+                # Safe to retry
+                cmd.message_id = next_message_id()  # New ID for new connection
+                conn.send(cmd)
+            else:
+                # Not safe to retry - notify application
+                cmd.state = CommandState.UNKNOWN_OUTCOME
+                notify_application(cmd, "Command outcome unknown - manual verification needed")
+
+        # COMPLETED commands need no action
+```
+
+**Read-before-retry pattern:**
+
+For non-idempotent commands, controller SHOULD verify state before retrying:
+
+```python
+def retry_start_command(device_id: str, process_params: dict, conn: Connection) -> bool:
+    """Retry Start command safely."""
+
+    # Read current process state first
+    state = conn.read_attribute(endpoint=1, feature="EnergyControl", attr="processState")
+
+    if state == "RUNNING":
+        # Process already started - command succeeded
+        return True
+    elif state == "IDLE":
+        # Process not started - safe to retry
+        return conn.invoke("Start", process_params)
+    else:
+        # PAUSED, ERROR, etc. - ambiguous, ask user
+        raise AmbiguousStateError(f"Process in {state} state, manual intervention needed")
+```
+
+**Notification to application:**
+
+When command outcome is unknown, controller MUST notify application:
+
+```python
+class CommandResult:
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    UNKNOWN = "unknown"      # New state for connection loss scenarios
+    RETRY_SCHEDULED = "retry_scheduled"  # Idempotent command will be retried
+```
+
+**Test cases for in-flight commands:**
+
+| ID | Description | Setup | Expected |
+|----|-------------|-------|----------|
+| TC-INFLIGHT-1 | Queued command | Command in queue, disconnect | Sent after reconnect |
+| TC-INFLIGHT-2 | Idempotent retry | SetLimit in flight, disconnect | Retried after reconnect |
+| TC-INFLIGHT-3 | Non-idempotent | Start in flight, disconnect | Marked UNKNOWN |
+| TC-INFLIGHT-4 | Read before retry | Start uncertain | State read before retry |
+| TC-INFLIGHT-5 | Multiple in-flight | Several commands | Each handled per type |
+
 ---
 
 ## 6. Connection Loss Behavior
@@ -349,6 +450,165 @@ Device MUST use all three mechanisms. Application-layer ping/pong is required be
 - Controller MUST re-subscribe
 - Device sends priming report (full current state)
 - No "missed" notifications are replayed
+
+### 6.5 Certificate Expiry During Disconnection
+
+**Scenario:** Controller is disconnected (reconnecting with backoff) and certificate expires during the disconnection period.
+
+**Detection:** During TLS handshake on reconnection attempt:
+- Controller presents its operational certificate
+- Device checks certificate validity (notAfter)
+- If expired: TLS handshake fails with `certificate_expired` alert
+
+**Controller behavior on cert expiry detection:**
+
+```python
+def handle_reconnect_tls_failure(error: TLSError, zone: Zone) -> Action:
+    """Handle TLS failure during reconnection."""
+
+    if error.alert == "certificate_expired":
+        # Check if OUR cert expired (controller) or THEIRS (device)
+        if zone.controller_cert.not_after < now():
+            # Our cert expired - renew locally and retry
+            new_cert = zone.ca.issue_certificate(
+                subject=zone.controller_cert.subject,
+                public_key=zone.controller_key.public_key()
+            )
+            zone.controller_cert = new_cert
+            return Action.RETRY_IMMEDIATELY
+        else:
+            # Device cert expired - cannot recover, device needs recommissioning
+            log.error(f"Device {zone.device_id} certificate expired")
+            return Action.MARK_DEVICE_OFFLINE
+
+    elif error.alert == "unknown_ca":
+        # Zone CA mismatch - device may have been recommissioned
+        log.warning(f"Device {zone.device_id} no longer recognizes zone")
+        return Action.MARK_DEVICE_REMOVED
+
+    else:
+        # Other TLS error - continue reconnection backoff
+        return Action.CONTINUE_BACKOFF
+```
+
+**Device behavior on controller cert expiry:**
+
+1. Reject TLS handshake with `certificate_expired` alert
+2. Continue listening for new connections
+3. Do NOT trigger FAILSAFE (controller might reconnect with renewed cert)
+4. Log the rejected connection attempt
+
+**Recovery paths:**
+
+| Expired Cert | Recovery | Who Initiates |
+|--------------|----------|---------------|
+| Controller cert | Controller self-issues new cert from Zone CA | Controller |
+| Device cert | Recommission device (new PASE + new cert) | Controller |
+| Both certs | Recommission device | Controller |
+| Zone CA cert | Cannot recover - create new zone | Controller |
+
+**Grace period handling:**
+
+If device supports grace period (`MASH.S.CERT.GRACE_PERIOD_DAYS > 0`):
+
+1. Device accepts reconnection with expired cert (within grace period)
+2. Device sends `cert_expiring` event immediately after connection established
+3. Controller MUST initiate renewal before grace period ends
+4. Connection closes if grace period expires without renewal
+
+### 6.6 Subscription Restoration After Reconnection
+
+**Problem:** When controller reconnects after connection loss, all subscriptions were lost. Controller needs to re-establish subscriptions efficiently.
+
+**Controller subscription restoration workflow:**
+
+```python
+def restore_subscriptions_after_reconnect(conn: Connection, zone: Zone) -> None:
+    """Restore subscriptions after successful reconnection."""
+
+    # Step 1: Wait for connection to reach OPERATIONAL state
+    assert conn.state == ConnectionState.OPERATIONAL
+
+    # Step 2: Re-subscribe to previously subscribed attributes
+    # Controller should maintain list of "desired subscriptions" locally
+    for sub in zone.desired_subscriptions:
+        try:
+            response = conn.subscribe(
+                endpoint=sub.endpoint,
+                feature=sub.feature,
+                attributes=sub.attributes,
+                min_interval=sub.min_interval,
+                max_interval=sub.max_interval
+            )
+            # Device sends priming report with current values
+            handle_priming_report(response.priming_data)
+        except SubscriptionError as e:
+            log.warning(f"Failed to restore subscription: {e}")
+            # Continue with other subscriptions
+
+    # Step 3: Detect state changes that occurred during disconnection
+    # Compare priming report values with last known values
+    for attr, new_value in priming_data.items():
+        if attr in last_known_values:
+            if new_value != last_known_values[attr]:
+                notify_application(attr, old=last_known_values[attr], new=new_value)
+
+    # Step 4: Process queued commands (if any)
+    replay_queued_commands(conn, zone)
+```
+
+**Subscription ordering:**
+
+Controller SHOULD restore subscriptions in this order (most critical first):
+
+1. **ControlState** - Know current device operating state
+2. **effectiveLimits** - Know current limit values
+3. **ProcessState** - For devices with processes (EV charging, etc.)
+4. **Measurement** data - Power, energy, current readings
+5. **Other attributes** - Status, info, etc.
+
+**Priming report handling:**
+
+When subscription is established, device sends a **priming report** containing:
+- Current values of all subscribed attributes
+- Same format as delta notifications
+- Allows controller to sync state without separate reads
+
+```cbor
+// Priming report (device → controller)
+{
+  1: 0,                       // notification type
+  2: <subscriptionId>,
+  3: <endpoint>,
+  4: <feature>,
+  5: {                        // attribute values (full state)
+    "controlState": "LIMITED",
+    "effectiveConsumptionLimit": 5000000,
+    "effectiveProductionLimit": null,
+    "zoneLimits": [
+      { "zoneId": "A1B2...", "consumptionLimit": 5000000 }
+    ]
+  }
+}
+```
+
+**Detecting missed events:**
+
+Events that occurred during disconnection are NOT replayed. However:
+
+1. Controller can infer some changes by comparing priming report to last known state
+2. For critical events (state changes), device SHOULD maintain recent event log
+3. Controller MAY read recent events after reconnection: `ReadEvents(since=lastEventTimestamp)`
+
+**Test cases for subscription restoration:**
+
+| ID | Description | Setup | Expected |
+|----|-------------|-------|----------|
+| TC-SUB-RESTORE-1 | Basic restoration | Disconnect, reconnect | Subscriptions re-established |
+| TC-SUB-RESTORE-2 | Value changed | Limit changed during disconnect | Priming report shows new value |
+| TC-SUB-RESTORE-3 | Partial failure | One subscription fails | Others still restored |
+| TC-SUB-RESTORE-4 | Order preserved | Multiple subscriptions | Critical subscribed first |
+| TC-SUB-RESTORE-5 | Queued commands | Commands queued during disconnect | Replayed after restore |
 
 ---
 

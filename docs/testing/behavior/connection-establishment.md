@@ -743,6 +743,272 @@ Controller                                    Device
     │     [OPERATIONAL]                          │
 ```
 
+### 7.3 Initial Operational Reads After Commissioning
+
+After commissioning completes and operational TLS is established, controller SHOULD read device attributes in a specific order to understand device capabilities before sending commands.
+
+**Recommended read sequence:**
+
+| Order | Feature | Attributes | Purpose |
+|-------|---------|------------|---------|
+| 1 | DeviceInfo | all | Device identity, capabilities, firmware version |
+| 2 | Electrical | phaseCount, connectionType | Understand electrical configuration |
+| 3 | EnergyControl | controlState, acceptsLimits, isPausable | Understand current state and capabilities |
+| 4 | EnergyControl | effectiveLimits, zoneLimits | Understand current constraints |
+| 5 | Measurement | activePower, current (if needed) | Current operating point |
+| 6 | Status | operationalState | Device operational status |
+
+**Read algorithm:**
+
+```python
+def perform_initial_reads(conn: Connection, device: Device) -> DeviceState:
+    """Read initial device state after commissioning."""
+
+    # 1. DeviceInfo - mandatory, always read first
+    device_info = conn.read_all_attributes(endpoint=0, feature="DeviceInfo")
+    device.device_type = device_info.device_type
+    device.firmware = device_info.firmware_version
+    device.serial = device_info.serial_number
+    device.supported_features = device_info.feature_map
+
+    # 2. Electrical - if supported
+    if device.supports_feature("Electrical"):
+        electrical = conn.read_all_attributes(endpoint=0, feature="Electrical")
+        device.phase_count = electrical.phase_count
+        device.connection_type = electrical.connection_type
+
+    # 3. EnergyControl - if supported
+    if device.supports_feature("EnergyControl"):
+        control = conn.read_all_attributes(endpoint=0, feature="EnergyControl")
+        device.control_state = control.control_state
+        device.accepts_limits = control.accepts_limits
+        device.is_pausable = control.is_pausable
+        device.effective_limits = {
+            "consumption": control.effective_consumption_limit,
+            "production": control.effective_production_limit
+        }
+
+    # 4. Measurement - if supported, for initial values
+    if device.supports_feature("Measurement"):
+        measurement = conn.read_all_attributes(endpoint=0, feature="Measurement")
+        device.current_power = measurement.active_power
+
+    # 5. Subscribe for ongoing updates
+    setup_subscriptions(conn, device)
+
+    return device.state
+```
+
+**Why read before subscribe:**
+- Understand capabilities before establishing subscriptions
+- Avoid subscribing to unsupported attributes
+- Single read is faster than subscription priming for initial sync
+- Controller can make decisions based on capabilities
+
+**DeviceInfo attributes (mandatory read):**
+
+```cbor
+{
+  "deviceType": "EVSE",           // What kind of device
+  "vendorName": "ChargePoint",    // Manufacturer
+  "productName": "Home Flex",     // Model
+  "serialNumber": "WB-001234",    // Unique identifier
+  "firmwareVersion": "1.2.3",     // Software version
+  "featureMap": 0x001B,           // Supported features bitmap
+  "endpointList": [0, 1]          // Available endpoints
+}
+```
+
+**Handling read errors:**
+
+| Error | Action |
+|-------|--------|
+| Attribute not found | Feature not supported, skip |
+| Timeout | Retry once, then mark device degraded |
+| Permission denied | Log warning, continue with other reads |
+| Connection lost | Re-enter reconnection flow |
+
+### 7.4 mDNS Resolution Strategy
+
+**Problem:** When to use cached mDNS results vs perform fresh resolution?
+
+**Resolution decision tree:**
+
+```python
+def get_device_address(device_id: str, context: str) -> list[Address]:
+    """Decide whether to use cache or fresh resolution."""
+
+    if context == "first_connection":
+        # Always fresh resolution for new connections
+        return mdns_resolve_fresh(device_id)
+
+    if context == "reconnection":
+        cached = address_cache.get(device_id)
+        if cached and cached.age < timedelta(seconds=30):
+            # Try cached first, but have fallback ready
+            return [cached.address] + mdns_resolve_fresh(device_id)
+        else:
+            # Cache too old, resolve fresh
+            return mdns_resolve_fresh(device_id)
+
+    if context == "address_failed":
+        # Previous address didn't work, must resolve fresh
+        address_cache.invalidate(device_id)
+        return mdns_resolve_fresh(device_id)
+```
+
+**Cache policy:**
+
+| Scenario | Cache Behavior |
+|----------|----------------|
+| First commissioning | Always fresh mDNS browse |
+| Reconnection (< 30s disconnect) | Try cached address first |
+| Reconnection (> 30s disconnect) | Fresh mDNS resolution |
+| Connection refused | Invalidate cache, fresh resolution |
+| TLS handshake failure | Invalidate cache, fresh resolution |
+| After device reboot | Fresh resolution (address may have changed) |
+
+**Cache invalidation triggers:**
+
+1. **TCP connection refused** - Device may have moved
+2. **TLS certificate mismatch** - Wrong device at that address
+3. **mDNS goodbye received** - Device announcing departure
+4. **Cache age > 2 minutes** - Standard TTL expiry
+5. **Explicit invalidation** - After device removal or factory reset
+
+**mDNS resolution timeout:**
+
+| Phase | Timeout | Rationale |
+|-------|---------|-----------|
+| PTR query | 5 seconds | Discovery of instance names |
+| SRV query | 3 seconds | Get hostname and port |
+| AAAA query | 3 seconds | Get addresses |
+| **Total resolution** | **10 seconds** | Sum with parallelization |
+
+**Continuous browse mode:**
+
+For active monitoring (EMS watching for devices), controller MAY use continuous mDNS browse:
+
+```python
+def start_continuous_browse() -> None:
+    """Monitor for device availability changes."""
+
+    def on_service_added(service):
+        # New device available
+        if service.type == "_mash._tcp":
+            notify_device_available(service)
+
+    def on_service_removed(service):
+        # Device no longer advertising
+        if service.type == "_mash._tcp":
+            notify_device_unavailable(service)
+            address_cache.invalidate(service.device_id)
+
+    mdns.browse("_mash._tcp.local", on_service_added, on_service_removed)
+```
+
+### 7.5 Device Not Found Handling
+
+**Scenario:** Controller scans QR code or attempts to connect but cannot find device via mDNS.
+
+**Browse result classification:**
+
+| Result | Meaning | User Message |
+|--------|---------|--------------|
+| No PTR responses | No devices in commissioning mode | "No devices found. Ensure device is in pairing mode." |
+| PTR but no matching D | Devices found, but wrong discriminator | "Device not found. Check QR code matches device." |
+| SRV but no AAAA | DNS misconfiguration | "Device found but address unavailable. Check network." |
+| AAAA but connection refused | Device reachable but not listening | "Device not responding. Try rebooting device." |
+
+**Error handling flow:**
+
+```python
+def handle_device_not_found(qr_data: QRData, browse_results: list) -> UserError:
+    """Provide actionable error message based on failure mode."""
+
+    if not browse_results:
+        # No mDNS responses at all
+        return UserError(
+            code="NO_DEVICES_FOUND",
+            message="No devices found in pairing mode",
+            suggestions=[
+                "Press the pairing button on your device",
+                "Ensure device is powered on",
+                "Check device is on same network",
+                "Wait for device to finish booting"
+            ],
+            retry_action="browse"
+        )
+
+    # Check if any device has matching discriminator
+    matching = [r for r in browse_results if r.discriminator == qr_data.discriminator]
+    if not matching:
+        # Found devices, but not the right one
+        found_discriminators = [r.discriminator for r in browse_results]
+        return UserError(
+            code="DISCRIMINATOR_MISMATCH",
+            message=f"Device with discriminator {qr_data.discriminator} not found",
+            suggestions=[
+                "Verify QR code is for the device you want to pair",
+                f"Found devices with discriminators: {found_discriminators}",
+                "Device may have been reset (new QR code)"
+            ],
+            retry_action="scan_qr"
+        )
+
+    # Device found but address resolution failed
+    device = matching[0]
+    if not device.addresses:
+        return UserError(
+            code="ADDRESS_RESOLUTION_FAILED",
+            message="Device found but network address unavailable",
+            suggestions=[
+                "Device may have network issues",
+                "Check router/DHCP configuration",
+                "Try restarting device"
+            ],
+            retry_action="browse"
+        )
+
+    # Address available but connection failed
+    return UserError(
+        code="CONNECTION_FAILED",
+        message="Cannot connect to device",
+        suggestions=[
+            "Device may be busy or unresponsive",
+            "Firewall may be blocking connection",
+            "Try power-cycling the device"
+        ],
+        retry_action="connect"
+    )
+```
+
+**Retry policy for device not found:**
+
+| Attempt | Wait | Action |
+|---------|------|--------|
+| 1 | 0s | Initial browse |
+| 2 | 2s | Retry browse |
+| 3 | 5s | Retry browse |
+| 4 | 10s | Final retry, then show error |
+
+**Device commissioning window considerations:**
+
+- Commissioning window is 120 seconds
+- If browse takes > 30 seconds, warn user window may expire
+- After 120 seconds, suggest user re-trigger commissioning mode
+
+**Test cases for device not found:**
+
+| ID | Description | Setup | Expected |
+|----|-------------|-------|----------|
+| TC-NOTFOUND-1 | No devices | No devices in commissioning | "No devices found" error |
+| TC-NOTFOUND-2 | Wrong discriminator | Device D=1111, QR D=2222 | "Discriminator mismatch" error |
+| TC-NOTFOUND-3 | Address unavailable | SRV present, no AAAA | "Address unavailable" error |
+| TC-NOTFOUND-4 | Connection refused | Address valid, port closed | "Connection failed" error |
+| TC-NOTFOUND-5 | Retry success | No device, then device appears | Browse retries, connection succeeds |
+| TC-NOTFOUND-6 | Window expired | Browse during last 30s of window | Warning about window expiry |
+
 ---
 
 ## 8. PICS Items

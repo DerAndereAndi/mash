@@ -292,6 +292,57 @@ Controller                                    Device
 }
 ```
 
+**Attestation Handling:**
+
+Attestation is OPTIONAL. It allows controller to verify device manufacturer identity.
+
+| Scenario | Controller Behavior |
+|----------|---------------------|
+| Device has no attestation cert | ATTESTATION_RSP with empty fields; controller proceeds |
+| Valid attestation chain | Log manufacturer info; proceed with commissioning |
+| Invalid attestation chain | Log warning; proceed with commissioning (don't reject) |
+| Attestation chain required (policy) | Reject if missing/invalid (controller-specific policy) |
+
+**Validation algorithm:**
+```python
+def handle_attestation(response: AttestationResponse, policy: Policy) -> AttestationResult:
+    """Handle device attestation response."""
+
+    if not response.device_cert:
+        # No attestation - device may be open-source/DIY
+        if policy.require_attestation:
+            return AttestationResult(
+                valid=False,
+                error="Attestation required but not provided"
+            )
+        return AttestationResult(valid=True, manufacturer=None)
+
+    # Validate certificate chain
+    try:
+        chain = [response.device_cert] + (response.cert_chain or [])
+        verify_chain(chain, trusted_roots=policy.trusted_manufacturer_cas)
+
+        # Extract manufacturer info from cert
+        manufacturer = extract_manufacturer(response.device_cert)
+
+        return AttestationResult(
+            valid=True,
+            manufacturer=manufacturer,
+            cert_fingerprint=sha256(response.device_cert)
+        )
+    except ChainValidationError as e:
+        # Log but don't necessarily reject
+        log.warning(f"Attestation chain invalid: {e}")
+
+        if policy.require_valid_attestation:
+            return AttestationResult(valid=False, error=str(e))
+
+        # Proceed anyway - attestation is informational
+        return AttestationResult(valid=True, manufacturer=None, warning=str(e))
+```
+
+**Default policy:** Accept devices without attestation. Log attestation info when present. This supports both commercial devices (with manufacturer certs) and open-source/DIY devices (without).
+
 **CSR_REQ (Controller → Device):**
 ```cbor
 {
@@ -327,6 +378,107 @@ Controller                                    Device
   3: <string>            // error_message (if status != 0)
 }
 ```
+
+### 4.4 Operational Certificate Format
+
+Controller creates the operational certificate from the device's CSR:
+
+**Certificate Structure:**
+
+```
+Certificate:
+    Version: 3 (0x2)
+    Serial Number: <random 128-bit>
+    Signature Algorithm: ecdsa-with-SHA256
+    Issuer: <Zone CA Subject>
+    Validity:
+        Not Before: <current time - 5 minutes>  (clock skew allowance)
+        Not After: <current time + 365 days>
+    Subject:
+        CN = <device-id>                        (16 hex chars, from CSR public key)
+        O = <zone-name>                         (optional, user-friendly)
+        OU = MASH Device
+    Subject Public Key Info:
+        Algorithm: id-ecPublicKey (P-256)
+        Public Key: <from CSR>
+    Extensions:
+        Basic Constraints: critical
+            CA: FALSE
+        Key Usage: critical
+            Digital Signature
+            Key Encipherment
+        Extended Key Usage:
+            TLS Web Server Authentication (1.3.6.1.5.5.7.3.1)
+            TLS Web Client Authentication (1.3.6.1.5.5.7.3.2)
+        Subject Key Identifier:
+            <SHA-1 of public key>
+        Authority Key Identifier:
+            keyIdentifier: <Zone CA SKI>
+```
+
+**Device ID derivation:**
+```python
+def derive_device_id(csr: PKCS10) -> str:
+    """Derive device ID from CSR public key."""
+    public_key_der = csr.public_key.to_der()  # SubjectPublicKeyInfo DER
+    hash = SHA256(public_key_der)
+    return hash[0:8].hex().upper()  # 16 hex chars (64 bits)
+```
+
+**Certificate generation algorithm:**
+```python
+def create_operational_cert(
+    csr: PKCS10,
+    zone_ca_cert: X509,
+    zone_ca_key: PrivateKey,
+    zone_name: str
+) -> X509:
+    """Create operational certificate from CSR."""
+
+    # Derive device ID from CSR public key
+    device_id = derive_device_id(csr)
+
+    # Build certificate
+    cert = X509Certificate()
+    cert.version = 3
+    cert.serial_number = random_bytes(16)
+    cert.issuer = zone_ca_cert.subject
+    cert.not_before = now() - timedelta(minutes=5)  # Clock skew
+    cert.not_after = now() + timedelta(days=365)
+
+    # Subject DN
+    cert.subject = X509Name()
+    cert.subject.CN = device_id
+    cert.subject.O = zone_name  # Optional
+    cert.subject.OU = "MASH Device"
+
+    # Copy public key from CSR
+    cert.public_key = csr.public_key
+
+    # Extensions
+    cert.add_extension(BasicConstraints(ca=False), critical=True)
+    cert.add_extension(KeyUsage(
+        digital_signature=True,
+        key_encipherment=True
+    ), critical=True)
+    cert.add_extension(ExtendedKeyUsage([
+        OID_SERVER_AUTH,
+        OID_CLIENT_AUTH
+    ]))
+    cert.add_extension(SubjectKeyIdentifier(cert.public_key))
+    cert.add_extension(AuthorityKeyIdentifier(zone_ca_cert))
+
+    # Sign with Zone CA
+    cert.sign(zone_ca_key, algorithm=SHA256)
+
+    return cert
+```
+
+**Validity period:**
+- Default: 365 days (1 year)
+- Controller MAY use shorter validity for higher security
+- Device MUST accept any validity up to 10 years
+- See `zone-lifecycle.md` for renewal procedures
 
 ---
 

@@ -422,6 +422,9 @@ For each feature, in order:
 | TC-D2D | 3 | Device-to-device verification |
 | TC-QR-GEN | 4 | QR code generation |
 | TC-MULTIIF | 10 | Multi-interface behavior |
+| TC-SUB-RESTORE | 5 | Subscription restoration after reconnection |
+| TC-INFLIGHT | 5 | In-flight command handling on connection loss |
+| TC-NOTFOUND | 6 | Device not found error handling |
 
 ### Gaps Remaining (from testability-analysis.md)
 
