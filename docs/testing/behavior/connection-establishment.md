@@ -459,6 +459,157 @@ Connect to: fe80::1234:5678:9abc:def0%eth0
 2. Use that interface for link-local connection
 3. Store interface with device record
 
+### 6.5 Multi-Interface Behavior
+
+Devices may have multiple network interfaces (e.g., Ethernet + WiFi). This section specifies behavior when interfaces change.
+
+**Note:** Matter has known limitations with multi-interface handling (see [connectedhomeip #32512](https://github.com/project-chip/connectedhomeip/issues/32512)). MASH takes a simpler approach: publish all addresses, try all addresses.
+
+#### 6.5.1 Device Behavior (mDNS)
+
+**Rule:** Device MUST publish AAAA records for ALL active interfaces.
+
+```
+evse-001.local.  AAAA  fe80::1111:1111:1111:1111  ; eth0 link-local
+evse-001.local.  AAAA  fd00::1111:1111:1111:1111  ; eth0 ULA
+evse-001.local.  AAAA  fe80::2222:2222:2222:2222  ; wlan0 link-local
+evse-001.local.  AAAA  fd00::2222:2222:2222:2222  ; wlan0 ULA
+```
+
+**When interface goes DOWN:**
+1. Send mDNS goodbye (TTL=0) for all addresses on that interface
+2. Keep AAAA records for remaining interfaces
+3. Existing connections on that interface will break (TCP timeout)
+
+**When interface comes UP:**
+1. Wait for address assignment (SLAAC/DHCPv6)
+2. Wait debounce period: **2 seconds** (avoid flapping)
+3. Send mDNS announcement for new addresses (3 times)
+
+**Debouncing:** If interface goes down and up within 2 seconds, suppress mDNS goodbye/announcement. This prevents mDNS storms during brief network glitches.
+
+#### 6.5.2 Controller Behavior (Connection)
+
+**Rule:** Controller MUST collect all AAAA records and try addresses until one works.
+
+**Address collection during mDNS resolution:**
+```python
+def resolve_device(instance_name: str) -> list[Address]:
+    """Resolve device to list of addresses."""
+    addresses = []
+
+    # Collect ALL AAAA records for the hostname
+    for record in mdns_query(instance_name):
+        if record.type == "AAAA":
+            addresses.append(Address(
+                ip=record.ip,
+                interface=record.receiving_interface  # For link-local
+            ))
+
+    # Sort by preference (ULA > Global > Link-local)
+    return sort_by_preference(addresses)
+```
+
+**Connection attempt sequence:**
+```python
+def connect_to_device(addresses: list[Address], timeout_per_addr: float = 5.0) -> Connection:
+    """Try all addresses until one succeeds."""
+    last_error = None
+
+    for addr in addresses:
+        try:
+            # For link-local, include interface
+            target = f"{addr.ip}%{addr.interface}" if addr.is_link_local else addr.ip
+
+            conn = tcp_connect(target, port=8443, timeout=timeout_per_addr)
+            return conn  # Success - use this address
+
+        except (ConnectionRefused, Timeout, NetworkUnreachable) as e:
+            last_error = e
+            continue  # Try next address
+
+    raise ConnectionFailed(f"All {len(addresses)} addresses failed", last_error)
+```
+
+**Timeout per address:** 5 seconds (allows time for TCP handshake but doesn't block too long)
+
+#### 6.5.3 Reconnection on Interface Change
+
+When connection breaks due to interface change:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Interface Change Reconnection Flow                                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Controller                          Device (eth0 + wlan0)                   │
+│      │                                      │                                │
+│      │◄═══ Connected via fd00::1111 (eth0) ═│                                │
+│      │                                      │                                │
+│      │                          [eth0 cable unplugged]                       │
+│      │                                      │                                │
+│      │    [TCP timeout / keep-alive fails]  │──► mDNS goodbye for eth0 addrs │
+│      │                                      │                                │
+│      │──► Enter RECONNECTING state          │                                │
+│      │                                      │                                │
+│      │─── mDNS re-resolve ─────────────────►│                                │
+│      │                                      │                                │
+│      │◄── AAAA: fd00::2222 (wlan0 only) ────│                                │
+│      │                                      │                                │
+│      │─── TCP connect fd00::2222 ──────────►│                                │
+│      │                                      │                                │
+│      │─── TLS mutual auth ─────────────────►│                                │
+│      │                                      │                                │
+│      │◄═══ Connected via fd00::2222 (wlan0) │                                │
+│      │                                      │                                │
+│      │─── Re-subscribe ────────────────────►│                                │
+│      │                                      │                                │
+│      │◄── Priming report ──────────────────│                                │
+│      │                                      │                                │
+│      │    [OPERATIONAL - via wlan0]         │                                │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.5.4 Address Preference Within Multi-Interface
+
+When device has multiple interfaces, controller sorts addresses:
+
+| Priority | Criteria | Rationale |
+|----------|----------|-----------|
+| 1 | ULA (fd00::/8) | Most stable, home network local |
+| 2 | Global unicast (2000::/3) | Routable, may work cross-subnet |
+| 3 | Link-local (fe80::/10) | Last resort, same-subnet only |
+
+**Within same priority:** No preference between interfaces. First working address wins.
+
+**No LAN vs WiFi preference:** Controller cannot reliably determine which interface is "better" (wired vs wireless). Network topology varies. Simply try all and use first working.
+
+#### 6.5.5 Edge Cases
+
+**All addresses fail:**
+- Report error to user: "Device unreachable"
+- Continue periodic retry (exponential backoff)
+- Device may be powered off, network isolated, or crashed
+
+**Address works but TLS fails:**
+- Different device at that address (rare, IP reuse)
+- Certificate mismatch → try next address
+- If all addresses have TLS failure → report "Device authentication failed"
+
+**mDNS returns no addresses:**
+- Device may have lost all network connectivity
+- Device may have deregistered (factory reset, zone removal)
+- Continue periodic mDNS browse with backoff
+
+#### 6.5.6 Implementation Notes
+
+**Caching:** Controller MAY cache last-known-good address and try it first before full mDNS resolution. But MUST fall back to mDNS if cached address fails.
+
+**Parallel connection attempts:** Controller MAY attempt connections to multiple addresses in parallel (e.g., start next attempt after 1 second if first hasn't succeeded). This reduces total connection time but increases network load.
+
+**Interface tracking:** For link-local addresses, controller MUST track which interface the mDNS response arrived on. This interface must be used for the connection (zone ID in socket address).
+
 ---
 
 ## 7. Complete Connection Sequence
@@ -620,6 +771,17 @@ MASH.S.CERT.CHECKS_KEY_USAGE=1        # Checks key usage extension
 # IPv6
 MASH.S.IPV6.LINK_LOCAL_INTERFACE=1    # Handles link-local interface binding
 MASH.S.IPV6.ADDRESS_CHANGE=1          # Handles address changes
+
+# Multi-interface (device)
+MASH.S.MULTIIF.SUPPORTED=1            # Supports multiple network interfaces
+MASH.S.MULTIIF.PUBLISH_ALL=1          # Publishes AAAA for all interfaces
+MASH.S.MULTIIF.DEBOUNCE_MS=2000       # Interface change debounce (ms)
+
+# Multi-interface (controller)
+MASH.C.MULTIIF.TRY_ALL=1              # Tries all addresses until success
+MASH.C.MULTIIF.TIMEOUT_PER_ADDR=5000  # Timeout per address attempt (ms)
+MASH.C.MULTIIF.PARALLEL_CONNECT=0     # Parallel connection attempts (0=sequential)
+MASH.C.MULTIIF.CACHE_LAST_GOOD=1      # Caches last working address
 ```
 
 ---
@@ -671,6 +833,21 @@ MASH.S.IPV6.ADDRESS_CHANGE=1          # Handles address changes
 | TC-IPV6-2 | Global address | Preferred over link-local |
 | TC-IPV6-3 | Address change | Reconnect to new address |
 | TC-IPV6-4 | Interface binding | Correct interface used |
+
+### TC-MULTIIF-*: Multi-Interface Behavior
+
+| ID | Description | Setup | Expected |
+|----|-------------|-------|----------|
+| TC-MULTIIF-1 | Publish all interfaces | Device has eth0 + wlan0 | AAAA records for both interfaces |
+| TC-MULTIIF-2 | Interface down | Unplug eth0 while connected via eth0 | Goodbye for eth0 addrs, reconnect via wlan0 |
+| TC-MULTIIF-3 | Interface up | Enable wlan0 on device | New AAAA announced after 2s debounce |
+| TC-MULTIIF-4 | Try all addresses | First address unreachable | Controller tries next, connects |
+| TC-MULTIIF-5 | All addresses fail | All interfaces down | "Device unreachable" error |
+| TC-MULTIIF-6 | Debounce flapping | Interface down then up within 2s | No mDNS goodbye/announcement |
+| TC-MULTIIF-7 | ULA preferred | Device has ULA + link-local | ULA tried first |
+| TC-MULTIIF-8 | Cached address | Reconnect after brief disconnect | Cached address tried first |
+| TC-MULTIIF-9 | Cache miss fallback | Cached address no longer valid | mDNS re-resolve, new address works |
+| TC-MULTIIF-10 | TLS fail on one address | First address: wrong device | Try next address, TLS succeeds |
 
 ### TC-E2E-*: End-to-End Flow
 

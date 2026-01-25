@@ -421,6 +421,7 @@ For each feature, in order:
 | TC-ZONE-REMOVE | 5 | Removing devices from zone |
 | TC-D2D | 3 | Device-to-device verification |
 | TC-QR-GEN | 4 | QR code generation |
+| TC-MULTIIF | 10 | Multi-interface behavior |
 
 ### Gaps Remaining (from testability-analysis.md)
 
