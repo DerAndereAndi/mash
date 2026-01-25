@@ -23,18 +23,56 @@ This document specifies the complete connection establishment flow, bridging dis
 
 ## 2. mDNS Record Format
 
-### 2.1 Complete DNS-SD Records
+MASH uses three separate service types (see `discovery.md` for full details):
 
-A MASH device publishes three DNS record types:
+| Service Type | Purpose | When Present |
+|--------------|---------|--------------|
+| `_mashc._udp` | Commissionable discovery | Commissioning window open |
+| `_mash._tcp` | Operational discovery | Device has zone(s) |
+| `_mashd._udp` | Commissioner discovery | Controller has zone(s) |
 
-**PTR Record (Service Discovery):**
+### 2.1 Commissionable Discovery Records (`_mashc._udp`)
+
+During commissioning, device publishes:
+
+**PTR Record:**
 ```
-_mash._tcp.local.  PTR  MASH-1234._mash._tcp.local.
+_mashc._udp.local.  PTR  MASH-1234._mashc._udp.local.
 ```
 
-**SRV Record (Service Location):**
+**SRV Record:**
 ```
-MASH-1234._mash._tcp.local.  SRV  0 0 8443 evse-001.local.
+MASH-1234._mashc._udp.local.  SRV  0 0 8443 evse-001.local.
+```
+
+**TXT Record:**
+```
+MASH-1234._mashc._udp.local.  TXT  "D=1234" "VP=1234:5678" "DT=EVSE"
+```
+
+**AAAA Record:**
+```
+evse-001.local.  AAAA  fe80::1234:5678:9abc:def0
+evse-001.local.  AAAA  2001:db8::1234:5678:9abc:def0
+```
+
+### 2.2 Operational Discovery Records (`_mash._tcp`)
+
+After commissioning, device publishes (one per zone):
+
+**PTR Record:**
+```
+_mash._tcp.local.  PTR  A1B2C3D4-EVSE001._mash._tcp.local.
+```
+
+**SRV Record:**
+```
+A1B2C3D4-EVSE001._mash._tcp.local.  SRV  0 0 8443 evse-001.local.
+```
+
+**TXT Record:**
+```
+A1B2C3D4-EVSE001._mash._tcp.local.  TXT  "ZI=A1B2C3D4" "DI=EVSE001" "VP=1234:5678"
 ```
 
 | Field | Value | Description |
@@ -44,22 +82,18 @@ MASH-1234._mash._tcp.local.  SRV  0 0 8443 evse-001.local.
 | Port | 8443 | MASH default port |
 | Target | hostname.local | Device hostname |
 
-**AAAA Record (IPv6 Address):**
-```
-evse-001.local.  AAAA  fe80::1234:5678:9abc:def0
-evse-001.local.  AAAA  2001:db8::1234:5678:9abc:def0
-```
+### 2.3 Address Records
 
 Devices MUST publish at least one AAAA record. MAY publish multiple:
 - Link-local address (fe80::/10) - always available
 - Global/ULA address - if configured
 
-**TXT Record (Service Metadata):**
 ```
-MASH-1234._mash._tcp.local.  TXT  "D=1234" "VP=1234:5678" "CM=1" "DT=EVSE"
+evse-001.local.  AAAA  fe80::1234:5678:9abc:def0
+evse-001.local.  AAAA  2001:db8::1234:5678:9abc:def0
 ```
 
-### 2.2 Address Selection
+### 2.4 Address Selection
 
 When multiple AAAA records exist, controller selects:
 
@@ -72,7 +106,7 @@ When multiple AAAA records exist, controller selects:
 - Controller must determine correct interface
 - Works without router/DHCP infrastructure
 
-### 2.3 Record TTL (Time-To-Live)
+### 2.5 Record TTL (Time-To-Live)
 
 | Record | TTL | Rationale |
 |--------|-----|-----------|
@@ -81,7 +115,7 @@ When multiple AAAA records exist, controller selects:
 | AAAA | 120s (2 min) | Address may change |
 | TXT | 4500s (75 min) | Metadata changes infrequently |
 
-### 2.4 Record Updates
+### 2.6 Record Updates
 
 **When address changes:**
 1. Send mDNS "goodbye" (TTL=0) for old AAAA
@@ -89,8 +123,13 @@ When multiple AAAA records exist, controller selects:
 3. Existing connections will break, clients reconnect
 
 **When entering commissioning mode:**
-1. Update TXT record: CM=1
+1. Register `_mashc._udp` service instance
 2. Send mDNS announcement (3 times)
+
+**When commissioning completes:**
+1. Deregister `_mashc._udp` service instance
+2. Register `_mash._tcp` service instance for new zone
+3. Send mDNS announcements
 
 ---
 
@@ -221,9 +260,9 @@ Controller                                    Device
 4. Send Close_ACK
 5. Close TCP connection
 6. Update mDNS:
-   - Change instance name to device-id
-   - Update TXT records for operational mode
-   - Set CM=0 (no longer commissioning)
+   - Deregister `_mashc._udp` service instance
+   - Register `_mash._tcp` service instance with `<zone-id>-<device-id>` name
+   - Update TXT records for operational mode (ZI, DI, VP, etc.)
 7. Listen for new connection
 8. On new TLS connection, require mutual cert auth
 
@@ -432,15 +471,15 @@ Connect to: fe80::1234:5678:9abc:def0%eth0
 │      │     Parse: D=1234, setupcode, VP                              │     │
 │      │                                  │                            │     │
 │  2.  │ ─── mDNS Query ─────────────────►│                            │     │
-│      │     _mash._tcp.local PTR?        │                            │     │
+│      │     _mashc._udp.local PTR?       │                            │     │
 │      │                                  │                            │     │
 │      │ ◄── mDNS Response ───────────────┤◄──────────────────────────┤     │
-│      │     PTR MASH-1234._mash._tcp     │                            │     │
+│      │     PTR MASH-1234._mashc._udp    │                            │     │
 │      │     SRV 0 0 8443 evse.local      │                            │     │
 │      │     AAAA fe80::1234              │                            │     │
-│      │     TXT D=1234 VP=... CM=1       │                            │     │
+│      │     TXT D=1234 VP=...            │                            │     │
 │      │                                  │                            │     │
-│  3.  │     [Verify: D matches, VP matches, CM=1]                     │     │
+│  3.  │     [Verify: D matches, VP matches]                           │     │
 │      │                                  │                            │     │
 │  4.  │ ═══ TCP Connect ════════════════════════════════════════════►│     │
 │      │     [fe80::1234]:8443            │                            │     │
@@ -491,7 +530,8 @@ Connect to: fe80::1234:5678:9abc:def0%eth0
 │      │     [TCP CLOSED]                 │                            │     │
 │      │                                  │                            │     │
 │      │     [Wait 1 second]              │      [Update mDNS]         │     │
-│      │                                  │      [CM=0, new name]      │     │
+│      │                                  │      [_mashc gone,         │     │
+│      │                                  │       _mash._tcp added]    │     │
 │      │                                  │                            │     │
 │ 11.  │ ═══ TCP Connect (new) ══════════════════════════════════════►│     │
 │      │                                  │                            │     │
@@ -604,8 +644,8 @@ MASH.S.IPV6.ADDRESS_CHANGE=1          # Handles address changes
 | ID | Description | Expected |
 |----|-------------|----------|
 | TC-TRANS-1 | Normal transition | Close, reconnect, mutual TLS |
-| TC-TRANS-2 | mDNS update | New instance name after close |
-| TC-TRANS-3 | CM flag clear | CM=0 after commissioning |
+| TC-TRANS-2 | mDNS update | `_mashc._udp` removed, `_mash._tcp` added |
+| TC-TRANS-3 | Service type switch | `_mash._tcp` instance name: `<zone-id>-<device-id>` |
 | TC-TRANS-4 | Reconnect timeout | 10 seconds max |
 
 ### TC-CERT-VAL-*: Certificate Validation
