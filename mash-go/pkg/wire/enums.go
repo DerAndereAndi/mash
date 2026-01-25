@@ -185,16 +185,16 @@ func (z ZoneType) CanOverride(other ZoneType) bool {
 type DeviceType uint8
 
 const (
-	DeviceTypeGeneric       DeviceType = 0
-	DeviceTypeEVSE          DeviceType = 1  // EV Charger
-	DeviceTypeHeatPump      DeviceType = 2  // Heat Pump
-	DeviceTypeBattery       DeviceType = 3  // Battery Storage
-	DeviceTypeInverter      DeviceType = 4  // PV/Battery Inverter
-	DeviceTypePVString      DeviceType = 5  // PV String
-	DeviceTypeSmartAppliance DeviceType = 6 // Dishwasher, Washer, etc.
-	DeviceTypeHVAC          DeviceType = 7  // Heating/Cooling
-	DeviceTypeWaterHeater   DeviceType = 8  // Water Heater
-	DeviceTypeMeter         DeviceType = 9  // Energy Meter
+	DeviceTypeGeneric        DeviceType = 0
+	DeviceTypeEVSE           DeviceType = 1  // EV Charger
+	DeviceTypeHeatPump       DeviceType = 2  // Heat Pump
+	DeviceTypeBattery        DeviceType = 3  // Battery Storage
+	DeviceTypeInverter       DeviceType = 4  // PV/Battery Inverter
+	DeviceTypePVString       DeviceType = 5  // PV String
+	DeviceTypeSmartAppliance DeviceType = 6  // Dishwasher, Washer, etc.
+	DeviceTypeHVAC           DeviceType = 7  // Heating/Cooling
+	DeviceTypeWaterHeater    DeviceType = 8  // Water Heater
+	DeviceTypeMeter          DeviceType = 9  // Energy Meter
 	DeviceTypeGridConnection DeviceType = 10 // Grid Connection Point
 )
 
@@ -314,14 +314,14 @@ func (d EnergyDirection) String() string {
 type LimitCause uint8
 
 const (
-	LimitCauseUnspecified      LimitCause = 0
-	LimitCauseGridProtection   LimitCause = 1 // Grid stability/protection
-	LimitCauseLocalProtection  LimitCause = 2 // Local installation protection
+	LimitCauseUnspecified        LimitCause = 0
+	LimitCauseGridProtection     LimitCause = 1 // Grid stability/protection
+	LimitCauseLocalProtection    LimitCause = 2 // Local installation protection
 	LimitCauseTariffOptimization LimitCause = 3 // Cost optimization
-	LimitCauseSelfConsumption  LimitCause = 4 // Self-consumption optimization
-	LimitCauseUserRequest      LimitCause = 5 // User-initiated
-	LimitCauseSchedule         LimitCause = 6 // Scheduled limit
-	LimitCauseEmergency        LimitCause = 7 // Emergency situation
+	LimitCauseSelfConsumption    LimitCause = 4 // Self-consumption optimization
+	LimitCauseUserRequest        LimitCause = 5 // User-initiated
+	LimitCauseSchedule           LimitCause = 6 // Scheduled limit
+	LimitCauseEmergency          LimitCause = 7 // Emergency situation
 )
 
 // String returns the limit cause name.

@@ -32,7 +32,7 @@ func init() {
 
 	// Configure decoder to be lenient for forward compatibility
 	decOpts := cbor.DecOptions{
-		DupMapKey:         cbor.DupMapKeyQuiet,   // Ignore duplicate keys (last wins)
+		DupMapKey:         cbor.DupMapKeyQuiet, // Ignore duplicate keys (last wins)
 		IndefLength:       cbor.IndefLengthAllowed,
 		ExtraReturnErrors: cbor.ExtraDecErrorNone,
 	}
@@ -170,8 +170,8 @@ const (
 func PeekMessageType(data []byte) (MessageType, error) {
 	// Decode just enough to check key indicators
 	var peek struct {
-		MessageID uint32    `cbor:"1,keyasint"`
-		Field2    uint8     `cbor:"2,keyasint"` // Could be operation, status, or subscriptionId
+		MessageID uint32 `cbor:"1,keyasint"`
+		Field2    uint8  `cbor:"2,keyasint"` // Could be operation, status, or subscriptionId
 	}
 	if err := Unmarshal(data, &peek); err != nil {
 		return MessageTypeUnknown, fmt.Errorf("failed to peek message: %w", err)

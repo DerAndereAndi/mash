@@ -33,11 +33,11 @@ const NotificationMessageID uint32 = 0
 //	  5: payload       // operation-specific data
 //	}
 type Request struct {
-	MessageID  uint32      `cbor:"1,keyasint"`
-	Operation  Operation   `cbor:"2,keyasint"`
-	EndpointID uint8       `cbor:"3,keyasint"`
-	FeatureID  uint8       `cbor:"4,keyasint"`
-	Payload    any `cbor:"5,keyasint,omitempty"`
+	MessageID  uint32    `cbor:"1,keyasint"`
+	Operation  Operation `cbor:"2,keyasint"`
+	EndpointID uint8     `cbor:"3,keyasint"`
+	FeatureID  uint8     `cbor:"4,keyasint"`
+	Payload    any       `cbor:"5,keyasint,omitempty"`
 }
 
 // Validate checks if the request is valid.
@@ -61,9 +61,9 @@ func (r *Request) Validate() error {
 //	  3: payload       // operation-specific response data (if success)
 //	}
 type Response struct {
-	MessageID uint32      `cbor:"1,keyasint"`
-	Status    Status      `cbor:"2,keyasint"`
-	Payload   any `cbor:"3,keyasint,omitempty"`
+	MessageID uint32 `cbor:"1,keyasint"`
+	Status    Status `cbor:"2,keyasint"`
+	Payload   any    `cbor:"3,keyasint,omitempty"`
 }
 
 // IsSuccess returns true if the response indicates success.
@@ -83,9 +83,9 @@ func (r *Response) IsSuccess() bool {
 //	  5: changes           // map of changed attributes
 //	}
 type Notification struct {
-	SubscriptionID uint32                 `cbor:"2,keyasint"`
-	EndpointID     uint8                  `cbor:"3,keyasint"`
-	FeatureID      uint8                  `cbor:"4,keyasint"`
+	SubscriptionID uint32         `cbor:"2,keyasint"`
+	EndpointID     uint8          `cbor:"3,keyasint"`
+	FeatureID      uint8          `cbor:"4,keyasint"`
 	Changes        map[uint16]any `cbor:"5,keyasint"`
 }
 
@@ -132,7 +132,7 @@ type SubscribePayload struct {
 //	  2: currentValues    // map of current attribute values (priming report)
 //	}
 type SubscribeResponsePayload struct {
-	SubscriptionID uint32                 `cbor:"1,keyasint"`
+	SubscriptionID uint32         `cbor:"1,keyasint"`
 	CurrentValues  map[uint16]any `cbor:"2,keyasint,omitempty"`
 }
 
@@ -157,8 +157,8 @@ type UnsubscribePayload struct {
 //	  2: parameters   // command-specific parameters
 //	}
 type InvokePayload struct {
-	CommandID  uint8       `cbor:"1,keyasint"`
-	Parameters any `cbor:"2,keyasint,omitempty"`
+	CommandID  uint8 `cbor:"1,keyasint"`
+	Parameters any   `cbor:"2,keyasint,omitempty"`
 }
 
 // InvokeResponsePayload represents the payload for an Invoke response.

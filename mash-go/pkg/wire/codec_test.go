@@ -357,12 +357,12 @@ func TestUnknownFieldsIgnored(t *testing.T) {
 
 	// Create a map with extra fields
 	msg := map[int]any{
-		1:  uint32(1),                // messageId
-		2:  uint8(1),                 // operation
-		3:  uint8(1),                 // endpointId
-		4:  uint8(2),                 // featureId
-		5:  []uint16{1, 2, 3},        // payload
-		99: "future field",           // unknown field from future version
+		1:  uint32(1),         // messageId
+		2:  uint8(1),          // operation
+		3:  uint8(1),          // endpointId
+		4:  uint8(2),          // featureId
+		5:  []uint16{1, 2, 3}, // payload
+		99: "future field",    // unknown field from future version
 	}
 
 	data, err := Marshal(msg)
