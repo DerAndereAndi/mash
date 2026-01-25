@@ -444,7 +444,13 @@ device_id / endpoint_id / feature_id / attribute_or_command
 |-------------|----------|---------|------------|
 | Device/Attestation | 20 years | Never | N/A |
 | Operational | 1 year | Auto by controller | Controller deletes from device |
-| Zone CA | 10 years | Manual | Zone removal |
+| Zone CA | 99 years | N/A | Zone removal |
+
+**Note:** Zone CA uses very long validity (99 years) because:
+- Zone ID is derived from CA certificate fingerprint
+- Changing CA would require re-commissioning all devices
+- Expiry doesn't add security (zone removal is the revocation mechanism)
+- Effectively "permanent" for practical purposes
 
 **Revocation Flow:**
 1. Controller decides to remove device

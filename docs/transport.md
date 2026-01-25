@@ -175,11 +175,30 @@ Keep-alive uses application-layer ping/pong (not TCP keep-alive):
 }
 ```
 
-### 6.4 Connection Closure
+### 6.4 Connection Loss Detection
 
-After 3 missed pongs (90 seconds without response):
+**Maximum detection delay: 95 seconds**
+
+Calculation:
+```
+Ping every 30s → 3 cycles × 30s = 90s
+Plus final timeout → 90s + 5s = 95s maximum
+```
+
+This is the worst-case scenario when network partition occurs immediately after a successful ping. Typical detection is much faster:
+
+| Scenario | Detection Time |
+|----------|---------------|
+| Clean disconnect (TCP RST) | < 1 second |
+| TLS error | < 1 second |
+| Network partition after ping | 5 seconds |
+| Network partition mid-cycle | Up to 95 seconds |
+
+### 6.5 Connection Closure
+
+After 3 missed pongs:
 1. Close TCP connection
-2. Notify application layer
+2. Notify application layer (triggers FAILSAFE on device)
 3. Attempt reconnection (client side)
 
 ---
@@ -196,7 +215,38 @@ When connection is lost, client should:
 4. Continue attempting at 60s intervals
 5. Reset backoff on successful connection
 
-### 7.2 State Preservation
+### 7.2 Reconnection Jitter
+
+To prevent thundering herd when multiple clients reconnect simultaneously (e.g., after device restart), clients SHOULD add random jitter:
+
+```
+actual_delay = base_delay + random(0, base_delay * 0.25)
+```
+
+| Base Delay | With Jitter |
+|------------|-------------|
+| 1s | 1.0 - 1.25s |
+| 2s | 2.0 - 2.5s |
+| 60s | 60 - 75s |
+
+### 7.3 Reconnection Success Criteria
+
+**A reconnection is successful when the TLS handshake completes and both sides authenticate.**
+
+Specifically:
+1. TCP connection established
+2. TLS 1.3 handshake completed
+3. Both certificates validated (mutual authentication)
+4. Device not in commissioning mode (operational state)
+
+At this point:
+- Backoff timer resets to 1 second
+- Client should re-establish subscriptions
+- Client should re-read device state
+
+**Note:** A successful TLS handshake followed by immediate application-layer rejection (e.g., zone limit exceeded) does NOT count as successful reconnection - backoff should continue.
+
+### 7.4 State Preservation
 
 After reconnection:
 - Subscriptions must be re-established
@@ -205,7 +255,45 @@ After reconnection:
 
 ---
 
-## 8. Message Size Limits
+## 8. Message Ordering
+
+### 8.1 Delivery Order Guarantee
+
+**TCP guarantees in-order delivery.** MASH inherits this guarantee:
+
+- Messages from a single sender arrive in send order
+- No explicit sequence numbers needed at MASH layer
+- TLS maintains ordering within the encrypted stream
+
+### 8.2 Multi-Zone Ordering
+
+When multiple zones send commands simultaneously:
+
+- Device processes messages in receipt order (FIFO)
+- No priority queuing based on zone type
+- Each command is processed and responded to independently
+
+**Example:**
+```
+T+0.000s: Zone 1 sends SetLimit(5000)
+T+0.001s: Zone 2 sends SetLimit(3000)
+
+Device receives in order: Zone 1, then Zone 2
+Device processes Zone 1 SetLimit → responds
+Device processes Zone 2 SetLimit → responds
+
+Final effectiveLimit = min(5000, 3000) = 3000
+```
+
+### 8.3 Subscription Notification Ordering
+
+- Notifications are sent in the order changes occur
+- Coalescing may combine multiple changes (see subscription semantics)
+- Notifications from different subscriptions have no ordering guarantee relative to each other
+
+---
+
+## 9. Message Size Limits
 
 | Limit | Value | Rationale |
 |-------|-------|-----------|
@@ -215,9 +303,9 @@ After reconnection:
 
 ---
 
-## 9. Error Handling
+## 10. Error Handling
 
-### 9.1 Transport Errors
+### 10.1 Transport Errors
 
 | Error | Action |
 |-------|--------|
@@ -227,7 +315,7 @@ After reconnection:
 | CBOR parse error | Send error response, keep connection |
 | Timeout | Close connection, reconnect |
 
-### 9.2 Graceful Shutdown
+### 10.2 Graceful Shutdown
 
 To close connection gracefully:
 
@@ -242,7 +330,7 @@ Wait for acknowledgment or 5-second timeout, then close TCP.
 
 ---
 
-## 10. Comparison with EEBUS SHIP
+## 11. Comparison with EEBUS SHIP
 
 | Aspect | EEBUS SHIP | MASH Transport |
 |--------|------------|----------------|
