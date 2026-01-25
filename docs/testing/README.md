@@ -377,6 +377,10 @@ For each feature, in order:
 |----------|-------------|--------|
 | `behavior/multi-zone-resolution.md` | Limit/setpoint resolution, duration semantics | Complete |
 | `behavior/state-machines.md` | ControlState/ProcessState transitions, interactions | Complete |
+| `behavior/connection-state-machine.md` | Transport layer connection lifecycle, keep-alive, reconnection | Complete |
+| `behavior/message-framing.md` | Wire-level encoding, CBOR rules, size limits, compatibility | Complete |
+| `behavior/commissioning-pase.md` | SPAKE2+ commissioning, certificate flow, admin delegation | Complete |
+| `behavior/discovery.md` | mDNS/DNS-SD, QR code format, discriminator handling | Complete |
 
 ### Completed Test Cases
 
@@ -387,6 +391,26 @@ For each feature, in order:
 | TC-STATE | 15 | ControlState transitions and failsafe |
 | TC-PROCESS | 17 | ProcessState transitions and commands |
 | TC-INTERACTION | 15 | ControlState + ProcessState interactions |
+| TC-CONN | 5 | Connection establishment |
+| TC-KEEPALIVE | 4 | Keep-alive ping/pong behavior |
+| TC-RECONN | 4 | Reconnection with backoff |
+| TC-CLOSE | 4 | Graceful close handshake |
+| TC-MULTI | 4 | Multi-connection handling |
+| TC-FRAME | 6 | Frame parsing |
+| TC-CBOR | 7 | CBOR encoding/parsing |
+| TC-NULL | 4 | Null vs absent handling |
+| TC-INT | 4 | Integer range handling |
+| TC-COMPAT | 3 | Forward compatibility |
+| TC-PASE | 5 | SPAKE2+ protocol |
+| TC-COMM | 5 | Commissioning flow |
+| TC-ZONE-COMM | 5 | Multi-zone commissioning |
+| TC-ADMIN | 4 | Admin delegation |
+| TC-CERT | 4 | Certificate handling |
+| TC-MDNS | 5 | mDNS registration |
+| TC-QR | 6 | QR code parsing |
+| TC-DISC | 4 | Discriminator handling |
+| TC-DISC-STATE | 5 | Discovery state transitions |
+| TC-BROWSE | 4 | Service browsing |
 
 ### Gaps Remaining (from testability-analysis.md)
 
@@ -394,13 +418,13 @@ For each feature, in order:
 |------|----------|-----------|-----------|
 | State Machines | 4 | 4 | 0 |
 | Multi-Zone Resolution | 6 | 6 | 0 |
-| Timing/Ordering | 8 | 4 | 4 |
+| Timing/Ordering | 8 | 8 | 0 |
 | Feature Dependencies | 3 | 0 | 3 |
-| Protocol Encoding | 5 | 0 | 5 |
-| Security | 4 | 0 | 4 |
+| Protocol Encoding | 5 | 5 | 0 |
+| Security | 4 | 4 | 0 |
 | Feature Interaction | 5 | 0 | 5 |
-| Error Handling | 3 | 0 | 3 |
-| Discovery | 3 | 0 | 3 |
+| Error Handling | 3 | 3 | 0 |
+| Discovery | 3 | 3 | 0 |
 
 ---
 
