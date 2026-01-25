@@ -64,20 +64,24 @@ Port:          8443 (TCP/TLS WebSocket)
 - Device has at least one zone membership
 - One service instance per zone membership (device in 2 zones = 2 instances)
 
-**Instance name:** `<compressed-zone-id>-<device-id>`
+**Instance name:** `<zone-id>-<device-id>`
 
 Where:
-- `compressed-zone-id`: First 8 hex chars of Zone CA certificate fingerprint
-- `device-id`: Device's unique identifier (vendor-prefix + serial)
+- `zone-id`: First 8 hex chars of SHA-256(Zone CA certificate DER)
+- `device-id`: First 8 hex chars of SHA-256(device operational cert public key DER)
+
+Both IDs are **fingerprint-derived** - no assignment or vendor registration needed.
+
+**Note:** Device ID is zone-specific. Same physical device in two zones has different device IDs (different operational certs per zone). This is intentional - the device has a distinct identity in each zone.
 
 **Example (device in two zones):**
 ```
-_mash._tcp.local.                         PTR   A1B2C3D4-EVSE001._mash._tcp.local.
-_mash._tcp.local.                         PTR   E5F6G7H8-EVSE001._mash._tcp.local.
-A1B2C3D4-EVSE001._mash._tcp.local.        SRV   0 0 8443 evse-001.local.
-A1B2C3D4-EVSE001._mash._tcp.local.        TXT   "ZI=A1B2C3D4" "DI=EVSE001" "VP=1234:5678"
-E5F6G7H8-EVSE001._mash._tcp.local.        SRV   0 0 8443 evse-001.local.
-E5F6G7H8-EVSE001._mash._tcp.local.        TXT   "ZI=E5F6G7H8" "DI=EVSE001" "VP=1234:5678"
+_mash._tcp.local.                         PTR   A1B2C3D4-F9E8D7C6._mash._tcp.local.
+_mash._tcp.local.                         PTR   E5F6A7B8-B3A29180._mash._tcp.local.
+A1B2C3D4-F9E8D7C6._mash._tcp.local.       SRV   0 0 8443 evse-001.local.
+A1B2C3D4-F9E8D7C6._mash._tcp.local.       TXT   "ZI=A1B2C3D4" "DI=F9E8D7C6" "VP=1234:5678"
+E5F6A7B8-B3A29180._mash._tcp.local.       SRV   0 0 8443 evse-001.local.
+E5F6A7B8-B3A29180._mash._tcp.local.       TXT   "ZI=E5F6A7B8" "DI=B3A29180" "VP=1234:5678"
 ```
 
 ### 2.3 Commissioner Discovery (`_mashd._udp`)
@@ -127,13 +131,18 @@ ems-controller.local.                AAAA  2001:db8::1
 - Must not start or end with hyphen
 - Case-insensitive comparison
 
-**Device ID format:**
+**ID derivation:**
 ```
-<vendor-prefix><serial>
+Zone ID   = hex(SHA-256(Zone CA certificate DER)[0:4])     // 8 hex chars
+Device ID = hex(SHA-256(device op cert public key DER)[0:4]) // 8 hex chars
 ```
-Where:
-- `vendor-prefix`: Up to 10 alphanumeric characters
-- `serial`: Up to 20 alphanumeric characters + hyphens
+
+**Benefits of fingerprint-derived IDs:**
+- No vendor registration required (works for open source)
+- No ID assignment/coordination needed
+- Cryptographically bound to certificates
+- Device can compute its own ID
+- Verifiable by anyone with the certificate
 
 ---
 
@@ -177,9 +186,9 @@ DN=Garage Charger
 
 | Key | Type | Required | Max Len | Description |
 |-----|------|----------|---------|-------------|
-| `ZI` | string | Yes | 8 | Zone ID (first 8 hex chars of Zone CA fingerprint) |
-| `DI` | string | Yes | 31 | Device ID |
-| `VP` | string | Yes | 11 | Vendor:Product ID |
+| `ZI` | string | Yes | 8 | Zone ID (first 8 hex chars of SHA-256(Zone CA cert DER)) |
+| `DI` | string | Yes | 8 | Device ID (first 8 hex chars of SHA-256(device op cert pubkey DER)) |
+| `VP` | string | No | 11 | Vendor:Product ID (optional, for debugging) |
 | `FW` | string | No | 20 | Firmware version (semver) |
 | `EP` | uint8 | No | 3 | Endpoint count |
 | `FM` | string | No | 10 | Feature map (hex, e.g., "0x001B") |
@@ -187,14 +196,16 @@ DN=Garage Charger
 **Example:**
 ```
 ZI=A1B2C3D4
-DI=EVSE001
+DI=F9E8D7C6
 VP=1234:5678
 FW=1.2.3
 EP=2
 FM=0x001B
 ```
 
-**Total size:** ~80 bytes typical, 120 bytes maximum
+**Total size:** ~60 bytes typical, 100 bytes maximum
+
+**Note:** Both ZI and DI are fingerprint-derived. VP is optional (useful for debugging but not required for open source implementations).
 
 ### 3.4 Commissioner TXT Records (`_mashd._udp`)
 

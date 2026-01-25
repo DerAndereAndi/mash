@@ -36,10 +36,16 @@ Storage: Secure element or encrypted file (PKCS#8)
 ```
 Subject: CN=<zone-name>, O=<owner-name>, OU=MASH Zone CA
 Serial: Random 128-bit
-Validity: 10 years
+Validity: 99 years (effectively no expiry)
 Basic Constraints: CA:TRUE, pathlen:1
 Key Usage: Certificate Sign, CRL Sign
 ```
+
+**Note on Zone CA validity:** Zone CA certificates use very long validity (99 years) because:
+- Zone ID is derived from Zone CA fingerprint - if CA changes, zone identity changes
+- Expiration doesn't add security for root CAs (compromise requires regeneration anyway)
+- Follows Matter model where Fabric Root CAs are effectively permanent
+- X.509 requires a notAfter date, so we use maximum practical value
 
 **Step 3: Generate Zone ID**
 ```
