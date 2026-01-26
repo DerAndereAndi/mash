@@ -201,6 +201,10 @@ func (c *SPAKE2PlusClient) PublicValue() []byte {
 func (c *SPAKE2PlusClient) ProcessServerValue(pB []byte) error {
 	c.pB = pB
 
+	// Ensure our public value is generated before deriving keys
+	// (deriveKeys needs both pA and pB for the transcript)
+	_ = c.PublicValue()
+
 	// Parse pB
 	pBx, pBy := elliptic.Unmarshal(curve, pB)
 	if pBx == nil {
@@ -359,6 +363,10 @@ func (s *SPAKE2PlusServer) PublicValue() []byte {
 // ProcessClientValue processes the client's public value and derives the shared secret.
 func (s *SPAKE2PlusServer) ProcessClientValue(pA []byte) error {
 	s.pA = pA
+
+	// Ensure our public value is generated before deriving keys
+	// (deriveKeys needs both pA and pB for the transcript)
+	_ = s.PublicValue()
 
 	// Parse pA
 	pAx, pAy := elliptic.Unmarshal(curve, pA)

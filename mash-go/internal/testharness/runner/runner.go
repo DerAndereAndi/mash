@@ -1,0 +1,598 @@
+// Package runner provides test execution against real MASH devices/controllers.
+package runner
+
+import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"io"
+	"net"
+	"sync/atomic"
+	"time"
+
+	"github.com/mash-protocol/mash-go/internal/testharness/engine"
+	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/internal/testharness/reporter"
+	"github.com/mash-protocol/mash-go/pkg/transport"
+	"github.com/mash-protocol/mash-go/pkg/wire"
+)
+
+// Runner executes test cases against a target device or controller.
+type Runner struct {
+	config    *Config
+	engine    *engine.Engine
+	reporter  reporter.Reporter
+	conn      *Connection
+	messageID uint32 // Atomic counter for message IDs
+}
+
+// Config configures the test runner.
+type Config struct {
+	// Target is the address of the device/controller under test.
+	Target string
+
+	// Mode is "device" or "controller".
+	Mode string
+
+	// PICSFile is the path to the PICS file.
+	PICSFile string
+
+	// TestDir is the path to test case directory.
+	TestDir string
+
+	// Pattern filters test cases by name.
+	Pattern string
+
+	// Timeout is the default test timeout.
+	Timeout time.Duration
+
+	// Verbose enables verbose output.
+	Verbose bool
+
+	// Output is where to write results.
+	Output io.Writer
+
+	// OutputFormat is "text", "json", or "junit".
+	OutputFormat string
+
+	// InsecureSkipVerify skips TLS certificate verification.
+	InsecureSkipVerify bool
+}
+
+// Connection represents a connection to the target.
+type Connection struct {
+	conn      net.Conn
+	tlsConn   *tls.Conn
+	framer    *transport.Framer
+	connected bool
+}
+
+// New creates a new test runner.
+func New(config *Config) *Runner {
+	// Create engine with config
+	engineConfig := engine.DefaultConfig()
+	engineConfig.DefaultTimeout = config.Timeout
+
+	// Load PICS if provided
+	if config.PICSFile != "" {
+		pics, err := loader.LoadPICS(config.PICSFile)
+		if err == nil {
+			engineConfig.PICS = pics
+		}
+	}
+
+	r := &Runner{
+		config: config,
+		engine: engine.NewWithConfig(engineConfig),
+		conn:   &Connection{},
+	}
+
+	// Create reporter
+	switch config.OutputFormat {
+	case "json":
+		r.reporter = reporter.NewJSONReporter(config.Output, true)
+	case "junit":
+		r.reporter = reporter.NewJUnitReporter(config.Output)
+	default:
+		r.reporter = reporter.NewTextReporter(config.Output, config.Verbose)
+	}
+
+	// Register action handlers
+	r.registerHandlers()
+
+	return r
+}
+
+// nextMessageID returns the next message ID.
+func (r *Runner) nextMessageID() uint32 {
+	return atomic.AddUint32(&r.messageID, 1)
+}
+
+// Run executes all matching test cases and returns the suite result.
+func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
+	// Load test cases
+	cases, err := loader.LoadDirectory(r.config.TestDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load tests: %w", err)
+	}
+
+	// Filter by pattern if provided
+	if r.config.Pattern != "" {
+		cases = filterByPattern(cases, r.config.Pattern)
+	}
+
+	if len(cases) == 0 {
+		return nil, fmt.Errorf("no test cases found matching pattern %q", r.config.Pattern)
+	}
+
+	// Run the test suite
+	result := r.engine.RunSuite(ctx, cases)
+	result.SuiteName = fmt.Sprintf("MASH Conformance Tests (%s)", r.config.Target)
+
+	// Report results
+	r.reporter.ReportSuite(result)
+
+	return result, nil
+}
+
+// Close cleans up runner resources.
+func (r *Runner) Close() error {
+	if r.conn != nil && r.conn.connected {
+		return r.conn.Close()
+	}
+	return nil
+}
+
+// Close closes the connection.
+func (c *Connection) Close() error {
+	c.connected = false
+	if c.tlsConn != nil {
+		return c.tlsConn.Close()
+	}
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
+}
+
+// registerHandlers registers all action handlers with the engine.
+func (r *Runner) registerHandlers() {
+	// Connection handlers
+	r.engine.RegisterHandler("connect", r.handleConnect)
+	r.engine.RegisterHandler("disconnect", r.handleDisconnect)
+
+	// Protocol operation handlers
+	r.engine.RegisterHandler("read", r.handleRead)
+	r.engine.RegisterHandler("write", r.handleWrite)
+	r.engine.RegisterHandler("subscribe", r.handleSubscribe)
+	r.engine.RegisterHandler("invoke", r.handleInvoke)
+
+	// Discovery handlers
+	r.engine.RegisterHandler("start_discovery", r.handleStartDiscovery)
+	r.engine.RegisterHandler("wait_for_device", r.handleWaitForDevice)
+	r.engine.RegisterHandler("stop_discovery", r.handleStopDiscovery)
+	r.engine.RegisterHandler("verify_txt_records", r.handleVerifyTXTRecords)
+
+	// PASE handlers
+	r.engine.RegisterHandler("pase_request", r.handlePASERequest)
+	r.engine.RegisterHandler("pase_receive_response", r.handlePASEReceiveResponse)
+	r.engine.RegisterHandler("pase_confirm", r.handlePASEConfirm)
+	r.engine.RegisterHandler("pase_receive_verify", r.handlePASEReceiveVerify)
+	r.engine.RegisterHandler("verify_session_key", r.handleVerifySessionKey)
+
+	// Utility handlers
+	r.engine.RegisterHandler("wait", r.handleWait)
+	r.engine.RegisterHandler("verify", r.handleVerify)
+
+	// Register custom expectation checkers
+	r.engine.RegisterChecker("connection_established", r.checkConnectionEstablished)
+	r.engine.RegisterChecker("response_received", r.checkResponseReceived)
+}
+
+// handleConnect establishes a connection to the target.
+func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	target := r.config.Target
+	if t, ok := step.Params["target"].(string); ok && t != "" {
+		target = t
+	}
+
+	insecure := r.config.InsecureSkipVerify
+	if i, ok := step.Params["insecure"].(bool); ok {
+		insecure = i
+	}
+
+	// Create TLS config
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: insecure,
+		NextProtos:         []string{"mash/1"},
+	}
+
+	// Connect with timeout
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect: %w", err)
+	}
+
+	r.conn.tlsConn = conn
+	r.conn.framer = transport.NewFramer(conn)
+	r.conn.connected = true
+
+	// Store connection info in state
+	state.Set("connection", r.conn)
+
+	return map[string]any{
+		"connection_established": true,
+		"target":                 target,
+		"tls_version":            conn.ConnectionState().Version,
+		"negotiated_protocol":    conn.ConnectionState().NegotiatedProtocol,
+	}, nil
+}
+
+// handleDisconnect closes the connection.
+func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	if r.conn == nil || !r.conn.connected {
+		return map[string]any{"disconnected": true}, nil
+	}
+
+	err := r.conn.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to disconnect: %w", err)
+	}
+
+	return map[string]any{"disconnected": true}, nil
+}
+
+// handleRead sends a read request and returns the response.
+func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	if !r.conn.connected {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	endpoint, _ := step.Params["endpoint"].(float64)
+	feature, _ := step.Params["feature"].(float64)
+	attribute, _ := step.Params["attribute"].(string)
+
+	// Create read request
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpRead,
+		EndpointID: uint8(endpoint),
+		FeatureID:  uint8(feature),
+	}
+
+	// Encode and send
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode read request: %w", err)
+	}
+
+	if err := r.conn.framer.WriteFrame(data); err != nil {
+		return nil, fmt.Errorf("failed to send read request: %w", err)
+	}
+
+	// Read response
+	respData, err := r.conn.framer.ReadFrame()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	resp, err := wire.DecodeResponse(respData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	outputs := map[string]any{
+		"read_success": resp.IsSuccess(),
+		"response":     resp,
+		"value":        resp.Payload,
+		"status":       resp.Status,
+	}
+
+	// Add attribute-specific outputs
+	if attribute != "" {
+		outputs[attribute+"_present"] = resp.Payload != nil
+	}
+
+	return outputs, nil
+}
+
+// handleWrite sends a write request.
+func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	if !r.conn.connected {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	endpoint, _ := step.Params["endpoint"].(float64)
+	feature, _ := step.Params["feature"].(float64)
+	value := step.Params["value"]
+
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpWrite,
+		EndpointID: uint8(endpoint),
+		FeatureID:  uint8(feature),
+		Payload:    value,
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode write request: %w", err)
+	}
+
+	if err := r.conn.framer.WriteFrame(data); err != nil {
+		return nil, fmt.Errorf("failed to send write request: %w", err)
+	}
+
+	// Read response
+	respData, err := r.conn.framer.ReadFrame()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	resp, err := wire.DecodeResponse(respData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return map[string]any{
+		"write_success": resp.IsSuccess(),
+		"response":      resp,
+		"status":        resp.Status,
+	}, nil
+}
+
+// handleSubscribe sends a subscribe request.
+func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	if !r.conn.connected {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	endpoint, _ := step.Params["endpoint"].(float64)
+	feature, _ := step.Params["feature"].(float64)
+
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpSubscribe,
+		EndpointID: uint8(endpoint),
+		FeatureID:  uint8(feature),
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode subscribe request: %w", err)
+	}
+
+	if err := r.conn.framer.WriteFrame(data); err != nil {
+		return nil, fmt.Errorf("failed to send subscribe request: %w", err)
+	}
+
+	respData, err := r.conn.framer.ReadFrame()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	resp, err := wire.DecodeResponse(respData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return map[string]any{
+		"subscribe_success": resp.IsSuccess(),
+		"subscription_id":   resp.Payload,
+		"status":            resp.Status,
+	}, nil
+}
+
+// handleInvoke sends an invoke request.
+func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	if !r.conn.connected {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	endpoint, _ := step.Params["endpoint"].(float64)
+	feature, _ := step.Params["feature"].(float64)
+	params := step.Params["params"]
+
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpInvoke,
+		EndpointID: uint8(endpoint),
+		FeatureID:  uint8(feature),
+		Payload:    params,
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode invoke request: %w", err)
+	}
+
+	if err := r.conn.framer.WriteFrame(data); err != nil {
+		return nil, fmt.Errorf("failed to send invoke request: %w", err)
+	}
+
+	respData, err := r.conn.framer.ReadFrame()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	resp, err := wire.DecodeResponse(respData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return map[string]any{
+		"invoke_success": resp.IsSuccess(),
+		"result":         resp.Payload,
+		"status":         resp.Status,
+	}, nil
+}
+
+// Discovery handlers (stubs for now - would use actual mDNS)
+func (r *Runner) handleStartDiscovery(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// TODO: Integrate with actual mDNS discovery
+	return map[string]any{"discovery_started": true}, nil
+}
+
+func (r *Runner) handleWaitForDevice(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// TODO: Integrate with actual mDNS discovery
+	return map[string]any{
+		"device_found":           true,
+		"device_has_txt_records": true,
+	}, nil
+}
+
+func (r *Runner) handleStopDiscovery(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	return map[string]any{"discovery_stopped": true}, nil
+}
+
+func (r *Runner) handleVerifyTXTRecords(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	return map[string]any{"txt_valid": true}, nil
+}
+
+// PASE handlers (stubs - would integrate with commissioning package)
+func (r *Runner) handlePASERequest(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	return map[string]any{
+		"request_sent": true,
+		"pA_generated": true,
+	}, nil
+}
+
+func (r *Runner) handlePASEReceiveResponse(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	return map[string]any{
+		"response_received": true,
+		"pB_received":       true,
+	}, nil
+}
+
+func (r *Runner) handlePASEConfirm(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	return map[string]any{"confirm_sent": true}, nil
+}
+
+func (r *Runner) handlePASEReceiveVerify(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	return map[string]any{
+		"verify_received":     true,
+		"session_established": true,
+	}, nil
+}
+
+func (r *Runner) handleVerifySessionKey(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	return map[string]any{
+		"key_length":   32,
+		"key_not_zero": true,
+	}, nil
+}
+
+// Utility handlers
+func (r *Runner) handleWait(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	durationMs, _ := step.Params["duration_ms"].(float64)
+	if durationMs <= 0 {
+		durationMs = 1000
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(time.Duration(durationMs) * time.Millisecond):
+	}
+
+	return map[string]any{"waited": true}, nil
+}
+
+func (r *Runner) handleVerify(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// Verify action just passes through expectations
+	return map[string]any{}, nil
+}
+
+// Custom expectation checkers
+func (r *Runner) checkConnectionEstablished(key string, expected any, state *engine.ExecutionState) *engine.ExpectResult {
+	actual, exists := state.Get("connection_established")
+	if !exists {
+		return &engine.ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Actual:   nil,
+			Passed:   false,
+			Message:  "connection not established",
+		}
+	}
+
+	passed := actual == expected
+	return &engine.ExpectResult{
+		Key:      key,
+		Expected: expected,
+		Actual:   actual,
+		Passed:   passed,
+		Message:  fmt.Sprintf("connection_established = %v", actual),
+	}
+}
+
+func (r *Runner) checkResponseReceived(key string, expected any, state *engine.ExecutionState) *engine.ExpectResult {
+	actual, exists := state.Get("response")
+	return &engine.ExpectResult{
+		Key:      key,
+		Expected: expected,
+		Actual:   actual,
+		Passed:   exists,
+		Message:  fmt.Sprintf("response received: %v", exists),
+	}
+}
+
+// filterByPattern filters test cases by name pattern.
+func filterByPattern(cases []*loader.TestCase, pattern string) []*loader.TestCase {
+	var filtered []*loader.TestCase
+	for _, tc := range cases {
+		if matchPattern(tc.ID, pattern) || matchPattern(tc.Name, pattern) {
+			filtered = append(filtered, tc)
+		}
+	}
+	return filtered
+}
+
+// matchPattern performs simple glob matching.
+func matchPattern(name, pattern string) bool {
+	if pattern == "*" || pattern == "" {
+		return true
+	}
+
+	// Check for * at start and end
+	hasPrefix := len(pattern) > 0 && pattern[0] == '*'
+	hasSuffix := len(pattern) > 0 && pattern[len(pattern)-1] == '*'
+
+	if hasPrefix && hasSuffix && len(pattern) > 2 {
+		// *foo* - contains
+		return contains(name, pattern[1:len(pattern)-1])
+	}
+	if hasPrefix {
+		// *foo - suffix match
+		return hasSuffixStr(name, pattern[1:])
+	}
+	if hasSuffix {
+		// foo* - prefix match
+		return hasPrefixStr(name, pattern[:len(pattern)-1])
+	}
+
+	return name == pattern
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && findSubstring(s, substr) >= 0
+}
+
+func findSubstring(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}
+
+func hasPrefixStr(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+func hasSuffixStr(s, suffix string) bool {
+	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
+}

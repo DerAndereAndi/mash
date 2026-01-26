@@ -179,3 +179,13 @@ func GenerateDiscriminator() (uint16, error) {
 	}
 	return uint16(n.Uint64()), nil
 }
+
+// MustParseSetupCode parses a setup code string and panics on error.
+// Use only in tests or when the setup code is known to be valid.
+func MustParseSetupCode(s string) SetupCode {
+	sc, err := ParseSetupCode(s)
+	if err != nil {
+		panic(err)
+	}
+	return sc
+}

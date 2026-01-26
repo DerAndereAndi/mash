@@ -1,0 +1,55 @@
+# Test Case: Basic Device Discovery
+# Verifies that a controller can discover a device via mDNS
+
+id: TC-DISC-001
+name: Basic Device Discovery
+description: |
+  Verifies that a controller can discover a MASH device
+  advertising via mDNS and retrieve its basic information.
+
+pics_requirements:
+  - D.COMM.SC  # Device supports secure connection
+
+preconditions:
+  - device_advertising: true
+  - device_in_network: true
+
+steps:
+  - name: Start mDNS discovery
+    action: start_discovery
+    params:
+      timeout_ms: 5000
+    expect:
+      discovery_started: true
+
+  - name: Wait for device advertisement
+    action: wait_for_device
+    params:
+      device_type: EV_CHARGER
+    expect:
+      device_found: true
+      device_has_txt_records: true
+
+  - name: Verify device TXT records
+    action: verify_txt_records
+    params:
+      required_keys:
+        - "id"
+        - "cat"
+        - "proto"
+    expect:
+      txt_valid: true
+
+  - name: Stop discovery
+    action: stop_discovery
+    expect:
+      discovery_stopped: true
+
+postconditions:
+  - discovery_cleaned_up: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - mDNS
+  - basic

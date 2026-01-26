@@ -1,0 +1,75 @@
+# Test Case: Read Device Information
+# Verifies reading basic device attributes
+
+id: TC-READ-001
+name: Read Device Information
+description: |
+  Verifies that a controller can read the DeviceInfo feature
+  from endpoint 0 of a connected device.
+
+pics_requirements:
+  - D.COMM.SC     # Device supports secure connection
+  - D.INFO.BASIC  # Device supports basic info attributes
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read endpoint list from device root
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: endpointList
+    expect:
+      read_success: true
+      endpoint_list_not_empty: true
+
+  - name: Read device vendor ID
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorId
+    expect:
+      read_success: true
+      vendor_id_present: true
+
+  - name: Read device product ID
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: productId
+    expect:
+      read_success: true
+      product_id_present: true
+
+  - name: Read device serial number
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: serialNumber
+    expect:
+      read_success: true
+      serial_number_format_valid: true
+
+  - name: Read feature map
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: featureMap
+    expect:
+      read_success: true
+      feature_map_valid: true
+
+postconditions:
+  - session_still_active: true
+
+timeout: "5s"
+tags:
+  - read
+  - device-info
+  - basic

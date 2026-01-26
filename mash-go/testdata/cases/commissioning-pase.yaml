@@ -1,0 +1,58 @@
+# Test Case: PASE Commissioning
+# Verifies password-authenticated session establishment
+
+id: TC-COMM-001
+name: PASE Commissioning Handshake
+description: |
+  Verifies that a controller can establish a secure session
+  with a device using PASE (Password-Authenticated Session Establishment).
+
+pics_requirements:
+  - D.COMM.SC     # Device supports secure connection
+  - D.COMM.PASE   # Device supports PASE commissioning
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - tls_connection_established: true
+
+steps:
+  - name: Send PASE request with public value
+    action: pase_request
+    params:
+      password: "test-password"
+    expect:
+      request_sent: true
+      pA_generated: true
+
+  - name: Receive PASE response with server public value
+    action: pase_receive_response
+    expect:
+      response_received: true
+      pB_received: true
+
+  - name: Send PASE confirm
+    action: pase_confirm
+    expect:
+      confirm_sent: true
+
+  - name: Receive PASE verify
+    action: pase_receive_verify
+    expect:
+      verify_received: true
+      session_established: true
+
+  - name: Verify session key derived
+    action: verify_session_key
+    expect:
+      key_length: 32
+      key_not_zero: true
+
+postconditions:
+  - session_active: true
+  - commissioning_complete: true
+
+timeout: "5s"
+tags:
+  - commissioning
+  - PASE
+  - security
