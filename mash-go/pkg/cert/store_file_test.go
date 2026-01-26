@@ -309,7 +309,6 @@ func TestFileControllerStore(t *testing.T) {
 		info := &CommissionedDevice{
 			DeviceID:   "dev-123",
 			SKI:        []byte{0x01, 0x02, 0x03},
-			ZoneID:     "my-zone",
 			DeviceType: "EVSE",
 		}
 
@@ -348,7 +347,6 @@ func TestFileControllerStore(t *testing.T) {
 			info := &CommissionedDevice{
 				DeviceID:   id,
 				SKI:        []byte{byte(i)},
-				ZoneID:     "zone-1",
 				DeviceType: "EVSE",
 			}
 			_ = store.AddDevice(info)
@@ -373,7 +371,6 @@ func TestFileControllerStore(t *testing.T) {
 		info := &CommissionedDevice{
 			DeviceID: "dev-remove",
 			SKI:      []byte{0x01},
-			ZoneID:   "zone-1",
 		}
 		_ = store.AddDevice(info)
 		_ = store.Save()

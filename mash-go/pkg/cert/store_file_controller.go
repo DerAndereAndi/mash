@@ -19,7 +19,6 @@ type CommissionedDevice struct {
 	DeviceID   string `json:"device_id"`
 	SKI        []byte `json:"-"` // Stored as hex in JSON
 	SKIHex     string `json:"ski"`
-	ZoneID     string `json:"zone_id"`
 	DeviceType string `json:"device_type,omitempty"`
 }
 
