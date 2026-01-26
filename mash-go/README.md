@@ -24,19 +24,80 @@ go test ./...
 
 ### mash-device
 
-Run a MASH device that advertises via mDNS and accepts controller connections.
+Reference MASH device implementation supporting multiple device types with mDNS discovery, commissioning, and simulation mode.
 
 ```bash
-go run ./cmd/mash-device -port 8443 -name "My Device"
+# Start EVSE device with default settings
+mash-device -type evse -discriminator 1234 -setup-code 12345678
+
+# Start inverter with custom branding
+mash-device -type inverter -brand "Solar Corp" -model "Inverter 10kW"
+
+# Start battery in simulation mode with debug logging
+mash-device -type battery -simulate -log-level debug
+
+# Custom port and device name
+mash-device -type evse -port 9443 -name "Garage Charger"
 ```
+
+**Flags:**
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-type` | Device type: `evse`, `inverter`, `battery` | `evse` |
+| `-discriminator` | Discriminator for commissioning (0-4095) | `1234` |
+| `-setup-code` | 8-digit setup code for commissioning | `12345678` |
+| `-port` | Listen port | `8443` |
+| `-simulate` | Enable simulation mode with synthetic data | `true` |
+| `-log-level` | Log level: `debug`, `info`, `warn`, `error` | `info` |
+| `-config` | Configuration file path | - |
+| `-serial` | Device serial number (auto-generated if empty) | - |
+| `-brand` | Device brand/vendor name | `MASH Reference` |
+| `-model` | Device model name (auto-generated if empty) | - |
+| `-name` | User-friendly device name | - |
+
+**Device Types:**
+- **evse**: EV charger (22kW, 3-phase, supports power limiting)
+- **inverter**: PV inverter (10kW, 3-phase, production only)
+- **battery**: Battery storage (5kW charge/discharge, bidirectional)
 
 ### mash-controller
 
-Run a MASH controller that discovers and connects to devices.
+Reference MASH controller (Energy Management System) with device discovery, commissioning, and interactive command interface.
 
 ```bash
-go run ./cmd/mash-controller
+# Start controller with interactive mode
+mash-controller -zone-name "My Home" -interactive
+
+# Start controller that auto-commissions discovered devices
+mash-controller -auto-commission -log-level debug
+
+# Custom zone configuration
+mash-controller -zone-name "Building A" -zone-type building
 ```
+
+**Flags:**
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-zone-name` | Zone name for this controller | `Home Energy` |
+| `-zone-type` | Zone type: `grid`, `building`, `home`, `user` | `home` |
+| `-interactive` | Enable interactive command mode | `false` |
+| `-auto-commission` | Automatically commission discovered devices | `false` |
+| `-log-level` | Log level: `debug`, `info`, `warn`, `error` | `info` |
+| `-config` | Configuration file path | - |
+
+**Interactive Commands:**
+| Command | Description |
+|---------|-------------|
+| `discover` | Discover commissionable devices |
+| `list` | List connected devices |
+| `commission <discriminator> <setup-code>` | Commission a device |
+| `limit <device-id> <power-kw>` | Set power limit in kW |
+| `clear <device-id>` | Clear power limit |
+| `pause <device-id>` | Pause device operation |
+| `resume <device-id>` | Resume device operation |
+| `status` | Show controller status |
+| `help` | Show command help |
+| `quit` | Exit the controller |
 
 ### mash-test
 
