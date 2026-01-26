@@ -382,6 +382,9 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 	// Start message loop in background to receive responses/notifications
 	go s.runDeviceMessageLoop(deviceID, framedConn, deviceSession)
 
+	// Persist state immediately after commissioning
+	_ = s.SaveState()
+
 	// Emit event
 	s.emitEvent(Event{
 		Type:     EventCommissioned,

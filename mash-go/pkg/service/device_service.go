@@ -424,6 +424,9 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// For now, assume HomeManager type since we don't have certificate-based zone typing yet
 	s.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
 
+	// Persist state immediately after commissioning
+	_ = s.SaveState()
+
 	// Exit commissioning mode after successful commission
 	// The device should no longer advertise as commissionable
 	if err := s.ExitCommissioningMode(); err != nil {
