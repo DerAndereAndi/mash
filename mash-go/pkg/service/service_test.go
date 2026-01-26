@@ -167,6 +167,18 @@ func (m *mockBrowser) AddDevice(svc *discovery.CommissionableService) {
 	m.commissionableDevices = append(m.commissionableDevices, svc)
 }
 
+func (m *mockBrowser) AddOperationalDevice(svc *discovery.OperationalService) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.operationalDevices = append(m.operationalDevices, svc)
+}
+
+func (m *mockBrowser) ClearOperationalDevices() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.operationalDevices = nil
+}
+
 // Test helpers
 
 func validDeviceConfig() DeviceConfig {
@@ -1092,6 +1104,163 @@ func TestControllerServiceStopDiscovery(t *testing.T) {
 func TestEventDeviceDiscoveredString(t *testing.T) {
 	if EventDeviceDiscovered.String() != "DEVICE_DISCOVERED" {
 		t.Errorf("expected DEVICE_DISCOVERED, got %s", EventDeviceDiscovered.String())
+	}
+}
+
+// TestControllerOperationalDiscoveryMatchesDeviceID verifies that operational discovery
+// correctly matches devices by device ID. This is a unit test for the bug where
+// device IDs were derived differently on controller vs device side.
+func TestControllerOperationalDiscoveryMatchesDeviceID(t *testing.T) {
+	config := validControllerConfig()
+
+	svc, err := NewControllerService(config)
+	if err != nil {
+		t.Fatalf("NewControllerService failed: %v", err)
+	}
+
+	// Set up mock browser
+	browser := newMockBrowser()
+	svc.SetBrowser(browser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// Manually set zone ID (normally set during commissioning)
+	svc.mu.Lock()
+	svc.zoneID = "zone123456789abc"
+	svc.mu.Unlock()
+
+	// Simulate a known device that was previously commissioned
+	// The device ID must be exactly what the device advertises
+	knownDeviceID := "abc123def456789a"
+	svc.mu.Lock()
+	svc.connectedDevices[knownDeviceID] = &ConnectedDevice{
+		ID:        knownDeviceID,
+		Host:      "device.local",
+		Port:      8443,
+		Connected: false, // Currently disconnected
+		LastSeen:  time.Now().Add(-1 * time.Minute),
+	}
+	svc.mu.Unlock()
+
+	// Track events
+	var rediscoveredDeviceID string
+	var mu sync.Mutex
+	eventReceived := make(chan struct{}, 1)
+	svc.OnEvent(func(e Event) {
+		mu.Lock()
+		defer mu.Unlock()
+		if e.Type == EventDeviceRediscovered {
+			rediscoveredDeviceID = e.DeviceID
+			select {
+			case eventReceived <- struct{}{}:
+			default:
+			}
+		}
+	})
+
+	// Add operational device with MATCHING device ID to mock browser
+	browser.AddOperationalDevice(&discovery.OperationalService{
+		InstanceName: "zone123456789abc-abc123def456789a",
+		Host:         "device.local",
+		Port:         8443,
+		ZoneID:       "zone123456789abc",
+		DeviceID:     knownDeviceID, // Same ID as stored
+	})
+
+	// Start operational discovery
+	if err := svc.StartOperationalDiscovery(ctx); err != nil {
+		t.Fatalf("StartOperationalDiscovery failed: %v", err)
+	}
+	defer svc.StopOperationalDiscovery()
+
+	// Wait for rediscovery event
+	select {
+	case <-eventReceived:
+		mu.Lock()
+		gotID := rediscoveredDeviceID
+		mu.Unlock()
+
+		if gotID != knownDeviceID {
+			t.Errorf("expected rediscovered device ID %s, got %s", knownDeviceID, gotID)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for EventDeviceRediscovered - device ID matching failed")
+	}
+}
+
+// TestControllerOperationalDiscoveryIgnoresUnknownDevices verifies that operational
+// discovery ignores devices that aren't in the controller's known device list.
+func TestControllerOperationalDiscoveryIgnoresUnknownDevices(t *testing.T) {
+	config := validControllerConfig()
+
+	svc, err := NewControllerService(config)
+	if err != nil {
+		t.Fatalf("NewControllerService failed: %v", err)
+	}
+
+	browser := newMockBrowser()
+	svc.SetBrowser(browser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// Set zone ID
+	svc.mu.Lock()
+	svc.zoneID = "zone123456789abc"
+	svc.mu.Unlock()
+
+	// Add a known device with one ID
+	knownDeviceID := "known1234567890a"
+	svc.mu.Lock()
+	svc.connectedDevices[knownDeviceID] = &ConnectedDevice{
+		ID:        knownDeviceID,
+		Connected: false,
+	}
+	svc.mu.Unlock()
+
+	// Track events
+	var gotRediscovered bool
+	var mu sync.Mutex
+	svc.OnEvent(func(e Event) {
+		mu.Lock()
+		defer mu.Unlock()
+		if e.Type == EventDeviceRediscovered {
+			gotRediscovered = true
+		}
+	})
+
+	// Add operational device with DIFFERENT device ID (unknown device)
+	browser.AddOperationalDevice(&discovery.OperationalService{
+		InstanceName: "zone123456789abc-unknowndevice123",
+		Host:         "unknown.local",
+		Port:         8443,
+		ZoneID:       "zone123456789abc",
+		DeviceID:     "unknowndevice123", // Different from known device
+	})
+
+	// Start operational discovery
+	if err := svc.StartOperationalDiscovery(ctx); err != nil {
+		t.Fatalf("StartOperationalDiscovery failed: %v", err)
+	}
+
+	// Wait a bit - should NOT receive rediscovery event
+	time.Sleep(200 * time.Millisecond)
+
+	svc.StopOperationalDiscovery()
+
+	mu.Lock()
+	gotEvent := gotRediscovered
+	mu.Unlock()
+
+	if gotEvent {
+		t.Error("should NOT have received EventDeviceRediscovered for unknown device")
 	}
 }
 

@@ -339,8 +339,20 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 		return nil, ErrCommissionFailed
 	}
 
-	// Derive IDs from shared secret
-	deviceID := deriveDeviceID(sharedSecret)
+	// Derive device ID from the device's TLS certificate
+	// This must match what the device advertises in operational mDNS
+	tlsState := conn.ConnectionState()
+	if len(tlsState.PeerCertificates) == 0 {
+		conn.Close()
+		return nil, fmt.Errorf("%w: no device certificate", ErrCommissionFailed)
+	}
+	deviceID, err := discovery.DeviceIDFromPublicKey(tlsState.PeerCertificates[0])
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("%w: failed to derive device ID: %v", ErrCommissionFailed, err)
+	}
+
+	// Zone ID is derived from shared secret (both sides compute the same value)
 	zoneID := deriveZoneID(sharedSecret)
 
 	// Create framed connection wrapper for operational messaging

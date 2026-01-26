@@ -804,3 +804,266 @@ func TestE2E_NotificationDelivery(t *testing.T) {
 
 	t.Log("Notification delivery test passed")
 }
+
+// TestE2E_DeviceIDConsistencyForReconnection verifies that the device ID stored by the
+// controller after commissioning matches the device ID advertised by the device.
+// This is critical for reconnection - if these don't match, operational discovery
+// won't recognize the device.
+func TestE2E_DeviceIDConsistencyForReconnection(t *testing.T) {
+	// === Setup Device ===
+	device := model.NewDevice("evse-reconnect", 0x1234, 0x5678)
+	deviceConfig := validDeviceConfig()
+	deviceConfig.ListenAddress = "localhost:0"
+	deviceConfig.SetupCode = "12345678"
+	deviceConfig.Discriminator = 3333 // Must be <= 4095
+
+	deviceSvc, err := NewDeviceService(device, deviceConfig)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	deviceAdvertiser := newMockAdvertiser()
+	deviceSvc.SetAdvertiser(deviceAdvertiser)
+
+	// Track device's zone ID
+	var deviceZoneID string
+	var deviceEventMu sync.Mutex
+	deviceSvc.OnEvent(func(e Event) {
+		deviceEventMu.Lock()
+		defer deviceEventMu.Unlock()
+		if e.Type == EventConnected && e.ZoneID != "" {
+			deviceZoneID = e.ZoneID
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := deviceSvc.Start(ctx); err != nil {
+		t.Fatalf("Device Start failed: %v", err)
+	}
+	defer func() { _ = deviceSvc.Stop() }()
+
+	if err := deviceSvc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	addr := deviceSvc.TLSAddr()
+	if addr == nil {
+		t.Fatal("Device TLS address is nil")
+	}
+
+	// === Setup Controller ===
+	controllerConfig := validControllerConfig()
+	controllerSvc, err := NewControllerService(controllerConfig)
+	if err != nil {
+		t.Fatalf("NewControllerService failed: %v", err)
+	}
+
+	browser := newMockBrowser()
+	controllerSvc.SetBrowser(browser)
+
+	if err := controllerSvc.Start(ctx); err != nil {
+		t.Fatalf("Controller Start failed: %v", err)
+	}
+	defer func() { _ = controllerSvc.Stop() }()
+
+	// === Commission ===
+	port := parseTestPort(addr.String())
+	commissionSvc := &discovery.CommissionableService{
+		InstanceName:  "MASH-3333",
+		Host:          "localhost",
+		Port:          port,
+		Discriminator: 3333,
+	}
+
+	connectedDevice, err := controllerSvc.Commission(ctx, commissionSvc, "12345678")
+	if err != nil {
+		t.Fatalf("Commission failed: %v", err)
+	}
+
+	// Wait for device to process connection
+	time.Sleep(100 * time.Millisecond)
+
+	// === Get the device ID stored by controller ===
+	controllerStoredDeviceID := connectedDevice.ID
+	t.Logf("Controller stored device ID: %s", controllerStoredDeviceID)
+
+	// === Get the device ID from device's operational advertising ===
+	deviceEventMu.Lock()
+	zoneID := deviceZoneID
+	deviceEventMu.Unlock()
+
+	if zoneID == "" {
+		t.Fatal("Device did not receive zone connection event")
+	}
+
+	// Check the mock advertiser for the operational info
+	deviceAdvertiser.mu.Lock()
+	opInfo, exists := deviceAdvertiser.operationalZones[zoneID]
+	deviceAdvertiser.mu.Unlock()
+
+	if !exists {
+		t.Fatal("Device did not start operational advertising for the zone")
+	}
+
+	advertisedDeviceID := opInfo.DeviceID
+	t.Logf("Device advertised device ID: %s", advertisedDeviceID)
+
+	// === THE CRITICAL CHECK ===
+	// This is exactly what the bug was about - these didn't match before the fix
+	if controllerStoredDeviceID != advertisedDeviceID {
+		t.Errorf("DEVICE ID MISMATCH - reconnection would fail!\n"+
+			"  Controller stored: %s\n"+
+			"  Device advertises: %s\n"+
+			"  These must be identical for operational discovery to work.",
+			controllerStoredDeviceID, advertisedDeviceID)
+	} else {
+		t.Log("Device IDs match - reconnection will work correctly")
+	}
+
+	// Also verify the zone IDs match
+	controllerZoneID := controllerSvc.ZoneID()
+	if controllerZoneID != zoneID {
+		t.Errorf("Zone ID mismatch:\n  Controller: %s\n  Device: %s",
+			controllerZoneID, zoneID)
+	}
+
+	if opInfo.ZoneID != zoneID {
+		t.Errorf("Advertised zone ID mismatch:\n  Expected: %s\n  Advertised: %s",
+			zoneID, opInfo.ZoneID)
+	}
+}
+
+// TestE2E_ReconnectionAfterDisconnect tests the full reconnection flow:
+// 1. Commission a device
+// 2. Disconnect
+// 3. Verify operational discovery can find and reconnect to the device
+func TestE2E_ReconnectionAfterDisconnect(t *testing.T) {
+	// === Setup Device ===
+	device := model.NewDevice("evse-reconnect-full", 0x1234, 0x5678)
+	deviceConfig := validDeviceConfig()
+	deviceConfig.ListenAddress = "localhost:0"
+	deviceConfig.SetupCode = "12345678"
+	deviceConfig.Discriminator = 2222 // Must be <= 4095
+
+	deviceSvc, err := NewDeviceService(device, deviceConfig)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	deviceAdvertiser := newMockAdvertiser()
+	deviceSvc.SetAdvertiser(deviceAdvertiser)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := deviceSvc.Start(ctx); err != nil {
+		t.Fatalf("Device Start failed: %v", err)
+	}
+	defer func() { _ = deviceSvc.Stop() }()
+
+	if err := deviceSvc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	addr := deviceSvc.TLSAddr()
+
+	// === Setup Controller ===
+	controllerConfig := validControllerConfig()
+	controllerSvc, err := NewControllerService(controllerConfig)
+	if err != nil {
+		t.Fatalf("NewControllerService failed: %v", err)
+	}
+
+	browser := newMockBrowser()
+	controllerSvc.SetBrowser(browser)
+
+	// Track controller events
+	reconnectedCh := make(chan string, 1)
+	controllerSvc.OnEvent(func(e Event) {
+		if e.Type == EventDeviceReconnected {
+			select {
+			case reconnectedCh <- e.DeviceID:
+			default:
+			}
+		}
+	})
+
+	if err := controllerSvc.Start(ctx); err != nil {
+		t.Fatalf("Controller Start failed: %v", err)
+	}
+	defer func() { _ = controllerSvc.Stop() }()
+
+	// === Commission ===
+	port := parseTestPort(addr.String())
+	commissionSvc := &discovery.CommissionableService{
+		InstanceName:  "MASH-2222",
+		Host:          "localhost",
+		Port:          port,
+		Discriminator: 2222,
+	}
+
+	connectedDevice, err := controllerSvc.Commission(ctx, commissionSvc, "12345678")
+	if err != nil {
+		t.Fatalf("Commission failed: %v", err)
+	}
+
+	deviceID := connectedDevice.ID
+	zoneID := controllerSvc.ZoneID()
+	t.Logf("Commissioned device: %s (zone: %s)", deviceID, zoneID)
+
+	// Wait for stable connection
+	time.Sleep(100 * time.Millisecond)
+
+	// === Simulate disconnect ===
+	// Directly mark device as disconnected (simulates network failure)
+	// In real scenario, this happens when the message loop detects connection closure
+	controllerSvc.HandleDeviceDisconnect(deviceID)
+
+	// Verify device is marked disconnected
+	storedDevice := controllerSvc.GetDevice(deviceID)
+	if storedDevice == nil {
+		t.Fatal("Device record missing after disconnect")
+	}
+	if storedDevice.Connected {
+		t.Fatal("Device should be marked as disconnected")
+	}
+	t.Log("Device marked as disconnected")
+
+	// === Setup mock browser with operational service ===
+	// This simulates what the device advertises via mDNS
+	browser.AddOperationalDevice(&discovery.OperationalService{
+		InstanceName: zoneID + "-" + deviceID,
+		Host:         "localhost",
+		Port:         port,
+		ZoneID:       zoneID,
+		DeviceID:     deviceID, // Must match what controller stored
+	})
+
+	// === Start operational discovery ===
+	if err := controllerSvc.StartOperationalDiscovery(ctx); err != nil {
+		t.Fatalf("StartOperationalDiscovery failed: %v", err)
+	}
+	defer controllerSvc.StopOperationalDiscovery()
+
+	// === Wait for reconnection ===
+	select {
+	case reconnectedID := <-reconnectedCh:
+		if reconnectedID != deviceID {
+			t.Errorf("Reconnected device ID mismatch: expected %s, got %s", deviceID, reconnectedID)
+		}
+		t.Logf("Device reconnected successfully: %s", reconnectedID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timed out waiting for device reconnection")
+	}
+
+	// Verify device is marked connected again
+	storedDevice = controllerSvc.GetDevice(deviceID)
+	if storedDevice == nil {
+		t.Fatal("Device record missing after reconnection")
+	}
+	if !storedDevice.Connected {
+		t.Error("Device should be marked as connected after reconnection")
+	}
+}
