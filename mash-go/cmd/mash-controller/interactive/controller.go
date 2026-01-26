@@ -33,11 +33,12 @@ type ControllerConfig interface {
 
 // Controller handles interactive mode for mash-controller.
 type Controller struct {
-	svc       *service.ControllerService
-	cem       *examples.CEM
-	config    ControllerConfig
-	formatter *inspect.Formatter
-	rl        *readline.Instance
+	svc            *service.ControllerService
+	cem            *examples.CEM
+	config         ControllerConfig
+	localInspector *inspect.Inspector // Inspects the controller's own CEM model
+	formatter      *inspect.Formatter
+	rl             *readline.Instance
 }
 
 // New creates a new interactive controller handler.
@@ -52,11 +53,12 @@ func New(svc *service.ControllerService, cem *examples.CEM, cfg ControllerConfig
 	}
 
 	return &Controller{
-		svc:       svc,
-		cem:       cem,
-		config:    cfg,
-		formatter: inspect.NewFormatter(),
-		rl:        rl,
+		svc:            svc,
+		cem:            cem,
+		config:         cfg,
+		localInspector: inspect.NewInspector(cem.Device()),
+		formatter:      inspect.NewFormatter(),
+		rl:             rl,
 	}, nil
 }
 
@@ -165,7 +167,8 @@ MASH Controller Commands:
     decommission <device-id>          - Remove a device (alias: kick)
 
   Inspection:
-    inspect <device-id> [path]        - Inspect device structure
+    inspect                           - Inspect this controller's model
+    inspect <device-id> [path]        - Inspect a connected device
     read <device-id>/<path>           - Read an attribute value
     write <device-id>/<path> <value>  - Write an attribute value
 
@@ -293,11 +296,9 @@ func (c *Controller) cmdDecommission(args []string) {
 // cmdInspect handles the inspect command.
 func (c *Controller) cmdInspect(ctx context.Context, args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(c.rl.Stdout(),"Usage: inspect <device-id> [path]")
-		fmt.Fprintln(c.rl.Stdout(),"  Examples:")
-		fmt.Fprintln(c.rl.Stdout(),"    inspect evse-1234        - Show device overview")
-		fmt.Fprintln(c.rl.Stdout(),"    inspect evse-1234/1      - Show endpoint 1")
-		fmt.Fprintln(c.rl.Stdout(),"    inspect evse-1234/1/2    - Show feature on endpoint 1")
+		// No args: show local controller's CEM model
+		tree := c.localInspector.InspectDevice()
+		fmt.Fprint(c.rl.Stdout(), c.localInspector.FormatDeviceTree(tree, c.formatter))
 		return
 	}
 
