@@ -56,6 +56,7 @@ import (
 	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/examples"
 	"github.com/mash-protocol/mash-go/pkg/service"
 	"github.com/mash-protocol/mash-go/pkg/wire"
@@ -137,7 +138,9 @@ func main() {
 	log.Printf("Service started (state: %s)", svc.State())
 
 	// Start background tasks
-	go runDiscoveryLoop(ctx)
+	if err := svc.StartDiscovery(ctx, nil); err != nil {
+		log.Printf("Failed to start discovery: %v", err)
+	}
 	go runMonitoringLoop(ctx)
 
 	// Run interactive mode or wait for signal
@@ -190,6 +193,25 @@ func parseZoneType(s string) (cert.ZoneType, error) {
 
 func handleEvent(event service.Event) {
 	switch event.Type {
+	case service.EventDeviceDiscovered:
+		if d, ok := event.DiscoveredService.(*discovery.CommissionableService); ok {
+			log.Printf("[EVENT] Device discovered: %s (discriminator: %d, host: %s:%d)",
+				d.InstanceName, d.Discriminator, d.Host, d.Port)
+			for _, cat := range d.Categories {
+				log.Printf("     Category: %s", cat)
+			}
+
+			// Auto-commission if enabled
+			if config.AutoCommission {
+				log.Printf("Auto-commissioning device %d...", d.Discriminator)
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				_, err := svc.Commission(ctx, d, "12345678") // Default setup code
+				cancel()
+				if err != nil {
+					log.Printf("Failed to commission: %v", err)
+				}
+			}
+		}
 	case service.EventConnected:
 		log.Printf("[EVENT] Device connected: %s", event.DeviceID)
 	case service.EventDisconnected:
@@ -249,62 +271,6 @@ func setupDeviceMonitoring(deviceID string) {
 	}
 }
 
-func runDiscoveryLoop(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	// Initial discovery
-	discoverDevices(ctx)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			discoverDevices(ctx)
-		}
-	}
-}
-
-func discoverDevices(ctx context.Context) {
-	log.Println("Discovering commissionable devices...")
-
-	discoverCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	devices, err := svc.Discover(discoverCtx, nil)
-	if err != nil {
-		// Discovery might not be available without a browser
-		if config.LogLevel == "debug" {
-			log.Printf("Discovery: %v", err)
-		}
-		return
-	}
-
-	if len(devices) == 0 {
-		log.Println("No commissionable devices found")
-		return
-	}
-
-	log.Printf("Found %d commissionable device(s):", len(devices))
-	for i, d := range devices {
-		log.Printf("  %d. %s (discriminator: %d, host: %s:%d)",
-			i+1, d.InstanceName, d.Discriminator, d.Host, d.Port)
-		for _, cat := range d.Categories {
-			log.Printf("     Category: %s", cat)
-		}
-
-		// Auto-commission if enabled
-		if config.AutoCommission {
-			log.Printf("Auto-commissioning device %d...", d.Discriminator)
-			_, err := svc.Commission(ctx, d, "12345678") // Default setup code
-			if err != nil {
-				log.Printf("Failed to commission: %v", err)
-			}
-		}
-	}
-}
-
 func runMonitoringLoop(ctx context.Context) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -356,7 +322,21 @@ func runInteractive(ctx context.Context, cancel context.CancelFunc) {
 			printHelp()
 
 		case "discover":
-			discoverDevices(ctx)
+			fmt.Println("Discovering commissionable devices...")
+			discoverCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			devices, err := svc.Discover(discoverCtx, nil)
+			cancel()
+			if err != nil {
+				fmt.Printf("Discovery error: %v\n", err)
+			} else if len(devices) == 0 {
+				fmt.Println("No commissionable devices found")
+			} else {
+				fmt.Printf("Found %d commissionable device(s):\n", len(devices))
+				for i, d := range devices {
+					fmt.Printf("  %d. %s (discriminator: %d, host: %s:%d)\n",
+						i+1, d.InstanceName, d.Discriminator, d.Host, d.Port)
+				}
+			}
 
 		case "list", "ls":
 			listDevices()
