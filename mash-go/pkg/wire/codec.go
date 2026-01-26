@@ -205,19 +205,21 @@ func PeekMessageType(data []byte) (MessageType, error) {
 		}
 	}
 
-	// If field 2 is a valid status (0-13) and > 4 (not a valid operation), it's Response
-	// Status values 5-13 are not valid Operation values
-	if field2 > 4 {
-		return MessageTypeResponse, nil
-	}
-
 	// Check for control message: Type (key 1) is 1-3 AND no endpoint/feature fields
+	// Must check this BEFORE the field2 > 4 check because control messages use
+	// field 2 as a sequence number which can be any uint32 value
 	if field1 >= 1 && field1 <= 3 {
 		_, hasField3 := rawMsg[3]
 		_, hasField4 := rawMsg[4]
 		if !hasField3 && !hasField4 {
 			return MessageTypeControl, nil
 		}
+	}
+
+	// If field 2 is a valid status (0-13) and > 4 (not a valid operation), it's Response
+	// Status values 5-13 are not valid Operation values
+	if field2 > 4 {
+		return MessageTypeResponse, nil
 	}
 
 	// Check for request: field 2 is valid operation (1-4) and has endpoint/feature
