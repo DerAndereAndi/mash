@@ -226,9 +226,19 @@ func setupDeviceMonitoring(deviceID string) {
 		return
 	}
 
-	// Set up notification handler to route to CEM
+	// Set up notification handler to route to CEM and display updates
 	session.SetNotificationHandler(func(notif *wire.Notification) {
 		cem.HandleNotification(deviceID, notif.EndpointID, notif.FeatureID, notif.Changes)
+
+		// Log power updates in real-time
+		if notif.FeatureID == 2 { // FeatureMeasurement
+			if rawPower, exists := notif.Changes[1]; exists { // MeasurementAttrACActivePower
+				if power, ok := wire.ToInt64(rawPower); ok {
+					powerKW := float64(power) / 1_000_000.0
+					log.Printf("[NOTIFY] Device %s power: %.1f kW", deviceID[:8], powerKW)
+				}
+			}
+		}
 	})
 
 	// Subscribe to Measurement on endpoint 1 (functional endpoint)

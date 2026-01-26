@@ -306,6 +306,12 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// For now, assume HomeManager type since we don't have certificate-based zone typing yet
 	s.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
 
+	// Exit commissioning mode after successful commission
+	// The device should no longer advertise as commissionable
+	if err := s.ExitCommissioningMode(); err != nil {
+		s.debugLog("handleCommissioningConnection: failed to exit commissioning mode", "error", err)
+	}
+
 	// Create framed connection wrapper for operational messaging
 	framedConn := newFramedConnection(conn)
 
