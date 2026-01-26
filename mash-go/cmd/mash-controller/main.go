@@ -58,6 +58,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/examples"
 	"github.com/mash-protocol/mash-go/pkg/service"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // Config holds the controller configuration.
@@ -193,12 +194,48 @@ func handleEvent(event service.Event) {
 		log.Printf("[EVENT] Device connected: %s", event.DeviceID)
 	case service.EventDisconnected:
 		log.Printf("[EVENT] Device disconnected: %s", event.DeviceID)
+		// Remove from CEM
+		_ = cem.DisconnectDevice(event.DeviceID)
 	case service.EventCommissioned:
 		log.Printf("[EVENT] Device commissioned: %s", event.DeviceID)
+		// Wire up device to CEM for monitoring
+		go setupDeviceMonitoring(event.DeviceID)
 	case service.EventDecommissioned:
 		log.Printf("[EVENT] Device decommissioned: %s", event.DeviceID)
+		_ = cem.DisconnectDevice(event.DeviceID)
 	case service.EventValueChanged:
 		log.Printf("[EVENT] Value changed (device: %s)", event.DeviceID)
+	}
+}
+
+func setupDeviceMonitoring(deviceID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Get the session for this device
+	session := svc.GetSession(deviceID)
+	if session == nil {
+		log.Printf("[MONITOR] No session for device %s", deviceID)
+		return
+	}
+
+	// Add device to CEM
+	_, err := cem.ConnectDevice(deviceID, session)
+	if err != nil {
+		log.Printf("[MONITOR] Failed to add device to CEM: %v", err)
+		return
+	}
+
+	// Set up notification handler to route to CEM
+	session.SetNotificationHandler(func(notif *wire.Notification) {
+		cem.HandleNotification(deviceID, notif.EndpointID, notif.FeatureID, notif.Changes)
+	})
+
+	// Subscribe to Measurement on endpoint 1 (functional endpoint)
+	if err := cem.SubscribeToMeasurement(ctx, deviceID, 1); err != nil {
+		log.Printf("[MONITOR] Failed to subscribe to measurement: %v", err)
+	} else {
+		log.Printf("[MONITOR] Subscribed to measurements for device %s", deviceID)
 	}
 }
 

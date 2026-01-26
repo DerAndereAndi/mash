@@ -10,6 +10,16 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
 
+// DeviceClient is an interface for interacting with a remote device.
+// Both interaction.Client and service.DeviceSession implement this interface.
+type DeviceClient interface {
+	Read(ctx context.Context, endpointID uint8, featureID uint8, attrIDs []uint16) (map[uint16]any, error)
+	Write(ctx context.Context, endpointID uint8, featureID uint8, attrs map[uint16]any) (map[uint16]any, error)
+	Subscribe(ctx context.Context, endpointID uint8, featureID uint8, opts *interaction.SubscribeOptions) (uint32, map[uint16]any, error)
+	Unsubscribe(ctx context.Context, subscriptionID uint32) error
+	Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[string]any) (any, error)
+}
+
 // CEM represents a Central Energy Manager that controls other devices.
 // It demonstrates how to build a MASH controller that:
 //   - Discovers and connects to controllable devices
@@ -34,7 +44,7 @@ type CEM struct {
 // ConnectedDevice represents a device the CEM is controlling.
 type ConnectedDevice struct {
 	DeviceID string
-	Client   *interaction.Client
+	Client   DeviceClient
 
 	// Cached device info
 	VendorName  string
@@ -113,7 +123,7 @@ func (c *CEM) SetZoneType(zoneType features.LimitCause) {
 
 // ConnectDevice establishes a zone relationship with a device.
 // In a real implementation, this would happen after SHIP connection and pairing.
-func (c *CEM) ConnectDevice(deviceID string, client *interaction.Client) (*ConnectedDevice, error) {
+func (c *CEM) ConnectDevice(deviceID string, client DeviceClient) (*ConnectedDevice, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
