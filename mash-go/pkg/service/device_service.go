@@ -986,3 +986,64 @@ func (s *DeviceService) LoadState() error {
 
 	return nil
 }
+
+// RemoveZone removes a zone from this device.
+// It closes the session, removes from connectedZones, stops the failsafe timer,
+// and stops operational mDNS advertising for this zone.
+func (s *DeviceService) RemoveZone(zoneID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check if zone exists
+	if _, exists := s.connectedZones[zoneID]; !exists {
+		return ErrDeviceNotFound
+	}
+
+	// Close zone session if exists
+	if session, exists := s.zoneSessions[zoneID]; exists {
+		session.Close()
+		delete(s.zoneSessions, zoneID)
+	}
+
+	// Stop and remove failsafe timer
+	if timer, exists := s.failsafeTimers[zoneID]; exists {
+		timer.Reset()
+		delete(s.failsafeTimers, zoneID)
+	}
+
+	// Cancel any duration timers for this zone
+	if zoneIndex, exists := s.zoneIndexMap[zoneID]; exists {
+		s.durationManager.CancelZoneTimers(zoneIndex)
+	}
+
+	// Stop operational mDNS advertising for this zone
+	if s.discoveryManager != nil {
+		if err := s.discoveryManager.RemoveZone(zoneID); err != nil {
+			s.debugLog("RemoveZone: failed to stop operational advertising",
+				"zoneID", zoneID, "error", err)
+		}
+	}
+
+	// Remove from connected zones
+	delete(s.connectedZones, zoneID)
+
+	// Emit event (without holding lock for event handlers)
+	go s.emitEvent(Event{
+		Type:   EventZoneRemoved,
+		ZoneID: zoneID,
+	})
+
+	return nil
+}
+
+// ListZoneIDs returns a list of all connected zone IDs.
+func (s *DeviceService) ListZoneIDs() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ids := make([]string, 0, len(s.connectedZones))
+	for id := range s.connectedZones {
+		ids = append(ids, id)
+	}
+	return ids
+}

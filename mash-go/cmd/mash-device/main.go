@@ -21,6 +21,7 @@
 //	-port int           Listen port (default 8443)
 //	-log-level string   Log level: debug, info, warn, error (default "info")
 //	-simulate           Enable simulation mode with synthetic data
+//	-interactive        Enable interactive command mode
 //	-state-dir string   Directory for persistent state
 //	-reset              Clear all persisted state before starting
 //
@@ -40,6 +41,18 @@
 //
 //	# Reset persistent state
 //	mash-device -type evse -state-dir /var/lib/mash-device -reset
+//
+//	# Start in interactive mode (simulation controlled manually)
+//	mash-device -type evse -interactive
+//
+// Interactive Commands:
+//
+//	start       - Start simulation
+//	stop        - Stop simulation
+//	power <kw>  - Set power value directly (in kW)
+//	status      - Show device status
+//	help        - Show available commands
+//	quit        - Exit the device
 package main
 
 import (
@@ -80,6 +93,7 @@ type Config struct {
 	Port          int
 	LogLevel      string
 	Simulate      bool
+	Interactive   bool
 
 	// Device-specific settings
 	SerialNumber string
@@ -114,6 +128,7 @@ func init() {
 	flag.IntVar(&config.Port, "port", 8443, "Listen port")
 	flag.StringVar(&config.LogLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	flag.BoolVar(&config.Simulate, "simulate", true, "Enable simulation mode with synthetic data")
+	flag.BoolVar(&config.Interactive, "interactive", false, "Enable interactive command mode")
 
 	flag.StringVar(&config.SerialNumber, "serial", "", "Device serial number (auto-generated if empty)")
 	flag.StringVar(&config.Brand, "brand", "MASH Reference", "Device brand/vendor name")
@@ -224,8 +239,13 @@ func main() {
 		printCommissioningInfo()
 	}
 
-	// Note: Simulation starts automatically when a zone connects (see handleEvent)
-	if config.Simulate {
+	// Set up simulation behavior
+	if config.Interactive {
+		log.Println("Interactive mode enabled - use 'start' to begin simulation")
+		interactive := NewInteractiveDevice(svc)
+		go interactive.Run(ctx, cancel)
+	} else if config.Simulate {
+		// Note: Simulation starts automatically when a zone connects (see handleEvent)
 		log.Println("Simulation mode enabled (will start when controller connects)")
 	}
 
@@ -420,8 +440,8 @@ func handleEvent(event service.Event) {
 	case service.EventConnected:
 		log.Printf("[EVENT] Zone connected: %s", event.ZoneID)
 		connectedCnt++
-		// Start simulation on first connection
-		if config.Simulate && !simRunning && connectedCnt == 1 {
+		// Start simulation on first connection (unless in interactive mode)
+		if config.Simulate && !config.Interactive && !simRunning && connectedCnt == 1 {
 			startSimulation()
 		}
 
@@ -564,3 +584,4 @@ func abs(x int) int {
 	}
 	return x
 }
+
