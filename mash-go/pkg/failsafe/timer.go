@@ -31,6 +31,7 @@ const (
 var (
 	ErrInvalidDuration = errors.New("invalid failsafe duration")
 	ErrTimerNotRunning = errors.New("failsafe timer not running")
+	ErrNilSnapshot     = errors.New("nil snapshot")
 )
 
 // State represents the failsafe state.
@@ -412,4 +413,125 @@ func CalculateAccuracy(d time.Duration) time.Duration {
 		return percentAccuracy
 	}
 	return AccuracyAbsolute
+}
+
+// TimerSnapshot captures the failsafe timer state for persistence.
+type TimerSnapshot struct {
+	// State is the current failsafe state.
+	State State
+
+	// Duration is the configured failsafe duration.
+	Duration time.Duration
+
+	// StartedAt is when the timer was started (only valid if State == StateTimerRunning).
+	StartedAt time.Time
+
+	// Remaining is how much time was remaining when the snapshot was taken.
+	Remaining time.Duration
+
+	// Limits are the failsafe power limits.
+	Limits Limits
+}
+
+// Snapshot captures the current timer state for persistence.
+func (t *Timer) Snapshot() *TimerSnapshot {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	snap := &TimerSnapshot{
+		State:    t.state,
+		Duration: t.duration,
+		Limits:   t.limits,
+	}
+
+	if t.state == StateTimerRunning {
+		snap.StartedAt = t.startedAt
+		elapsed := time.Since(t.startedAt)
+		remaining := t.duration - elapsed
+		if remaining < 0 {
+			remaining = 0
+		}
+		snap.Remaining = remaining
+	}
+
+	return snap
+}
+
+// Restore restores the timer state from a snapshot.
+// If the timer was running and the remaining time has elapsed,
+// failsafe mode is entered immediately.
+func (t *Timer) Restore(snap *TimerSnapshot) error {
+	if snap == nil {
+		return ErrNilSnapshot
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Stop any existing timers
+	if t.failsafeTimer != nil {
+		t.failsafeTimer.Stop()
+		t.failsafeTimer = nil
+	}
+	if t.gracePeriodTimer != nil {
+		t.gracePeriodTimer.Stop()
+		t.gracePeriodTimer = nil
+	}
+
+	// Restore configuration
+	if snap.Duration > 0 {
+		t.duration = snap.Duration
+	}
+	t.limits = snap.Limits
+
+	switch snap.State {
+	case StateNormal:
+		t.state = StateNormal
+		t.startedAt = time.Time{}
+
+	case StateTimerRunning:
+		// Calculate how much time remains now
+		var remaining time.Duration
+		if snap.Remaining > 0 {
+			// Use saved remaining time as the base
+			remaining = snap.Remaining
+		} else if !snap.StartedAt.IsZero() {
+			// Calculate from start time
+			elapsed := time.Since(snap.StartedAt)
+			remaining = snap.Duration - elapsed
+		}
+
+		if remaining <= 0 {
+			// Timer has expired, enter failsafe immediately
+			t.state = StateFailsafe
+			t.startedAt = time.Time{}
+			if t.onFailsafeEnter != nil {
+				// Call callback outside lock
+				fn := t.onFailsafeEnter
+				limits := t.limits
+				t.mu.Unlock()
+				fn(limits)
+				t.mu.Lock()
+			}
+		} else {
+			// Restart timer with remaining time
+			t.state = StateTimerRunning
+			t.startedAt = time.Now()
+			t.duration = remaining // Adjust duration to remaining time
+			t.failsafeTimer = time.AfterFunc(remaining, func() {
+				t.enterFailsafe()
+			})
+		}
+
+	case StateFailsafe:
+		t.state = StateFailsafe
+		t.startedAt = time.Time{}
+
+	case StateGracePeriod:
+		// Grace period doesn't persist - treat as normal
+		t.state = StateNormal
+		t.startedAt = time.Time{}
+	}
+
+	return nil
 }

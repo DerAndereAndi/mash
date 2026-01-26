@@ -17,6 +17,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/duration"
 	"github.com/mash-protocol/mash-go/pkg/failsafe"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/persistence"
 	"github.com/mash-protocol/mash-go/pkg/subscription"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
@@ -72,6 +73,10 @@ type DeviceService struct {
 
 	// Logger for debug output (optional)
 	logger *slog.Logger
+
+	// Persistence (optional, set by CLI)
+	certStore  cert.Store
+	stateStore *persistence.DeviceStateStore
 
 	// Context for cancellation
 	ctx    context.Context
@@ -844,4 +849,140 @@ func parsePort(addr string) uint16 {
 		}
 	}
 	return 8443 // Default port
+}
+
+// SetCertStore sets the certificate store for persistence.
+func (s *DeviceService) SetCertStore(store cert.Store) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.certStore = store
+}
+
+// SetStateStore sets the state store for persistence.
+func (s *DeviceService) SetStateStore(store *persistence.DeviceStateStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stateStore = store
+}
+
+// SaveState persists the current device state.
+// This should be called on graceful shutdown and after commissioning changes.
+func (s *DeviceService) SaveState() error {
+	s.mu.RLock()
+	store := s.stateStore
+	if store == nil {
+		s.mu.RUnlock()
+		return nil // No store configured, no-op
+	}
+
+	state := &persistence.DeviceState{
+		SavedAt:       time.Now(),
+		ZoneIndexMap:  make(map[string]uint8),
+		FailsafeState: make(map[string]persistence.FailsafeSnapshot),
+	}
+
+	// Save zone index map
+	for zoneID, idx := range s.zoneIndexMap {
+		state.ZoneIndexMap[zoneID] = idx
+	}
+
+	// Save zone memberships
+	for zoneID, cz := range s.connectedZones {
+		zm := persistence.ZoneMembership{
+			ZoneID:   zoneID,
+			ZoneType: uint8(cz.Type),
+			JoinedAt: cz.LastSeen, // Use LastSeen as proxy for JoinedAt
+		}
+		state.Zones = append(state.Zones, zm)
+	}
+
+	// Save failsafe timer states
+	for zoneID, timer := range s.failsafeTimers {
+		snap := timer.Snapshot()
+		state.FailsafeState[zoneID] = persistence.FailsafeSnapshot{
+			State:     uint8(snap.State),
+			Duration:  snap.Duration,
+			StartedAt: snap.StartedAt,
+			Remaining: snap.Remaining,
+			Limits: persistence.FailsafeLimits{
+				ConsumptionLimit:    snap.Limits.ConsumptionLimit,
+				ProductionLimit:     snap.Limits.ProductionLimit,
+				HasConsumptionLimit: snap.Limits.HasConsumptionLimit,
+				HasProductionLimit:  snap.Limits.HasProductionLimit,
+			},
+		}
+	}
+
+	s.mu.RUnlock()
+
+	return store.Save(state)
+}
+
+// LoadState restores the device state from persistence.
+// This should be called during Start() if a state store is configured.
+func (s *DeviceService) LoadState() error {
+	s.mu.Lock()
+	store := s.stateStore
+	s.mu.Unlock()
+
+	if store == nil {
+		return nil // No store configured, no-op
+	}
+
+	state, err := store.Load()
+	if err != nil {
+		return err
+	}
+	if state == nil {
+		return nil // No saved state
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Restore zone index map
+	for zoneID, idx := range state.ZoneIndexMap {
+		s.zoneIndexMap[zoneID] = idx
+		if idx >= s.nextZoneIndex {
+			s.nextZoneIndex = idx + 1
+		}
+	}
+
+	// Restore failsafe timers
+	for zoneID, snap := range state.FailsafeState {
+		// Only restore timers that were running or in failsafe
+		if snap.State == uint8(failsafe.StateNormal) {
+			continue
+		}
+
+		timer := failsafe.NewTimer()
+		timerSnap := &failsafe.TimerSnapshot{
+			State:     failsafe.State(snap.State),
+			Duration:  snap.Duration,
+			StartedAt: snap.StartedAt,
+			Remaining: snap.Remaining,
+			Limits: failsafe.Limits{
+				ConsumptionLimit:    snap.Limits.ConsumptionLimit,
+				ProductionLimit:     snap.Limits.ProductionLimit,
+				HasConsumptionLimit: snap.Limits.HasConsumptionLimit,
+				HasProductionLimit:  snap.Limits.HasProductionLimit,
+			},
+		}
+
+		// Set up callback before restore
+		zoneIDCopy := zoneID // Capture for closure
+		timer.OnFailsafeEnter(func(_ failsafe.Limits) {
+			s.handleFailsafe(zoneIDCopy)
+		})
+
+		if err := timer.Restore(timerSnap); err != nil {
+			s.debugLog("LoadState: failed to restore failsafe timer",
+				"zoneID", zoneID, "error", err)
+			continue
+		}
+
+		s.failsafeTimers[zoneID] = timer
+	}
+
+	return nil
 }

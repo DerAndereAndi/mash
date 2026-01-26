@@ -258,6 +258,9 @@ type ConnectedDevice struct {
 	// Addresses contains resolved IP addresses.
 	Addresses []string
 
+	// DeviceType is the device type string (e.g., "EVSE", "INVERTER").
+	DeviceType string
+
 	// VendorProduct is the vendor:product ID if available.
 	VendorProduct string
 

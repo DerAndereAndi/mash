@@ -20,6 +20,8 @@
 //	-log-level string   Log level: debug, info, warn, error (default "info")
 //	-interactive        Enable interactive command mode
 //	-auto-commission    Automatically commission discovered devices
+//	-state-dir string   Directory for persistent state
+//	-reset              Clear all persisted state before starting
 //
 // Examples:
 //
@@ -28,6 +30,12 @@
 //
 //	# Start controller that auto-commissions devices
 //	mash-controller -auto-commission -log-level debug
+//
+//	# Start with persistence (remembers devices across restarts)
+//	mash-controller -zone-name "My Home" -state-dir /var/lib/mash-controller
+//
+//	# Reset persistent state
+//	mash-controller -state-dir /var/lib/mash-controller -reset
 //
 // Interactive Commands:
 //
@@ -50,6 +58,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -58,6 +67,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/examples"
+	"github.com/mash-protocol/mash-go/pkg/persistence"
 	"github.com/mash-protocol/mash-go/pkg/service"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -70,6 +80,10 @@ type Config struct {
 	LogLevel       string
 	Interactive    bool
 	AutoCommission bool
+
+	// Persistence settings
+	StateDir string
+	Reset    bool
 }
 
 var (
@@ -85,6 +99,9 @@ func init() {
 	flag.StringVar(&config.LogLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	flag.BoolVar(&config.Interactive, "interactive", false, "Enable interactive command mode")
 	flag.BoolVar(&config.AutoCommission, "auto-commission", false, "Automatically commission discovered devices")
+
+	flag.StringVar(&config.StateDir, "state-dir", "", "Directory for persistent state")
+	flag.BoolVar(&config.Reset, "reset", false, "Clear all persisted state before starting")
 }
 
 func main() {
@@ -125,6 +142,39 @@ func main() {
 		log.Fatalf("Failed to create controller service: %v", err)
 	}
 
+	// Set up persistence if state-dir is provided
+	if config.StateDir != "" {
+		log.Printf("Using state directory: %s", config.StateDir)
+
+		// Create certificate store
+		certStore := cert.NewFileControllerStore(config.StateDir)
+
+		// Create state store
+		stateStore := persistence.NewControllerStateStore(filepath.Join(config.StateDir, "state.json"))
+
+		// Handle --reset flag
+		if config.Reset {
+			log.Println("Resetting persisted state...")
+			if err := stateStore.Clear(); err != nil {
+				log.Printf("Warning: Failed to clear state: %v", err)
+			}
+		}
+
+		// Load existing certs (may fail if first run)
+		if err := certStore.Load(); err != nil {
+			log.Printf("No existing certificates found (first run or reset): %v", err)
+		}
+
+		// Set stores on the service
+		svc.SetCertStore(certStore)
+		svc.SetStateStore(stateStore)
+
+		// Load state (will restore device list, zone ID, etc.)
+		if err := svc.LoadState(); err != nil {
+			log.Printf("Warning: Failed to load state: %v", err)
+		}
+	}
+
 	// Register event handler
 	svc.OnEvent(handleEvent)
 
@@ -155,6 +205,14 @@ func main() {
 
 	log.Printf("Received signal: %v", sig)
 	log.Println("Shutting down...")
+
+	// Save state before stopping
+	if config.StateDir != "" {
+		log.Println("Saving state...")
+		if err := svc.SaveState(); err != nil {
+			log.Printf("Warning: Failed to save state: %v", err)
+		}
+	}
 
 	cancel()
 

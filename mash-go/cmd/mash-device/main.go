@@ -21,6 +21,8 @@
 //	-port int           Listen port (default 8443)
 //	-log-level string   Log level: debug, info, warn, error (default "info")
 //	-simulate           Enable simulation mode with synthetic data
+//	-state-dir string   Directory for persistent state
+//	-reset              Clear all persisted state before starting
 //
 // Examples:
 //
@@ -32,6 +34,12 @@
 //
 //	# Start battery in simulation mode
 //	mash-device -type battery -simulate -log-level debug
+//
+//	# Start with persistence (remembers zones across restarts)
+//	mash-device -type evse -state-dir /var/lib/mash-device
+//
+//	# Reset persistent state
+//	mash-device -type evse -state-dir /var/lib/mash-device -reset
 package main
 
 import (
@@ -41,13 +49,16 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/examples"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/persistence"
 	"github.com/mash-protocol/mash-go/pkg/service"
 )
 
@@ -75,6 +86,10 @@ type Config struct {
 	Brand        string
 	Model        string
 	DeviceName   string
+
+	// Persistence settings
+	StateDir string
+	Reset    bool
 }
 
 var (
@@ -104,6 +119,9 @@ func init() {
 	flag.StringVar(&config.Brand, "brand", "MASH Reference", "Device brand/vendor name")
 	flag.StringVar(&config.Model, "model", "", "Device model name (auto-generated if empty)")
 	flag.StringVar(&config.DeviceName, "name", "", "User-friendly device name")
+
+	flag.StringVar(&config.StateDir, "state-dir", "", "Directory for persistent state")
+	flag.BoolVar(&config.Reset, "reset", false, "Clear all persisted state before starting")
 }
 
 func main() {
@@ -152,6 +170,40 @@ func main() {
 	// Store for simulation
 	deviceSvc = svc
 
+	// Set up persistence if state-dir is provided
+	if config.StateDir != "" {
+		log.Printf("Using state directory: %s", config.StateDir)
+
+		// Create certificate store
+		certStore := cert.NewFileStore(config.StateDir)
+
+		// Create state store
+		stateStore := persistence.NewDeviceStateStore(filepath.Join(config.StateDir, "state.json"))
+
+		// Handle --reset flag
+		if config.Reset {
+			log.Println("Resetting persisted state...")
+			if err := stateStore.Clear(); err != nil {
+				log.Printf("Warning: Failed to clear state: %v", err)
+			}
+			// Note: certStore.Clear() would need to be implemented if we want to clear certs too
+		}
+
+		// Load existing certs (may fail if first run)
+		if err := certStore.Load(); err != nil {
+			log.Printf("No existing certificates found (first run or reset): %v", err)
+		}
+
+		// Set stores on the service
+		svc.SetCertStore(certStore)
+		svc.SetStateStore(stateStore)
+
+		// Load state (will restore zone memberships, failsafe timers, etc.)
+		if err := svc.LoadState(); err != nil {
+			log.Printf("Warning: Failed to load state: %v", err)
+		}
+	}
+
 	// Register event handler
 	svc.OnEvent(handleEvent)
 
@@ -184,6 +236,14 @@ func main() {
 
 	log.Printf("Received signal: %v", sig)
 	log.Println("Shutting down...")
+
+	// Save state before stopping
+	if config.StateDir != "" {
+		log.Println("Saving state...")
+		if err := svc.SaveState(); err != nil {
+			log.Printf("Warning: Failed to save state: %v", err)
+		}
+	}
 
 	if err := svc.Stop(); err != nil {
 		log.Printf("Error stopping service: %v", err)

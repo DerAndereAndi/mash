@@ -349,3 +349,186 @@ func TestTimerIdempotentStop(t *testing.T) {
 		t.Errorf("State() = %v after Stop on already stopped, want StateNormal", timer.State())
 	}
 }
+
+func TestTimerSnapshot(t *testing.T) {
+	t.Run("NormalState", func(t *testing.T) {
+		timer := NewTimer()
+		timer.SetLimits(Limits{ConsumptionLimit: 5000, HasConsumptionLimit: true})
+
+		snap := timer.Snapshot()
+
+		if snap.State != StateNormal {
+			t.Errorf("State = %v, want StateNormal", snap.State)
+		}
+		if snap.Duration != DefaultDuration {
+			t.Errorf("Duration = %v, want %v", snap.Duration, DefaultDuration)
+		}
+		if snap.Limits.ConsumptionLimit != 5000 {
+			t.Errorf("Limits.ConsumptionLimit = %d, want 5000", snap.Limits.ConsumptionLimit)
+		}
+	})
+
+	t.Run("TimerRunning", func(t *testing.T) {
+		timer := NewTestTimer(200*time.Millisecond, 0, Limits{})
+		timer.Start()
+		time.Sleep(50 * time.Millisecond)
+
+		snap := timer.Snapshot()
+
+		if snap.State != StateTimerRunning {
+			t.Errorf("State = %v, want StateTimerRunning", snap.State)
+		}
+		if snap.StartedAt.IsZero() {
+			t.Error("StartedAt should not be zero")
+		}
+		// Remaining should be roughly duration - 50ms
+		expected := 150 * time.Millisecond
+		tolerance := 20 * time.Millisecond
+		if snap.Remaining < expected-tolerance || snap.Remaining > expected+tolerance {
+			t.Errorf("Remaining = %v, expected ~%v", snap.Remaining, expected)
+		}
+	})
+
+	t.Run("FailsafeState", func(t *testing.T) {
+		timer := NewTestTimer(30*time.Millisecond, 0, Limits{ProductionLimit: -2000, HasProductionLimit: true})
+		timer.Start()
+		time.Sleep(50 * time.Millisecond)
+
+		snap := timer.Snapshot()
+
+		if snap.State != StateFailsafe {
+			t.Errorf("State = %v, want StateFailsafe", snap.State)
+		}
+		if snap.Remaining != 0 {
+			t.Errorf("Remaining = %v, want 0 in failsafe", snap.Remaining)
+		}
+	})
+}
+
+func TestTimerRestore(t *testing.T) {
+	t.Run("RestoreNormal", func(t *testing.T) {
+		timer := NewTimer()
+		snap := &TimerSnapshot{
+			State:    StateNormal,
+			Duration: 6 * time.Hour,
+			Limits:   Limits{ConsumptionLimit: 3000, HasConsumptionLimit: true},
+		}
+
+		err := timer.Restore(snap)
+		if err != nil {
+			t.Fatalf("Restore() error = %v", err)
+		}
+
+		if timer.State() != StateNormal {
+			t.Errorf("State() = %v, want StateNormal", timer.State())
+		}
+		if timer.Limits().ConsumptionLimit != 3000 {
+			t.Errorf("Limits().ConsumptionLimit = %d, want 3000", timer.Limits().ConsumptionLimit)
+		}
+	})
+
+	t.Run("RestoreTimerRunningWithTimeLeft", func(t *testing.T) {
+		timer := NewTestTimer(200*time.Millisecond, 0, Limits{})
+		now := time.Now()
+		snap := &TimerSnapshot{
+			State:     StateTimerRunning,
+			Duration:  200 * time.Millisecond,
+			StartedAt: now.Add(-50 * time.Millisecond), // Started 50ms ago
+			Remaining: 150 * time.Millisecond,
+		}
+
+		err := timer.Restore(snap)
+		if err != nil {
+			t.Fatalf("Restore() error = %v", err)
+		}
+
+		if timer.State() != StateTimerRunning {
+			t.Errorf("State() = %v, want StateTimerRunning", timer.State())
+		}
+
+		// Check remaining time is approximately correct
+		remaining := timer.RemainingTime()
+		// Should be around 150ms minus time spent in test
+		if remaining < 100*time.Millisecond || remaining > 160*time.Millisecond {
+			t.Errorf("RemainingTime() = %v, expected 100-160ms", remaining)
+		}
+
+		// Clean up
+		timer.Stop()
+	})
+
+	t.Run("RestoreTimerRunningExpired", func(t *testing.T) {
+		timer := NewTestTimer(100*time.Millisecond, 0, Limits{ConsumptionLimit: 4000, HasConsumptionLimit: true})
+
+		var failsafeEntered bool
+		var mu sync.Mutex
+		timer.OnFailsafeEnter(func(limits Limits) {
+			mu.Lock()
+			failsafeEntered = true
+			mu.Unlock()
+		})
+
+		now := time.Now()
+		snap := &TimerSnapshot{
+			State:     StateTimerRunning,
+			Duration:  100 * time.Millisecond,
+			StartedAt: now.Add(-200 * time.Millisecond), // Started 200ms ago, already expired
+			Remaining: 0,                                // No time left
+			Limits:    Limits{ConsumptionLimit: 4000, HasConsumptionLimit: true},
+		}
+
+		err := timer.Restore(snap)
+		if err != nil {
+			t.Fatalf("Restore() error = %v", err)
+		}
+
+		// Should immediately enter failsafe
+		if timer.State() != StateFailsafe {
+			t.Errorf("State() = %v, want StateFailsafe for expired timer", timer.State())
+		}
+
+		mu.Lock()
+		entered := failsafeEntered
+		mu.Unlock()
+		if !entered {
+			t.Error("OnFailsafeEnter callback should have been called")
+		}
+	})
+
+	t.Run("RestoreFailsafe", func(t *testing.T) {
+		timer := NewTimer()
+		snap := &TimerSnapshot{
+			State:  StateFailsafe,
+			Limits: Limits{ProductionLimit: -1000, HasProductionLimit: true},
+		}
+
+		err := timer.Restore(snap)
+		if err != nil {
+			t.Fatalf("Restore() error = %v", err)
+		}
+
+		if timer.State() != StateFailsafe {
+			t.Errorf("State() = %v, want StateFailsafe", timer.State())
+		}
+		if !timer.IsFailsafe() {
+			t.Error("IsFailsafe() = false, want true")
+		}
+	})
+
+	t.Run("RestoreNil", func(t *testing.T) {
+		timer := NewTimer()
+		timer.Start()
+
+		err := timer.Restore(nil)
+		if err != ErrNilSnapshot {
+			t.Errorf("Restore(nil) error = %v, want ErrNilSnapshot", err)
+		}
+
+		// Timer should be unchanged
+		if timer.State() != StateTimerRunning {
+			t.Errorf("State() = %v, should be unchanged", timer.State())
+		}
+
+		timer.Stop()
+	})
+}

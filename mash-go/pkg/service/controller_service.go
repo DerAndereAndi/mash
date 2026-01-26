@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
+	"github.com/mash-protocol/mash-go/pkg/persistence"
 	"github.com/mash-protocol/mash-go/pkg/subscription"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 )
@@ -45,6 +47,10 @@ type ControllerService struct {
 
 	// Event handlers
 	eventHandlers []EventHandler
+
+	// Persistence (optional, set by CLI)
+	certStore  cert.ControllerStore
+	stateStore *persistence.ControllerStateStore
 
 	// Context for cancellation
 	ctx    context.Context
@@ -565,4 +571,87 @@ func (s *ControllerService) IsDiscovering() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.discoveryActive
+}
+
+// SetCertStore sets the certificate store for persistence.
+func (s *ControllerService) SetCertStore(store cert.ControllerStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.certStore = store
+}
+
+// SetStateStore sets the state store for persistence.
+func (s *ControllerService) SetStateStore(store *persistence.ControllerStateStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stateStore = store
+}
+
+// SaveState persists the current controller state.
+// This should be called on graceful shutdown and after commissioning changes.
+func (s *ControllerService) SaveState() error {
+	s.mu.RLock()
+	store := s.stateStore
+	if store == nil {
+		s.mu.RUnlock()
+		return nil // No store configured, no-op
+	}
+
+	state := &persistence.ControllerState{
+		SavedAt: time.Now(),
+		ZoneID:  s.zoneID,
+	}
+
+	// Save device memberships
+	for _, device := range s.connectedDevices {
+		dm := persistence.DeviceMembership{
+			DeviceID:   device.ID,
+			DeviceType: device.DeviceType,
+			JoinedAt:   device.LastSeen, // Use LastSeen as proxy for JoinedAt
+			LastSeenAt: device.LastSeen,
+		}
+		state.Devices = append(state.Devices, dm)
+	}
+
+	s.mu.RUnlock()
+
+	return store.Save(state)
+}
+
+// LoadState restores the controller state from persistence.
+// This should be called during Start() if a state store is configured.
+func (s *ControllerService) LoadState() error {
+	s.mu.Lock()
+	store := s.stateStore
+	s.mu.Unlock()
+
+	if store == nil {
+		return nil // No store configured, no-op
+	}
+
+	state, err := store.Load()
+	if err != nil {
+		return err
+	}
+	if state == nil {
+		return nil // No saved state
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Restore zone ID
+	s.zoneID = state.ZoneID
+
+	// Restore device list (as disconnected - they'll reconnect)
+	for _, dm := range state.Devices {
+		s.connectedDevices[dm.DeviceID] = &ConnectedDevice{
+			ID:         dm.DeviceID,
+			DeviceType: dm.DeviceType,
+			Connected:  false, // Will be updated on reconnect
+			LastSeen:   dm.LastSeenAt,
+		}
+	}
+
+	return nil
 }
