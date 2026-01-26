@@ -3,14 +3,14 @@
 package interactive
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"os"
+	"io"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/chzyer/readline"
 	"github.com/mash-protocol/mash-go/pkg/examples"
 	"github.com/mash-protocol/mash-go/pkg/inspect"
 	"github.com/mash-protocol/mash-go/pkg/service"
@@ -37,21 +37,43 @@ type Controller struct {
 	cem       *examples.CEM
 	config    ControllerConfig
 	formatter *inspect.Formatter
+	rl        *readline.Instance
 }
 
 // New creates a new interactive controller handler.
-func New(svc *service.ControllerService, cem *examples.CEM, cfg ControllerConfig) *Controller {
+func New(svc *service.ControllerService, cem *examples.CEM, cfg ControllerConfig) (*Controller, error) {
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "\nmash> ",
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create readline: %w", err)
+	}
+
 	return &Controller{
 		svc:       svc,
 		cem:       cem,
 		config:    cfg,
 		formatter: inspect.NewFormatter(),
-	}
+		rl:        rl,
+	}, nil
+}
+
+// Stdout returns a writer that properly coordinates with the readline input.
+// Use this for log output to avoid interfering with the command prompt.
+func (c *Controller) Stdout() io.Writer {
+	return c.rl.Stdout()
+}
+
+// Stderr returns a writer that properly coordinates with the readline input.
+func (c *Controller) Stderr() io.Writer {
+	return c.rl.Stderr()
 }
 
 // Run starts the interactive command loop.
 func (c *Controller) Run(ctx context.Context, cancel context.CancelFunc) {
-	reader := bufio.NewReader(os.Stdin)
+	defer c.rl.Close()
 
 	c.printHelp()
 
@@ -62,13 +84,18 @@ func (c *Controller) Run(ctx context.Context, cancel context.CancelFunc) {
 		default:
 		}
 
-		fmt.Print("\nmash> ")
-		input, err := reader.ReadString('\n')
+		line, err := c.rl.Readline()
 		if err != nil {
-			continue
+			// EOF or interrupt
+			if err == readline.ErrInterrupt {
+				continue
+			}
+			fmt.Fprintln(c.rl.Stdout(), "Exiting...")
+			cancel()
+			return
 		}
 
-		input = strings.TrimSpace(input)
+		input := strings.TrimSpace(line)
 		if input == "" {
 			continue
 		}
@@ -118,18 +145,18 @@ func (c *Controller) Run(ctx context.Context, cancel context.CancelFunc) {
 			c.cmdStatus()
 
 		case "quit", "exit", "q":
-			fmt.Println("Exiting...")
+			fmt.Fprintln(c.rl.Stdout(), "Exiting...")
 			cancel()
 			return
 
 		default:
-			fmt.Printf("Unknown command: %s (type 'help' for commands)\n", cmd)
+			fmt.Fprintf(c.rl.Stdout(), "Unknown command: %s (type 'help' for commands)\n", cmd)
 		}
 	}
 }
 
 func (c *Controller) printHelp() {
-	fmt.Println(`
+	fmt.Fprintln(c.rl.Stdout(), `
 MASH Controller Commands:
   Discovery & Connection:
     discover                          - Discover commissionable devices
@@ -159,22 +186,22 @@ MASH Controller Commands:
 
 // cmdDiscover handles the discover command.
 func (c *Controller) cmdDiscover(ctx context.Context) {
-	fmt.Println("Discovering commissionable devices...")
+	fmt.Fprintln(c.rl.Stdout(),"Discovering commissionable devices...")
 	discoverCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	devices, err := c.svc.Discover(discoverCtx, nil)
 	cancel()
 	if err != nil {
-		fmt.Printf("Discovery error: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Discovery error: %v\n", err)
 		return
 	}
 	if len(devices) == 0 {
-		fmt.Println("No commissionable devices found")
+		fmt.Fprintln(c.rl.Stdout(),"No commissionable devices found")
 		return
 	}
 
-	fmt.Printf("Found %d commissionable device(s):\n", len(devices))
+	fmt.Fprintf(c.rl.Stdout(),"Found %d commissionable device(s):\n", len(devices))
 	for idx, d := range devices {
-		fmt.Printf("  %d. %s (discriminator: %d, host: %s:%d)\n",
+		fmt.Fprintf(c.rl.Stdout(),"  %d. %s (discriminator: %d, host: %s:%d)\n",
 			idx+1, d.InstanceName, d.Discriminator, d.Host, d.Port)
 	}
 }
@@ -183,94 +210,94 @@ func (c *Controller) cmdDiscover(ctx context.Context) {
 func (c *Controller) cmdDevices() {
 	devices := c.svc.GetAllDevices()
 	if len(devices) == 0 {
-		fmt.Println("No devices connected")
+		fmt.Fprintln(c.rl.Stdout(),"No devices connected")
 		return
 	}
 
-	fmt.Printf("\nConnected Devices (%d):\n", len(devices))
-	fmt.Println("-------------------------------------------")
+	fmt.Fprintf(c.rl.Stdout(),"\nConnected Devices (%d):\n", len(devices))
+	fmt.Fprintln(c.rl.Stdout(),"-------------------------------------------")
 	for _, d := range devices {
 		status := "connected"
 		if !d.Connected {
 			status = "disconnected"
 		}
-		fmt.Printf("  ID: %s\n", d.ID)
-		fmt.Printf("      Host: %s:%d\n", d.Host, d.Port)
-		fmt.Printf("      Type: %s\n", d.DeviceType)
-		fmt.Printf("      Status: %s\n", status)
-		fmt.Printf("      Last seen: %s\n", d.LastSeen.Format("15:04:05"))
-		fmt.Println()
+		fmt.Fprintf(c.rl.Stdout(),"  ID: %s\n", d.ID)
+		fmt.Fprintf(c.rl.Stdout(),"      Host: %s:%d\n", d.Host, d.Port)
+		fmt.Fprintf(c.rl.Stdout(),"      Type: %s\n", d.DeviceType)
+		fmt.Fprintf(c.rl.Stdout(),"      Status: %s\n", status)
+		fmt.Fprintf(c.rl.Stdout(),"      Last seen: %s\n", d.LastSeen.Format("15:04:05"))
+		fmt.Fprintln(c.rl.Stdout(),)
 	}
 }
 
 // cmdCommission handles the commission command.
 func (c *Controller) cmdCommission(ctx context.Context, args []string) {
 	if len(args) < 2 {
-		fmt.Println("Usage: commission <discriminator> <setup-code>")
+		fmt.Fprintln(c.rl.Stdout(),"Usage: commission <discriminator> <setup-code>")
 		return
 	}
 
 	disc, err := strconv.ParseUint(args[0], 10, 16)
 	if err != nil {
-		fmt.Printf("Invalid discriminator: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Invalid discriminator: %v\n", err)
 		return
 	}
 
-	fmt.Printf("Looking for device with discriminator %d...\n", disc)
+	fmt.Fprintf(c.rl.Stdout(),"Looking for device with discriminator %d...\n", disc)
 
 	device, err := c.svc.DiscoverByDiscriminator(ctx, uint16(disc))
 	if err != nil {
-		fmt.Printf("Device not found: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Device not found: %v\n", err)
 		return
 	}
 
-	fmt.Printf("Found device: %s at %s:%d\n", device.InstanceName, device.Host, device.Port)
-	fmt.Println("Commissioning...")
+	fmt.Fprintf(c.rl.Stdout(),"Found device: %s at %s:%d\n", device.InstanceName, device.Host, device.Port)
+	fmt.Fprintln(c.rl.Stdout(),"Commissioning...")
 
 	commissioned, err := c.svc.Commission(ctx, device, args[1])
 	if err != nil {
-		fmt.Printf("Commissioning failed: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Commissioning failed: %v\n", err)
 		return
 	}
 
-	fmt.Printf("Device commissioned successfully: %s\n", commissioned.ID)
+	fmt.Fprintf(c.rl.Stdout(),"Device commissioned successfully: %s\n", commissioned.ID)
 }
 
 // cmdDecommission handles the decommission command.
 func (c *Controller) cmdDecommission(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: decommission <device-id>")
-		fmt.Println("  Use 'devices' to list device IDs")
+		fmt.Fprintln(c.rl.Stdout(),"Usage: decommission <device-id>")
+		fmt.Fprintln(c.rl.Stdout(),"  Use 'devices' to list device IDs")
 		return
 	}
 
 	deviceID := c.resolveDeviceID(args[0])
 	if deviceID == "" {
-		fmt.Printf("Device not found: %s\n", args[0])
+		fmt.Fprintf(c.rl.Stdout(),"Device not found: %s\n", args[0])
 		return
 	}
 
-	fmt.Printf("Decommissioning device %s...\n", deviceID)
+	fmt.Fprintf(c.rl.Stdout(),"Decommissioning device %s...\n", deviceID)
 
 	if err := c.svc.Decommission(deviceID); err != nil {
-		fmt.Printf("Failed to decommission: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Failed to decommission: %v\n", err)
 		return
 	}
 
 	// Also remove from CEM
 	_ = c.cem.DisconnectDevice(deviceID)
 
-	fmt.Println("Device decommissioned")
+	fmt.Fprintln(c.rl.Stdout(),"Device decommissioned")
 }
 
 // cmdInspect handles the inspect command.
 func (c *Controller) cmdInspect(ctx context.Context, args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: inspect <device-id> [path]")
-		fmt.Println("  Examples:")
-		fmt.Println("    inspect evse-1234        - Show device overview")
-		fmt.Println("    inspect evse-1234/1      - Show endpoint 1")
-		fmt.Println("    inspect evse-1234/1/2    - Show feature on endpoint 1")
+		fmt.Fprintln(c.rl.Stdout(),"Usage: inspect <device-id> [path]")
+		fmt.Fprintln(c.rl.Stdout(),"  Examples:")
+		fmt.Fprintln(c.rl.Stdout(),"    inspect evse-1234        - Show device overview")
+		fmt.Fprintln(c.rl.Stdout(),"    inspect evse-1234/1      - Show endpoint 1")
+		fmt.Fprintln(c.rl.Stdout(),"    inspect evse-1234/1/2    - Show feature on endpoint 1")
 		return
 	}
 
@@ -280,13 +307,13 @@ func (c *Controller) cmdInspect(ctx context.Context, args []string) {
 
 	deviceID = c.resolveDeviceID(deviceID)
 	if deviceID == "" {
-		fmt.Printf("Device not found: %s\n", args[0])
+		fmt.Fprintf(c.rl.Stdout(),"Device not found: %s\n", args[0])
 		return
 	}
 
 	session := c.svc.GetSession(deviceID)
 	if session == nil {
-		fmt.Printf("No active session for device %s\n", deviceID)
+		fmt.Fprintf(c.rl.Stdout(),"No active session for device %s\n", deviceID)
 		return
 	}
 
@@ -301,7 +328,7 @@ func (c *Controller) cmdInspect(ctx context.Context, args []string) {
 	// Parse the path for specific inspection
 	path, err := inspect.ParsePath(pathStr)
 	if err != nil {
-		fmt.Printf("Invalid path: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Invalid path: %v\n", err)
 		return
 	}
 
@@ -309,66 +336,66 @@ func (c *Controller) cmdInspect(ctx context.Context, args []string) {
 		// Read all attributes for the endpoint/feature
 		attrs, err := ri.ReadAllAttributes(ctx, path.EndpointID, path.FeatureID)
 		if err != nil {
-			fmt.Printf("Failed to read attributes: %v\n", err)
+			fmt.Fprintf(c.rl.Stdout(),"Failed to read attributes: %v\n", err)
 			return
 		}
 
-		fmt.Printf("\nEndpoint %d / Feature %d:\n", path.EndpointID, path.FeatureID)
-		fmt.Println("-------------------------------------------")
+		fmt.Fprintf(c.rl.Stdout(),"\nEndpoint %d / Feature %d:\n", path.EndpointID, path.FeatureID)
+		fmt.Fprintln(c.rl.Stdout(),"-------------------------------------------")
 		for attrID, value := range attrs {
 			name := inspect.GetAttributeName(path.FeatureID, attrID)
 			if name == "" {
 				name = fmt.Sprintf("attr_%d", attrID)
 			}
-			fmt.Printf("  %s: %v\n", name, value)
+			fmt.Fprintf(c.rl.Stdout(),"  %s: %v\n", name, value)
 		}
 	} else {
 		// Read single attribute
 		value, err := ri.ReadAttribute(ctx, path)
 		if err != nil {
-			fmt.Printf("Failed to read attribute: %v\n", err)
+			fmt.Fprintf(c.rl.Stdout(),"Failed to read attribute: %v\n", err)
 			return
 		}
-		fmt.Printf("%s = %v\n", path.Raw, value)
+		fmt.Fprintf(c.rl.Stdout(),"%s = %v\n", path.Raw, value)
 	}
 }
 
 // showDeviceOverview displays high-level device information.
 func (c *Controller) showDeviceOverview(ctx context.Context, ri *inspect.RemoteInspector, deviceID string) {
-	fmt.Printf("\nDevice: %s\n", deviceID)
-	fmt.Println("-------------------------------------------")
+	fmt.Fprintf(c.rl.Stdout(),"\nDevice: %s\n", deviceID)
+	fmt.Fprintln(c.rl.Stdout(),"-------------------------------------------")
 
 	// Read DeviceInfo from endpoint 0
 	attrs, err := ri.ReadAllAttributes(ctx, 0, 1) // Endpoint 0, Feature DeviceInfo (0x01)
 	if err != nil {
-		fmt.Printf("Failed to read device info: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Failed to read device info: %v\n", err)
 		return
 	}
 
 	// Display key attributes
 	if v, ok := attrs[1]; ok { // vendorName
-		fmt.Printf("  Vendor: %v\n", v)
+		fmt.Fprintf(c.rl.Stdout(),"  Vendor: %v\n", v)
 	}
 	if v, ok := attrs[2]; ok { // productName
-		fmt.Printf("  Product: %v\n", v)
+		fmt.Fprintf(c.rl.Stdout(),"  Product: %v\n", v)
 	}
 	if v, ok := attrs[3]; ok { // serialNumber
-		fmt.Printf("  Serial: %v\n", v)
+		fmt.Fprintf(c.rl.Stdout(),"  Serial: %v\n", v)
 	}
 	if v, ok := attrs[6]; ok { // firmwareVersion
-		fmt.Printf("  Firmware: %v\n", v)
+		fmt.Fprintf(c.rl.Stdout(),"  Firmware: %v\n", v)
 	}
 	if v, ok := attrs[10]; ok { // endpointCount
-		fmt.Printf("  Endpoints: %v\n", v)
+		fmt.Fprintf(c.rl.Stdout(),"  Endpoints: %v\n", v)
 	}
-	fmt.Println()
+	fmt.Fprintln(c.rl.Stdout(),)
 }
 
 // cmdRead handles the read command.
 func (c *Controller) cmdRead(ctx context.Context, args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: read <device-id>/<endpoint>/<feature>/<attribute>")
-		fmt.Println("  Example: read evse-1234/1/measurement/acActivePower")
+		fmt.Fprintln(c.rl.Stdout(),"Usage: read <device-id>/<endpoint>/<feature>/<attribute>")
+		fmt.Fprintln(c.rl.Stdout(),"  Example: read evse-1234/1/measurement/acActivePower")
 		return
 	}
 
@@ -376,24 +403,24 @@ func (c *Controller) cmdRead(ctx context.Context, args []string) {
 
 	deviceID = c.resolveDeviceID(deviceID)
 	if deviceID == "" {
-		fmt.Printf("Device not found\n")
+		fmt.Fprintf(c.rl.Stdout(),"Device not found\n")
 		return
 	}
 
 	if pathStr == "" {
-		fmt.Println("Path required: <endpoint>/<feature>/<attribute>")
+		fmt.Fprintln(c.rl.Stdout(),"Path required: <endpoint>/<feature>/<attribute>")
 		return
 	}
 
 	session := c.svc.GetSession(deviceID)
 	if session == nil {
-		fmt.Printf("No active session for device %s\n", deviceID)
+		fmt.Fprintf(c.rl.Stdout(),"No active session for device %s\n", deviceID)
 		return
 	}
 
 	path, err := inspect.ParsePath(pathStr)
 	if err != nil {
-		fmt.Printf("Invalid path: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Invalid path: %v\n", err)
 		return
 	}
 
@@ -403,7 +430,7 @@ func (c *Controller) cmdRead(ctx context.Context, args []string) {
 		// Read all attributes
 		attrs, err := ri.ReadAllAttributes(ctx, path.EndpointID, path.FeatureID)
 		if err != nil {
-			fmt.Printf("Read failed: %v\n", err)
+			fmt.Fprintf(c.rl.Stdout(),"Read failed: %v\n", err)
 			return
 		}
 		for attrID, value := range attrs {
@@ -411,13 +438,13 @@ func (c *Controller) cmdRead(ctx context.Context, args []string) {
 			if name == "" {
 				name = fmt.Sprintf("attr_%d", attrID)
 			}
-			fmt.Printf("  %s: %v\n", name, value)
+			fmt.Fprintf(c.rl.Stdout(),"  %s: %v\n", name, value)
 		}
 	} else {
 		// Read single attribute
 		value, err := ri.ReadAttribute(ctx, path)
 		if err != nil {
-			fmt.Printf("Read failed: %v\n", err)
+			fmt.Fprintf(c.rl.Stdout(),"Read failed: %v\n", err)
 			return
 		}
 
@@ -426,15 +453,15 @@ func (c *Controller) cmdRead(ctx context.Context, args []string) {
 		if name == "" {
 			name = fmt.Sprintf("attr_%d", path.AttributeID)
 		}
-		fmt.Printf("%s = %v\n", name, value)
+		fmt.Fprintf(c.rl.Stdout(),"%s = %v\n", name, value)
 	}
 }
 
 // cmdWrite handles the write command.
 func (c *Controller) cmdWrite(ctx context.Context, args []string) {
 	if len(args) < 2 {
-		fmt.Println("Usage: write <device-id>/<endpoint>/<feature>/<attribute> <value>")
-		fmt.Println("  Example: write evse-1234/1/energyControl/20 5000000")
+		fmt.Fprintln(c.rl.Stdout(),"Usage: write <device-id>/<endpoint>/<feature>/<attribute> <value>")
+		fmt.Fprintln(c.rl.Stdout(),"  Example: write evse-1234/1/energyControl/20 5000000")
 		return
 	}
 
@@ -442,29 +469,29 @@ func (c *Controller) cmdWrite(ctx context.Context, args []string) {
 
 	deviceID = c.resolveDeviceID(deviceID)
 	if deviceID == "" {
-		fmt.Printf("Device not found\n")
+		fmt.Fprintf(c.rl.Stdout(),"Device not found\n")
 		return
 	}
 
 	if pathStr == "" {
-		fmt.Println("Path required: <endpoint>/<feature>/<attribute>")
+		fmt.Fprintln(c.rl.Stdout(),"Path required: <endpoint>/<feature>/<attribute>")
 		return
 	}
 
 	session := c.svc.GetSession(deviceID)
 	if session == nil {
-		fmt.Printf("No active session for device %s\n", deviceID)
+		fmt.Fprintf(c.rl.Stdout(),"No active session for device %s\n", deviceID)
 		return
 	}
 
 	path, err := inspect.ParsePath(pathStr)
 	if err != nil {
-		fmt.Printf("Invalid path: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Invalid path: %v\n", err)
 		return
 	}
 
 	if path.IsPartial {
-		fmt.Println("Cannot write to partial path, specify attribute")
+		fmt.Fprintln(c.rl.Stdout(),"Cannot write to partial path, specify attribute")
 		return
 	}
 
@@ -484,123 +511,123 @@ func (c *Controller) cmdWrite(ctx context.Context, args []string) {
 
 	ri := inspect.NewRemoteInspector(session)
 	if err := ri.WriteAttribute(ctx, path, value); err != nil {
-		fmt.Printf("Write failed: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Write failed: %v\n", err)
 		return
 	}
 
-	fmt.Println("OK")
+	fmt.Fprintln(c.rl.Stdout(),"OK")
 }
 
 // cmdLimit handles the limit command.
 func (c *Controller) cmdLimit(ctx context.Context, args []string) {
 	if len(args) < 2 {
-		fmt.Println("Usage: limit <device-id> <power-kw>")
+		fmt.Fprintln(c.rl.Stdout(),"Usage: limit <device-id> <power-kw>")
 		return
 	}
 
 	deviceID := c.resolveDeviceID(args[0])
 	if deviceID == "" {
-		fmt.Printf("Device not found: %s\n", args[0])
+		fmt.Fprintf(c.rl.Stdout(),"Device not found: %s\n", args[0])
 		return
 	}
 
 	powerKW, err := strconv.ParseFloat(args[1], 64)
 	if err != nil {
-		fmt.Printf("Invalid power: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Invalid power: %v\n", err)
 		return
 	}
 
 	limitMW := int64(powerKW * 1000000)
-	fmt.Printf("Setting power limit to %.1f kW on %s...\n", powerKW, deviceID)
+	fmt.Fprintf(c.rl.Stdout(),"Setting power limit to %.1f kW on %s...\n", powerKW, deviceID)
 
 	if err := c.cem.SetPowerLimit(ctx, deviceID, 1, limitMW); err != nil {
-		fmt.Printf("Failed to set limit: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Failed to set limit: %v\n", err)
 		return
 	}
 
-	fmt.Println("Limit set successfully")
+	fmt.Fprintln(c.rl.Stdout(),"Limit set successfully")
 }
 
 // cmdClear handles the clear command.
 func (c *Controller) cmdClear(ctx context.Context, args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: clear <device-id>")
+		fmt.Fprintln(c.rl.Stdout(),"Usage: clear <device-id>")
 		return
 	}
 
 	deviceID := c.resolveDeviceID(args[0])
 	if deviceID == "" {
-		fmt.Printf("Device not found: %s\n", args[0])
+		fmt.Fprintf(c.rl.Stdout(),"Device not found: %s\n", args[0])
 		return
 	}
 
-	fmt.Printf("Clearing power limit on %s...\n", deviceID)
+	fmt.Fprintf(c.rl.Stdout(),"Clearing power limit on %s...\n", deviceID)
 
 	if err := c.cem.ClearPowerLimit(ctx, deviceID, 1); err != nil {
-		fmt.Printf("Failed to clear limit: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Failed to clear limit: %v\n", err)
 		return
 	}
 
-	fmt.Println("Limit cleared")
+	fmt.Fprintln(c.rl.Stdout(),"Limit cleared")
 }
 
 // cmdPause handles the pause command.
 func (c *Controller) cmdPause(ctx context.Context, args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: pause <device-id>")
+		fmt.Fprintln(c.rl.Stdout(),"Usage: pause <device-id>")
 		return
 	}
 
 	deviceID := c.resolveDeviceID(args[0])
 	if deviceID == "" {
-		fmt.Printf("Device not found: %s\n", args[0])
+		fmt.Fprintf(c.rl.Stdout(),"Device not found: %s\n", args[0])
 		return
 	}
 
-	fmt.Printf("Pausing device %s...\n", deviceID)
+	fmt.Fprintf(c.rl.Stdout(),"Pausing device %s...\n", deviceID)
 
 	if err := c.cem.PauseDevice(ctx, deviceID, 1); err != nil {
-		fmt.Printf("Failed to pause: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Failed to pause: %v\n", err)
 		return
 	}
 
-	fmt.Println("Device paused")
+	fmt.Fprintln(c.rl.Stdout(),"Device paused")
 }
 
 // cmdResume handles the resume command.
 func (c *Controller) cmdResume(ctx context.Context, args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: resume <device-id>")
+		fmt.Fprintln(c.rl.Stdout(),"Usage: resume <device-id>")
 		return
 	}
 
 	deviceID := c.resolveDeviceID(args[0])
 	if deviceID == "" {
-		fmt.Printf("Device not found: %s\n", args[0])
+		fmt.Fprintf(c.rl.Stdout(),"Device not found: %s\n", args[0])
 		return
 	}
 
-	fmt.Printf("Resuming device %s...\n", deviceID)
+	fmt.Fprintf(c.rl.Stdout(),"Resuming device %s...\n", deviceID)
 
 	if err := c.cem.ResumeDevice(ctx, deviceID, 1); err != nil {
-		fmt.Printf("Failed to resume: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(),"Failed to resume: %v\n", err)
 		return
 	}
 
-	fmt.Println("Device resumed")
+	fmt.Fprintln(c.rl.Stdout(),"Device resumed")
 }
 
 // cmdStatus handles the status command.
 func (c *Controller) cmdStatus() {
-	fmt.Println("\nController Status")
-	fmt.Println("-------------------------------------------")
-	fmt.Printf("  Zone Name:         %s\n", c.config.ZoneName())
-	fmt.Printf("  Zone Type:         %s\n", c.config.ZoneType())
-	fmt.Printf("  Service State:     %s\n", c.svc.State())
-	fmt.Printf("  Zone ID:           %s\n", c.svc.ZoneID())
-	fmt.Printf("  Connected Devices: %d\n", c.svc.DeviceCount())
-	fmt.Printf("  Total Power:       %.1f kW\n", float64(c.cem.GetTotalPower())/1000000)
-	fmt.Println()
+	fmt.Fprintln(c.rl.Stdout(),"\nController Status")
+	fmt.Fprintln(c.rl.Stdout(),"-------------------------------------------")
+	fmt.Fprintf(c.rl.Stdout(),"  Zone Name:         %s\n", c.config.ZoneName())
+	fmt.Fprintf(c.rl.Stdout(),"  Zone Type:         %s\n", c.config.ZoneType())
+	fmt.Fprintf(c.rl.Stdout(),"  Service State:     %s\n", c.svc.State())
+	fmt.Fprintf(c.rl.Stdout(),"  Zone ID:           %s\n", c.svc.ZoneID())
+	fmt.Fprintf(c.rl.Stdout(),"  Connected Devices: %d\n", c.svc.DeviceCount())
+	fmt.Fprintf(c.rl.Stdout(),"  Total Power:       %.1f kW\n", float64(c.cem.GetTotalPower())/1000000)
+	fmt.Fprintln(c.rl.Stdout(),)
 }
 
 // resolveDeviceID resolves a partial device ID to a full device ID.

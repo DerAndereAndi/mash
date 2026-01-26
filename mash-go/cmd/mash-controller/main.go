@@ -205,7 +205,12 @@ func main() {
 
 	// Run interactive mode or wait for signal
 	if config.Interactive {
-		ic := interactive.New(svc, cem, &config)
+		ic, err := interactive.New(svc, cem, &config)
+		if err != nil {
+			log.Fatalf("Failed to create interactive controller: %v", err)
+		}
+		// Redirect log output through readline to avoid interfering with input
+		log.SetOutput(ic.Stdout())
 		go ic.Run(ctx, cancel)
 	}
 

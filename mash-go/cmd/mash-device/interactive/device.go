@@ -3,14 +3,14 @@
 package interactive
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"os"
+	"io"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/chzyer/readline"
 	"github.com/mash-protocol/mash-go/pkg/inspect"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/service"
@@ -39,6 +39,7 @@ type Device struct {
 	config    DeviceConfig
 	inspector *inspect.Inspector
 	formatter *inspect.Formatter
+	rl        *readline.Instance
 
 	// Simulation control
 	simCtx     context.Context
@@ -47,18 +48,39 @@ type Device struct {
 }
 
 // New creates a new interactive device handler.
-func New(svc *service.DeviceService, cfg DeviceConfig) *Device {
+func New(svc *service.DeviceService, cfg DeviceConfig) (*Device, error) {
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "\ndevice> ",
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create readline: %w", err)
+	}
+
 	return &Device{
 		svc:       svc,
 		config:    cfg,
 		inspector: inspect.NewInspector(svc.Device()),
 		formatter: inspect.NewFormatter(),
-	}
+		rl:        rl,
+	}, nil
+}
+
+// Stdout returns a writer that properly coordinates with the readline input.
+// Use this for log output to avoid interfering with the command prompt.
+func (d *Device) Stdout() io.Writer {
+	return d.rl.Stdout()
+}
+
+// Stderr returns a writer that properly coordinates with the readline input.
+func (d *Device) Stderr() io.Writer {
+	return d.rl.Stderr()
 }
 
 // Run starts the interactive command loop.
 func (d *Device) Run(ctx context.Context, cancel context.CancelFunc) {
-	reader := bufio.NewReader(os.Stdin)
+	defer d.rl.Close()
 
 	d.printHelp()
 
@@ -69,13 +91,18 @@ func (d *Device) Run(ctx context.Context, cancel context.CancelFunc) {
 		default:
 		}
 
-		fmt.Print("\ndevice> ")
-		input, err := reader.ReadString('\n')
+		line, err := d.rl.Readline()
 		if err != nil {
-			continue
+			// EOF or interrupt
+			if err == readline.ErrInterrupt {
+				continue
+			}
+			fmt.Fprintln(d.rl.Stdout(), "Exiting...")
+			cancel()
+			return
 		}
 
-		input = strings.TrimSpace(input)
+		input := strings.TrimSpace(line)
 		if input == "" {
 			continue
 		}
@@ -116,18 +143,18 @@ func (d *Device) Run(ctx context.Context, cancel context.CancelFunc) {
 			d.cmdStatus()
 
 		case "quit", "exit", "q":
-			fmt.Println("Exiting...")
+			fmt.Fprintln(d.rl.Stdout(), "Exiting...")
 			cancel()
 			return
 
 		default:
-			fmt.Printf("Unknown command: %s (type 'help' for commands)\n", cmd)
+			fmt.Fprintf(d.rl.Stdout(), "Unknown command: %s (type 'help' for commands)\n", cmd)
 		}
 	}
 }
 
 func (d *Device) printHelp() {
-	fmt.Println(`
+	fmt.Fprintln(d.rl.Stdout(),`
 MASH Device Commands:
   Inspection:
     inspect [path]     - Inspect device structure (or specific endpoint/feature)
@@ -158,14 +185,14 @@ func (d *Device) cmdInspect(args []string) {
 	if len(args) == 0 {
 		// Show full device tree
 		tree := d.inspector.InspectDevice()
-		fmt.Print(d.inspector.FormatDeviceTree(tree, d.formatter))
+		fmt.Fprint(d.rl.Stdout(),d.inspector.FormatDeviceTree(tree, d.formatter))
 		return
 	}
 
 	// Parse path
 	path, err := inspect.ParsePath(args[0])
 	if err != nil {
-		fmt.Printf("Invalid path: %v\n", err)
+		fmt.Fprintf(d.rl.Stdout(),"Invalid path: %v\n", err)
 		return
 	}
 
@@ -174,42 +201,42 @@ func (d *Device) cmdInspect(args []string) {
 			// Endpoint only
 			epInfo, err := d.inspector.InspectEndpoint(path.EndpointID)
 			if err != nil {
-				fmt.Printf("Error: %v\n", err)
+				fmt.Fprintf(d.rl.Stdout(),"Error: %v\n", err)
 				return
 			}
-			fmt.Print(d.inspector.FormatEndpoint(epInfo, d.formatter))
+			fmt.Fprint(d.rl.Stdout(),d.inspector.FormatEndpoint(epInfo, d.formatter))
 		} else {
 			// Endpoint and feature
 			featInfo, err := d.inspector.InspectFeature(path.EndpointID, path.FeatureID)
 			if err != nil {
-				fmt.Printf("Error: %v\n", err)
+				fmt.Fprintf(d.rl.Stdout(),"Error: %v\n", err)
 				return
 			}
-			fmt.Print(d.inspector.FormatFeature(featInfo, d.formatter))
+			fmt.Fprint(d.rl.Stdout(),d.inspector.FormatFeature(featInfo, d.formatter))
 		}
 	} else {
 		// Full path - show single attribute
 		value, meta, err := d.inspector.ReadAttribute(path)
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
+			fmt.Fprintf(d.rl.Stdout(),"Error: %v\n", err)
 			return
 		}
 		valueStr := d.formatter.FormatValue(value, meta.Unit)
-		fmt.Printf("%s = %s\n", meta.Name, valueStr)
+		fmt.Fprintf(d.rl.Stdout(),"%s = %s\n", meta.Name, valueStr)
 	}
 }
 
 // cmdRead handles the read command.
 func (d *Device) cmdRead(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: read <path>")
-		fmt.Println("  Example: read 1/measurement/acActivePower")
+		fmt.Fprintln(d.rl.Stdout(),"Usage: read <path>")
+		fmt.Fprintln(d.rl.Stdout(),"  Example: read 1/measurement/acActivePower")
 		return
 	}
 
 	path, err := inspect.ParsePath(args[0])
 	if err != nil {
-		fmt.Printf("Invalid path: %v\n", err)
+		fmt.Fprintf(d.rl.Stdout(),"Invalid path: %v\n", err)
 		return
 	}
 
@@ -217,7 +244,7 @@ func (d *Device) cmdRead(args []string) {
 		// Read all attributes for the feature
 		attrs, err := d.inspector.ReadAllAttributes(path.EndpointID, path.FeatureID)
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
+			fmt.Fprintf(d.rl.Stdout(),"Error: %v\n", err)
 			return
 		}
 		for attrID, value := range attrs {
@@ -225,31 +252,31 @@ func (d *Device) cmdRead(args []string) {
 			if name == "" {
 				name = fmt.Sprintf("attr_%d", attrID)
 			}
-			fmt.Printf("  %s: %v\n", name, value)
+			fmt.Fprintf(d.rl.Stdout(),"  %s: %v\n", name, value)
 		}
 	} else {
 		// Read single attribute
 		value, meta, err := d.inspector.ReadAttribute(path)
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
+			fmt.Fprintf(d.rl.Stdout(),"Error: %v\n", err)
 			return
 		}
 		valueStr := d.formatter.FormatValue(value, meta.Unit)
-		fmt.Printf("%s = %s\n", meta.Name, valueStr)
+		fmt.Fprintf(d.rl.Stdout(),"%s = %s\n", meta.Name, valueStr)
 	}
 }
 
 // cmdWrite handles the write command.
 func (d *Device) cmdWrite(args []string) {
 	if len(args) < 2 {
-		fmt.Println("Usage: write <path> <value>")
-		fmt.Println("  Example: write 0/deviceInfo/label \"My EVSE\"")
+		fmt.Fprintln(d.rl.Stdout(),"Usage: write <path> <value>")
+		fmt.Fprintln(d.rl.Stdout(),"  Example: write 0/deviceInfo/label \"My EVSE\"")
 		return
 	}
 
 	path, err := inspect.ParsePath(args[0])
 	if err != nil {
-		fmt.Printf("Invalid path: %v\n", err)
+		fmt.Fprintf(d.rl.Stdout(),"Invalid path: %v\n", err)
 		return
 	}
 
@@ -270,23 +297,23 @@ func (d *Device) cmdWrite(args []string) {
 	}
 
 	if err := d.inspector.WriteAttribute(path, value); err != nil {
-		fmt.Printf("Write failed: %v\n", err)
+		fmt.Fprintf(d.rl.Stdout(),"Write failed: %v\n", err)
 		return
 	}
 
-	fmt.Println("OK")
+	fmt.Fprintln(d.rl.Stdout(),"OK")
 }
 
 // cmdZones handles the zones command.
 func (d *Device) cmdZones(_ []string) {
 	zones := d.svc.GetAllZones()
 	if len(zones) == 0 {
-		fmt.Println("No zones connected")
+		fmt.Fprintln(d.rl.Stdout(),"No zones connected")
 		return
 	}
 
-	fmt.Printf("\nConnected Zones (%d):\n", len(zones))
-	fmt.Println("-------------------------------------------")
+	fmt.Fprintf(d.rl.Stdout(),"\nConnected Zones (%d):\n", len(zones))
+	fmt.Fprintln(d.rl.Stdout(),"-------------------------------------------")
 	for _, z := range zones {
 		status := "connected"
 		if !z.Connected {
@@ -295,19 +322,19 @@ func (d *Device) cmdZones(_ []string) {
 		if z.FailsafeActive {
 			status = "FAILSAFE"
 		}
-		fmt.Printf("  ID: %s\n", z.ID)
-		fmt.Printf("      Type: %s (priority %d)\n", z.Type.String(), z.Priority)
-		fmt.Printf("      Status: %s\n", status)
-		fmt.Printf("      Last seen: %s\n", z.LastSeen.Format("15:04:05"))
-		fmt.Println()
+		fmt.Fprintf(d.rl.Stdout(),"  ID: %s\n", z.ID)
+		fmt.Fprintf(d.rl.Stdout(),"      Type: %s (priority %d)\n", z.Type.String(), z.Priority)
+		fmt.Fprintf(d.rl.Stdout(),"      Status: %s\n", status)
+		fmt.Fprintf(d.rl.Stdout(),"      Last seen: %s\n", z.LastSeen.Format("15:04:05"))
+		fmt.Fprintln(d.rl.Stdout(),)
 	}
 }
 
 // cmdKick handles the kick command (removes a zone).
 func (d *Device) cmdKick(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: kick <zone-id>")
-		fmt.Println("  Use 'zones' to list zone IDs")
+		fmt.Fprintln(d.rl.Stdout(),"Usage: kick <zone-id>")
+		fmt.Fprintln(d.rl.Stdout(),"  Use 'zones' to list zone IDs")
 		return
 	}
 
@@ -327,51 +354,51 @@ func (d *Device) cmdKick(args []string) {
 	}
 
 	if zone == nil {
-		fmt.Printf("Zone not found: %s\n", args[0])
+		fmt.Fprintf(d.rl.Stdout(),"Zone not found: %s\n", args[0])
 		return
 	}
 
-	fmt.Printf("Removing zone %s...\n", zoneID)
+	fmt.Fprintf(d.rl.Stdout(),"Removing zone %s...\n", zoneID)
 	if err := d.svc.RemoveZone(zoneID); err != nil {
-		fmt.Printf("Failed to remove zone: %v\n", err)
+		fmt.Fprintf(d.rl.Stdout(),"Failed to remove zone: %v\n", err)
 		return
 	}
 
-	fmt.Println("Zone removed")
+	fmt.Fprintln(d.rl.Stdout(),"Zone removed")
 }
 
 // cmdStart starts the simulation.
 func (d *Device) cmdStart() {
 	if d.simRunning {
-		fmt.Println("Simulation already running")
+		fmt.Fprintln(d.rl.Stdout(),"Simulation already running")
 		return
 	}
 	d.startSimulation()
-	fmt.Println("Simulation started")
+	fmt.Fprintln(d.rl.Stdout(),"Simulation started")
 }
 
 // cmdStop stops the simulation.
 func (d *Device) cmdStop() {
 	if !d.simRunning {
-		fmt.Println("Simulation not running")
+		fmt.Fprintln(d.rl.Stdout(),"Simulation not running")
 		return
 	}
 	d.stopSimulation()
-	fmt.Println("Simulation stopped")
+	fmt.Fprintln(d.rl.Stdout(),"Simulation stopped")
 }
 
 // cmdPower sets the power directly.
 func (d *Device) cmdPower(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: power <kw>")
-		fmt.Println("  Positive values = consumption/charging")
-		fmt.Println("  Negative values = production/discharging")
+		fmt.Fprintln(d.rl.Stdout(),"Usage: power <kw>")
+		fmt.Fprintln(d.rl.Stdout(),"  Positive values = consumption/charging")
+		fmt.Fprintln(d.rl.Stdout(),"  Negative values = production/discharging")
 		return
 	}
 
 	powerKW, err := strconv.ParseFloat(args[0], 64)
 	if err != nil {
-		fmt.Printf("Invalid power value: %v\n", err)
+		fmt.Fprintf(d.rl.Stdout(),"Invalid power value: %v\n", err)
 		return
 	}
 
@@ -381,18 +408,18 @@ func (d *Device) cmdPower(args []string) {
 
 // cmdStatus shows the device status.
 func (d *Device) cmdStatus() {
-	fmt.Println("\nDevice Status")
-	fmt.Println("-------------------------------------------")
-	fmt.Printf("  Device ID:      %s\n", d.svc.Device().DeviceID())
-	fmt.Printf("  Device Type:    %s\n", d.config.DeviceType())
-	fmt.Printf("  Service State:  %s\n", d.svc.State())
-	fmt.Printf("  Connected Zones: %d\n", d.svc.ZoneCount())
+	fmt.Fprintln(d.rl.Stdout(),"\nDevice Status")
+	fmt.Fprintln(d.rl.Stdout(),"-------------------------------------------")
+	fmt.Fprintf(d.rl.Stdout(),"  Device ID:      %s\n", d.svc.Device().DeviceID())
+	fmt.Fprintf(d.rl.Stdout(),"  Device Type:    %s\n", d.config.DeviceType())
+	fmt.Fprintf(d.rl.Stdout(),"  Service State:  %s\n", d.svc.State())
+	fmt.Fprintf(d.rl.Stdout(),"  Connected Zones: %d\n", d.svc.ZoneCount())
 
 	simStatus := "stopped"
 	if d.simRunning {
 		simStatus = "running"
 	}
-	fmt.Printf("  Simulation:     %s\n", simStatus)
+	fmt.Fprintf(d.rl.Stdout(),"  Simulation:     %s\n", simStatus)
 
 	// Read current power if available
 	path := &inspect.Path{
@@ -401,10 +428,10 @@ func (d *Device) cmdStatus() {
 		AttributeID: 1, // acActivePower
 	}
 	if value, meta, err := d.inspector.ReadAttribute(path); err == nil {
-		fmt.Printf("  Current Power:  %s\n", d.formatter.FormatValue(value, meta.Unit))
+		fmt.Fprintf(d.rl.Stdout(),"  Current Power:  %s\n", d.formatter.FormatValue(value, meta.Unit))
 	}
 
-	fmt.Println()
+	fmt.Fprintln(d.rl.Stdout(),)
 }
 
 // startSimulation starts the background simulation.
@@ -445,11 +472,11 @@ func (d *Device) setPowerDirect(powerMW int64) {
 	}
 
 	if err := d.svc.NotifyAttributeChange(1, uint8(model.FeatureMeasurement), attrID, powerMW); err != nil {
-		fmt.Printf("Failed to set power: %v\n", err)
+		fmt.Fprintf(d.rl.Stdout(),"Failed to set power: %v\n", err)
 		return
 	}
 
-	fmt.Printf("Power set to %.1f kW\n", float64(powerMW)/1_000_000)
+	fmt.Fprintf(d.rl.Stdout(),"Power set to %.1f kW\n", float64(powerMW)/1_000_000)
 }
 
 // runSimulation runs the background simulation loop.

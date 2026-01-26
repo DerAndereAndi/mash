@@ -249,7 +249,12 @@ func main() {
 	// Set up simulation behavior
 	if config.Interactive {
 		log.Println("Interactive mode enabled - use 'start' to begin simulation")
-		id := interactive.New(svc, &config)
+		id, err := interactive.New(svc, &config)
+		if err != nil {
+			log.Fatalf("Failed to create interactive device: %v", err)
+		}
+		// Redirect log output through readline to avoid interfering with input
+		log.SetOutput(id.Stdout())
 		go id.Run(ctx, cancel)
 	} else if config.Simulate {
 		// Note: Simulation starts automatically when a zone connects (see handleEvent)

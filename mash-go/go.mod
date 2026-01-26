@@ -10,6 +10,7 @@ require (
 )
 
 require (
+	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/miekg/dns v1.1.62 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/mod v0.21.0 // indirect
