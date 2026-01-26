@@ -382,6 +382,9 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 	zoneSession := NewZoneSession(targetZoneID, framedConn, s.device)
 	zoneSession.SetLogger(s.logger)
 
+	// Initialize renewal handler for certificate renewal support
+	zoneSession.InitializeRenewalHandler(s.buildDeviceIdentity())
+
 	// Store the session
 	s.mu.Lock()
 	s.zoneSessions[targetZoneID] = zoneSession
@@ -439,6 +442,9 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// Create zone session for this connection
 	zoneSession := NewZoneSession(zoneID, framedConn, s.device)
 	zoneSession.SetLogger(s.logger)
+
+	// Initialize renewal handler for certificate renewal support
+	zoneSession.InitializeRenewalHandler(s.buildDeviceIdentity())
 
 	// Store the session
 	s.mu.Lock()
@@ -1232,4 +1238,13 @@ func (s *DeviceService) ListZoneIDs() []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// buildDeviceIdentity creates a DeviceIdentity from the device's information.
+func (s *DeviceService) buildDeviceIdentity() *cert.DeviceIdentity {
+	return &cert.DeviceIdentity{
+		DeviceID:  s.deviceID,
+		VendorID:  s.device.VendorID(),
+		ProductID: s.device.ProductID(),
+	}
 }

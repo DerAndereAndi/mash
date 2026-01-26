@@ -1,0 +1,68 @@
+# Test Case: Certificate Expiry Warning
+# Verifies device sends warning event when certificate nears expiry
+
+id: TC-CERT-RENEW-3
+name: Certificate Expiry Warning Event
+description: |
+  Verifies that the device sends a cert_expiring event notification
+  when the certificate is within 7 days of expiry. This allows
+  controllers to proactively initiate renewal.
+
+pics_requirements:
+  - D.CERT.RENEWAL        # Device supports certificate renewal
+  - D.EVENT.CERT_EXPIRING # Device sends expiry warning events
+
+preconditions:
+  - device_commissioned: true
+  - tls_connection_established: true
+  - cert_days_until_expiry: 7
+
+steps:
+  - name: Connect to device
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
+
+  - name: Subscribe to DeviceInfo for events
+    action: subscribe
+    params:
+      endpoint: 0
+      feature: 1
+    expect:
+      subscribe_success: true
+
+  - name: Configure device with expiring certificate
+    action: set_cert_expiry
+    params:
+      days_until_expiry: 7
+    expect:
+      cert_expiry_set: true
+
+  - name: Wait for expiry notification
+    action: wait_for_notification
+    params:
+      event_type: "cert_expiring"
+      timeout_ms: 5000
+    expect:
+      notification_received: true
+
+  - name: Verify notification content
+    action: verify_notification_content
+    expect:
+      event: "cert_expiring"
+      zone_id_present: true
+      expires_at_present: true
+      days_remaining_valid: true
+
+postconditions:
+  - warning_logged: true
+
+timeout: "15s"
+tags:
+  - certificate
+  - expiry
+  - notification
+  - warning
+  - event

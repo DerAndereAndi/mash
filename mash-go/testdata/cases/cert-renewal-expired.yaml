@@ -1,0 +1,63 @@
+# Test Case: Expired Certificate Handling
+# Verifies connections are rejected when certificate expires
+
+id: TC-CERT-RENEW-4
+name: Expired Certificate Handling
+description: |
+  Verifies that connections are closed when a certificate expires
+  and the device is not in grace period. The device should reject
+  the connection at the TLS handshake level.
+
+pics_requirements:
+  - D.CERT.RENEWAL         # Device supports certificate renewal
+  - D.CERT.EXPIRY_HANDLING # Device enforces certificate expiry
+
+preconditions:
+  - device_commissioned: true
+  - grace_period_disabled: true
+
+steps:
+  - name: Connect with valid certificate
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
+
+  - name: Verify connection works
+    action: read
+    params:
+      endpoint: 0
+      feature: 1
+    expect:
+      read_success: true
+
+  - name: Disconnect
+    action: disconnect
+    expect:
+      disconnected: true
+
+  - name: Simulate certificate expiry
+    action: simulate_cert_expiry
+    params:
+      expired: true
+    expect:
+      cert_expired: true
+
+  - name: Attempt connection with expired certificate
+    action: connect_expect_failure
+    params:
+      insecure: true
+    expect:
+      connection_failed: true
+      error_type: "certificate_expired"
+
+postconditions:
+  - device_rejects_expired_certs: true
+
+timeout: "15s"
+tags:
+  - certificate
+  - expiry
+  - error
+  - security

@@ -1,0 +1,78 @@
+# Test Case: Normal Certificate Renewal
+# Verifies the standard renewal protocol flow
+
+id: TC-CERT-RENEW-1
+name: Normal Certificate Renewal
+description: |
+  Verifies that a controller can renew a device certificate
+  before expiry using the standard renewal protocol.
+
+  Protocol flow:
+  1. Controller sends CertRenewalRequest with nonce
+  2. Device responds with CertRenewalCSR
+  3. Controller signs CSR and sends CertRenewalInstall
+  4. Device acknowledges with CertRenewalAck
+
+pics_requirements:
+  - D.CERT.RENEWAL        # Device supports certificate renewal
+  - C.CERT.ZONE_CA        # Controller has Zone CA capability
+
+preconditions:
+  - device_commissioned: true
+  - tls_connection_established: true
+
+steps:
+  - name: Connect to device
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
+
+  - name: Send renewal request with nonce
+    action: send_renewal_request
+    params:
+      nonce_length: 32
+    expect:
+      request_sent: true
+      nonce_generated: true
+
+  - name: Receive CSR from device
+    action: receive_renewal_csr
+    expect:
+      csr_received: true
+      csr_valid: true
+
+  - name: Sign CSR and send new certificate
+    action: send_cert_install
+    params:
+      validity_days: 365
+    expect:
+      cert_sent: true
+      sequence_incremented: true
+
+  - name: Receive acknowledgment
+    action: receive_renewal_ack
+    expect:
+      ack_received: true
+      status: 0
+      new_cert_active: true
+
+  - name: Verify device still responds
+    action: read
+    params:
+      endpoint: 0
+      feature: 1
+    expect:
+      read_success: true
+
+postconditions:
+  - cert_expiry_extended: true
+  - session_maintained: true
+
+timeout: "15s"
+tags:
+  - certificate
+  - renewal
+  - zone
+  - protocol

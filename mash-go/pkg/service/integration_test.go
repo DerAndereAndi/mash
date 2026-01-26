@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
@@ -1065,5 +1066,157 @@ func TestE2E_ReconnectionAfterDisconnect(t *testing.T) {
 	}
 	if !storedDevice.Connected {
 		t.Error("Device should be marked as connected after reconnection")
+	}
+}
+
+// TestE2E_RenewalOverTLS tests certificate renewal over an established TLS connection.
+// This is TC-E2E-RENEW-1: Full renewal over TLS test.
+func TestE2E_RenewalOverTLS(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Create test device with DeviceInfo feature
+	device := model.NewDevice("evse-renewal", 0x1234, 0x5678)
+
+	// Add DeviceInfo feature to endpoint 0
+	endpoint, _ := device.GetEndpoint(0)
+	deviceInfo := model.NewFeature(model.FeatureDeviceInfo, 1)
+	endpoint.AddFeature(deviceInfo)
+
+	// Create device config with a setup code
+	deviceConfig := validDeviceConfig()
+	deviceConfig.ListenAddress = "localhost:0"
+	deviceConfig.SetupCode = "12345678"
+	deviceConfig.Discriminator = 3456 // Max is 4095
+
+	// Create device service
+	deviceSvc, err := NewDeviceService(device, deviceConfig)
+	if err != nil {
+		t.Fatalf("Failed to create device service: %v", err)
+	}
+
+	// Setup mock advertiser for device discovery
+	mockAdv := newMockAdvertiser()
+	deviceSvc.SetAdvertiser(mockAdv)
+
+	// Create controller config
+	controllerConfig := validControllerConfig()
+
+	// Create controller service
+	controllerSvc, err := NewControllerService(controllerConfig)
+	if err != nil {
+		t.Fatalf("Failed to create controller service: %v", err)
+	}
+
+	// Setup in-memory cert store for the controller
+	certStore := cert.NewMemoryControllerStore()
+	controllerSvc.SetCertStore(certStore)
+
+	// Setup mock browser for controller discovery
+	mockBrowser := newMockBrowser()
+	controllerSvc.SetBrowser(mockBrowser)
+
+	// Start both services
+	if err := deviceSvc.Start(ctx); err != nil {
+		t.Fatalf("Failed to start device service: %v", err)
+	}
+	defer func() { _ = deviceSvc.Stop() }()
+
+	// Enter commissioning mode on device
+	if err := deviceSvc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	if err := controllerSvc.Start(ctx); err != nil {
+		t.Fatalf("Failed to start controller service: %v", err)
+	}
+	defer func() { _ = controllerSvc.Stop() }()
+
+	// Get device address for commissioning
+	addr := deviceSvc.TLSAddr()
+	if addr == nil {
+		t.Fatal("Device TLS address is nil")
+	}
+	port := parseTestPort(addr.String())
+
+	// Create commissionable service info
+	commService := &discovery.CommissionableService{
+		Host:          "localhost",
+		Port:          port,
+		Addresses:     []string{"127.0.0.1"},
+		Discriminator: deviceConfig.Discriminator,
+	}
+
+	// Commission the device
+	connectedDevice, err := controllerSvc.Commission(ctx, commService, "12345678")
+	if err != nil {
+		t.Fatalf("Commission failed: %v", err)
+	}
+
+	deviceID := connectedDevice.ID
+	t.Logf("Commissioned device: %s", deviceID)
+
+	// Wait for session to be established
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify we can communicate before renewal
+	session := controllerSvc.GetSession(deviceID)
+	if session == nil {
+		t.Fatal("No session found for device")
+	}
+
+	// Read an attribute to verify the connection works
+	attrs, err := session.Read(ctx, 0, uint8(model.FeatureDeviceInfo), nil)
+	if err != nil {
+		t.Fatalf("Pre-renewal read failed: %v", err)
+	}
+	if len(attrs) == 0 {
+		t.Error("Expected to read some attributes")
+	}
+	t.Logf("Pre-renewal: Read %d attributes", len(attrs))
+
+	// Perform certificate renewal
+	t.Log("Starting certificate renewal...")
+	if err := controllerSvc.RenewDevice(ctx, deviceID); err != nil {
+		t.Fatalf("RenewDevice failed: %v", err)
+	}
+	t.Log("Certificate renewal completed successfully")
+
+	// Verify the session still works after renewal
+	attrs, err = session.Read(ctx, 0, uint8(model.FeatureDeviceInfo), nil)
+	if err != nil {
+		t.Fatalf("Post-renewal read failed: %v", err)
+	}
+	if len(attrs) == 0 {
+		t.Error("Expected to read some attributes after renewal")
+	}
+	t.Logf("Post-renewal: Read %d attributes", len(attrs))
+
+	// Verify device's renewal handler was invoked
+	s := deviceSvc
+	s.mu.RLock()
+	zoneSession := s.zoneSessions[controllerSvc.ZoneID()]
+	s.mu.RUnlock()
+
+	if zoneSession == nil {
+		t.Fatal("No zone session found on device")
+	}
+
+	renewalHandler := zoneSession.RenewalHandler()
+	if renewalHandler == nil {
+		t.Fatal("Device should have a renewal handler")
+	}
+
+	activeCert := renewalHandler.ActiveCert()
+	if activeCert == nil {
+		t.Error("Device should have an active certificate after renewal")
+	} else {
+		t.Logf("Device has active cert, expires: %v", activeCert.NotAfter)
+	}
+
+	// Verify the connection was preserved (same session, not reconnected)
+	newSession := controllerSvc.GetSession(deviceID)
+	if newSession != session {
+		t.Error("Session should be preserved during renewal, not replaced")
 	}
 }

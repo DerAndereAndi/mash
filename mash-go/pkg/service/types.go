@@ -349,6 +349,9 @@ const (
 
 	// EventDeviceReconnected - reconnected to a known device.
 	EventDeviceReconnected
+
+	// EventCertificateRenewed - device certificate was renewed.
+	EventCertificateRenewed
 )
 
 // String returns the event type name.
@@ -384,6 +387,8 @@ func (e EventType) String() string {
 		return "DEVICE_REDISCOVERED"
 	case EventDeviceReconnected:
 		return "DEVICE_RECONNECTED"
+	case EventCertificateRenewed:
+		return "CERTIFICATE_RENEWED"
 	default:
 		return "UNKNOWN"
 	}

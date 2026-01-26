@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -21,6 +22,9 @@ type DeviceSession struct {
 	sender   *TransportRequestSender
 	closed   bool
 	logger   *slog.Logger
+
+	// Renewal handling
+	renewalHandler *ControllerRenewalHandler
 }
 
 // NewDeviceSession creates a new device session.
@@ -51,7 +55,16 @@ func (s *DeviceSession) OnMessage(data []byte) {
 	}
 	client := s.client
 	logger := s.logger
+	renewalHandler := s.renewalHandler
 	s.mu.RUnlock()
+
+	// Check for renewal response messages first (MsgType 31 or 33)
+	if isRenewalMessage(data) {
+		if renewalHandler != nil {
+			s.handleRenewalResponse(data, renewalHandler)
+		}
+		return
+	}
 
 	// Determine message type
 	msgType, err := wire.PeekMessageType(data)
@@ -205,4 +218,34 @@ func (s *DeviceSession) Close() error {
 	s.closed = true
 
 	return s.client.Close()
+}
+
+// SetRenewalHandler sets the handler for certificate renewal.
+func (s *DeviceSession) SetRenewalHandler(handler *ControllerRenewalHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.renewalHandler = handler
+}
+
+// RenewalHandler returns the session's renewal handler.
+func (s *DeviceSession) RenewalHandler() *ControllerRenewalHandler {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.renewalHandler
+}
+
+// handleRenewalResponse processes a renewal response from the device.
+func (s *DeviceSession) handleRenewalResponse(data []byte, handler *ControllerRenewalHandler) {
+	msg, err := commissioning.DecodeRenewalMessage(data)
+	if err != nil {
+		return
+	}
+
+	// Route to the handler's response channel
+	handler.HandleResponse(msg)
+}
+
+// Conn returns the underlying connection (for renewal handler initialization).
+func (s *DeviceSession) Conn() Sendable {
+	return s.conn
 }

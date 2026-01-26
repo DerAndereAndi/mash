@@ -146,6 +146,9 @@ func (c *Controller) Run(ctx context.Context, cancel context.CancelFunc) {
 		case "status":
 			c.cmdStatus()
 
+		case "renew":
+			c.cmdRenew(ctx, args)
+
 		case "quit", "exit", "q":
 			fmt.Fprintln(c.rl.Stdout(), "Exiting...")
 			cancel()
@@ -177,6 +180,11 @@ MASH Controller Commands:
     clear <device-id>                 - Clear power limit
     pause <device-id>                 - Pause device
     resume <device-id>                - Resume device
+
+  Certificate Management:
+    renew <device-id>                 - Renew device certificate
+    renew --all                       - Renew all devices needing renewal
+    renew --status                    - Show certificate expiry status
 
   General:
     status                            - Show controller status

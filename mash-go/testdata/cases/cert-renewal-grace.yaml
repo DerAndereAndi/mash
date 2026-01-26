@@ -1,0 +1,78 @@
+# Test Case: Grace Period Acceptance
+# Verifies grace period allows connections after expiry
+
+id: TC-CERT-RENEW-5
+name: Grace Period Acceptance
+description: |
+  Verifies that devices with grace period configured continue
+  to accept connections for a limited time after certificate expiry.
+  This provides a recovery window for renewal.
+
+pics_requirements:
+  - D.CERT.RENEWAL      # Device supports certificate renewal
+  - D.CERT.GRACE_PERIOD # Device supports grace period
+
+preconditions:
+  - device_commissioned: true
+  - grace_period_days: 7
+
+steps:
+  - name: Connect with valid certificate
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
+
+  - name: Configure grace period
+    action: set_grace_period
+    params:
+      days: 7
+    expect:
+      grace_period_set: true
+
+  - name: Simulate 3 days past expiry
+    action: simulate_time_advance
+    params:
+      days_past_expiry: 3
+    expect:
+      time_advanced: true
+      in_grace_period: true
+
+  - name: Verify connection still works in grace period
+    action: read
+    params:
+      endpoint: 0
+      feature: 1
+    expect:
+      read_success: true
+
+  - name: Verify grace period indicator
+    action: check_grace_period_status
+    expect:
+      in_grace_period: true
+      days_remaining: 4
+
+  - name: Simulate past grace period (8 days after expiry)
+    action: simulate_time_advance
+    params:
+      days_past_expiry: 8
+    expect:
+      time_advanced: true
+      grace_period_expired: true
+
+  - name: Verify connection now fails
+    action: read
+    expect:
+      read_success: false
+      error_type: "grace_period_expired"
+
+postconditions:
+  - grace_period_enforced: true
+
+timeout: "15s"
+tags:
+  - certificate
+  - grace_period
+  - expiry
+  - recovery

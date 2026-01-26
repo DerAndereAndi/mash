@@ -1,0 +1,76 @@
+# Test Case: Session Continuity During Renewal
+# Verifies that subscriptions survive certificate renewal
+
+id: TC-CERT-RENEW-2
+name: Session Continuity During Renewal
+description: |
+  Verifies that subscriptions and connection state are preserved
+  during certificate renewal. The TLS session should remain active
+  and no reconnection should be required.
+
+pics_requirements:
+  - D.CERT.RENEWAL            # Device supports certificate renewal
+  - D.CERT.IN_SESSION_RENEWAL # Supports renewal without disconnect
+
+preconditions:
+  - device_commissioned: true
+  - tls_connection_established: true
+
+steps:
+  - name: Connect to device
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
+
+  - name: Create subscription before renewal
+    action: subscribe
+    params:
+      endpoint: 0
+      feature: 1
+    expect:
+      subscribe_success: true
+
+  - name: Record subscription ID
+    action: record_subscription_state
+    expect:
+      subscription_id_recorded: true
+
+  - name: Perform certificate renewal
+    action: full_renewal_flow
+    expect:
+      renewal_complete: true
+      status: 0
+
+  - name: Verify subscription still active
+    action: verify_subscription_active
+    expect:
+      same_subscription_id: true
+      subscription_active: true
+
+  - name: Verify commands still work
+    action: read
+    params:
+      endpoint: 0
+      feature: 1
+    expect:
+      read_success: true
+
+  - name: Verify no reconnection occurred
+    action: verify_connection_state
+    expect:
+      same_connection: true
+      no_reconnection_required: true
+
+postconditions:
+  - tls_session_same: true
+  - subscription_active: true
+
+timeout: "20s"
+tags:
+  - certificate
+  - renewal
+  - session
+  - subscription
+  - continuity

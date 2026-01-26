@@ -187,6 +187,9 @@ func (r *Runner) registerHandlers() {
 	// Register custom expectation checkers
 	r.engine.RegisterChecker("connection_established", r.checkConnectionEstablished)
 	r.engine.RegisterChecker("response_received", r.checkResponseReceived)
+
+	// Certificate renewal handlers
+	r.registerRenewalHandlers()
 }
 
 // handleConnect establishes a connection to the target.

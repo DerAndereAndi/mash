@@ -1,0 +1,54 @@
+# PICS (Protocol Implementation Conformance Statement)
+# Common Protocol Capabilities
+#
+# This file describes protocol-level capabilities that are not
+# specific to any device type. Device profiles (like ev-charger.yaml)
+# describe device-specific features; this file covers the protocol layer.
+
+# Device Identification
+device:
+  vendor: "Reference"
+  product: "Protocol Common"
+  model: "N/A"
+  version: "1.0.0"
+
+# PICS Items
+items:
+  # ==========================================================================
+  # Certificate Management (Device-Side)
+  # ==========================================================================
+
+  D.CERT.RENEWAL: true           # Device supports certificate renewal
+  D.CERT.IN_SESSION_RENEWAL: true # Renewal without TLS reconnection
+  D.CERT.EXPIRY_HANDLING: true   # Proper handling of expired certificates
+  D.CERT.GRACE_PERIOD: 7         # Days to accept connections after expiry
+  D.EVENT.CERT_EXPIRING: true    # Sends notification when cert near expiry
+
+  # ==========================================================================
+  # Certificate Management (Controller-Side)
+  # ==========================================================================
+
+  C.CERT.ZONE_CA: true           # Controller has Zone CA for signing
+  C.CERT.RENEWAL_INITIATE: true  # Controller can initiate renewal
+  C.CERT.AUTO_RENEWAL: false     # Automatic renewal (optional)
+
+# =============================================================================
+# Test Case to PICS Mapping
+# =============================================================================
+#
+# TC-CERT-RENEW-1 (Normal Renewal):
+#   - D.CERT.RENEWAL: true
+#   - C.CERT.ZONE_CA: true
+#
+# TC-CERT-RENEW-2 (Session Continuity):
+#   - D.CERT.IN_SESSION_RENEWAL: true
+#
+# TC-CERT-RENEW-3 (Expiry Warning):
+#   - D.EVENT.CERT_EXPIRING: true
+#
+# TC-CERT-RENEW-4 (Expired Certificate):
+#   - D.CERT.EXPIRY_HANDLING: true
+#   - D.CERT.GRACE_PERIOD: 0
+#
+# TC-CERT-RENEW-5 (Grace Period):
+#   - D.CERT.GRACE_PERIOD: > 0

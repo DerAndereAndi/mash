@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -19,6 +21,9 @@ type ZoneSession struct {
 	handler *ProtocolHandler
 	closed  bool
 	logger  *slog.Logger
+
+	// Renewal handling
+	renewalHandler *DeviceRenewalHandler
 }
 
 // NewZoneSession creates a new zone session.
@@ -46,7 +51,16 @@ func (s *ZoneSession) OnMessage(data []byte) {
 		s.mu.RUnlock()
 		return
 	}
+	renewalHandler := s.renewalHandler
 	s.mu.RUnlock()
+
+	// Check for renewal messages first (MsgType 30-33 at key 1)
+	if isRenewalMessage(data) {
+		if renewalHandler != nil {
+			s.handleRenewalMessage(data, renewalHandler)
+		}
+		return
+	}
 
 	// Determine message type
 	msgType, err := wire.PeekMessageType(data)
@@ -185,4 +199,70 @@ func (s *ZoneSession) clearSubscriptions() {
 	device := s.handler.Device()
 	s.handler = NewProtocolHandler(device)
 	s.handler.SetZoneID(s.zoneID)
+}
+
+// SetRenewalHandler sets the handler for certificate renewal messages.
+func (s *ZoneSession) SetRenewalHandler(handler *DeviceRenewalHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.renewalHandler = handler
+}
+
+// handleRenewalMessage processes certificate renewal messages.
+func (s *ZoneSession) handleRenewalMessage(data []byte, handler *DeviceRenewalHandler) {
+	msg, err := commissioning.DecodeRenewalMessage(data)
+	if err != nil {
+		return
+	}
+
+	var resp any
+
+	switch m := msg.(type) {
+	case *commissioning.CertRenewalRequest:
+		resp, err = handler.HandleRenewalRequest(m)
+	case *commissioning.CertRenewalInstall:
+		resp, err = handler.HandleCertInstall(m)
+	default:
+		// Unknown renewal message type
+		return
+	}
+
+	if err != nil {
+		return
+	}
+
+	// Send response
+	respData, err := commissioning.EncodeRenewalMessage(resp)
+	if err != nil {
+		return
+	}
+
+	s.conn.Send(respData)
+}
+
+// isRenewalMessage checks if data is a renewal message (MsgType 30-33).
+func isRenewalMessage(data []byte) bool {
+	// Quick check: renewal messages have MsgType at CBOR key 1 with value 30-33.
+	// We need to peek at the first integer after key 1 in the CBOR map.
+	// For simplicity, try to decode as a renewal message header.
+	msg, err := commissioning.DecodeRenewalMessage(data)
+	if err != nil {
+		return false
+	}
+	// If it decoded successfully, it's a renewal message
+	msgType := commissioning.RenewalMessageType(msg)
+	return msgType >= commissioning.MsgCertRenewalRequest && msgType <= commissioning.MsgCertRenewalAck
+}
+
+// InitializeRenewalHandler creates and sets a renewal handler with the given identity.
+func (s *ZoneSession) InitializeRenewalHandler(identity *cert.DeviceIdentity) {
+	handler := NewDeviceRenewalHandler(identity)
+	s.SetRenewalHandler(handler)
+}
+
+// RenewalHandler returns the session's renewal handler.
+func (s *ZoneSession) RenewalHandler() *DeviceRenewalHandler {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.renewalHandler
 }

@@ -902,3 +902,53 @@ func (s *ControllerService) LoadState() error {
 
 	return nil
 }
+
+// RenewDevice initiates and completes certificate renewal for a connected device.
+// The renewal happens over the existing TLS connection without disconnection.
+func (s *ControllerService) RenewDevice(ctx context.Context, deviceID string) error {
+	s.mu.RLock()
+	session := s.deviceSessions[deviceID]
+	certStore := s.certStore
+	s.mu.RUnlock()
+
+	if session == nil {
+		return fmt.Errorf("no session for device %s", deviceID)
+	}
+
+	if certStore == nil {
+		return fmt.Errorf("no certificate store configured")
+	}
+
+	// Get Zone CA for signing
+	zoneCA, err := certStore.GetZoneCA()
+	if err != nil {
+		return fmt.Errorf("get Zone CA: %w", err)
+	}
+	if zoneCA == nil {
+		return fmt.Errorf("Zone CA not available")
+	}
+
+	// Create renewal handler using the session's connection
+	renewalHandler := NewControllerRenewalHandler(zoneCA, session.Conn())
+
+	// Set the handler on the session so responses get routed correctly
+	session.SetRenewalHandler(renewalHandler)
+	defer session.SetRenewalHandler(nil) // Clean up after renewal
+
+	// Perform the renewal
+	newCert, err := renewalHandler.RenewDevice(ctx, deviceID)
+	if err != nil {
+		return fmt.Errorf("renewal failed: %w", err)
+	}
+
+	// Emit success event
+	s.emitEvent(Event{
+		Type:     EventCertificateRenewed,
+		DeviceID: deviceID,
+	})
+
+	// Log the new certificate expiry
+	_ = newCert // Could update tracking here
+
+	return nil
+}
