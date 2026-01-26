@@ -3,6 +3,8 @@ package inspect
 import (
 	"strings"
 	"testing"
+
+	"github.com/mash-protocol/mash-go/pkg/model"
 )
 
 func TestFormatValue(t *testing.T) {
@@ -221,12 +223,13 @@ func TestFormatFeatureType(t *testing.T) {
 		featType uint8
 		expected string
 	}{
-		{1, "DeviceInfo"},    // FeatureDeviceInfo = 0x0001
-		{2, "Status"},        // FeatureStatus = 0x0002
-		{3, "Electrical"},    // FeatureElectrical = 0x0003
-		{4, "Measurement"},   // FeatureMeasurement = 0x0004
-		{5, "EnergyControl"}, // FeatureEnergyControl = 0x0005
-		{255, "Unknown"},     // Model returns "Unknown" for unknown values
+		{uint8(model.FeatureDeviceInfo), "DeviceInfo"},
+		{uint8(model.FeatureStatus), "Status"},
+		{uint8(model.FeatureElectrical), "Electrical"},
+		{uint8(model.FeatureMeasurement), "Measurement"},
+		{uint8(model.FeatureEnergyControl), "EnergyControl"},
+		{0x10, "Unknown"}, // Undefined standard feature (0x0A-0x7F range)
+		{0x80, "Vendor"},  // Vendor features start at 0x80
 	}
 
 	for _, tt := range tests {

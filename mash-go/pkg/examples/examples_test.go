@@ -7,6 +7,7 @@ import (
 
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
+	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -188,7 +189,7 @@ func TestZoneInteraction(t *testing.T) {
 		MessageID:  1,
 		Operation:  wire.OpInvoke,
 		EndpointID: 1,
-		FeatureID:  uint8(features.EnergyControlFeatureRevision), // Use correct feature ID
+		FeatureID:  uint8(model.FeatureEnergyControl),
 		Payload: &wire.InvokePayload{
 			CommandID: features.EnergyControlCmdSetLimit,
 			Parameters: map[string]any{
@@ -197,7 +198,6 @@ func TestZoneInteraction(t *testing.T) {
 			},
 		},
 	}
-	req.FeatureID = 5 // FeatureEnergyControl = 0x0005
 
 	resp := evseServer.HandleRequest(ctx, req)
 	if !resp.Status.IsSuccess() {
@@ -223,7 +223,7 @@ func TestZoneInteraction(t *testing.T) {
 		MessageID:  2,
 		Operation:  wire.OpInvoke,
 		EndpointID: 1,
-		FeatureID:  5, // FeatureEnergyControl
+		FeatureID:  uint8(model.FeatureEnergyControl),
 		Payload: &wire.InvokePayload{
 			CommandID:  features.EnergyControlCmdClearLimit,
 			Parameters: map[string]any{},
@@ -278,7 +278,7 @@ func TestReadMeasurements(t *testing.T) {
 		MessageID:  1,
 		Operation:  wire.OpRead,
 		EndpointID: 1,
-		FeatureID:  4, // FeatureMeasurement
+		FeatureID:  uint8(model.FeatureMeasurement),
 		Payload:    []uint16{1}, // ACActivePower
 	}
 
@@ -332,7 +332,7 @@ func TestSubscribeToMeasurements(t *testing.T) {
 		MessageID:  1,
 		Operation:  wire.OpSubscribe,
 		EndpointID: 1,
-		FeatureID:  4, // FeatureMeasurement
+		FeatureID:  uint8(model.FeatureMeasurement),
 		Payload: &wire.SubscribePayload{
 			AttributeIDs: []uint16{1}, // ACActivePower
 			MinInterval:  0,           // No delay for testing
@@ -399,7 +399,7 @@ func TestPauseResume(t *testing.T) {
 		MessageID:  1,
 		Operation:  wire.OpInvoke,
 		EndpointID: 1,
-		FeatureID:  5, // FeatureEnergyControl
+		FeatureID:  uint8(model.FeatureEnergyControl),
 		Payload: &wire.InvokePayload{
 			CommandID:  features.EnergyControlCmdPause,
 			Parameters: map[string]any{},
@@ -421,7 +421,7 @@ func TestPauseResume(t *testing.T) {
 		MessageID:  2,
 		Operation:  wire.OpInvoke,
 		EndpointID: 1,
-		FeatureID:  5, // FeatureEnergyControl
+		FeatureID:  uint8(model.FeatureEnergyControl),
 		Payload: &wire.InvokePayload{
 			CommandID:  features.EnergyControlCmdResume,
 			Parameters: map[string]any{},

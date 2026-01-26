@@ -2,6 +2,8 @@ package inspect
 
 import (
 	"testing"
+
+	"github.com/mash-protocol/mash-go/pkg/model"
 )
 
 func TestParsePath(t *testing.T) {
@@ -187,7 +189,7 @@ func TestParsePathWithNames(t *testing.T) {
 			input: "deviceRoot/deviceInfo/1",
 			want: &Path{
 				EndpointID:  0,
-				FeatureID:   1, // FeatureDeviceInfo
+				FeatureID:   uint8(model.FeatureDeviceInfo),
 				AttributeID: 1,
 			},
 		},
@@ -196,7 +198,7 @@ func TestParsePathWithNames(t *testing.T) {
 			input: "1/measurement/1",
 			want: &Path{
 				EndpointID:  1,
-				FeatureID:   4, // FeatureMeasurement
+				FeatureID:   uint8(model.FeatureMeasurement),
 				AttributeID: 1,
 			},
 		},
@@ -205,7 +207,7 @@ func TestParsePathWithNames(t *testing.T) {
 			input: "1/measurement/acActivePower",
 			want: &Path{
 				EndpointID:  1,
-				FeatureID:   4, // FeatureMeasurement
+				FeatureID:   uint8(model.FeatureMeasurement),
 				AttributeID: 1, // MeasurementAttrACActivePower
 			},
 		},
@@ -214,7 +216,7 @@ func TestParsePathWithNames(t *testing.T) {
 			input: "evCharger/energyControl/effectiveConsumptionLimit",
 			want: &Path{
 				EndpointID:  5, // EndpointEVCharger
-				FeatureID:   5, // FeatureEnergyControl
+				FeatureID:   uint8(model.FeatureEnergyControl),
 				AttributeID: 20,
 			},
 		},

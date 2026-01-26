@@ -745,7 +745,8 @@ func TestFeatureTypeString(t *testing.T) {
 		{FeatureStatus, "Status"},
 		{FeatureDeviceInfo, "DeviceInfo"},
 		{FeatureVendorBase, "Vendor"},
-		{FeatureType(0xFF), "Unknown"},
+		{FeatureType(0xFF), "Vendor"},   // 0xFF is in vendor range (0x80-0xFF)
+		{FeatureType(0x10), "Unknown"},  // 0x10 is undefined standard feature
 	}
 
 	for _, tt := range tests {

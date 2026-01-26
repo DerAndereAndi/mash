@@ -1,49 +1,53 @@
 package model
 
 // FeatureType identifies the type of a feature.
-type FeatureType uint16
+// Uses uint8 to match wire protocol and save bytes in messages.
+type FeatureType uint8
 
 // Feature types from the MASH feature registry.
 // Ordered from most fundamental to most specialized.
+// Standard features: 0x01-0x7F (127 max)
+// Vendor features: 0x80-0xFF (128 max)
 const (
 	// FeatureDeviceInfo provides device identity and structure information.
 	// Present on endpoint 0 (DEVICE_ROOT) of every device.
-	FeatureDeviceInfo FeatureType = 0x0001
+	FeatureDeviceInfo FeatureType = 0x01
 
 	// FeatureStatus provides operating state and fault information.
 	// "Is it working?" - Operational status and diagnostics.
-	FeatureStatus FeatureType = 0x0002
+	FeatureStatus FeatureType = 0x02
 
 	// FeatureElectrical provides static electrical configuration.
 	// "What CAN this do?" - Phase config, ratings, capabilities.
-	FeatureElectrical FeatureType = 0x0003
+	FeatureElectrical FeatureType = 0x03
 
 	// FeatureMeasurement provides power, energy, voltage, current telemetry.
 	// "What IS it doing?" - Real-time telemetry data.
-	FeatureMeasurement FeatureType = 0x0004
+	FeatureMeasurement FeatureType = 0x04
 
 	// FeatureEnergyControl provides limits, setpoints, and control commands.
 	// "What SHOULD it do?" - Control interface for energy management.
-	FeatureEnergyControl FeatureType = 0x0005
+	FeatureEnergyControl FeatureType = 0x05
 
 	// FeatureChargingSession provides EV charging session data.
 	// Used on EV_CHARGER endpoints.
-	FeatureChargingSession FeatureType = 0x0006
+	FeatureChargingSession FeatureType = 0x06
 
 	// FeatureTariff provides price structure, components, and power tiers.
 	// Defines the structure that Signals references.
-	FeatureTariff FeatureType = 0x0007
+	FeatureTariff FeatureType = 0x07
 
 	// FeatureSignals provides time-slotted prices, limits, and forecasts.
 	// Receives incentive/constraint signals from controllers.
-	FeatureSignals FeatureType = 0x0008
+	FeatureSignals FeatureType = 0x08
 
 	// FeaturePlan provides the device's intended behavior/schedule.
 	// Reports planned power consumption/production in response to Signals.
-	FeaturePlan FeatureType = 0x0009
+	FeaturePlan FeatureType = 0x09
 
 	// FeatureVendorBase is the start of vendor-specific feature IDs.
-	FeatureVendorBase FeatureType = 0x0100
+	// Vendor features use range 0x80-0xFF (128 slots).
+	FeatureVendorBase FeatureType = 0x80
 )
 
 // String returns the feature type name.
