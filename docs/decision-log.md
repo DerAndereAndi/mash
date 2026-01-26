@@ -3,7 +3,7 @@
 > Tracking what we evaluated, decided, and declined
 
 **Created:** 2025-01-24
-**Last Updated:** 2025-01-25
+**Last Updated:** 2026-01-26
 
 ---
 
@@ -2181,6 +2181,44 @@ ChargingSession.evDemandMode: DYNAMIC_BIDIRECTIONAL
 - TC-PROCESS-* cover ProcessState transitions
 
 **Documentation:** See `docs/testing/behavior/state-machines.md` for complete specification.
+
+---
+
+### DEC-040: Device Identity via Certificate Fingerprint
+
+**Date:** 2026-01-26
+**Status:** Proposed
+
+**Context:** Need a stable, verifiable device identity for:
+- Reconnection after restarts (controller matches device)
+- Certificate pinning/validation
+- Persistence of commissioned device relationships
+
+**Options Evaluated:**
+1. Subject Key Identifier (SKI) - 20-byte hash of public key
+2. Full certificate fingerprint - SHA-256 hash of entire certificate
+3. PASE-derived ID - hash of SPAKE2+ shared secret
+
+**Decision:** Full certificate fingerprint (SHA-256)
+
+**Rationale:**
+- More collision-resistant than SKI (32 bytes vs 20 bytes)
+- Covers entire certificate content, not just public key
+- Standard practice for certificate pinning
+- If certificate changes (renewal, rotation), identity changes appropriately
+- Easy to compute: `sha256(certificate.Raw)` in Go
+
+**Implementation:**
+- Device generates/loads persistent TLS certificate on startup
+- Device ID = hex-encoded SHA-256 of DER-encoded certificate
+- Controller stores device's certificate fingerprint during commissioning
+- On reconnection, controller verifies fingerprint matches
+
+**Declined Alternatives:**
+- SKI: Smaller but less collision-resistant, only covers public key
+- PASE-derived: Different for each commissioning session, not tied to certificate
+
+**Related:** OPEN-002 (Certificate and Session Details)
 
 ---
 

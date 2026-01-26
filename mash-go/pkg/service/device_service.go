@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -174,20 +175,59 @@ func (s *DeviceService) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Generate self-signed certificate for commissioning mode
-	s.tlsCert, err = generateSelfSignedCert()
-	if err != nil {
-		s.mu.Lock()
-		s.state = StateIdle
-		s.mu.Unlock()
-		return err
+	// Get or generate the device identity certificate
+	// This certificate is used for TLS and defines the device ID
+	s.mu.RLock()
+	certStore := s.certStore
+	s.mu.RUnlock()
+
+	var deviceCert *x509.Certificate
+	var deviceKey *ecdsa.PrivateKey
+
+	if certStore != nil {
+		// Try to load existing certificate
+		deviceCert, deviceKey, err = certStore.GetDeviceAttestation()
+		if err != nil && err != cert.ErrCertNotFound {
+			s.mu.Lock()
+			s.state = StateIdle
+			s.mu.Unlock()
+			return fmt.Errorf("failed to load device certificate: %w", err)
+		}
+	}
+
+	if deviceCert == nil || deviceKey == nil {
+		// Generate new self-signed certificate
+		s.tlsCert, err = generateSelfSignedCert()
+		if err != nil {
+			s.mu.Lock()
+			s.state = StateIdle
+			s.mu.Unlock()
+			return err
+		}
+
+		// Save to cert store if available
+		if certStore != nil && len(s.tlsCert.Certificate) > 0 {
+			parsedCert, parseErr := x509.ParseCertificate(s.tlsCert.Certificate[0])
+			if parseErr == nil {
+				if key, ok := s.tlsCert.PrivateKey.(*ecdsa.PrivateKey); ok {
+					_ = certStore.SetDeviceAttestation(parsedCert, key)
+					_ = certStore.Save()
+				}
+			}
+		}
+	} else {
+		// Use loaded certificate
+		s.tlsCert = tls.Certificate{
+			Certificate: [][]byte{deviceCert.Raw},
+			PrivateKey:  deviceKey,
+		}
 	}
 
 	// Derive device ID from the certificate's public key
 	if len(s.tlsCert.Certificate) > 0 {
-		cert, err := x509.ParseCertificate(s.tlsCert.Certificate[0])
+		parsedCert, err := x509.ParseCertificate(s.tlsCert.Certificate[0])
 		if err == nil {
-			s.deviceID, _ = discovery.DeviceIDFromPublicKey(cert)
+			s.deviceID, _ = discovery.DeviceIDFromPublicKey(parsedCert)
 		}
 	}
 
@@ -294,10 +334,70 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 	if inCommissioningMode {
 		s.handleCommissioningConnection(tlsConn)
 	} else {
-		// Operational mode - verify client certificate
-		// TODO: Implement operational connection handling
-		tlsConn.Close()
+		// Operational mode - handle reconnection from known zones
+		s.handleOperationalConnection(tlsConn)
 	}
+}
+
+// handleOperationalConnection handles a reconnection from a known zone.
+func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
+	s.mu.RLock()
+	// Find a known zone that isn't currently connected
+	var targetZoneID string
+	for zoneID, cz := range s.connectedZones {
+		if !cz.Connected {
+			targetZoneID = zoneID
+			break
+		}
+	}
+	s.mu.RUnlock()
+
+	if targetZoneID == "" {
+		// No known disconnected zones - reject connection
+		s.debugLog("handleOperationalConnection: no disconnected zones to reconnect")
+		conn.Close()
+		return
+	}
+
+	// Mark zone as connected
+	s.mu.Lock()
+	if cz, exists := s.connectedZones[targetZoneID]; exists {
+		cz.Connected = true
+		cz.LastSeen = time.Now()
+	}
+
+	// Restart failsafe timer for this zone
+	if timer, hasTimer := s.failsafeTimers[targetZoneID]; hasTimer {
+		timer.Reset()
+		timer.Start()
+	}
+	s.mu.Unlock()
+
+	s.debugLog("handleOperationalConnection: zone reconnected", "zoneID", targetZoneID)
+
+	// Create framed connection wrapper for operational messaging
+	framedConn := newFramedConnection(conn)
+
+	// Create zone session for this connection
+	zoneSession := NewZoneSession(targetZoneID, framedConn, s.device)
+	zoneSession.SetLogger(s.logger)
+
+	// Store the session
+	s.mu.Lock()
+	s.zoneSessions[targetZoneID] = zoneSession
+	s.mu.Unlock()
+
+	// Emit connected event
+	s.emitEvent(Event{
+		Type:   EventConnected,
+		ZoneID: targetZoneID,
+	})
+
+	// Start message loop - blocks until connection closes
+	s.runZoneMessageLoop(targetZoneID, framedConn, zoneSession)
+
+	// Clean up on disconnect
+	s.handleZoneSessionClose(targetZoneID)
 }
 
 // handleCommissioningConnection handles PASE commissioning over TLS.
@@ -938,13 +1038,47 @@ func (s *DeviceService) LoadState() error {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
+
+	// Track restored zones to emit events after unlock
+	var restoredZones []string
 
 	// Restore zone index map
 	for zoneID, idx := range state.ZoneIndexMap {
 		s.zoneIndexMap[zoneID] = idx
 		if idx >= s.nextZoneIndex {
 			s.nextZoneIndex = idx + 1
+		}
+	}
+
+	// Restore zone memberships (marked as not connected since no active connection)
+	if len(state.Zones) > 0 {
+		// New format: zones are explicitly saved
+		for _, zm := range state.Zones {
+			zoneType := cert.ZoneType(zm.ZoneType)
+			cz := &ConnectedZone{
+				ID:        zm.ZoneID,
+				Type:      zoneType,
+				Priority:  zoneType.Priority(),
+				Connected: false, // Not connected until controller reconnects
+				LastSeen:  zm.JoinedAt,
+			}
+			s.connectedZones[zm.ZoneID] = cz
+			restoredZones = append(restoredZones, zm.ZoneID)
+		}
+	} else if len(state.ZoneIndexMap) > 0 {
+		// Backward compatibility: derive zones from zone_index_map
+		// We don't have zone type info, assume HomeManager as default
+		for zoneID := range state.ZoneIndexMap {
+			zoneType := cert.ZoneTypeHomeManager
+			cz := &ConnectedZone{
+				ID:        zoneID,
+				Type:      zoneType,
+				Priority:  zoneType.Priority(),
+				Connected: false,
+				LastSeen:  state.SavedAt,
+			}
+			s.connectedZones[zoneID] = cz
+			restoredZones = append(restoredZones, zoneID)
 		}
 	}
 
@@ -984,6 +1118,16 @@ func (s *DeviceService) LoadState() error {
 		s.failsafeTimers[zoneID] = timer
 	}
 
+	s.mu.Unlock()
+
+	// Emit events for restored zones (after releasing lock)
+	for _, zoneID := range restoredZones {
+		s.emitEvent(Event{
+			Type:   EventZoneRestored,
+			ZoneID: zoneID,
+		})
+	}
+
 	return nil
 }
 
@@ -992,10 +1136,10 @@ func (s *DeviceService) LoadState() error {
 // and stops operational mDNS advertising for this zone.
 func (s *DeviceService) RemoveZone(zoneID string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Check if zone exists
 	if _, exists := s.connectedZones[zoneID]; !exists {
+		s.mu.Unlock()
 		return ErrDeviceNotFound
 	}
 
@@ -1011,9 +1155,10 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 		delete(s.failsafeTimers, zoneID)
 	}
 
-	// Cancel any duration timers for this zone
+	// Cancel any duration timers for this zone and remove from index map
 	if zoneIndex, exists := s.zoneIndexMap[zoneID]; exists {
 		s.durationManager.CancelZoneTimers(zoneIndex)
+		delete(s.zoneIndexMap, zoneID)
 	}
 
 	// Stop operational mDNS advertising for this zone
@@ -1026,12 +1171,50 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 
 	// Remove from connected zones
 	delete(s.connectedZones, zoneID)
+	s.mu.Unlock()
 
-	// Emit event (without holding lock for event handlers)
-	go s.emitEvent(Event{
+	// Save state to persist the removal
+	_ = s.SaveState() // Ignore error - zone is already removed from memory
+
+	// Emit event
+	s.emitEvent(Event{
 		Type:   EventZoneRemoved,
 		ZoneID: zoneID,
 	})
+
+	return nil
+}
+
+// StartOperationalAdvertising starts mDNS operational advertising for all known zones.
+// This should be called after Start() when the device has restored zones from persistence.
+// It allows controllers to rediscover the device for reconnection.
+func (s *DeviceService) StartOperationalAdvertising() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.discoveryManager == nil {
+		return nil // No discovery manager, skip
+	}
+
+	port := uint16(0)
+	if s.tlsListener != nil {
+		port = parsePort(s.tlsListener.Addr().String())
+	}
+
+	for zoneID := range s.connectedZones {
+		opInfo := &discovery.OperationalInfo{
+			ZoneID:        zoneID,
+			DeviceID:      s.deviceID,
+			VendorProduct: fmt.Sprintf("%04x:%04x", s.device.VendorID(), s.device.ProductID()),
+			EndpointCount: uint8(s.device.EndpointCount()),
+			Port:          port,
+		}
+
+		if err := s.discoveryManager.AddZone(s.ctx, opInfo); err != nil {
+			s.debugLog("StartOperationalAdvertising: failed to start advertising",
+				"zoneID", zoneID, "error", err)
+		}
+	}
 
 	return nil
 }

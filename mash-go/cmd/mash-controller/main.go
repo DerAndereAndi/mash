@@ -201,6 +201,15 @@ func main() {
 	if err := svc.StartDiscovery(ctx, nil); err != nil {
 		log.Printf("Failed to start discovery: %v", err)
 	}
+
+	// Start operational discovery for reconnecting to known devices
+	if svc.DeviceCount() > 0 {
+		log.Printf("Starting operational discovery for %d known device(s)", svc.DeviceCount())
+		if err := svc.StartOperationalDiscovery(ctx); err != nil {
+			log.Printf("Warning: Failed to start operational discovery: %v", err)
+		}
+	}
+
 	go runMonitoringLoop(ctx)
 
 	// Run interactive mode or wait for signal
@@ -306,6 +315,14 @@ func handleEvent(event service.Event) {
 		_ = cem.DisconnectDevice(event.DeviceID)
 	case service.EventValueChanged:
 		log.Printf("[EVENT] Value changed (device: %s)", event.DeviceID)
+
+	case service.EventDeviceRediscovered:
+		log.Printf("[EVENT] Known device rediscovered: %s (attempting reconnection...)", event.DeviceID)
+
+	case service.EventDeviceReconnected:
+		log.Printf("[EVENT] Device reconnected: %s", event.DeviceID)
+		// Re-setup device monitoring after reconnection
+		go setupDeviceMonitoring(event.DeviceID)
 	}
 }
 

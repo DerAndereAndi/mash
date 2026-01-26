@@ -192,6 +192,9 @@ func main() {
 	// Store for simulation
 	deviceSvc = svc
 
+	// Register event handler early so we can see events during state loading
+	svc.OnEvent(handleEvent)
+
 	// Set up persistence if state-dir is provided
 	if config.StateDir != "" {
 		log.Printf("Using state directory: %s", config.StateDir)
@@ -226,9 +229,6 @@ func main() {
 		}
 	}
 
-	// Register event handler
-	svc.OnEvent(handleEvent)
-
 	// Start service
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -238,12 +238,22 @@ func main() {
 	}
 	log.Printf("Service started (state: %s)", svc.State())
 
-	// Enter commissioning mode
-	if err := svc.EnterCommissioningMode(); err != nil {
-		log.Printf("Warning: Failed to enter commissioning mode: %v", err)
+	// Check if we have existing zones from persistence
+	knownZones := svc.ZoneCount()
+	if knownZones > 0 {
+		// Device is already commissioned - start operational advertising
+		log.Printf("Device has %d known zone(s), starting operational advertising", knownZones)
+		if err := svc.StartOperationalAdvertising(); err != nil {
+			log.Printf("Warning: Failed to start operational advertising: %v", err)
+		}
 	} else {
-		log.Println("Commissioning mode active")
-		printCommissioningInfo()
+		// No zones - enter commissioning mode
+		if err := svc.EnterCommissioningMode(); err != nil {
+			log.Printf("Warning: Failed to enter commissioning mode: %v", err)
+		} else {
+			log.Println("Commissioning mode active")
+			printCommissioningInfo()
+		}
 	}
 
 	// Set up simulation behavior
@@ -491,6 +501,12 @@ func handleEvent(event service.Event) {
 
 	case service.EventValueChanged:
 		log.Printf("[EVENT] Value changed (zone: %s)", event.ZoneID)
+
+	case service.EventZoneRestored:
+		log.Printf("[EVENT] Zone restored from persistence: %s (awaiting reconnection)", event.ZoneID)
+
+	case service.EventZoneRemoved:
+		log.Printf("[EVENT] Zone removed: %s", event.ZoneID)
 	}
 }
 

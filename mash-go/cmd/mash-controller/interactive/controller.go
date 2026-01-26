@@ -117,7 +117,7 @@ func (c *Controller) Run(ctx context.Context, cancel context.CancelFunc) {
 		case "commission":
 			c.cmdCommission(ctx, args)
 
-		case "decommission":
+		case "decommission", "kick":
 			c.cmdDecommission(args)
 
 		case "inspect", "i":
@@ -162,7 +162,7 @@ MASH Controller Commands:
     discover                          - Discover commissionable devices
     devices                           - List connected devices
     commission <discriminator> <code> - Commission a device
-    decommission <device-id>          - Remove a device
+    decommission <device-id>          - Remove a device (alias: kick)
 
   Inspection:
     inspect <device-id> [path]        - Inspect device structure

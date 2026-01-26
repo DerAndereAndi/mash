@@ -340,6 +340,15 @@ const (
 
 	// EventZoneRemoved - zone was removed from device.
 	EventZoneRemoved
+
+	// EventZoneRestored - zone was restored from persistence (awaiting reconnection).
+	EventZoneRestored
+
+	// EventDeviceRediscovered - known device found via operational mDNS.
+	EventDeviceRediscovered
+
+	// EventDeviceReconnected - reconnected to a known device.
+	EventDeviceReconnected
 )
 
 // String returns the event type name.
@@ -369,6 +378,12 @@ func (e EventType) String() string {
 		return "DEVICE_DISCOVERED"
 	case EventZoneRemoved:
 		return "ZONE_REMOVED"
+	case EventZoneRestored:
+		return "ZONE_RESTORED"
+	case EventDeviceRediscovered:
+		return "DEVICE_REDISCOVERED"
+	case EventDeviceReconnected:
+		return "DEVICE_RECONNECTED"
 	default:
 		return "UNKNOWN"
 	}

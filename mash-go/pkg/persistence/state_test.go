@@ -215,15 +215,13 @@ func TestControllerStateStore(t *testing.T) {
 			ZoneID:  "my-zone",
 			Devices: []DeviceMembership{
 				{
-					DeviceID:    "dev-1",
-					SKI:         "abc123",
-					DeviceType:  "EVSE",
-					JoinedAt:    time.Now(),
-					LastSeenAt:  time.Now(),
+					DeviceID:   "dev-1",
+					DeviceType: "EVSE",
+					JoinedAt:   time.Now(),
+					LastSeenAt: time.Now(),
 				},
 				{
 					DeviceID:   "dev-2",
-					SKI:        "xyz789",
 					DeviceType: "INVERTER",
 					JoinedAt:   time.Now(),
 				},

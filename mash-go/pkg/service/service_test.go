@@ -1133,6 +1133,10 @@ func TestEventTypeString(t *testing.T) {
 		{EventCommissioningOpened, "COMMISSIONING_OPENED"},
 		{EventCommissioningClosed, "COMMISSIONING_CLOSED"},
 		{EventDeviceDiscovered, "DEVICE_DISCOVERED"},
+		{EventZoneRemoved, "ZONE_REMOVED"},
+		{EventZoneRestored, "ZONE_RESTORED"},
+		{EventDeviceRediscovered, "DEVICE_REDISCOVERED"},
+		{EventDeviceReconnected, "DEVICE_RECONNECTED"},
 		{EventType(99), "UNKNOWN"},
 	}
 

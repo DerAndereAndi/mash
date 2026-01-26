@@ -32,9 +32,13 @@ type ControllerService struct {
 	discoveryManager *discovery.DiscoveryManager
 	advertiser       discovery.Advertiser
 
-	// Background discovery state
+	// Background discovery state (commissionable)
 	discoveryActive bool
 	discoveryCancel context.CancelFunc
+
+	// Operational discovery state (for reconnection)
+	operationalDiscoveryActive bool
+	operationalDiscoveryCancel context.CancelFunc
 
 	// Connected devices
 	connectedDevices map[string]*ConnectedDevice
@@ -115,14 +119,62 @@ func (s *ControllerService) Start(ctx context.Context) error {
 		return ErrAlreadyStarted
 	}
 	s.state = StateStarting
+	certStore := s.certStore
+	config := s.config
+	existingZoneID := s.zoneID
 	s.mu.Unlock()
 
 	// Create cancellable context
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
-	// TODO: Generate/load zone certificate
-	// TODO: Initialize zone ID from certificate fingerprint
-	// TODO: Start advertising as commissioner
+	// Generate or load Zone CA if certStore is configured
+	if certStore != nil {
+		zoneCA, err := certStore.GetZoneCA()
+		if err != nil && err != cert.ErrCertNotFound {
+			s.mu.Lock()
+			s.state = StateIdle
+			s.mu.Unlock()
+			return fmt.Errorf("failed to load zone CA: %w", err)
+		}
+
+		if zoneCA == nil {
+			// Generate new Zone CA
+			// Use zone name as the zone ID for generation
+			zoneID := config.ZoneName
+			if existingZoneID != "" {
+				zoneID = existingZoneID // Prefer existing zone ID from state
+			}
+
+			zoneCA, err = cert.GenerateZoneCA(zoneID, config.ZoneType)
+			if err != nil {
+				s.mu.Lock()
+				s.state = StateIdle
+				s.mu.Unlock()
+				return fmt.Errorf("failed to generate zone CA: %w", err)
+			}
+
+			// Save the Zone CA
+			if err := certStore.SetZoneCA(zoneCA); err != nil {
+				s.mu.Lock()
+				s.state = StateIdle
+				s.mu.Unlock()
+				return fmt.Errorf("failed to save zone CA: %w", err)
+			}
+			if err := certStore.Save(); err != nil {
+				s.mu.Lock()
+				s.state = StateIdle
+				s.mu.Unlock()
+				return fmt.Errorf("failed to persist zone CA: %w", err)
+			}
+		}
+
+		// Use the Zone CA's zone ID if we don't have one from state
+		if existingZoneID == "" {
+			s.mu.Lock()
+			s.zoneID = zoneCA.ZoneID
+			s.mu.Unlock()
+		}
+	}
 
 	// Initialize mDNS browser if not already set (e.g., by tests)
 	if s.browser == nil {
@@ -372,17 +424,28 @@ func (s *ControllerService) GetSession(deviceID string) *DeviceSession {
 // Decommission removes a device from the zone.
 func (s *ControllerService) Decommission(deviceID string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	device, exists := s.connectedDevices[deviceID]
 	if !exists {
+		s.mu.Unlock()
 		return ErrDeviceNotFound
 	}
 
+	// Close and remove the session if it exists
+	if session, hasSession := s.deviceSessions[deviceID]; hasSession {
+		session.Close()
+		delete(s.deviceSessions, deviceID)
+	}
+
+	// TODO: Remove subscriptions for this device
 	// TODO: Send decommission command to device
 	// TODO: Revoke device certificate
 
 	delete(s.connectedDevices, deviceID)
+	s.mu.Unlock()
+
+	// Save state to persist the removal
+	_ = s.SaveState() // Ignore error - device is already removed from memory
 
 	s.emitEvent(Event{
 		Type:     EventDecommissioned,
@@ -571,6 +634,175 @@ func (s *ControllerService) IsDiscovering() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.discoveryActive
+}
+
+// StartOperationalDiscovery starts background mDNS discovery for known devices.
+// This browses for devices advertising on _mash._tcp with this controller's zone ID.
+// Known devices that are found will trigger reconnection attempts.
+func (s *ControllerService) StartOperationalDiscovery(ctx context.Context) error {
+	s.mu.Lock()
+	if s.state != StateRunning {
+		s.mu.Unlock()
+		return ErrNotStarted
+	}
+	if s.operationalDiscoveryActive {
+		s.mu.Unlock()
+		return nil // Already discovering
+	}
+
+	browser := s.browser
+	zoneID := s.zoneID
+	if browser == nil || zoneID == "" {
+		s.mu.Unlock()
+		return ErrNotStarted
+	}
+
+	// Create cancellable context for this discovery session
+	discoveryCtx, cancel := context.WithCancel(ctx)
+	s.operationalDiscoveryActive = true
+	s.operationalDiscoveryCancel = cancel
+	s.mu.Unlock()
+
+	// Start browsing in background
+	go s.runOperationalDiscoveryLoop(discoveryCtx, zoneID)
+
+	return nil
+}
+
+// runOperationalDiscoveryLoop runs operational discovery and handles reconnection.
+func (s *ControllerService) runOperationalDiscoveryLoop(ctx context.Context, zoneID string) {
+	results, err := s.browser.BrowseOperational(ctx, zoneID)
+	if err != nil {
+		s.mu.Lock()
+		s.operationalDiscoveryActive = false
+		s.operationalDiscoveryCancel = nil
+		s.mu.Unlock()
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.mu.Lock()
+			s.operationalDiscoveryActive = false
+			s.operationalDiscoveryCancel = nil
+			s.mu.Unlock()
+			return
+
+		case svc, ok := <-results:
+			if !ok {
+				s.mu.Lock()
+				s.operationalDiscoveryActive = false
+				s.operationalDiscoveryCancel = nil
+				s.mu.Unlock()
+				return
+			}
+
+			// Check if this is a known device
+			s.mu.RLock()
+			device, isKnown := s.connectedDevices[svc.DeviceID]
+			alreadyConnected := isKnown && device.Connected
+			s.mu.RUnlock()
+
+			if !isKnown {
+				continue // Not our device
+			}
+
+			if alreadyConnected {
+				continue // Already connected
+			}
+
+			// Emit rediscovery event
+			s.emitEvent(Event{
+				Type:              EventDeviceRediscovered,
+				DeviceID:          svc.DeviceID,
+				DiscoveredService: svc,
+			})
+
+			// Attempt reconnection in background
+			go s.attemptReconnection(ctx, svc)
+		}
+	}
+}
+
+// attemptReconnection tries to reconnect to a known device.
+func (s *ControllerService) attemptReconnection(ctx context.Context, svc *discovery.OperationalService) {
+	// Build the connection address
+	addr := fmt.Sprintf("%s:%d", svc.Host, svc.Port)
+
+	// Create TLS config for operational connection
+	// Use the same pattern as commissioning for now
+	// TODO: Implement proper certificate validation with zone CA
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		MaxVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true, // TODO: Validate against known device cert
+		NextProtos:         []string{transport.ALPNProtocol},
+	}
+
+	// Attempt connection
+	conn, err := tls.Dial("tcp", addr, tlsConfig)
+	if err != nil {
+		// Connection failed - device might not be ready yet
+		return
+	}
+
+	// Update device state
+	s.mu.Lock()
+	device, exists := s.connectedDevices[svc.DeviceID]
+	if exists {
+		device.Connected = true
+		device.Host = svc.Host
+		device.Port = svc.Port
+		device.LastSeen = time.Now()
+	}
+	s.mu.Unlock()
+
+	if !exists {
+		conn.Close()
+		return
+	}
+
+	// Create framed connection wrapper for operational messaging
+	framedConn := newFramedConnection(conn)
+
+	// Create device session
+	session := NewDeviceSession(svc.DeviceID, framedConn)
+
+	s.mu.Lock()
+	s.deviceSessions[svc.DeviceID] = session
+	s.mu.Unlock()
+
+	// Emit reconnected event
+	s.emitEvent(Event{
+		Type:     EventDeviceReconnected,
+		DeviceID: svc.DeviceID,
+	})
+
+	// Start message loop - blocks until connection closes
+	s.runDeviceMessageLoop(svc.DeviceID, framedConn, session)
+
+	// Clean up on disconnect
+	s.handleDeviceSessionClose(svc.DeviceID)
+}
+
+// StopOperationalDiscovery stops background operational discovery.
+func (s *ControllerService) StopOperationalDiscovery() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.operationalDiscoveryCancel != nil {
+		s.operationalDiscoveryCancel()
+		s.operationalDiscoveryCancel = nil
+	}
+	s.operationalDiscoveryActive = false
+}
+
+// IsOperationalDiscovering returns true if operational discovery is active.
+func (s *ControllerService) IsOperationalDiscovering() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.operationalDiscoveryActive
 }
 
 // SetCertStore sets the certificate store for persistence.

@@ -194,7 +194,7 @@ type zoneCAMetadata struct {
 }
 
 func (s *FileControllerStore) saveZoneCA() error {
-	dir := filepath.Join(s.baseDir, "controller")
+	dir := filepath.Join(s.baseDir, "identity")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -229,7 +229,7 @@ func (s *FileControllerStore) saveZoneCA() error {
 }
 
 func (s *FileControllerStore) loadZoneCA() error {
-	dir := filepath.Join(s.baseDir, "controller")
+	dir := filepath.Join(s.baseDir, "identity")
 
 	// Load certificate
 	certPath := filepath.Join(dir, "zone-ca.pem")

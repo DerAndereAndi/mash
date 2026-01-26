@@ -130,6 +130,9 @@ func (d *Device) Run(ctx context.Context, cancel context.CancelFunc) {
 		case "kick":
 			d.cmdKick(args)
 
+		case "commission", "comm":
+			d.cmdCommission()
+
 		case "start", "sim-start":
 			d.cmdStart()
 
@@ -164,6 +167,7 @@ MASH Device Commands:
   Zone Management:
     zones              - List connected zones
     kick <zone-id>     - Remove a zone from this device
+    commission         - Enter commissioning mode (open for pairing)
 
   Simulation:
     start              - Start simulation
@@ -365,6 +369,15 @@ func (d *Device) cmdKick(args []string) {
 	}
 
 	fmt.Fprintln(d.rl.Stdout(),"Zone removed")
+}
+
+// cmdCommission enters commissioning mode.
+func (d *Device) cmdCommission() {
+	if err := d.svc.EnterCommissioningMode(); err != nil {
+		fmt.Fprintf(d.rl.Stdout(), "Failed to enter commissioning mode: %v\n", err)
+		return
+	}
+	fmt.Fprintln(d.rl.Stdout(), "Commissioning mode enabled - device is now discoverable")
 }
 
 // cmdStart starts the simulation.

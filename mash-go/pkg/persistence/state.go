@@ -161,9 +161,6 @@ type DeviceMembership struct {
 	// DeviceID is the unique device identifier.
 	DeviceID string `json:"device_id"`
 
-	// SKI is the Subject Key Identifier (hex-encoded).
-	SKI string `json:"ski"`
-
 	// DeviceType is the device type (EVSE, INVERTER, etc.).
 	DeviceType string `json:"device_type,omitempty"`
 

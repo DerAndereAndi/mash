@@ -87,6 +87,21 @@ func TestDeviceServiceSaveLoadState(t *testing.T) {
 	if idx != 0 {
 		t.Errorf("zone index = %d, want 0", idx)
 	}
+
+	// Verify connected zones were restored (with Connected: false)
+	zones := svc2.GetAllZones()
+	if len(zones) != 1 {
+		t.Fatalf("expected 1 zone, got %d", len(zones))
+	}
+	if zones[0].ID != zoneID {
+		t.Errorf("zone ID = %q, want %q", zones[0].ID, zoneID)
+	}
+	if zones[0].Type != cert.ZoneTypeHomeManager {
+		t.Errorf("zone type = %v, want HomeManager", zones[0].Type)
+	}
+	if zones[0].Connected {
+		t.Error("restored zone should have Connected = false")
+	}
 }
 
 func TestDeviceServiceSaveStateWithFailsafeTimer(t *testing.T) {
@@ -150,6 +165,56 @@ func TestDeviceServiceSaveStateWithFailsafeTimer(t *testing.T) {
 
 	if snap.State != uint8(failsafe.StateTimerRunning) {
 		t.Errorf("failsafe state = %d, want %d (TIMER_RUNNING)", snap.State, failsafe.StateTimerRunning)
+	}
+}
+
+func TestDeviceServiceLoadStateBackwardCompatibility(t *testing.T) {
+	// Test that zones are derived from zone_index_map when state.Zones is empty
+	// (backward compatibility with old state files)
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	dir := t.TempDir()
+	store := persistence.NewDeviceStateStore(filepath.Join(dir, "state.json"))
+	svc.SetStateStore(store)
+
+	// Manually create a state file without the Zones field (old format)
+	oldState := &persistence.DeviceState{
+		SavedAt: time.Now(),
+		ZoneIndexMap: map[string]uint8{
+			"zone-old-001": 0,
+			"zone-old-002": 1,
+		},
+		// Note: Zones field is intentionally not set (simulating old format)
+	}
+	if err := store.Save(oldState); err != nil {
+		t.Fatalf("store.Save() error = %v", err)
+	}
+
+	// Load state
+	if err := svc.LoadState(); err != nil {
+		t.Fatalf("LoadState() error = %v", err)
+	}
+
+	// Verify zones were derived from zone_index_map
+	zones := svc.GetAllZones()
+	if len(zones) != 2 {
+		t.Fatalf("expected 2 zones, got %d", len(zones))
+	}
+
+	// Check that zones were created with default type (HomeManager)
+	for _, z := range zones {
+		if z.Type != cert.ZoneTypeHomeManager {
+			t.Errorf("zone %s: type = %v, want HomeManager", z.ID, z.Type)
+		}
+		if z.Connected {
+			t.Errorf("zone %s: should have Connected = false", z.ID)
+		}
 	}
 }
 

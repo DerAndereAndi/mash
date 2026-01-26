@@ -270,7 +270,7 @@ func TestFileControllerStore(t *testing.T) {
 		}
 
 		// Verify files
-		ctrlDir := filepath.Join(dir, "controller")
+		ctrlDir := filepath.Join(dir, "identity")
 		if _, err := os.Stat(filepath.Join(ctrlDir, "zone-ca.pem")); err != nil {
 			t.Errorf("zone-ca.pem not found: %v", err)
 		}
@@ -381,7 +381,7 @@ func TestFileControllerStore(t *testing.T) {
 		_ = store.Save()
 
 		// Verify file removed
-		devDir := filepath.Join(dir, "controller", "devices", "dev-remove")
+		devDir := filepath.Join(dir, "identity", "devices", "dev-remove")
 		if _, err := os.Stat(devDir); !os.IsNotExist(err) {
 			t.Errorf("device directory should be removed")
 		}
