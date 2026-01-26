@@ -80,6 +80,8 @@ func NewEVSE(cfg EVSEConfig) *EVSE {
 
 func (e *EVSE) setupDeviceInfo(cfg EVSEConfig) {
 	e.deviceInfo = features.NewDeviceInfo()
+	// Device-level capability bitmap indicates overall device type
+	e.deviceInfo.Feature.SetFeatureMap(uint32(model.FeatureMapCore | model.FeatureMapFlex | model.FeatureMapEMob))
 	_ = e.deviceInfo.SetDeviceID(cfg.DeviceID)
 	_ = e.deviceInfo.SetVendorName(cfg.VendorName)
 	_ = e.deviceInfo.SetProductName(cfg.ProductName)
@@ -94,8 +96,12 @@ func (e *EVSE) setupDeviceInfo(cfg EVSEConfig) {
 func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 	charger := model.NewEndpoint(1, model.EndpointEVCharger, "EV Charger")
 
+	// EVSE capability bitmap: CORE + FLEX + EMOB
+	evseCapabilities := uint32(model.FeatureMapCore | model.FeatureMapFlex | model.FeatureMapEMob)
+
 	// Electrical - static capabilities
 	e.electrical = features.NewElectrical()
+	e.electrical.Feature.SetFeatureMap(evseCapabilities)
 	_ = e.electrical.SetPhaseCount(cfg.PhaseCount)
 	_ = e.electrical.SetNominalVoltage(cfg.NominalVoltage)
 	_ = e.electrical.SetNominalFrequency(50)
@@ -113,10 +119,12 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 
 	// Measurement - real-time telemetry
 	e.measurement = features.NewMeasurement()
+	e.measurement.Feature.SetFeatureMap(evseCapabilities)
 	charger.AddFeature(e.measurement.Feature)
 
 	// EnergyControl - accepts limits from CEM
 	e.energyControl = features.NewEnergyControl()
+	e.energyControl.Feature.SetFeatureMap(evseCapabilities)
 	_ = e.energyControl.SetDeviceType(features.DeviceTypeEVSE)
 	_ = e.energyControl.SetControlState(features.ControlStateAutonomous)
 	e.energyControl.SetCapabilities(
@@ -132,6 +140,7 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 
 	// ChargingSession - EV session management
 	e.chargingSession = features.NewChargingSession()
+	e.chargingSession.Feature.SetFeatureMap(evseCapabilities)
 	_ = e.chargingSession.SetSupportedChargingModes([]features.ChargingMode{
 		features.ChargingModeOff,
 		features.ChargingModePVSurplusOnly,
@@ -142,6 +151,7 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 
 	// Status - health and operating state
 	e.status = features.NewStatus()
+	e.status.Feature.SetFeatureMap(evseCapabilities)
 	_ = e.status.SetOperatingState(features.OperatingStateStandby)
 	charger.AddFeature(e.status.Feature)
 

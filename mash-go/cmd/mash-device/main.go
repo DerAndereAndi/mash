@@ -383,6 +383,7 @@ func createInverterDevice() *model.Device {
 
 	// Root endpoint with DeviceInfo
 	deviceInfo := features.NewDeviceInfo()
+	deviceInfo.Feature.SetFeatureMap(uint32(model.FeatureMapCore | model.FeatureMapFlex))
 	_ = deviceInfo.SetDeviceID(config.SerialNumber)
 	_ = deviceInfo.SetVendorName(config.Brand)
 	_ = deviceInfo.SetProductName(config.Model)
@@ -393,8 +394,12 @@ func createInverterDevice() *model.Device {
 	// Inverter endpoint
 	inverter := model.NewEndpoint(1, model.EndpointInverter, "PV Inverter")
 
+	// PV inverter capability bitmap: CORE + FLEX
+	pvCapabilities := uint32(model.FeatureMapCore | model.FeatureMapFlex)
+
 	// Electrical capabilities
 	electrical := features.NewElectrical()
+	electrical.Feature.SetFeatureMap(pvCapabilities)
 	_ = electrical.SetPhaseCount(3)
 	_ = electrical.SetNominalVoltage(230)
 	_ = electrical.SetNominalFrequency(50)
@@ -404,10 +409,12 @@ func createInverterDevice() *model.Device {
 
 	// Measurement
 	measurement := features.NewMeasurement()
+	measurement.Feature.SetFeatureMap(pvCapabilities)
 	inverter.AddFeature(measurement.Feature)
 
 	// Status
 	status := features.NewStatus()
+	status.Feature.SetFeatureMap(pvCapabilities)
 	_ = status.SetOperatingState(features.OperatingStateRunning)
 	inverter.AddFeature(status.Feature)
 
@@ -421,6 +428,7 @@ func createBatteryDevice() *model.Device {
 
 	// Root endpoint with DeviceInfo
 	deviceInfo := features.NewDeviceInfo()
+	deviceInfo.Feature.SetFeatureMap(uint32(model.FeatureMapCore | model.FeatureMapFlex | model.FeatureMapBattery))
 	_ = deviceInfo.SetDeviceID(config.SerialNumber)
 	_ = deviceInfo.SetVendorName(config.Brand)
 	_ = deviceInfo.SetProductName(config.Model)
@@ -431,8 +439,12 @@ func createBatteryDevice() *model.Device {
 	// Battery endpoint
 	battery := model.NewEndpoint(1, model.EndpointBattery, "Battery Storage")
 
+	// Battery capability bitmap: CORE + FLEX + BATTERY
+	batteryCapabilities := uint32(model.FeatureMapCore | model.FeatureMapFlex | model.FeatureMapBattery)
+
 	// Electrical capabilities
 	electrical := features.NewElectrical()
+	electrical.Feature.SetFeatureMap(batteryCapabilities)
 	_ = electrical.SetPhaseCount(3)
 	_ = electrical.SetNominalVoltage(230)
 	_ = electrical.SetNominalFrequency(50)
@@ -443,10 +455,12 @@ func createBatteryDevice() *model.Device {
 
 	// Measurement
 	measurement := features.NewMeasurement()
+	measurement.Feature.SetFeatureMap(batteryCapabilities)
 	battery.AddFeature(measurement.Feature)
 
 	// EnergyControl
 	energyControl := features.NewEnergyControl()
+	energyControl.Feature.SetFeatureMap(batteryCapabilities)
 	_ = energyControl.SetDeviceType(features.DeviceTypeBattery)
 	_ = energyControl.SetControlState(features.ControlStateAutonomous)
 	energyControl.SetCapabilities(true, false, true, false, true, true, true)
@@ -454,6 +468,7 @@ func createBatteryDevice() *model.Device {
 
 	// Status
 	status := features.NewStatus()
+	status.Feature.SetFeatureMap(batteryCapabilities)
 	_ = status.SetOperatingState(features.OperatingStateStandby)
 	battery.AddFeature(status.Feature)
 

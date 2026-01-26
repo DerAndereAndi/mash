@@ -92,6 +92,7 @@ func NewCEM(cfg CEMConfig) *CEM {
 
 func (c *CEM) setupDeviceInfo(cfg CEMConfig) {
 	c.deviceInfo = features.NewDeviceInfo()
+	c.deviceInfo.Feature.SetFeatureMap(uint32(model.FeatureMapCore)) // CEM is a MASH controller
 	_ = c.deviceInfo.SetDeviceID(cfg.DeviceID)
 	_ = c.deviceInfo.SetVendorName(cfg.VendorName)
 	_ = c.deviceInfo.SetProductName(cfg.ProductName)
