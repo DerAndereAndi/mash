@@ -190,6 +190,29 @@ func (f *Feature) WriteAttribute(id uint16, value any) error {
 	return nil
 }
 
+// SetAttributeInternal sets an attribute value without checking write access.
+// Used by device implementations to update read-only attributes (e.g., measurements).
+func (f *Feature) SetAttributeInternal(id uint16, value any) error {
+	// Global attributes are still not writable
+	if id >= AttrIDGlobalBase {
+		return ErrFeatureReadOnly
+	}
+
+	attr, err := f.GetAttribute(id)
+	if err != nil {
+		return err
+	}
+
+	if err := attr.SetValueInternal(value); err != nil {
+		return err
+	}
+
+	// Notify subscribers
+	f.notifyAttributeChanged(id, value)
+
+	return nil
+}
+
 // ReadAllAttributes returns all readable attribute values.
 func (f *Feature) ReadAllAttributes() map[uint16]any {
 	f.mu.RLock()

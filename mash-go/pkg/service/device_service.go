@@ -670,7 +670,9 @@ func (s *DeviceService) NotifyAttributeChange(endpointID uint8, featureID uint8,
 		return err
 	}
 
-	if err := feature.WriteAttribute(attrID, value); err != nil {
+	// Use SetAttributeInternal to bypass access checks for device-side updates
+	// (measurement attributes are read-only for controllers but writable internally)
+	if err := feature.SetAttributeInternal(attrID, value); err != nil {
 		return err
 	}
 
