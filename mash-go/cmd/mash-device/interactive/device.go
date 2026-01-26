@@ -50,7 +50,7 @@ type Device struct {
 // New creates a new interactive device handler.
 func New(svc *service.DeviceService, cfg DeviceConfig) (*Device, error) {
 	rl, err := readline.NewEx(&readline.Config{
-		Prompt:          "\ndevice> ",
+		Prompt:          "device> ",
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
 	})

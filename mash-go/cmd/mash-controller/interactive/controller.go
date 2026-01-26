@@ -43,7 +43,7 @@ type Controller struct {
 // New creates a new interactive controller handler.
 func New(svc *service.ControllerService, cem *examples.CEM, cfg ControllerConfig) (*Controller, error) {
 	rl, err := readline.NewEx(&readline.Config{
-		Prompt:          "\nmash> ",
+		Prompt:          "mash> ",
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
 	})

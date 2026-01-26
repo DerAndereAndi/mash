@@ -261,12 +261,17 @@ func main() {
 		log.Println("Simulation mode enabled (will start when controller connects)")
 	}
 
-	// Wait for shutdown signal
+	// Wait for shutdown signal or context cancellation
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigCh
 
-	log.Printf("Received signal: %v", sig)
+	select {
+	case sig := <-sigCh:
+		log.Printf("Received signal: %v", sig)
+	case <-ctx.Done():
+		// Context was cancelled (e.g., by interactive quit command)
+	}
+
 	log.Println("Shutting down...")
 
 	// Save state before stopping
