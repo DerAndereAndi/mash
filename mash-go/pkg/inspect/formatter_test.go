@@ -221,12 +221,12 @@ func TestFormatFeatureType(t *testing.T) {
 		featType uint8
 		expected string
 	}{
-		{1, "Electrical"},
-		{2, "Measurement"},
-		{3, "EnergyControl"},
-		{5, "Status"},       // FeatureStatus = 0x0005
-		{6, "DeviceInfo"},
-		{255, "Unknown"},    // Model returns "Unknown" for unknown values
+		{1, "DeviceInfo"},    // FeatureDeviceInfo = 0x0001
+		{2, "Status"},        // FeatureStatus = 0x0002
+		{3, "Electrical"},    // FeatureElectrical = 0x0003
+		{4, "Measurement"},   // FeatureMeasurement = 0x0004
+		{5, "EnergyControl"}, // FeatureEnergyControl = 0x0005
+		{255, "Unknown"},     // Model returns "Unknown" for unknown values
 	}
 
 	for _, tt := range tests {

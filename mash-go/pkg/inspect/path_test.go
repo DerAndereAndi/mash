@@ -187,7 +187,7 @@ func TestParsePathWithNames(t *testing.T) {
 			input: "deviceRoot/deviceInfo/1",
 			want: &Path{
 				EndpointID:  0,
-				FeatureID:   6, // FeatureDeviceInfo
+				FeatureID:   1, // FeatureDeviceInfo
 				AttributeID: 1,
 			},
 		},
@@ -196,7 +196,7 @@ func TestParsePathWithNames(t *testing.T) {
 			input: "1/measurement/1",
 			want: &Path{
 				EndpointID:  1,
-				FeatureID:   2, // FeatureMeasurement
+				FeatureID:   4, // FeatureMeasurement
 				AttributeID: 1,
 			},
 		},
@@ -205,7 +205,7 @@ func TestParsePathWithNames(t *testing.T) {
 			input: "1/measurement/acActivePower",
 			want: &Path{
 				EndpointID:  1,
-				FeatureID:   2, // FeatureMeasurement
+				FeatureID:   4, // FeatureMeasurement
 				AttributeID: 1, // MeasurementAttrACActivePower
 			},
 		},
@@ -214,7 +214,7 @@ func TestParsePathWithNames(t *testing.T) {
 			input: "evCharger/energyControl/effectiveConsumptionLimit",
 			want: &Path{
 				EndpointID:  5, // EndpointEVCharger
-				FeatureID:   3, // FeatureEnergyControl
+				FeatureID:   5, // FeatureEnergyControl
 				AttributeID: 20,
 			},
 		},

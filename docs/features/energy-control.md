@@ -2,7 +2,7 @@
 
 > Limits, setpoints, control commands, and process management
 
-**Feature ID:** 0x0003
+**Feature ID:** 0x0005
 **Direction:** IN (controller sends to device)
 **Status:** Draft
 **Last Updated:** 2025-01-25

@@ -2,7 +2,7 @@
 
 > Electrical characteristics and current capability envelope of an endpoint
 
-**Feature ID:** 0x0001
+**Feature ID:** 0x0003
 **Status:** Draft
 **Last Updated:** 2025-01-25
 

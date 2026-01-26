@@ -24,16 +24,15 @@ MASH features are organized by concern:
 
 | ID | Name | Direction | Description | Document |
 |----|------|-----------|-------------|----------|
-| 0x0001 | Electrical | - | Dynamic electrical configuration | [electrical.md](electrical.md) |
-| 0x0002 | Measurement | OUT | Power, energy, voltage, current telemetry | [measurement.md](measurement.md) |
-| 0x0003 | EnergyControl | IN | Limits, setpoints, control commands | [energy-control.md](energy-control.md) |
-| 0x0004 | (reserved) | - | | |
-| 0x0005 | Status | OUT | Operating state, faults | [status.md](status.md) |
-| 0x0006 | DeviceInfo | OUT | Device identity and structure | [device-info.md](device-info.md) |
-| 0x0007 | ChargingSession | OUT | EV charging session data | [charging-session.md](charging-session.md) |
+| 0x0001 | DeviceInfo | OUT | Device identity and structure | [device-info.md](device-info.md) |
+| 0x0002 | Status | OUT | Operating state, faults | [status.md](status.md) |
+| 0x0003 | Electrical | - | Dynamic electrical configuration | [electrical.md](electrical.md) |
+| 0x0004 | Measurement | OUT | Power, energy, voltage, current telemetry | [measurement.md](measurement.md) |
+| 0x0005 | EnergyControl | IN | Limits, setpoints, control commands | [energy-control.md](energy-control.md) |
+| 0x0006 | ChargingSession | OUT | EV charging session data | [charging-session.md](charging-session.md) |
+| 0x0007 | Tariff | IN | Price structure, components, power tiers | [tariff.md](tariff.md) |
 | 0x0008 | Signals | IN | Time-slotted prices, limits, forecasts | [signals.md](signals.md) |
-| 0x0009 | Tariff | IN | Price structure, components, power tiers | [tariff.md](tariff.md) |
-| 0x000A | Plan | OUT | Device's intended behavior | [plan.md](plan.md) |
+| 0x0009 | Plan | OUT | Device's intended behavior | [plan.md](plan.md) |
 | 0x0100+ | (vendor) | - | Vendor-specific features | |
 
 **Direction:**

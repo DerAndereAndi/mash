@@ -4,44 +4,43 @@ package model
 type FeatureType uint16
 
 // Feature types from the MASH feature registry.
+// Ordered from most fundamental to most specialized.
 const (
-	// FeatureElectrical provides static electrical configuration.
-	// "What CAN this do?" - Phase config, ratings, capabilities.
-	FeatureElectrical FeatureType = 0x0001
-
-	// FeatureMeasurement provides power, energy, voltage, current telemetry.
-	// "What IS it doing?" - Real-time telemetry data.
-	FeatureMeasurement FeatureType = 0x0002
-
-	// FeatureEnergyControl provides limits, setpoints, and control commands.
-	// "What SHOULD it do?" - Control interface for energy management.
-	FeatureEnergyControl FeatureType = 0x0003
-
-	// Feature 0x0004 is reserved.
+	// FeatureDeviceInfo provides device identity and structure information.
+	// Present on endpoint 0 (DEVICE_ROOT) of every device.
+	FeatureDeviceInfo FeatureType = 0x0001
 
 	// FeatureStatus provides operating state and fault information.
 	// "Is it working?" - Operational status and diagnostics.
-	FeatureStatus FeatureType = 0x0005
+	FeatureStatus FeatureType = 0x0002
 
-	// FeatureDeviceInfo provides device identity and structure information.
-	// Present on endpoint 0 (DEVICE_ROOT) of every device.
-	FeatureDeviceInfo FeatureType = 0x0006
+	// FeatureElectrical provides static electrical configuration.
+	// "What CAN this do?" - Phase config, ratings, capabilities.
+	FeatureElectrical FeatureType = 0x0003
+
+	// FeatureMeasurement provides power, energy, voltage, current telemetry.
+	// "What IS it doing?" - Real-time telemetry data.
+	FeatureMeasurement FeatureType = 0x0004
+
+	// FeatureEnergyControl provides limits, setpoints, and control commands.
+	// "What SHOULD it do?" - Control interface for energy management.
+	FeatureEnergyControl FeatureType = 0x0005
 
 	// FeatureChargingSession provides EV charging session data.
 	// Used on EV_CHARGER endpoints.
-	FeatureChargingSession FeatureType = 0x0007
+	FeatureChargingSession FeatureType = 0x0006
+
+	// FeatureTariff provides price structure, components, and power tiers.
+	// Defines the structure that Signals references.
+	FeatureTariff FeatureType = 0x0007
 
 	// FeatureSignals provides time-slotted prices, limits, and forecasts.
 	// Receives incentive/constraint signals from controllers.
 	FeatureSignals FeatureType = 0x0008
 
-	// FeatureTariff provides price structure, components, and power tiers.
-	// Used with Signals for tariff-based optimization.
-	FeatureTariff FeatureType = 0x0009
-
 	// FeaturePlan provides the device's intended behavior/schedule.
-	// Reports planned power consumption/production.
-	FeaturePlan FeatureType = 0x000A
+	// Reports planned power consumption/production in response to Signals.
+	FeaturePlan FeatureType = 0x0009
 
 	// FeatureVendorBase is the start of vendor-specific feature IDs.
 	FeatureVendorBase FeatureType = 0x0100

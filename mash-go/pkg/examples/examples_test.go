@@ -197,7 +197,7 @@ func TestZoneInteraction(t *testing.T) {
 			},
 		},
 	}
-	req.FeatureID = 3 // FeatureEnergyControl = 0x0003
+	req.FeatureID = 5 // FeatureEnergyControl = 0x0005
 
 	resp := evseServer.HandleRequest(ctx, req)
 	if !resp.Status.IsSuccess() {
@@ -223,7 +223,7 @@ func TestZoneInteraction(t *testing.T) {
 		MessageID:  2,
 		Operation:  wire.OpInvoke,
 		EndpointID: 1,
-		FeatureID:  3, // FeatureEnergyControl
+		FeatureID:  5, // FeatureEnergyControl
 		Payload: &wire.InvokePayload{
 			CommandID:  features.EnergyControlCmdClearLimit,
 			Parameters: map[string]any{},
@@ -278,7 +278,7 @@ func TestReadMeasurements(t *testing.T) {
 		MessageID:  1,
 		Operation:  wire.OpRead,
 		EndpointID: 1,
-		FeatureID:  2, // FeatureMeasurement
+		FeatureID:  4, // FeatureMeasurement
 		Payload:    []uint16{1}, // ACActivePower
 	}
 
@@ -332,7 +332,7 @@ func TestSubscribeToMeasurements(t *testing.T) {
 		MessageID:  1,
 		Operation:  wire.OpSubscribe,
 		EndpointID: 1,
-		FeatureID:  2, // FeatureMeasurement
+		FeatureID:  4, // FeatureMeasurement
 		Payload: &wire.SubscribePayload{
 			AttributeIDs: []uint16{1}, // ACActivePower
 			MinInterval:  0,           // No delay for testing
@@ -399,7 +399,7 @@ func TestPauseResume(t *testing.T) {
 		MessageID:  1,
 		Operation:  wire.OpInvoke,
 		EndpointID: 1,
-		FeatureID:  3, // FeatureEnergyControl
+		FeatureID:  5, // FeatureEnergyControl
 		Payload: &wire.InvokePayload{
 			CommandID:  features.EnergyControlCmdPause,
 			Parameters: map[string]any{},
@@ -421,7 +421,7 @@ func TestPauseResume(t *testing.T) {
 		MessageID:  2,
 		Operation:  wire.OpInvoke,
 		EndpointID: 1,
-		FeatureID:  3, // FeatureEnergyControl
+		FeatureID:  5, // FeatureEnergyControl
 		Payload: &wire.InvokePayload{
 			CommandID:  features.EnergyControlCmdResume,
 			Parameters: map[string]any{},

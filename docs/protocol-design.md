@@ -1663,7 +1663,7 @@ The ChargingSession feature accommodates all levels - fields are nullable when t
 #### 4.5.2 Attributes
 
 ```cbor
-ChargingSession Feature (Feature ID: 0x0007)
+ChargingSession Feature (Feature ID: 0x0006)
 {
   // SESSION STATE
   1: state,                    // ChargingStateEnum
@@ -1953,7 +1953,7 @@ Devices are identified by a globally unique string in one of two formats:
 #### 4.6.2 Attributes
 
 ```cbor
-DeviceInfo Feature (Feature ID: 0x0006)
+DeviceInfo Feature (Feature ID: 0x0001)
 {
   // DEVICE IDENTIFICATION
   1: deviceId,           // string: unique ID (format: i:<PEN>:<id> or n:<vendor>:<id>)
@@ -2012,31 +2012,31 @@ EndpointDescriptor {
     {
       1: 0,                            // id: endpoint 0
       2: 0x00,                         // type: DEVICE_ROOT
-      4: [0x0006]                      // features: DeviceInfo
+      4: [0x0001]                      // features: DeviceInfo
     },
     {
       1: 1,                            // id: endpoint 1
       2: 0x02,                         // type: INVERTER
       3: "Grid Connection",            // label
-      4: [0x0001, 0x0002, 0x0003, 0x0005]  // features: Electrical, Measurement, EnergyControl, Status
+      4: [0x0002, 0x0003, 0x0004, 0x0005]  // features: Status, Electrical, Measurement, EnergyControl
     },
     {
       1: 2,                            // id: endpoint 2
       2: 0x03,                         // type: PV_STRING
       3: "Roof South",                 // label
-      4: [0x0002, 0x0005]              // features: Measurement, Status
+      4: [0x0002, 0x0004]              // features: Status, Measurement
     },
     {
       1: 3,                            // id: endpoint 3
       2: 0x03,                         // type: PV_STRING
       3: "Roof West",                  // label
-      4: [0x0002, 0x0005]              // features: Measurement, Status
+      4: [0x0002, 0x0004]              // features: Status, Measurement
     },
     {
       1: 4,                            // id: endpoint 4
       2: 0x04,                         // type: BATTERY
       3: "LG Chem RESU",               // label
-      4: [0x0002, 0x0003, 0x0005]      // features: Measurement, EnergyControl, Status
+      4: [0x0002, 0x0004, 0x0005]      // features: Status, Measurement, EnergyControl
     }
   ]
 }
@@ -2056,12 +2056,12 @@ EndpointDescriptor {
     {
       1: 0,                            // id: endpoint 0
       2: 0x00,                         // type: DEVICE_ROOT
-      4: [0x0006]                      // features: DeviceInfo
+      4: [0x0001]                      // features: DeviceInfo
     },
     {
       1: 1,                            // id: endpoint 1
       2: 0x05,                         // type: EV_CHARGER
-      4: [0x0001, 0x0002, 0x0003, 0x0005]  // Electrical, Measurement, EnergyControl, Status
+      4: [0x0002, 0x0003, 0x0004, 0x0005]  // Status, Electrical, Measurement, EnergyControl
     }
   ]
 }
@@ -2071,13 +2071,15 @@ EndpointDescriptor {
 
 | Feature ID | Name | Description |
 |------------|------|-------------|
-| 0x0001 | Electrical | Static electrical configuration |
-| 0x0002 | Measurement | Power, energy, voltage, current telemetry |
-| 0x0003 | EnergyControl | Limits, setpoints, control commands |
-| 0x0004 | (reserved) | |
-| 0x0005 | Status | Operating state, faults |
-| 0x0006 | DeviceInfo | Device identity and structure |
-| 0x0007 | ChargingSession | EV charging session data (future) |
+| 0x0001 | DeviceInfo | Device identity and structure |
+| 0x0002 | Status | Operating state, faults |
+| 0x0003 | Electrical | Static electrical configuration |
+| 0x0004 | Measurement | Power, energy, voltage, current telemetry |
+| 0x0005 | EnergyControl | Limits, setpoints, control commands |
+| 0x0006 | ChargingSession | EV charging session data |
+| 0x0007 | Tariff | Price structure, components, power tiers |
+| 0x0008 | Signals | Time-slotted prices, limits, forecasts |
+| 0x0009 | Plan | Device's intended behavior |
 | 0x0100+ | (vendor) | Vendor-specific features |
 
 #### 4.6.5 Usage Notes
@@ -2431,7 +2433,7 @@ Response:
 #### 4.8.2 Attributes
 
 ```cbor
-Tariff Feature (Feature ID: 0x0009)
+Tariff Feature (Feature ID: 0x0007)
 {
   // TARIFF DEFINITIONS
   1: tariffs,                     // TariffDefinition[]: all defined tariffs
@@ -2715,7 +2717,7 @@ Sum all component prices for total price.
 #### 4.9.2 Attributes
 
 ```cbor
-Plan Feature (Feature ID: 0x000A)
+Plan Feature (Feature ID: 0x0009)
 {
   // CURRENT PLAN
   1: currentPlan,                 // Plan?: device's current plan (if any)
@@ -2877,16 +2879,15 @@ EMS                          EVSE                         EV (via ISO 15118)
 
 | ID | Name | Direction | Description |
 |----|------|-----------|-------------|
-| 0x0001 | Electrical | - | Static electrical configuration |
-| 0x0002 | Measurement | OUT | Power, energy, voltage, current telemetry |
-| 0x0003 | EnergyControl | IN | Limits, setpoints, control commands |
-| 0x0004 | (reserved) | - | |
-| 0x0005 | Status | OUT | Operating state, faults |
-| 0x0006 | DeviceInfo | OUT | Device identity and structure |
-| 0x0007 | ChargingSession | OUT | EV charging session data |
+| 0x0001 | DeviceInfo | OUT | Device identity and structure |
+| 0x0002 | Status | OUT | Operating state, faults |
+| 0x0003 | Electrical | - | Static electrical configuration |
+| 0x0004 | Measurement | OUT | Power, energy, voltage, current telemetry |
+| 0x0005 | EnergyControl | IN | Limits, setpoints, control commands |
+| 0x0006 | ChargingSession | OUT | EV charging session data |
+| 0x0007 | Tariff | IN | Price structure, components, power tiers |
 | 0x0008 | Signals | IN | Time-slotted prices, limits, forecasts (TO device) |
-| 0x0009 | Tariff | IN | Price structure, components, power tiers |
-| 0x000A | Plan | OUT | Device's intended behavior (FROM device) |
+| 0x0009 | Plan | OUT | Device's intended behavior (FROM device) |
 | 0x0100+ | (vendor) | - | Vendor-specific features |
 
 ---

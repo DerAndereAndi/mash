@@ -69,9 +69,9 @@ func TestRemoteInspectorReadAttribute(t *testing.T) {
 			path: "1/measurement/acActivePower",
 			setupMock: func(m *mockSession) {
 				m.readFunc = func(_ context.Context, epID uint8, featID uint8, attrIDs []uint16) (map[uint16]any, error) {
-					// measurement = 0x02, acActivePower = 1
-					if epID != 1 || featID != 2 {
-						t.Errorf("wrong endpoint/feature: got %d/%d, want 1/2", epID, featID)
+					// measurement = 0x04, acActivePower = 1
+					if epID != 1 || featID != 4 {
+						t.Errorf("wrong endpoint/feature: got %d/%d, want 1/4", epID, featID)
 					}
 					if len(attrIDs) != 1 || attrIDs[0] != 1 {
 						t.Errorf("wrong attrIDs: got %v, want [1]", attrIDs)
@@ -200,9 +200,9 @@ func TestRemoteInspectorWriteAttribute(t *testing.T) {
 			value: int64(11000000),
 			setupMock: func(m *mockSession) {
 				m.writeFunc = func(_ context.Context, epID uint8, featID uint8, attrs map[uint16]any) (map[uint16]any, error) {
-					// energyControl = 0x03, effectiveConsumptionLimit = 20
-					if epID != 1 || featID != 3 {
-						t.Errorf("wrong endpoint/feature: got %d/%d, want 1/3", epID, featID)
+					// energyControl = 0x05, effectiveConsumptionLimit = 20
+					if epID != 1 || featID != 5 {
+						t.Errorf("wrong endpoint/feature: got %d/%d, want 1/5", epID, featID)
 					}
 					if v, ok := attrs[20]; !ok || v != int64(11000000) {
 						t.Errorf("wrong attrs: got %v", attrs)
