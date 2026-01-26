@@ -19,6 +19,7 @@ var (
 	ErrZoneFull         = errors.New("maximum zones reached")
 	ErrUnauthorized     = errors.New("unauthorized")
 	ErrInvalidConfig    = errors.New("invalid configuration")
+	ErrSessionClosed    = errors.New("session closed")
 )
 
 // ServiceState represents the service state.

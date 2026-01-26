@@ -170,42 +170,103 @@ const (
 //
 // Message type detection logic:
 // - Notification: messageId (key 1) = 0
-// - Control: key 1 is 1-3 (valid ControlMessageType) AND keys 3,4 are absent/zero
-// - Request: has endpoint (key 3) or feature (key 4) with meaningful values
-// - Response: default for other cases
+// - Control: key 1 is 1-3 (valid ControlMessageType) AND no payload at key 3
+// - Request: has endpoint (key 3) and feature (key 4) as integers
+// - Response: has payload at key 3 as a map, or status > 4
 func PeekMessageType(data []byte) (MessageType, error) {
-	// Decode all relevant fields at once for efficiency
-	var fullPeek struct {
-		Field1     uint32 `cbor:"1,keyasint"` // messageId, or controlType
-		Field2     uint8  `cbor:"2,keyasint"` // operation, status, or sequence
-		EndpointID uint8  `cbor:"3,keyasint,omitempty"`
-		FeatureID  uint8  `cbor:"4,keyasint,omitempty"`
-	}
-	if err := Unmarshal(data, &fullPeek); err != nil {
+	// Decode into a generic map to inspect field types
+	var rawMsg map[uint64]any
+	if err := Unmarshal(data, &rawMsg); err != nil {
 		return MessageTypeUnknown, fmt.Errorf("failed to peek message: %w", err)
 	}
 
+	// Get field 1 (messageId / controlType)
+	field1, _ := toUint32(rawMsg[1])
+
 	// Check for notification (messageId = 0)
-	if fullPeek.Field1 == NotificationMessageID {
+	if field1 == NotificationMessageID {
 		return MessageTypeNotification, nil
 	}
 
-	// Check for control message: Type (key 1) is 1-3 AND no endpoint/feature
-	// Control messages only have keys 1 and 2, while requests have keys 3 and 4
-	if fullPeek.Field1 >= 1 && fullPeek.Field1 <= 3 &&
-		fullPeek.EndpointID == 0 && fullPeek.FeatureID == 0 {
-		return MessageTypeControl, nil
+	// Get field 2 (operation / status / sequence)
+	field2, _ := toUint8(rawMsg[2])
+
+	// Check field 3 to distinguish Request from Response
+	// Request has uint8 EndpointID at key 3
+	// Response has map or nil payload at key 3
+	field3 := rawMsg[3]
+
+	// If field 3 is a map or absent with status value > 4, it's a Response
+	if field3 != nil {
+		switch field3.(type) {
+		case map[any]any, map[uint64]any, map[string]any:
+			// Field 3 is a map -> Response payload
+			return MessageTypeResponse, nil
+		}
 	}
 
-	// Check for request: has endpoint or feature ID
-	// Requests always have featureId > 0 for meaningful operations
-	if fullPeek.Field2 >= 1 && fullPeek.Field2 <= 4 &&
-		(fullPeek.EndpointID > 0 || fullPeek.FeatureID > 0) {
-		return MessageTypeRequest, nil
+	// If field 2 is a valid status (0-13) and > 4 (not a valid operation), it's Response
+	// Status values 5-13 are not valid Operation values
+	if field2 > 4 {
+		return MessageTypeResponse, nil
+	}
+
+	// Check for control message: Type (key 1) is 1-3 AND no endpoint/feature fields
+	if field1 >= 1 && field1 <= 3 {
+		_, hasField3 := rawMsg[3]
+		_, hasField4 := rawMsg[4]
+		if !hasField3 && !hasField4 {
+			return MessageTypeControl, nil
+		}
+	}
+
+	// Check for request: field 2 is valid operation (1-4) and has endpoint/feature
+	if field2 >= 1 && field2 <= 4 {
+		endpointID, _ := toUint8(field3)
+		featureID, _ := toUint8(rawMsg[4])
+		if endpointID > 0 || featureID > 0 {
+			return MessageTypeRequest, nil
+		}
+		// EndpointID can be 0 (DEVICE_ROOT), so also check if field 4 exists
+		if _, hasField4 := rawMsg[4]; hasField4 {
+			return MessageTypeRequest, nil
+		}
 	}
 
 	// Default to response
 	return MessageTypeResponse, nil
+}
+
+// toUint32 converts various numeric types to uint32.
+func toUint32(v any) (uint32, bool) {
+	switch n := v.(type) {
+	case uint64:
+		return uint32(n), true
+	case uint32:
+		return n, true
+	case int64:
+		return uint32(n), true
+	case int:
+		return uint32(n), true
+	default:
+		return 0, false
+	}
+}
+
+// toUint8 converts various numeric types to uint8.
+func toUint8(v any) (uint8, bool) {
+	switch n := v.(type) {
+	case uint64:
+		return uint8(n), true
+	case uint32:
+		return uint8(n), true
+	case int64:
+		return uint8(n), true
+	case int:
+		return uint8(n), true
+	default:
+		return 0, false
+	}
 }
 
 // Clone creates a deep copy of the CBOR data by re-encoding.

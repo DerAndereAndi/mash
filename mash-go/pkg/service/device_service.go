@@ -2,15 +2,20 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
+	"net"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/duration"
 	"github.com/mash-protocol/mash-go/pkg/failsafe"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/subscription"
+	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/zone"
 )
 
@@ -29,6 +34,15 @@ type DeviceService struct {
 	discoveryManager *discovery.DiscoveryManager
 	advertiser       discovery.Advertiser
 
+	// TLS server for commissioning and operational connections
+	tlsListener net.Listener
+	tlsConfig   *tls.Config
+	tlsCert     tls.Certificate
+
+	// PASE commissioning
+	verifier *commissioning.Verifier
+	serverID []byte
+
 	// Timer management - one failsafe timer per zone
 	failsafeTimers  map[string]*failsafe.Timer
 	durationManager *duration.Manager
@@ -38,6 +52,9 @@ type DeviceService struct {
 
 	// Connected zones
 	connectedZones map[string]*ConnectedZone
+
+	// Zone sessions for operational messaging
+	zoneSessions map[string]*ZoneSession
 
 	// Zone ID to index mapping (for duration timers which use uint8)
 	zoneIndexMap  map[string]uint8
@@ -63,6 +80,7 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 		state:          StateIdle,
 		zoneManager:    zone.NewManager(),
 		connectedZones: make(map[string]*ConnectedZone),
+		zoneSessions:   make(map[string]*ZoneSession),
 		failsafeTimers: make(map[string]*failsafe.Timer),
 		zoneIndexMap:   make(map[string]uint8),
 	}
@@ -112,14 +130,249 @@ func (s *DeviceService) Start(ctx context.Context) error {
 	// Create cancellable context
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
-	// TODO: Start TLS server
-	// TODO: Initialize discovery advertiser
+	// Generate server identity for PASE
+	// Use a fixed identity for commissioning that both sides agree on
+	s.serverID = []byte("mash-device")
+
+	// Generate verifier from setup code
+	setupCode, err := strconv.ParseUint(s.config.SetupCode, 10, 32)
+	if err != nil {
+		s.mu.Lock()
+		s.state = StateIdle
+		s.mu.Unlock()
+		return err
+	}
+
+	// Client identity is generic for commissioning (controller will provide its own)
+	// Both sides must use the same identities for PASE to work
+	clientIdentity := []byte("mash-controller")
+	s.verifier, err = commissioning.GenerateVerifier(
+		commissioning.SetupCode(setupCode),
+		clientIdentity,
+		s.serverID,
+	)
+	if err != nil {
+		s.mu.Lock()
+		s.state = StateIdle
+		s.mu.Unlock()
+		return err
+	}
+
+	// Generate self-signed certificate for commissioning mode
+	s.tlsCert, err = generateSelfSignedCert()
+	if err != nil {
+		s.mu.Lock()
+		s.state = StateIdle
+		s.mu.Unlock()
+		return err
+	}
+
+	// Create TLS config for commissioning (no client cert required)
+	s.tlsConfig = &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		MaxVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{s.tlsCert},
+		ClientAuth:   tls.NoClientCert, // During commissioning, no client cert
+		NextProtos:   []string{transport.ALPNProtocol},
+	}
+
+	// Start TLS listener
+	listener, err := net.Listen("tcp", s.config.ListenAddress)
+	if err != nil {
+		s.mu.Lock()
+		s.state = StateIdle
+		s.mu.Unlock()
+		return err
+	}
+	s.tlsListener = listener
+
+	// Start accepting connections in background
+	go s.acceptLoop()
+
+	// Initialize discovery advertiser if not already set (e.g., by tests)
+	if s.advertiser == nil {
+		advertiser, err := discovery.NewMDNSAdvertiser(discovery.DefaultAdvertiserConfig())
+		if err != nil {
+			s.tlsListener.Close()
+			s.mu.Lock()
+			s.state = StateIdle
+			s.mu.Unlock()
+			return err
+		}
+		s.advertiser = advertiser
+		s.discoveryManager = discovery.NewDiscoveryManager(advertiser)
+
+		// Parse port from actual listener address
+		port := parsePort(s.tlsListener.Addr().String())
+
+		s.discoveryManager.SetCommissionableInfo(&discovery.CommissionableInfo{
+			Discriminator: s.config.Discriminator,
+			Categories:    s.config.Categories,
+			Serial:        s.config.SerialNumber,
+			Brand:         s.config.Brand,
+			Model:         s.config.Model,
+			DeviceName:    s.config.DeviceName,
+			Port:          port,
+		})
+	}
 
 	s.mu.Lock()
 	s.state = StateRunning
 	s.mu.Unlock()
 
 	return nil
+}
+
+// acceptLoop accepts incoming TLS connections.
+func (s *DeviceService) acceptLoop() {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
+		}
+
+		conn, err := s.tlsListener.Accept()
+		if err != nil {
+			select {
+			case <-s.ctx.Done():
+				return
+			default:
+				continue
+			}
+		}
+
+		go s.handleConnection(conn)
+	}
+}
+
+// handleConnection handles an incoming connection.
+func (s *DeviceService) handleConnection(conn net.Conn) {
+	// TLS handshake
+	tlsConn := tls.Server(conn, s.tlsConfig)
+	if err := tlsConn.HandshakeContext(s.ctx); err != nil {
+		conn.Close()
+		return
+	}
+
+	// Verify TLS version and ALPN
+	state := tlsConn.ConnectionState()
+	if err := transport.VerifyConnection(state); err != nil {
+		tlsConn.Close()
+		return
+	}
+
+	// Check if we're in commissioning mode
+	s.mu.RLock()
+	inCommissioningMode := s.discoveryManager != nil && s.discoveryManager.IsCommissioningMode()
+	s.mu.RUnlock()
+
+	if inCommissioningMode {
+		s.handleCommissioningConnection(tlsConn)
+	} else {
+		// Operational mode - verify client certificate
+		// TODO: Implement operational connection handling
+		tlsConn.Close()
+	}
+}
+
+// handleCommissioningConnection handles PASE commissioning over TLS.
+func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
+	// Create PASE server session
+	paseSession, err := commissioning.NewPASEServerSession(s.verifier, s.serverID)
+	if err != nil {
+		conn.Close()
+		return
+	}
+
+	// Perform PASE handshake
+	sharedSecret, err := paseSession.Handshake(s.ctx, conn)
+	if err != nil {
+		// PASE failed - wrong setup code or protocol error
+		conn.Close()
+		return
+	}
+
+	// Derive zone ID from shared secret
+	zoneID := deriveZoneID(sharedSecret)
+
+	// Register the zone connection
+	// For now, assume HomeManager type since we don't have certificate-based zone typing yet
+	s.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+
+	// Create framed connection wrapper for operational messaging
+	framedConn := newFramedConnection(conn)
+
+	// Create zone session for this connection
+	zoneSession := NewZoneSession(zoneID, framedConn, s.device)
+
+	// Store the session
+	s.mu.Lock()
+	s.zoneSessions[zoneID] = zoneSession
+	s.mu.Unlock()
+
+	// Start message loop - blocks until connection closes
+	s.runZoneMessageLoop(zoneID, framedConn, zoneSession)
+
+	// Clean up on disconnect
+	s.handleZoneSessionClose(zoneID)
+}
+
+// runZoneMessageLoop reads messages from the connection and dispatches to the session.
+func (s *DeviceService) runZoneMessageLoop(zoneID string, conn *framedConnection, session *ZoneSession) {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
+		}
+
+		data, err := conn.ReadFrame()
+		if err != nil {
+			// Connection closed or error
+			return
+		}
+
+		// Dispatch to session
+		session.OnMessage(data)
+	}
+}
+
+// handleZoneSessionClose cleans up when a zone session closes.
+func (s *DeviceService) handleZoneSessionClose(zoneID string) {
+	s.mu.Lock()
+	if session, exists := s.zoneSessions[zoneID]; exists {
+		session.Close()
+		delete(s.zoneSessions, zoneID)
+	}
+	s.mu.Unlock()
+
+	// Notify disconnect
+	s.HandleZoneDisconnect(zoneID)
+}
+
+// GetZoneSession returns the session for a connected zone.
+func (s *DeviceService) GetZoneSession(zoneID string) *ZoneSession {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.zoneSessions[zoneID]
+}
+
+// TLSAddr returns the TLS server's listen address.
+func (s *DeviceService) TLSAddr() net.Addr {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.tlsListener != nil {
+		return s.tlsListener.Addr()
+	}
+	return nil
+}
+
+// ServerIdentity returns the server identity used for PASE.
+func (s *DeviceService) ServerIdentity() []byte {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.serverID
 }
 
 // Stop stops the device service.
@@ -135,6 +388,11 @@ func (s *DeviceService) Stop() error {
 	// Cancel context
 	if s.cancel != nil {
 		s.cancel()
+	}
+
+	// Close TLS listener
+	if s.tlsListener != nil {
+		s.tlsListener.Close()
 	}
 
 	// Stop all failsafe timers
@@ -438,4 +696,19 @@ func (s *DeviceService) GetFailsafeTimer(zoneID string) *failsafe.Timer {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.failsafeTimers[zoneID]
+}
+
+// parsePort extracts the port from a listen address (e.g., ":8443" -> 8443).
+func parsePort(addr string) uint16 {
+	// Handle formats: ":8443", "0.0.0.0:8443", "localhost:8443"
+	for i := len(addr) - 1; i >= 0; i-- {
+		if addr[i] == ':' {
+			var port uint16
+			for j := i + 1; j < len(addr); j++ {
+				port = port*10 + uint16(addr[j]-'0')
+			}
+			return port
+		}
+	}
+	return 8443 // Default port
 }

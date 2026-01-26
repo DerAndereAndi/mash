@@ -1,0 +1,169 @@
+package service
+
+import (
+	"context"
+	"sync"
+
+	"github.com/mash-protocol/mash-go/pkg/interaction"
+	"github.com/mash-protocol/mash-go/pkg/wire"
+)
+
+// DeviceSession manages a controller-side session with a connected device.
+// It wraps an interaction.Client to provide Read/Write/Subscribe/Invoke
+// operations to applications.
+type DeviceSession struct {
+	mu sync.RWMutex
+
+	deviceID string
+	conn     Sendable
+	client   *interaction.Client
+	sender   *TransportRequestSender
+	closed   bool
+}
+
+// NewDeviceSession creates a new device session.
+func NewDeviceSession(deviceID string, conn Sendable) *DeviceSession {
+	sender := NewTransportRequestSender(conn)
+	client := interaction.NewClient(sender)
+
+	return &DeviceSession{
+		deviceID: deviceID,
+		conn:     conn,
+		client:   client,
+		sender:   sender,
+	}
+}
+
+// DeviceID returns the session's device ID.
+func (s *DeviceSession) DeviceID() string {
+	return s.deviceID
+}
+
+// OnMessage handles an incoming message from the device.
+// This is called by the transport layer when data is received.
+func (s *DeviceSession) OnMessage(data []byte) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	// Determine message type
+	msgType, err := wire.PeekMessageType(data)
+	if err != nil {
+		return
+	}
+
+	switch msgType {
+	case wire.MessageTypeResponse:
+		// Decode and deliver to client
+		resp, err := wire.DecodeResponse(data)
+		if err != nil {
+			return
+		}
+		client.HandleResponse(resp)
+
+	case wire.MessageTypeNotification:
+		// Decode and deliver to client
+		notif, err := wire.DecodeNotification(data)
+		if err != nil {
+			return
+		}
+		client.HandleNotification(notif)
+	}
+}
+
+// Read reads attributes from a feature on the device.
+// If attrIDs is nil, all attributes are read.
+func (s *DeviceSession) Read(ctx context.Context, endpointID uint8, featureID uint8, attrIDs []uint16) (map[uint16]any, error) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return nil, ErrSessionClosed
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	return client.Read(ctx, endpointID, featureID, attrIDs)
+}
+
+// Write writes attributes to a feature on the device.
+func (s *DeviceSession) Write(ctx context.Context, endpointID uint8, featureID uint8, attrs map[uint16]any) (map[uint16]any, error) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return nil, ErrSessionClosed
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	return client.Write(ctx, endpointID, featureID, attrs)
+}
+
+// Subscribe subscribes to attribute changes on a feature.
+// Returns the subscription ID and initial attribute values (priming report).
+func (s *DeviceSession) Subscribe(ctx context.Context, endpointID uint8, featureID uint8, opts *interaction.SubscribeOptions) (uint32, map[uint16]any, error) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return 0, nil, ErrSessionClosed
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	return client.Subscribe(ctx, endpointID, featureID, opts)
+}
+
+// Unsubscribe cancels a subscription.
+func (s *DeviceSession) Unsubscribe(ctx context.Context, subscriptionID uint32) error {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return ErrSessionClosed
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	return client.Unsubscribe(ctx, subscriptionID)
+}
+
+// Invoke executes a command on a feature.
+func (s *DeviceSession) Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[string]any) (any, error) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return nil, ErrSessionClosed
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	return client.Invoke(ctx, endpointID, featureID, commandID, params)
+}
+
+// SetNotificationHandler sets the handler for incoming notifications.
+func (s *DeviceSession) SetNotificationHandler(handler func(*wire.Notification)) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	client.SetNotificationHandler(handler)
+}
+
+// Close closes the session and cleans up resources.
+func (s *DeviceSession) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+
+	return s.client.Close()
+}

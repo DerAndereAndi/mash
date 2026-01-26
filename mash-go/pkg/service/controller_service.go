@@ -2,11 +2,16 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/subscription"
+	"github.com/mash-protocol/mash-go/pkg/transport"
 )
 
 // ControllerService orchestrates a MASH controller (EMS).
@@ -27,6 +32,9 @@ type ControllerService struct {
 
 	// Connected devices
 	connectedDevices map[string]*ConnectedDevice
+
+	// Device sessions for operational messaging
+	deviceSessions map[string]*DeviceSession
 
 	// Subscription management
 	subscriptionManager *subscription.Manager
@@ -50,6 +58,7 @@ func NewControllerService(config ControllerConfig) (*ControllerService, error) {
 		state:            StateIdle,
 		zoneName:         config.ZoneName,
 		connectedDevices: make(map[string]*ConnectedDevice),
+		deviceSessions:   make(map[string]*DeviceSession),
 	}
 
 	// Initialize subscription manager
@@ -104,6 +113,18 @@ func (s *ControllerService) Start(ctx context.Context) error {
 	// TODO: Generate/load zone certificate
 	// TODO: Initialize zone ID from certificate fingerprint
 	// TODO: Start advertising as commissioner
+
+	// Initialize mDNS browser if not already set (e.g., by tests)
+	if s.browser == nil {
+		browser, err := discovery.NewMDNSBrowser(discovery.DefaultBrowserConfig())
+		if err != nil {
+			s.mu.Lock()
+			s.state = StateIdle
+			s.mu.Unlock()
+			return err
+		}
+		s.browser = browser
+	}
 
 	s.mu.Lock()
 	s.state = StateRunning
@@ -170,6 +191,7 @@ func (s *ControllerService) Discover(ctx context.Context, filter discovery.Filte
 	defer cancel()
 
 	// Start browsing
+	// Note: Browser handles aggregation/deduplication by instance name
 	results, err := browser.BrowseCommissionable(browseCtx)
 	if err != nil {
 		return nil, err
@@ -212,18 +234,63 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 	}
 	s.mu.RUnlock()
 
-	// TODO: Connect to device via TLS (InsecureSkipVerify initially)
-	// TODO: Perform SPAKE2+ exchange with setupCode
-	// TODO: Verify shared secret
-	// TODO: Request device certificate
-	// TODO: Generate zone certificate for device
-	// TODO: Install operational certificate
-	// TODO: Reconnect with mutual TLS
+	// Parse setup code
+	code, err := strconv.ParseUint(setupCode, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid setup code", ErrCommissionFailed)
+	}
 
-	// Placeholder - create device record
+	// Build address to connect to
+	addr := fmt.Sprintf("%s:%d", service.Host, service.Port)
+	if len(service.Addresses) > 0 {
+		// Prefer IP address over hostname
+		addr = fmt.Sprintf("%s:%d", service.Addresses[0], service.Port)
+	}
+
+	// Connect via TLS with InsecureSkipVerify (security from PASE)
+	tlsConfig := transport.NewCommissioningTLSConfig()
+	conn, err := tls.Dial("tcp", addr, tlsConfig)
+	if err != nil {
+		return nil, fmt.Errorf("%w: connection failed: %v", ErrCommissionFailed, err)
+	}
+
+	// Create client and server identities for PASE
+	// These must match the identities used by the device's verifier
+	clientIdentity := []byte("mash-controller")
+	serverIdentity := []byte("mash-device")
+
+	// Create PASE client session
+	session, err := commissioning.NewPASEClientSession(
+		commissioning.SetupCode(code),
+		clientIdentity,
+		serverIdentity,
+	)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("%w: failed to create PASE session: %v", ErrCommissionFailed, err)
+	}
+
+	// Perform PASE handshake
+	sharedSecret, err := session.Handshake(ctx, conn)
+	if err != nil {
+		conn.Close()
+		return nil, ErrCommissionFailed
+	}
+
+	// Derive IDs from shared secret
+	deviceID := deriveDeviceID(sharedSecret)
+	zoneID := deriveZoneID(sharedSecret)
+
+	// Create framed connection wrapper for operational messaging
+	framedConn := newFramedConnection(conn)
+
+	// Create device session for operational messaging
+	deviceSession := NewDeviceSession(deviceID, framedConn)
+
+	// Create device record
 	device := &ConnectedDevice{
-		ID:        "", // Would come from certificate fingerprint
-		ZoneID:    s.zoneID,
+		ID:        deviceID,
+		ZoneID:    zoneID,
 		Host:      service.Host,
 		Port:      service.Port,
 		Addresses: service.Addresses,
@@ -231,10 +298,15 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 		LastSeen:  time.Now(),
 	}
 
-	// Store device
+	// Store device and session
 	s.mu.Lock()
 	s.connectedDevices[device.ID] = device
+	s.deviceSessions[device.ID] = deviceSession
+	s.zoneID = zoneID // Store our zone ID
 	s.mu.Unlock()
+
+	// Start message loop in background to receive responses/notifications
+	go s.runDeviceMessageLoop(deviceID, framedConn, deviceSession)
 
 	// Emit event
 	s.emitEvent(Event{
@@ -243,6 +315,48 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 	})
 
 	return device, nil
+}
+
+// runDeviceMessageLoop reads messages from the device and dispatches to the session.
+func (s *ControllerService) runDeviceMessageLoop(deviceID string, conn *framedConnection, session *DeviceSession) {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
+		}
+
+		data, err := conn.ReadFrame()
+		if err != nil {
+			// Connection closed or error
+			s.handleDeviceSessionClose(deviceID)
+			return
+		}
+
+		// Dispatch to session
+		session.OnMessage(data)
+	}
+}
+
+// handleDeviceSessionClose cleans up when a device session closes.
+func (s *ControllerService) handleDeviceSessionClose(deviceID string) {
+	s.mu.Lock()
+	if session, exists := s.deviceSessions[deviceID]; exists {
+		session.Close()
+		delete(s.deviceSessions, deviceID)
+	}
+	s.mu.Unlock()
+
+	// Notify disconnect
+	s.HandleDeviceDisconnect(deviceID)
+}
+
+// GetSession returns the session for a connected device.
+// Returns nil if the device is not connected or has no session.
+func (s *ControllerService) GetSession(deviceID string) *DeviceSession {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.deviceSessions[deviceID]
 }
 
 // Decommission removes a device from the zone.
