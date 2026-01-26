@@ -62,6 +62,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mash-protocol/mash-go/cmd/mash-controller/interactive"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/examples"
@@ -71,17 +72,28 @@ import (
 )
 
 // Config holds the controller configuration.
+// It implements interactive.ControllerConfig.
 type Config struct {
-	ConfigFile     string
-	ZoneName       string
-	ZoneType       string
-	LogLevel       string
-	Interactive    bool
-	AutoCommission bool
+	ConfigFile       string
+	ZoneNameValue    string
+	ZoneTypeValue    string
+	LogLevel         string
+	Interactive      bool
+	AutoCommission   bool
 
 	// Persistence settings
 	StateDir string
 	Reset    bool
+}
+
+// ZoneName implements interactive.ControllerConfig.
+func (c *Config) ZoneName() string {
+	return c.ZoneNameValue
+}
+
+// ZoneType implements interactive.ControllerConfig.
+func (c *Config) ZoneType() string {
+	return c.ZoneTypeValue
 }
 
 var (
@@ -92,8 +104,8 @@ var (
 
 func init() {
 	flag.StringVar(&config.ConfigFile, "config", "", "Configuration file path")
-	flag.StringVar(&config.ZoneName, "zone-name", "Home Energy", "Zone name for this controller")
-	flag.StringVar(&config.ZoneType, "zone-type", "home", "Zone type: grid, building, home, user")
+	flag.StringVar(&config.ZoneNameValue, "zone-name", "Home Energy", "Zone name for this controller")
+	flag.StringVar(&config.ZoneTypeValue, "zone-type", "home", "Zone type: grid, building, home, user")
 	flag.StringVar(&config.LogLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	flag.BoolVar(&config.Interactive, "interactive", false, "Enable interactive command mode")
 	flag.BoolVar(&config.AutoCommission, "auto-commission", false, "Automatically commission discovered devices")
@@ -110,11 +122,11 @@ func main() {
 
 	log.Println("MASH Reference Controller")
 	log.Println("=========================")
-	log.Printf("Zone name: %s", config.ZoneName)
-	log.Printf("Zone type: %s", config.ZoneType)
+	log.Printf("Zone name: %s", config.ZoneNameValue)
+	log.Printf("Zone type: %s", config.ZoneTypeValue)
 
 	// Parse zone type
-	zoneType, err := parseZoneType(config.ZoneType)
+	zoneType, err := parseZoneType(config.ZoneTypeValue)
 	if err != nil {
 		log.Fatalf("Invalid zone type: %v", err)
 	}
@@ -132,7 +144,7 @@ func main() {
 
 	// Create controller service
 	svcConfig := service.DefaultControllerConfig()
-	svcConfig.ZoneName = config.ZoneName
+	svcConfig.ZoneName = config.ZoneNameValue
 	svcConfig.ZoneType = zoneType
 
 	svc, err = service.NewControllerService(svcConfig)
@@ -193,8 +205,8 @@ func main() {
 
 	// Run interactive mode or wait for signal
 	if config.Interactive {
-		interactive := NewInteractiveController(svc, cem)
-		go interactive.Run(ctx, cancel)
+		ic := interactive.New(svc, cem, &config)
+		go ic.Run(ctx, cancel)
 	}
 
 	// Wait for shutdown signal

@@ -66,6 +66,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mash-protocol/mash-go/cmd/mash-device/interactive"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/examples"
@@ -85,6 +86,7 @@ const (
 )
 
 // Config holds the device configuration.
+// It implements interactive.DeviceConfig.
 type Config struct {
 	Type          DeviceType
 	ConfigFile    string
@@ -104,6 +106,11 @@ type Config struct {
 	// Persistence settings
 	StateDir string
 	Reset    bool
+}
+
+// DeviceType implements interactive.DeviceConfig.
+func (c *Config) DeviceType() interactive.DeviceType {
+	return interactive.DeviceType(c.Type)
 }
 
 var (
@@ -242,8 +249,8 @@ func main() {
 	// Set up simulation behavior
 	if config.Interactive {
 		log.Println("Interactive mode enabled - use 'start' to begin simulation")
-		interactive := NewInteractiveDevice(svc)
-		go interactive.Run(ctx, cancel)
+		id := interactive.New(svc, &config)
+		go id.Run(ctx, cancel)
 	} else if config.Simulate {
 		// Note: Simulation starts automatically when a zone connects (see handleEvent)
 		log.Println("Simulation mode enabled (will start when controller connects)")

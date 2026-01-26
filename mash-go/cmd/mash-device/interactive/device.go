@@ -1,4 +1,6 @@
-package main
+// Package interactive provides the interactive command-line interface
+// for the MASH device.
+package interactive
 
 import (
 	"bufio"
@@ -7,15 +9,34 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/inspect"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/service"
 )
 
-// InteractiveDevice handles interactive mode for mash-device.
-type InteractiveDevice struct {
+// DeviceType represents supported device types.
+type DeviceType string
+
+const (
+	DeviceTypeEVSE     DeviceType = "evse"
+	DeviceTypeInverter DeviceType = "inverter"
+	DeviceTypeBattery  DeviceType = "battery"
+)
+
+// DeviceConfig provides configuration information to the interactive device.
+// This interface allows the interactive layer to access device settings
+// without depending on the main package's config structure.
+type DeviceConfig interface {
+	// DeviceType returns the type of device (evse, inverter, battery).
+	DeviceType() DeviceType
+}
+
+// Device handles interactive mode for mash-device.
+type Device struct {
 	svc       *service.DeviceService
+	config    DeviceConfig
 	inspector *inspect.Inspector
 	formatter *inspect.Formatter
 
@@ -25,20 +46,21 @@ type InteractiveDevice struct {
 	simRunning bool
 }
 
-// NewInteractiveDevice creates a new interactive device handler.
-func NewInteractiveDevice(svc *service.DeviceService) *InteractiveDevice {
-	return &InteractiveDevice{
+// New creates a new interactive device handler.
+func New(svc *service.DeviceService, cfg DeviceConfig) *Device {
+	return &Device{
 		svc:       svc,
+		config:    cfg,
 		inspector: inspect.NewInspector(svc.Device()),
 		formatter: inspect.NewFormatter(),
 	}
 }
 
 // Run starts the interactive command loop.
-func (i *InteractiveDevice) Run(ctx context.Context, cancel context.CancelFunc) {
+func (d *Device) Run(ctx context.Context, cancel context.CancelFunc) {
 	reader := bufio.NewReader(os.Stdin)
 
-	i.printHelp()
+	d.printHelp()
 
 	for {
 		select {
@@ -64,34 +86,34 @@ func (i *InteractiveDevice) Run(ctx context.Context, cancel context.CancelFunc) 
 
 		switch cmd {
 		case "help", "?":
-			i.printHelp()
+			d.printHelp()
 
 		case "inspect", "i":
-			i.cmdInspect(args)
+			d.cmdInspect(args)
 
 		case "read", "r":
-			i.cmdRead(args)
+			d.cmdRead(args)
 
 		case "write", "w":
-			i.cmdWrite(args)
+			d.cmdWrite(args)
 
 		case "zones", "z":
-			i.cmdZones(args)
+			d.cmdZones(args)
 
 		case "kick":
-			i.cmdKick(args)
+			d.cmdKick(args)
 
 		case "start", "sim-start":
-			i.cmdStart()
+			d.cmdStart()
 
 		case "stop", "sim-stop":
-			i.cmdStop()
+			d.cmdStop()
 
 		case "power":
-			i.cmdPower(args)
+			d.cmdPower(args)
 
 		case "status":
-			i.cmdStatus()
+			d.cmdStatus()
 
 		case "quit", "exit", "q":
 			fmt.Println("Exiting...")
@@ -104,7 +126,7 @@ func (i *InteractiveDevice) Run(ctx context.Context, cancel context.CancelFunc) 
 	}
 }
 
-func (i *InteractiveDevice) printHelp() {
+func (d *Device) printHelp() {
 	fmt.Println(`
 MASH Device Commands:
   Inspection:
@@ -132,11 +154,11 @@ MASH Device Commands:
 }
 
 // cmdInspect handles the inspect command.
-func (i *InteractiveDevice) cmdInspect(args []string) {
+func (d *Device) cmdInspect(args []string) {
 	if len(args) == 0 {
 		// Show full device tree
-		tree := i.inspector.InspectDevice()
-		fmt.Print(i.inspector.FormatDeviceTree(tree, i.formatter))
+		tree := d.inspector.InspectDevice()
+		fmt.Print(d.inspector.FormatDeviceTree(tree, d.formatter))
 		return
 	}
 
@@ -150,35 +172,35 @@ func (i *InteractiveDevice) cmdInspect(args []string) {
 	if path.IsPartial {
 		if path.FeatureID == 0 {
 			// Endpoint only
-			epInfo, err := i.inspector.InspectEndpoint(path.EndpointID)
+			epInfo, err := d.inspector.InspectEndpoint(path.EndpointID)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
 				return
 			}
-			fmt.Print(i.inspector.FormatEndpoint(epInfo, i.formatter))
+			fmt.Print(d.inspector.FormatEndpoint(epInfo, d.formatter))
 		} else {
 			// Endpoint and feature
-			featInfo, err := i.inspector.InspectFeature(path.EndpointID, path.FeatureID)
+			featInfo, err := d.inspector.InspectFeature(path.EndpointID, path.FeatureID)
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
 				return
 			}
-			fmt.Print(i.inspector.FormatFeature(featInfo, i.formatter))
+			fmt.Print(d.inspector.FormatFeature(featInfo, d.formatter))
 		}
 	} else {
 		// Full path - show single attribute
-		value, meta, err := i.inspector.ReadAttribute(path)
+		value, meta, err := d.inspector.ReadAttribute(path)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			return
 		}
-		valueStr := i.formatter.FormatValue(value, meta.Unit)
+		valueStr := d.formatter.FormatValue(value, meta.Unit)
 		fmt.Printf("%s = %s\n", meta.Name, valueStr)
 	}
 }
 
 // cmdRead handles the read command.
-func (i *InteractiveDevice) cmdRead(args []string) {
+func (d *Device) cmdRead(args []string) {
 	if len(args) < 1 {
 		fmt.Println("Usage: read <path>")
 		fmt.Println("  Example: read 1/measurement/acActivePower")
@@ -193,7 +215,7 @@ func (i *InteractiveDevice) cmdRead(args []string) {
 
 	if path.IsPartial {
 		// Read all attributes for the feature
-		attrs, err := i.inspector.ReadAllAttributes(path.EndpointID, path.FeatureID)
+		attrs, err := d.inspector.ReadAllAttributes(path.EndpointID, path.FeatureID)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			return
@@ -207,18 +229,18 @@ func (i *InteractiveDevice) cmdRead(args []string) {
 		}
 	} else {
 		// Read single attribute
-		value, meta, err := i.inspector.ReadAttribute(path)
+		value, meta, err := d.inspector.ReadAttribute(path)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			return
 		}
-		valueStr := i.formatter.FormatValue(value, meta.Unit)
+		valueStr := d.formatter.FormatValue(value, meta.Unit)
 		fmt.Printf("%s = %s\n", meta.Name, valueStr)
 	}
 }
 
 // cmdWrite handles the write command.
-func (i *InteractiveDevice) cmdWrite(args []string) {
+func (d *Device) cmdWrite(args []string) {
 	if len(args) < 2 {
 		fmt.Println("Usage: write <path> <value>")
 		fmt.Println("  Example: write 0/deviceInfo/label \"My EVSE\"")
@@ -247,7 +269,7 @@ func (i *InteractiveDevice) cmdWrite(args []string) {
 		value = strings.Trim(valueStr, "\"'")
 	}
 
-	if err := i.inspector.WriteAttribute(path, value); err != nil {
+	if err := d.inspector.WriteAttribute(path, value); err != nil {
 		fmt.Printf("Write failed: %v\n", err)
 		return
 	}
@@ -256,8 +278,8 @@ func (i *InteractiveDevice) cmdWrite(args []string) {
 }
 
 // cmdZones handles the zones command.
-func (i *InteractiveDevice) cmdZones(_ []string) {
-	zones := i.svc.GetAllZones()
+func (d *Device) cmdZones(_ []string) {
+	zones := d.svc.GetAllZones()
 	if len(zones) == 0 {
 		fmt.Println("No zones connected")
 		return
@@ -282,7 +304,7 @@ func (i *InteractiveDevice) cmdZones(_ []string) {
 }
 
 // cmdKick handles the kick command (removes a zone).
-func (i *InteractiveDevice) cmdKick(args []string) {
+func (d *Device) cmdKick(args []string) {
 	if len(args) < 1 {
 		fmt.Println("Usage: kick <zone-id>")
 		fmt.Println("  Use 'zones' to list zone IDs")
@@ -292,10 +314,10 @@ func (i *InteractiveDevice) cmdKick(args []string) {
 	zoneID := args[0]
 
 	// Try exact match first
-	zone := i.svc.GetZone(zoneID)
+	zone := d.svc.GetZone(zoneID)
 	if zone == nil {
 		// Try partial match
-		for _, z := range i.svc.GetAllZones() {
+		for _, z := range d.svc.GetAllZones() {
 			if strings.Contains(z.ID, zoneID) {
 				zoneID = z.ID
 				zone = z
@@ -310,7 +332,7 @@ func (i *InteractiveDevice) cmdKick(args []string) {
 	}
 
 	fmt.Printf("Removing zone %s...\n", zoneID)
-	if err := i.svc.RemoveZone(zoneID); err != nil {
+	if err := d.svc.RemoveZone(zoneID); err != nil {
 		fmt.Printf("Failed to remove zone: %v\n", err)
 		return
 	}
@@ -319,27 +341,27 @@ func (i *InteractiveDevice) cmdKick(args []string) {
 }
 
 // cmdStart starts the simulation.
-func (i *InteractiveDevice) cmdStart() {
-	if i.simRunning {
+func (d *Device) cmdStart() {
+	if d.simRunning {
 		fmt.Println("Simulation already running")
 		return
 	}
-	i.startSimulation()
+	d.startSimulation()
 	fmt.Println("Simulation started")
 }
 
 // cmdStop stops the simulation.
-func (i *InteractiveDevice) cmdStop() {
-	if !i.simRunning {
+func (d *Device) cmdStop() {
+	if !d.simRunning {
 		fmt.Println("Simulation not running")
 		return
 	}
-	i.stopSimulation()
+	d.stopSimulation()
 	fmt.Println("Simulation stopped")
 }
 
 // cmdPower sets the power directly.
-func (i *InteractiveDevice) cmdPower(args []string) {
+func (d *Device) cmdPower(args []string) {
 	if len(args) < 1 {
 		fmt.Println("Usage: power <kw>")
 		fmt.Println("  Positive values = consumption/charging")
@@ -354,19 +376,20 @@ func (i *InteractiveDevice) cmdPower(args []string) {
 	}
 
 	powerMW := int64(powerKW * 1_000_000)
-	i.setPowerDirect(powerMW)
+	d.setPowerDirect(powerMW)
 }
 
 // cmdStatus shows the device status.
-func (i *InteractiveDevice) cmdStatus() {
+func (d *Device) cmdStatus() {
 	fmt.Println("\nDevice Status")
 	fmt.Println("-------------------------------------------")
-	fmt.Printf("  Device ID:      %s\n", i.svc.Device().DeviceID())
-	fmt.Printf("  Service State:  %s\n", i.svc.State())
-	fmt.Printf("  Connected Zones: %d\n", i.svc.ZoneCount())
+	fmt.Printf("  Device ID:      %s\n", d.svc.Device().DeviceID())
+	fmt.Printf("  Device Type:    %s\n", d.config.DeviceType())
+	fmt.Printf("  Service State:  %s\n", d.svc.State())
+	fmt.Printf("  Connected Zones: %d\n", d.svc.ZoneCount())
 
 	simStatus := "stopped"
-	if i.simRunning {
+	if d.simRunning {
 		simStatus = "running"
 	}
 	fmt.Printf("  Simulation:     %s\n", simStatus)
@@ -377,36 +400,36 @@ func (i *InteractiveDevice) cmdStatus() {
 		FeatureID:   uint8(model.FeatureMeasurement),
 		AttributeID: 1, // acActivePower
 	}
-	if value, meta, err := i.inspector.ReadAttribute(path); err == nil {
-		fmt.Printf("  Current Power:  %s\n", i.formatter.FormatValue(value, meta.Unit))
+	if value, meta, err := d.inspector.ReadAttribute(path); err == nil {
+		fmt.Printf("  Current Power:  %s\n", d.formatter.FormatValue(value, meta.Unit))
 	}
 
 	fmt.Println()
 }
 
 // startSimulation starts the background simulation.
-func (i *InteractiveDevice) startSimulation() {
-	if i.simRunning {
+func (d *Device) startSimulation() {
+	if d.simRunning {
 		return
 	}
-	i.simCtx, i.simCancel = context.WithCancel(context.Background())
-	i.simRunning = true
-	go runSimulation(i.simCtx, config.Type)
+	d.simCtx, d.simCancel = context.WithCancel(context.Background())
+	d.simRunning = true
+	go d.runSimulation(d.simCtx)
 }
 
 // stopSimulation stops the background simulation.
-func (i *InteractiveDevice) stopSimulation() {
-	if !i.simRunning {
+func (d *Device) stopSimulation() {
+	if !d.simRunning {
 		return
 	}
-	if i.simCancel != nil {
-		i.simCancel()
+	if d.simCancel != nil {
+		d.simCancel()
 	}
-	i.simRunning = false
+	d.simRunning = false
 }
 
 // setPowerDirect sets the power value directly.
-func (i *InteractiveDevice) setPowerDirect(powerMW int64) {
+func (d *Device) setPowerDirect(powerMW int64) {
 	// Attribute IDs from features package
 	const (
 		attrACActivePower = uint16(1)  // features.MeasurementAttrACActivePower
@@ -414,14 +437,14 @@ func (i *InteractiveDevice) setPowerDirect(powerMW int64) {
 	)
 
 	var attrID uint16
-	switch config.Type {
+	switch d.config.DeviceType() {
 	case DeviceTypeEVSE, DeviceTypeInverter:
 		attrID = attrACActivePower
 	case DeviceTypeBattery:
 		attrID = attrDCPower
 	}
 
-	if err := i.svc.NotifyAttributeChange(1, uint8(model.FeatureMeasurement), attrID, powerMW); err != nil {
+	if err := d.svc.NotifyAttributeChange(1, uint8(model.FeatureMeasurement), attrID, powerMW); err != nil {
 		fmt.Printf("Failed to set power: %v\n", err)
 		return
 	}
@@ -429,7 +452,72 @@ func (i *InteractiveDevice) setPowerDirect(powerMW int64) {
 	fmt.Printf("Power set to %.1f kW\n", float64(powerMW)/1_000_000)
 }
 
+// runSimulation runs the background simulation loop.
+func (d *Device) runSimulation(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	var power int64
+
+	// Attribute IDs from features package
+	const (
+		attrACActivePower = uint16(1)  // features.MeasurementAttrACActivePower
+		attrDCPower       = uint16(40) // features.MeasurementAttrDCPower
+	)
+
+	deviceType := d.config.DeviceType()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			var attrID uint16
+			switch deviceType {
+			case DeviceTypeEVSE:
+				// Simulate varying charging power
+				power = (power + 1000000) % 22000000
+				if power == 0 {
+					power = 1380000
+				}
+				attrID = attrACActivePower
+
+			case DeviceTypeInverter:
+				// Simulate varying PV production based on time
+				hour := time.Now().Hour()
+				if hour >= 6 && hour <= 20 {
+					// Daytime - produce power (negative = production)
+					power = -int64((10 - abs(hour-13)) * 1000000)
+				} else {
+					power = 0
+				}
+				attrID = attrACActivePower
+
+			case DeviceTypeBattery:
+				// Simulate charge/discharge cycles
+				power = (power + 500000) % 10000000 - 5000000
+				attrID = attrDCPower
+			}
+
+			// Update the attribute and notify subscribed zones
+			if attrID != 0 {
+				if err := d.svc.NotifyAttributeChange(1, uint8(model.FeatureMeasurement), attrID, power); err != nil {
+					// Silently ignore errors in simulation
+					_ = err
+				}
+			}
+		}
+	}
+}
+
 // IsRunning returns whether simulation is running (for external access).
-func (i *InteractiveDevice) IsRunning() bool {
-	return i.simRunning
+func (d *Device) IsRunning() bool {
+	return d.simRunning
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
