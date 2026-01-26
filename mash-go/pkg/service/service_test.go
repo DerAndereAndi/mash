@@ -930,6 +930,171 @@ func TestDeviceServiceOperationalAdvertisingInfo(t *testing.T) {
 	}
 }
 
+// Streaming discovery tests
+
+func TestControllerServiceStartDiscovery(t *testing.T) {
+	config := validControllerConfig()
+
+	svc, err := NewControllerService(config)
+	if err != nil {
+		t.Fatalf("NewControllerService failed: %v", err)
+	}
+
+	// Set up mock browser with devices
+	browser := newMockBrowser()
+	browser.AddDevice(&discovery.CommissionableService{
+		InstanceName:  "MASH-1234",
+		Host:          "evse-001.local",
+		Port:          8443,
+		Discriminator: 1234,
+	})
+	browser.AddDevice(&discovery.CommissionableService{
+		InstanceName:  "MASH-5678",
+		Host:          "inverter-001.local",
+		Port:          8443,
+		Discriminator: 5678,
+	})
+	svc.SetBrowser(browser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// Track discovered devices via events
+	var discoveredDevices []*discovery.CommissionableService
+	var mu sync.Mutex
+	svc.OnEvent(func(e Event) {
+		if e.Type == EventDeviceDiscovered {
+			mu.Lock()
+			if svc, ok := e.DiscoveredService.(*discovery.CommissionableService); ok {
+				discoveredDevices = append(discoveredDevices, svc)
+			}
+			mu.Unlock()
+		}
+	})
+
+	// Start background discovery
+	if err := svc.StartDiscovery(ctx, nil); err != nil {
+		t.Fatalf("StartDiscovery failed: %v", err)
+	}
+
+	// Wait for devices to be discovered
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	count := len(discoveredDevices)
+	mu.Unlock()
+
+	if count != 2 {
+		t.Errorf("expected 2 discovered devices via events, got %d", count)
+	}
+
+	// Stop discovery
+	svc.StopDiscovery()
+}
+
+func TestControllerServiceStartDiscoveryWithFilter(t *testing.T) {
+	config := validControllerConfig()
+
+	svc, err := NewControllerService(config)
+	if err != nil {
+		t.Fatalf("NewControllerService failed: %v", err)
+	}
+
+	// Set up mock browser with devices
+	browser := newMockBrowser()
+	browser.AddDevice(&discovery.CommissionableService{
+		InstanceName:  "MASH-1234",
+		Discriminator: 1234,
+		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
+	})
+	browser.AddDevice(&discovery.CommissionableService{
+		InstanceName:  "MASH-5678",
+		Discriminator: 5678,
+		Categories:    []discovery.DeviceCategory{discovery.CategoryInverter},
+	})
+	svc.SetBrowser(browser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// Track discovered devices
+	var discoveredDevices []*discovery.CommissionableService
+	var mu sync.Mutex
+	svc.OnEvent(func(e Event) {
+		if e.Type == EventDeviceDiscovered {
+			mu.Lock()
+			if svc, ok := e.DiscoveredService.(*discovery.CommissionableService); ok {
+				discoveredDevices = append(discoveredDevices, svc)
+			}
+			mu.Unlock()
+		}
+	})
+
+	// Start discovery with filter - only EMobility
+	filter := discovery.FilterByCategory(discovery.CategoryEMobility)
+	if err := svc.StartDiscovery(ctx, filter); err != nil {
+		t.Fatalf("StartDiscovery failed: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	count := len(discoveredDevices)
+	mu.Unlock()
+
+	if count != 1 {
+		t.Errorf("expected 1 filtered device, got %d", count)
+	}
+
+	svc.StopDiscovery()
+}
+
+func TestControllerServiceStopDiscovery(t *testing.T) {
+	config := validControllerConfig()
+
+	svc, err := NewControllerService(config)
+	if err != nil {
+		t.Fatalf("NewControllerService failed: %v", err)
+	}
+
+	browser := newMockBrowser()
+	svc.SetBrowser(browser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// Start discovery
+	if err := svc.StartDiscovery(ctx, nil); err != nil {
+		t.Fatalf("StartDiscovery failed: %v", err)
+	}
+
+	if !svc.IsDiscovering() {
+		t.Error("expected IsDiscovering to be true")
+	}
+
+	// Stop discovery
+	svc.StopDiscovery()
+
+	if svc.IsDiscovering() {
+		t.Error("expected IsDiscovering to be false after StopDiscovery")
+	}
+}
+
+func TestEventDeviceDiscoveredString(t *testing.T) {
+	if EventDeviceDiscovered.String() != "DEVICE_DISCOVERED" {
+		t.Errorf("expected DEVICE_DISCOVERED, got %s", EventDeviceDiscovered.String())
+	}
+}
+
 // State and event String() tests
 
 func TestServiceStateString(t *testing.T) {
@@ -967,6 +1132,7 @@ func TestEventTypeString(t *testing.T) {
 		{EventFailsafeCleared, "FAILSAFE_CLEARED"},
 		{EventCommissioningOpened, "COMMISSIONING_OPENED"},
 		{EventCommissioningClosed, "COMMISSIONING_CLOSED"},
+		{EventDeviceDiscovered, "DEVICE_DISCOVERED"},
 		{EventType(99), "UNKNOWN"},
 	}
 

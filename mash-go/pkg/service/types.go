@@ -331,6 +331,9 @@ const (
 
 	// EventCommissioningClosed - commissioning window closed.
 	EventCommissioningClosed
+
+	// EventDeviceDiscovered - new device discovered via mDNS.
+	EventDeviceDiscovered
 )
 
 // String returns the event type name.
@@ -356,6 +359,8 @@ func (e EventType) String() string {
 		return "COMMISSIONING_OPENED"
 	case EventCommissioningClosed:
 		return "COMMISSIONING_CLOSED"
+	case EventDeviceDiscovered:
+		return "DEVICE_DISCOVERED"
 	default:
 		return "UNKNOWN"
 	}
@@ -383,6 +388,9 @@ type Event struct {
 
 	// Value is the new value (for value change events).
 	Value any
+
+	// DiscoveredService contains the discovered service info (for discovery events).
+	DiscoveredService any
 
 	// Error is set if the event is an error.
 	Error error

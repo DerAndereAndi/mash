@@ -30,6 +30,10 @@ type ControllerService struct {
 	discoveryManager *discovery.DiscoveryManager
 	advertiser       discovery.Advertiser
 
+	// Background discovery state
+	discoveryActive bool
+	discoveryCancel context.CancelFunc
+
 	// Connected devices
 	connectedDevices map[string]*ConnectedDevice
 
@@ -467,4 +471,98 @@ func (s *ControllerService) SetAdvertiser(advertiser discovery.Advertiser) {
 	defer s.mu.Unlock()
 	s.advertiser = advertiser
 	s.discoveryManager = discovery.NewDiscoveryManager(advertiser)
+}
+
+// StartDiscovery starts background mDNS discovery.
+// Discovered devices are emitted as EventDeviceDiscovered events.
+// Use StopDiscovery to stop the background discovery.
+func (s *ControllerService) StartDiscovery(ctx context.Context, filter discovery.FilterFunc) error {
+	s.mu.Lock()
+	if s.state != StateRunning {
+		s.mu.Unlock()
+		return ErrNotStarted
+	}
+	if s.discoveryActive {
+		s.mu.Unlock()
+		return nil // Already discovering
+	}
+
+	browser := s.browser
+	if browser == nil {
+		s.mu.Unlock()
+		return ErrNotStarted
+	}
+
+	// Create cancellable context for this discovery session
+	discoveryCtx, cancel := context.WithCancel(ctx)
+	s.discoveryActive = true
+	s.discoveryCancel = cancel
+	s.mu.Unlock()
+
+	// Start browsing in background
+	go s.runDiscoveryLoop(discoveryCtx, filter)
+
+	return nil
+}
+
+// runDiscoveryLoop runs the background discovery and emits events.
+func (s *ControllerService) runDiscoveryLoop(ctx context.Context, filter discovery.FilterFunc) {
+	results, err := s.browser.BrowseCommissionable(ctx)
+	if err != nil {
+		s.mu.Lock()
+		s.discoveryActive = false
+		s.discoveryCancel = nil
+		s.mu.Unlock()
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.mu.Lock()
+			s.discoveryActive = false
+			s.discoveryCancel = nil
+			s.mu.Unlock()
+			return
+
+		case svc, ok := <-results:
+			if !ok {
+				s.mu.Lock()
+				s.discoveryActive = false
+				s.discoveryCancel = nil
+				s.mu.Unlock()
+				return
+			}
+
+			// Apply filter if provided
+			if filter != nil && !filter(svc) {
+				continue
+			}
+
+			// Emit discovery event
+			s.emitEvent(Event{
+				Type:              EventDeviceDiscovered,
+				DiscoveredService: svc,
+			})
+		}
+	}
+}
+
+// StopDiscovery stops background mDNS discovery.
+func (s *ControllerService) StopDiscovery() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.discoveryCancel != nil {
+		s.discoveryCancel()
+		s.discoveryCancel = nil
+	}
+	s.discoveryActive = false
+}
+
+// IsDiscovering returns true if background discovery is active.
+func (s *ControllerService) IsDiscovering() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.discoveryActive
 }
