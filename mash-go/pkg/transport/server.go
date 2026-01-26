@@ -308,10 +308,16 @@ func (c *ServerConn) readLoop() {
 			return
 		}
 
-		// Try to decode as control message first
-		if ctrlMsg, err := wire.DecodeControlMessage(data); err == nil {
-			c.handleControlMessage(ctrlMsg)
-			continue
+		// Use PeekMessageType to properly distinguish message types.
+		// This is important because control messages and requests share
+		// similar CBOR structure (integer keys 1 and 2), so naive decoding
+		// could misinterpret a request as a control message.
+		msgType, peekErr := wire.PeekMessageType(data)
+		if peekErr == nil && msgType == wire.MessageTypeControl {
+			if ctrlMsg, err := wire.DecodeControlMessage(data); err == nil {
+				c.handleControlMessage(ctrlMsg)
+				continue
+			}
 		}
 
 		// Regular message - pass to handler

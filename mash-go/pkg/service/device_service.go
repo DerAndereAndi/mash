@@ -413,3 +413,29 @@ func (s *DeviceService) SetAdvertiser(advertiser discovery.Advertiser) {
 		Port:          8443,
 	})
 }
+
+// SetFailsafeTimer sets a custom failsafe timer for a zone (for testing/DI).
+// This allows injecting test timers with short durations.
+func (s *DeviceService) SetFailsafeTimer(zoneID string, timer *failsafe.Timer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Stop existing timer if any
+	if existing, ok := s.failsafeTimers[zoneID]; ok {
+		existing.Reset()
+	}
+
+	// Set up callback
+	timer.OnFailsafeEnter(func(_ failsafe.Limits) {
+		s.handleFailsafe(zoneID)
+	})
+
+	s.failsafeTimers[zoneID] = timer
+}
+
+// GetFailsafeTimer returns the failsafe timer for a zone (for testing).
+func (s *DeviceService) GetFailsafeTimer(zoneID string) *failsafe.Timer {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.failsafeTimers[zoneID]
+}

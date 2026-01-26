@@ -156,6 +156,21 @@ func NewTimerWithConfig(cfg Config) (*Timer, error) {
 	return t, nil
 }
 
+// NewTestTimer creates a failsafe timer for testing purposes.
+// This bypasses duration validation and allows any duration.
+// Should only be used in tests.
+func NewTestTimer(duration, gracePeriod time.Duration, limits Limits) *Timer {
+	if duration == 0 {
+		duration = 100 * time.Millisecond // Fast default for tests
+	}
+	return &Timer{
+		state:       StateNormal,
+		duration:    duration,
+		gracePeriod: gracePeriod,
+		limits:      limits,
+	}
+}
+
 // State returns the current failsafe state.
 func (t *Timer) State() State {
 	t.mu.RLock()

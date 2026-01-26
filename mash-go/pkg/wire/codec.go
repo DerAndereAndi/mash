@@ -167,65 +167,40 @@ const (
 
 // PeekMessageType examines CBOR data to determine the message type
 // without fully decoding it.
+//
+// Message type detection logic:
+// - Notification: messageId (key 1) = 0
+// - Control: key 1 is 1-3 (valid ControlMessageType) AND keys 3,4 are absent/zero
+// - Request: has endpoint (key 3) or feature (key 4) with meaningful values
+// - Response: default for other cases
 func PeekMessageType(data []byte) (MessageType, error) {
-	// Decode just enough to check key indicators
-	var peek struct {
-		MessageID uint32 `cbor:"1,keyasint"`
-		Field2    uint8  `cbor:"2,keyasint"` // Could be operation, status, or subscriptionId
-	}
-	if err := Unmarshal(data, &peek); err != nil {
-		return MessageTypeUnknown, fmt.Errorf("failed to peek message: %w", err)
-	}
-
-	// Check for notification (messageId = 0)
-	if peek.MessageID == NotificationMessageID {
-		return MessageTypeNotification, nil
-	}
-
-	// Check for control message by looking at the structure
-	// Control messages have a different shape (type field instead of messageId)
-	var ctrl struct {
-		Type uint8 `cbor:"1,keyasint"`
-	}
-	if err := Unmarshal(data, &ctrl); err == nil {
-		if ctrl.Type >= 1 && ctrl.Type <= 3 {
-			// Might be control message, verify by checking if it has seq field
-			var ctrlCheck struct {
-				Type uint8  `cbor:"1,keyasint"`
-				Seq  uint32 `cbor:"2,keyasint,omitempty"`
-			}
-			if Unmarshal(data, &ctrlCheck) == nil && ctrlCheck.Type >= 1 && ctrlCheck.Type <= 3 {
-				// Check if this could be a valid request/response instead
-				// by checking for endpoint/feature fields
-				var reqCheck struct {
-					EndpointID uint8 `cbor:"3,keyasint,omitempty"`
-				}
-				if Unmarshal(data, &reqCheck) == nil && reqCheck.EndpointID > 0 {
-					// Has endpoint, not a control message
-				} else if peek.MessageID == 0 && peek.Field2 == 0 {
-					// MessageId=0, Field2=0 could be notification or control
-					// Control messages don't have endpoint/feature
-					return MessageTypeControl, nil
-				}
-			}
-		}
-	}
-
-	// Determine if request or response by checking if field2 is valid operation or status
-	// Operations are 1-4, status codes can be 0-12
-	// We need additional context - check for payload structure
+	// Decode all relevant fields at once for efficiency
 	var fullPeek struct {
-		MessageID  uint32 `cbor:"1,keyasint"`
-		Field2     uint8  `cbor:"2,keyasint"`
+		Field1     uint32 `cbor:"1,keyasint"` // messageId, or controlType
+		Field2     uint8  `cbor:"2,keyasint"` // operation, status, or sequence
 		EndpointID uint8  `cbor:"3,keyasint,omitempty"`
 		FeatureID  uint8  `cbor:"4,keyasint,omitempty"`
 	}
 	if err := Unmarshal(data, &fullPeek); err != nil {
-		return MessageTypeUnknown, err
+		return MessageTypeUnknown, fmt.Errorf("failed to peek message: %w", err)
 	}
 
-	// Requests have endpointId and featureId, responses typically don't
-	if fullPeek.Field2 >= 1 && fullPeek.Field2 <= 4 && (fullPeek.EndpointID > 0 || fullPeek.FeatureID > 0) {
+	// Check for notification (messageId = 0)
+	if fullPeek.Field1 == NotificationMessageID {
+		return MessageTypeNotification, nil
+	}
+
+	// Check for control message: Type (key 1) is 1-3 AND no endpoint/feature
+	// Control messages only have keys 1 and 2, while requests have keys 3 and 4
+	if fullPeek.Field1 >= 1 && fullPeek.Field1 <= 3 &&
+		fullPeek.EndpointID == 0 && fullPeek.FeatureID == 0 {
+		return MessageTypeControl, nil
+	}
+
+	// Check for request: has endpoint or feature ID
+	// Requests always have featureId > 0 for meaningful operations
+	if fullPeek.Field2 >= 1 && fullPeek.Field2 <= 4 &&
+		(fullPeek.EndpointID > 0 || fullPeek.FeatureID > 0) {
 		return MessageTypeRequest, nil
 	}
 

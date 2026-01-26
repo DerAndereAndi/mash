@@ -42,6 +42,9 @@ const (
 
 	// StatusTimeout indicates the operation timed out.
 	StatusTimeout Status = 12
+
+	// StatusResourceExhausted indicates a resource limit has been reached.
+	StatusResourceExhausted Status = 13
 )
 
 // String returns the status name.
@@ -73,6 +76,8 @@ func (s Status) String() string {
 		return "CONSTRAINT_ERROR"
 	case StatusTimeout:
 		return "TIMEOUT"
+	case StatusResourceExhausted:
+		return "RESOURCE_EXHAUSTED"
 	default:
 		return "UNKNOWN"
 	}
