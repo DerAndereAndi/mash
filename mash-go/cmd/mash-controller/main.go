@@ -337,12 +337,7 @@ func runMonitoringLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			devices := svc.GetAllDevices()
-			if len(devices) > 0 {
-				log.Printf("Connected devices: %d", len(devices))
-				totalPower := cem.GetTotalPower()
-				log.Printf("Total power: %.1f kW", float64(totalPower)/1000000)
-			}
+			// Monitoring tick - status available via 'status' command
 		}
 	}
 }
