@@ -253,3 +253,46 @@ func TestFormatterIndent(t *testing.T) {
 		t.Errorf("Indent should preserve content, got %q", got)
 	}
 }
+
+func TestFormatFeatureMap(t *testing.T) {
+	tests := []struct {
+		name     string
+		fm       uint32
+		expected string
+	}{
+		{
+			name:     "zero",
+			fm:       0,
+			expected: "0x0 (none)",
+		},
+		{
+			name:     "core only",
+			fm:       uint32(model.FeatureMapCore),
+			expected: "0x0001 (CORE)",
+		},
+		{
+			name:     "core and flex",
+			fm:       uint32(model.FeatureMapCore) | uint32(model.FeatureMapFlex),
+			expected: "0x0003 (CORE|FLEX)",
+		},
+		{
+			name:     "emob charger",
+			fm:       uint32(model.FeatureMapCore) | uint32(model.FeatureMapFlex) | uint32(model.FeatureMapEMob),
+			expected: "0x000B (CORE|FLEX|EMOB)",
+		},
+		{
+			name:     "v2x bidirectional",
+			fm:       uint32(model.FeatureMapCore) | uint32(model.FeatureMapFlex) | uint32(model.FeatureMapEMob) | uint32(model.FeatureMapV2X),
+			expected: "0x040B (CORE|FLEX|EMOB|V2X)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatFeatureMap(tt.fm)
+			if got != tt.expected {
+				t.Errorf("FormatFeatureMap(0x%04X) = %q, want %q", tt.fm, got, tt.expected)
+			}
+		})
+	}
+}

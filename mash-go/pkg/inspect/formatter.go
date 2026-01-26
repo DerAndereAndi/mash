@@ -255,12 +255,41 @@ func FormatDataType(dt model.DataType) string {
 	}
 }
 
-// FormatFeatureMap formats a feature map bitmask.
+// FormatFeatureMap formats a feature map bitmask with human-readable capability names.
 func FormatFeatureMap(fm uint32) string {
 	if fm == 0 {
 		return "0x0 (none)"
 	}
-	return fmt.Sprintf("0x%08x", fm)
+
+	// Decode capability bits
+	var caps []string
+	bits := []struct {
+		mask uint32
+		name string
+	}{
+		{uint32(model.FeatureMapCore), "CORE"},
+		{uint32(model.FeatureMapFlex), "FLEX"},
+		{uint32(model.FeatureMapBattery), "BATTERY"},
+		{uint32(model.FeatureMapEMob), "EMOB"},
+		{uint32(model.FeatureMapSignals), "SIGNALS"},
+		{uint32(model.FeatureMapTariff), "TARIFF"},
+		{uint32(model.FeatureMapPlan), "PLAN"},
+		{uint32(model.FeatureMapProcess), "PROCESS"},
+		{uint32(model.FeatureMapForecast), "FORECAST"},
+		{uint32(model.FeatureMapAsymmetric), "ASYMMETRIC"},
+		{uint32(model.FeatureMapV2X), "V2X"},
+	}
+
+	for _, b := range bits {
+		if fm&b.mask != 0 {
+			caps = append(caps, b.name)
+		}
+	}
+
+	if len(caps) == 0 {
+		return fmt.Sprintf("0x%04X", fm)
+	}
+	return fmt.Sprintf("0x%04X (%s)", fm, strings.Join(caps, "|"))
 }
 
 // AttributeRow represents a formatted attribute for display.

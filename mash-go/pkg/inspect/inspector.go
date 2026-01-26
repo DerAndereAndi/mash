@@ -317,6 +317,11 @@ func (i *Inspector) formatFeature(feat *FeatureInfo, f *Formatter, depth int) st
 	header := fmt.Sprintf("%s (ID: %d, Rev: %d)", FormatFeatureType(feat.ID), feat.ID, feat.Revision)
 	result += f.Indent(depth, header) + "\n"
 
+	// Show FeatureMap if non-zero (indicates capabilities)
+	if feat.FeatureMap != 0 {
+		result += f.Indent(depth+1, "Capabilities: "+FormatFeatureMap(feat.FeatureMap)) + "\n"
+	}
+
 	// Attributes
 	for _, attr := range feat.Attributes {
 		attrStr := i.formatAttributeInfo(&attr, feat.Type, f)
