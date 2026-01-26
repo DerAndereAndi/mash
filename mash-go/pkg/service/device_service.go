@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"fmt"
 	"log/slog"
 	"net"
 	"strconv"
@@ -28,6 +30,9 @@ type DeviceService struct {
 	config DeviceConfig
 	device *model.Device
 	state  ServiceState
+
+	// Device identity (derived from certificate fingerprint)
+	deviceID string
 
 	// Zone management
 	zoneManager *zone.Manager
@@ -171,6 +176,14 @@ func (s *DeviceService) Start(ctx context.Context) error {
 		s.state = StateIdle
 		s.mu.Unlock()
 		return err
+	}
+
+	// Derive device ID from the certificate's public key
+	if len(s.tlsCert.Certificate) > 0 {
+		cert, err := x509.ParseCertificate(s.tlsCert.Certificate[0])
+		if err == nil {
+			s.deviceID, _ = discovery.DeviceIDFromPublicKey(cert)
+		}
 	}
 
 	// Create TLS config for commissioning (no client cert required)
@@ -516,6 +529,29 @@ func (s *DeviceService) HandleZoneConnect(zoneID string, zoneType cert.ZoneType)
 	if _, exists := s.zoneIndexMap[zoneID]; !exists {
 		s.zoneIndexMap[zoneID] = s.nextZoneIndex
 		s.nextZoneIndex++
+	}
+
+	// Start operational mDNS advertising for this zone
+	// This allows controllers to discover the device for reconnection
+	if s.discoveryManager != nil {
+		port := uint16(0)
+		if s.tlsListener != nil {
+			port = parsePort(s.tlsListener.Addr().String())
+		}
+
+		opInfo := &discovery.OperationalInfo{
+			ZoneID:        zoneID,
+			DeviceID:      s.deviceID,
+			VendorProduct: fmt.Sprintf("%04x:%04x", s.device.VendorID(), s.device.ProductID()),
+			EndpointCount: uint8(s.device.EndpointCount()),
+			Port:          port,
+		}
+
+		// AddZone is async-safe and will start advertising
+		if err := s.discoveryManager.AddZone(s.ctx, opInfo); err != nil {
+			s.debugLog("HandleZoneConnect: failed to start operational advertising",
+				"zoneID", zoneID, "error", err)
+		}
 	}
 
 	// Create failsafe timer for this zone

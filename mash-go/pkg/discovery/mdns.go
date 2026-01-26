@@ -316,24 +316,23 @@ func NewMDNSBrowser(config BrowserConfig) (*MDNSBrowser, error) {
 }
 
 // BrowseCommissionable searches for devices in commissioning mode.
+// Services are aggregated by instance name - addresses from multiple interfaces
+// are combined into a single entry. Removals are handled when interfaces disappear.
 func (b *MDNSBrowser) BrowseCommissionable(ctx context.Context) (<-chan *CommissionableService, error) {
 	out := make(chan *CommissionableService)
 
 	entries := make(chan *zeroconf.ServiceEntry)
-	removed := make(chan *zeroconf.ServiceEntry) // Required by v3 API but we ignore removals
+	removed := make(chan *zeroconf.ServiceEntry)
 
 	// Set up browser options
 	opts := b.browserOptions()
 
-	// Drain removed channel (we don't track removals)
-	go func() {
-		for range removed {
-		}
-	}()
-
-	// Process entries and forward to output
+	// Process entries with aggregation
 	go func() {
 		defer close(out)
+
+		// Track services by instance name, aggregating addresses
+		services := make(map[string]*CommissionableService)
 
 		for {
 			select {
@@ -342,21 +341,44 @@ func (b *MDNSBrowser) BrowseCommissionable(ctx context.Context) (<-chan *Commiss
 					return
 				}
 				svc := b.entryToCommissionable(entry)
-				if svc != nil {
+				if svc == nil {
+					continue
+				}
+
+				existing, found := services[svc.InstanceName]
+				if found {
+					// Merge addresses into existing entry
+					existing.Addresses = mergeAddresses(existing.Addresses, svc.Addresses)
+				} else {
+					// New service - store and emit
+					services[svc.InstanceName] = svc
 					select {
 					case out <- svc:
 					case <-ctx.Done():
 						return
 					}
 				}
+
+			case entry, ok := <-removed:
+				if !ok {
+					continue
+				}
+				// Remove addresses that came from this interface
+				if existing, found := services[entry.Instance]; found {
+					existing.Addresses = removeAddresses(existing.Addresses, entry)
+					// If no addresses remain, remove the service
+					if len(existing.Addresses) == 0 {
+						delete(services, entry.Instance)
+					}
+				}
+
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 
-	// Start browsing in background - blocks until context is cancelled
-	// zeroconf.Browse closes the channels when done
+	// Start browsing in background
 	go func() {
 		_ = zeroconf.Browse(ctx, ServiceTypeCommissionable, Domain, entries, removed, opts...)
 	}()
@@ -365,24 +387,23 @@ func (b *MDNSBrowser) BrowseCommissionable(ctx context.Context) (<-chan *Commiss
 }
 
 // BrowseOperational searches for commissioned devices.
+// Services are aggregated by instance name - addresses from multiple interfaces
+// are combined into a single entry.
 func (b *MDNSBrowser) BrowseOperational(ctx context.Context, zoneID string) (<-chan *OperationalService, error) {
 	out := make(chan *OperationalService)
 
 	entries := make(chan *zeroconf.ServiceEntry)
-	removed := make(chan *zeroconf.ServiceEntry) // Required by v3 API but we ignore removals
+	removed := make(chan *zeroconf.ServiceEntry)
 
 	// Set up browser options
 	opts := b.browserOptions()
 
-	// Drain removed channel (we don't track removals)
-	go func() {
-		for range removed {
-		}
-	}()
-
-	// Process entries and forward to output
+	// Process entries with aggregation
 	go func() {
 		defer close(out)
+
+		// Track services by instance name, aggregating addresses
+		services := make(map[string]*OperationalService)
 
 		for {
 			select {
@@ -391,25 +412,47 @@ func (b *MDNSBrowser) BrowseOperational(ctx context.Context, zoneID string) (<-c
 					return
 				}
 				svc := b.entryToOperational(entry)
-				if svc != nil {
-					// Filter by zone if specified
-					if zoneID != "" && svc.ZoneID != zoneID {
-						continue
-					}
+				if svc == nil {
+					continue
+				}
+
+				// Filter by zone if specified
+				if zoneID != "" && svc.ZoneID != zoneID {
+					continue
+				}
+
+				existing, found := services[svc.InstanceName]
+				if found {
+					// Merge addresses into existing entry
+					existing.Addresses = mergeAddresses(existing.Addresses, svc.Addresses)
+				} else {
+					// New service - store and emit
+					services[svc.InstanceName] = svc
 					select {
 					case out <- svc:
 					case <-ctx.Done():
 						return
 					}
 				}
+
+			case entry, ok := <-removed:
+				if !ok {
+					continue
+				}
+				if existing, found := services[entry.Instance]; found {
+					existing.Addresses = removeAddresses(existing.Addresses, entry)
+					if len(existing.Addresses) == 0 {
+						delete(services, entry.Instance)
+					}
+				}
+
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 
-	// Start browsing in background - blocks until context is cancelled
-	// zeroconf.Browse closes the channels when done
+	// Start browsing in background
 	go func() {
 		_ = zeroconf.Browse(ctx, ServiceTypeOperational, Domain, entries, removed, opts...)
 	}()
@@ -418,24 +461,23 @@ func (b *MDNSBrowser) BrowseOperational(ctx context.Context, zoneID string) (<-c
 }
 
 // BrowseCommissioners searches for zone controllers.
+// Services are aggregated by instance name - addresses from multiple interfaces
+// are combined into a single entry.
 func (b *MDNSBrowser) BrowseCommissioners(ctx context.Context) (<-chan *CommissionerService, error) {
 	out := make(chan *CommissionerService)
 
 	entries := make(chan *zeroconf.ServiceEntry)
-	removed := make(chan *zeroconf.ServiceEntry) // Required by v3 API but we ignore removals
+	removed := make(chan *zeroconf.ServiceEntry)
 
 	// Set up browser options
 	opts := b.browserOptions()
 
-	// Drain removed channel (we don't track removals)
-	go func() {
-		for range removed {
-		}
-	}()
-
-	// Process entries and forward to output
+	// Process entries with aggregation
 	go func() {
 		defer close(out)
+
+		// Track services by instance name, aggregating addresses
+		services := make(map[string]*CommissionerService)
 
 		for {
 			select {
@@ -444,21 +486,42 @@ func (b *MDNSBrowser) BrowseCommissioners(ctx context.Context) (<-chan *Commissi
 					return
 				}
 				svc := b.entryToCommissioner(entry)
-				if svc != nil {
+				if svc == nil {
+					continue
+				}
+
+				existing, found := services[svc.InstanceName]
+				if found {
+					// Merge addresses into existing entry
+					existing.Addresses = mergeAddresses(existing.Addresses, svc.Addresses)
+				} else {
+					// New service - store and emit
+					services[svc.InstanceName] = svc
 					select {
 					case out <- svc:
 					case <-ctx.Done():
 						return
 					}
 				}
+
+			case entry, ok := <-removed:
+				if !ok {
+					continue
+				}
+				if existing, found := services[entry.Instance]; found {
+					existing.Addresses = removeAddresses(existing.Addresses, entry)
+					if len(existing.Addresses) == 0 {
+						delete(services, entry.Instance)
+					}
+				}
+
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 
-	// Start browsing in background - blocks until context is cancelled
-	// zeroconf.Browse closes the channels when done
+	// Start browsing in background
 	go func() {
 		_ = zeroconf.Browse(ctx, ServiceTypeCommissioner, Domain, entries, removed, opts...)
 	}()
@@ -604,6 +667,43 @@ func (b *MDNSBrowser) entryToCommissioner(entry *zeroconf.ServiceEntry) *Commiss
 		ControllerName: info.ControllerName,
 		DeviceCount:    info.DeviceCount,
 	}
+}
+
+// mergeAddresses adds new addresses to existing list, avoiding duplicates.
+func mergeAddresses(existing, new []string) []string {
+	seen := make(map[string]bool, len(existing))
+	for _, addr := range existing {
+		seen[addr] = true
+	}
+
+	for _, addr := range new {
+		if !seen[addr] {
+			existing = append(existing, addr)
+			seen[addr] = true
+		}
+	}
+	return existing
+}
+
+// removeAddresses removes addresses from a zeroconf entry from the list.
+func removeAddresses(addresses []string, entry *zeroconf.ServiceEntry) []string {
+	// Build set of addresses to remove
+	toRemove := make(map[string]bool)
+	for _, ip := range entry.AddrIPv4 {
+		toRemove[ip.String()] = true
+	}
+	for _, ip := range entry.AddrIPv6 {
+		toRemove[ip.String()] = true
+	}
+
+	// Filter out removed addresses
+	result := make([]string, 0, len(addresses))
+	for _, addr := range addresses {
+		if !toRemove[addr] {
+			result = append(result, addr)
+		}
+	}
+	return result
 }
 
 // Ensure MDNSAdvertiser implements Advertiser interface.

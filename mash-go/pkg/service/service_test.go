@@ -747,6 +747,189 @@ func TestControllerConfigValidate(t *testing.T) {
 	}
 }
 
+// Operational mDNS advertising tests
+
+func TestDeviceServiceOperationalAdvertisingOnZoneConnect(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	// Set up mock advertiser
+	advertiser := newMockAdvertiser()
+	svc.SetAdvertiser(advertiser)
+
+	// Start service
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// Simulate zone connect (as happens after commissioning)
+	zoneID := "a1b2c3d4e5f6a7b8"
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+
+	// Verify operational advertising started
+	advertiser.mu.Lock()
+	opInfo, exists := advertiser.operationalZones[zoneID]
+	advertiser.mu.Unlock()
+
+	if !exists {
+		t.Fatal("expected operational advertising to start after zone connect")
+	}
+
+	if opInfo.ZoneID != zoneID {
+		t.Errorf("expected zone ID %s, got %s", zoneID, opInfo.ZoneID)
+	}
+
+	// Device ID should be set (derived from certificate fingerprint)
+	if opInfo.DeviceID == "" {
+		t.Error("expected device ID to be set in operational info")
+	}
+}
+
+func TestDeviceServiceOperationalAdvertisingPersistsOnDisconnect(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	// Set up mock advertiser
+	advertiser := newMockAdvertiser()
+	svc.SetAdvertiser(advertiser)
+
+	// Start service
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// Simulate zone connect
+	zoneID := "a1b2c3d4e5f6a7b8"
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+
+	// Verify advertising started
+	advertiser.mu.Lock()
+	_, exists := advertiser.operationalZones[zoneID]
+	advertiser.mu.Unlock()
+
+	if !exists {
+		t.Fatal("expected operational advertising to start")
+	}
+
+	// Simulate disconnect
+	svc.HandleZoneDisconnect(zoneID)
+
+	// Operational advertising should PERSIST (so controller can rediscover)
+	advertiser.mu.Lock()
+	_, stillExists := advertiser.operationalZones[zoneID]
+	advertiser.mu.Unlock()
+
+	if !stillExists {
+		t.Error("operational advertising should persist after disconnect for reconnection")
+	}
+}
+
+func TestDeviceServiceMultipleZonesOperationalAdvertising(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	// Set up mock advertiser
+	advertiser := newMockAdvertiser()
+	svc.SetAdvertiser(advertiser)
+
+	// Start service
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// Connect multiple zones
+	zone1 := "zone1111111111111"
+	zone2 := "zone2222222222222"
+
+	svc.HandleZoneConnect(zone1, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zone2, cert.ZoneTypeBuildingManager)
+
+	// Verify both zones are advertised
+	advertiser.mu.Lock()
+	_, zone1Exists := advertiser.operationalZones[zone1]
+	_, zone2Exists := advertiser.operationalZones[zone2]
+	zoneCount := len(advertiser.operationalZones)
+	advertiser.mu.Unlock()
+
+	if !zone1Exists {
+		t.Error("expected zone1 to be advertised")
+	}
+	if !zone2Exists {
+		t.Error("expected zone2 to be advertised")
+	}
+	if zoneCount != 2 {
+		t.Errorf("expected 2 operational zones, got %d", zoneCount)
+	}
+}
+
+func TestDeviceServiceOperationalAdvertisingInfo(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	config.Brand = "TestBrand"
+	config.Model = "TestModel"
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	// Set up mock advertiser
+	advertiser := newMockAdvertiser()
+	svc.SetAdvertiser(advertiser)
+
+	// Start service
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// Simulate zone connect
+	zoneID := "a1b2c3d4e5f6a7b8"
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+
+	// Verify operational info contains expected fields
+	advertiser.mu.Lock()
+	opInfo := advertiser.operationalZones[zoneID]
+	advertiser.mu.Unlock()
+
+	if opInfo == nil {
+		t.Fatal("expected operational info to exist")
+	}
+
+	// Check vendor:product ID format
+	expectedVP := "1234:5678" // From device vendor/product IDs
+	if opInfo.VendorProduct != expectedVP {
+		t.Errorf("expected vendor:product %s, got %s", expectedVP, opInfo.VendorProduct)
+	}
+
+	// Endpoint count should match device
+	if opInfo.EndpointCount != uint8(device.EndpointCount()) {
+		t.Errorf("expected endpoint count %d, got %d", device.EndpointCount(), opInfo.EndpointCount)
+	}
+}
+
 // State and event String() tests
 
 func TestServiceStateString(t *testing.T) {

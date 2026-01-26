@@ -344,6 +344,12 @@ func TestE2E_MultipleCommissioning(t *testing.T) {
 	}
 	t.Logf("First controller commissioned device: %s", device1.ID)
 
+	// Device exits commissioning mode after first commission.
+	// For additional zones, device must re-enter commissioning mode.
+	if err := deviceSvc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("Re-enter commissioning mode failed: %v", err)
+	}
+
 	// Commission from second controller
 	controller2Config := validControllerConfig()
 	controller2Config.ZoneName = "Home Manager 2"

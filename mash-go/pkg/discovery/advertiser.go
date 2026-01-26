@@ -98,6 +98,13 @@ func (m *DiscoveryManager) State() DiscoveryState {
 	return m.state
 }
 
+// IsCommissioningMode returns true if the device is in commissioning mode.
+func (m *DiscoveryManager) IsCommissioningMode() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.state == StateCommissioningOpen || m.state == StateOperationalCommissioning
+}
+
 // OnStateChange sets a callback for state changes.
 func (m *DiscoveryManager) OnStateChange(fn func(old, new DiscoveryState)) {
 	m.mu.Lock()
