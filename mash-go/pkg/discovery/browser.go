@@ -3,6 +3,8 @@ package discovery
 import (
 	"context"
 	"time"
+
+	"github.com/enbility/zeroconf/v3/api"
 )
 
 // Browser provides mDNS service browsing capabilities.
@@ -36,6 +38,16 @@ type BrowserConfig struct {
 	// Interface specifies which network interface to use.
 	// Empty string means all interfaces.
 	Interface string
+
+	// ConnectionFactory creates multicast connections.
+	// If nil, uses the default zeroconf connection factory.
+	// Set this in tests to inject mock connections.
+	ConnectionFactory api.ConnectionFactory
+
+	// InterfaceProvider lists network interfaces.
+	// If nil, uses the default zeroconf interface provider.
+	// Set this in tests to inject mock interface lists.
+	InterfaceProvider api.InterfaceProvider
 }
 
 // DefaultBrowserConfig returns the default browser configuration.

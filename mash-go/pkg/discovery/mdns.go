@@ -44,6 +44,22 @@ func (a *MDNSAdvertiser) getInterfaces() []net.Interface {
 	return []net.Interface{*iface}
 }
 
+// serverOptions returns zeroconf server options based on config.
+// This includes TTL and optional mock connection factory/interface provider for testing.
+func (a *MDNSAdvertiser) serverOptions() []zeroconf.ServerOption {
+	var opts []zeroconf.ServerOption
+	if a.config.TTL > 0 {
+		opts = append(opts, zeroconf.TTL(uint32(a.config.TTL.Seconds())))
+	}
+	if a.config.ConnectionFactory != nil {
+		opts = append(opts, zeroconf.WithServerConnFactory(a.config.ConnectionFactory))
+	}
+	if a.config.InterfaceProvider != nil {
+		opts = append(opts, zeroconf.WithServerInterfaceProvider(a.config.InterfaceProvider))
+	}
+	return opts
+}
+
 // AdvertiseCommissionable starts advertising a commissionable service.
 func (a *MDNSAdvertiser) AdvertiseCommissionable(ctx context.Context, info *CommissionableInfo) error {
 	a.mu.Lock()
@@ -68,14 +84,9 @@ func (a *MDNSAdvertiser) AdvertiseCommissionable(ctx context.Context, info *Comm
 		port = DefaultPort
 	}
 
-	// Register service
-	var opts []zeroconf.ServerOption
-	if a.config.TTL > 0 {
-		opts = append(opts, zeroconf.TTL(uint32(a.config.TTL.Seconds())))
-	}
-
-	// Get interfaces (nil means all interfaces)
+	// Get interfaces and options
 	ifaces := a.getInterfaces()
+	opts := a.serverOptions()
 
 	server, err := zeroconf.Register(
 		instanceName,
@@ -133,14 +144,9 @@ func (a *MDNSAdvertiser) AdvertiseOperational(ctx context.Context, info *Operati
 		port = DefaultPort
 	}
 
-	// Register service
-	var opts []zeroconf.ServerOption
-	if a.config.TTL > 0 {
-		opts = append(opts, zeroconf.TTL(uint32(a.config.TTL.Seconds())))
-	}
-
-	// Get interfaces (nil means all interfaces)
+	// Get interfaces and options
 	ifaces := a.getInterfaces()
+	opts := a.serverOptions()
 
 	server, err := zeroconf.Register(
 		instanceName,
@@ -219,14 +225,9 @@ func (a *MDNSAdvertiser) AdvertiseCommissioner(ctx context.Context, info *Commis
 		port = DefaultPort
 	}
 
-	// Register service
-	var opts []zeroconf.ServerOption
-	if a.config.TTL > 0 {
-		opts = append(opts, zeroconf.TTL(uint32(a.config.TTL.Seconds())))
-	}
-
-	// Get interfaces (nil means all interfaces)
+	// Get interfaces and options
 	ifaces := a.getInterfaces()
+	opts := a.serverOptions()
 
 	server, err := zeroconf.Register(
 		instanceName,
@@ -563,6 +564,7 @@ func (b *MDNSBrowser) Stop() {
 }
 
 // browserOptions returns zeroconf client options based on config.
+// This includes interface selection and optional mock connection factory/interface provider for testing.
 func (b *MDNSBrowser) browserOptions() []zeroconf.ClientOption {
 	var opts []zeroconf.ClientOption
 
@@ -572,6 +574,16 @@ func (b *MDNSBrowser) browserOptions() []zeroconf.ClientOption {
 		if err == nil {
 			opts = append(opts, zeroconf.SelectIfaces([]net.Interface{*iface}))
 		}
+	}
+
+	// Add mock connection factory if configured (for testing)
+	if b.config.ConnectionFactory != nil {
+		opts = append(opts, zeroconf.WithClientConnFactory(b.config.ConnectionFactory))
+	}
+
+	// Add mock interface provider if configured (for testing)
+	if b.config.InterfaceProvider != nil {
+		opts = append(opts, zeroconf.WithClientInterfaceProvider(b.config.InterfaceProvider))
 	}
 
 	return opts

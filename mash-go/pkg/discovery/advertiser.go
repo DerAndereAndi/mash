@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/enbility/zeroconf/v3/api"
 )
 
 // Advertiser provides mDNS service advertising capabilities.
@@ -48,6 +50,16 @@ type AdvertiserConfig struct {
 	// TTL is the DNS record TTL.
 	// Default: 120 seconds.
 	TTL time.Duration
+
+	// ConnectionFactory creates multicast connections.
+	// If nil, uses the default zeroconf connection factory.
+	// Set this in tests to inject mock connections.
+	ConnectionFactory api.ConnectionFactory
+
+	// InterfaceProvider lists network interfaces.
+	// If nil, uses the default zeroconf interface provider.
+	// Set this in tests to inject mock interface lists.
+	InterfaceProvider api.InterfaceProvider
 }
 
 // DefaultAdvertiserConfig returns the default advertiser configuration.
