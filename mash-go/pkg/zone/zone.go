@@ -1,0 +1,227 @@
+package zone
+
+import (
+	"errors"
+	"time"
+
+	"github.com/mash-protocol/mash-go/pkg/cert"
+)
+
+// Zone errors.
+var (
+	ErrZoneNotFound       = errors.New("zone not found")
+	ErrZoneExists         = errors.New("zone already exists")
+	ErrMaxZonesExceeded   = errors.New("maximum zones exceeded")
+	ErrInsufficientPriority = errors.New("insufficient priority")
+	ErrZoneNotConnected   = errors.New("zone not connected")
+)
+
+// MaxZones is the maximum number of zones a device can belong to.
+const MaxZones = 5
+
+// Zone represents a zone membership for a device.
+type Zone struct {
+	// ID is the unique zone identifier.
+	ID string
+
+	// Type determines the zone's priority.
+	Type cert.ZoneType
+
+	// Connected indicates if there's an active connection to this zone's controller.
+	Connected bool
+
+	// LastSeen is when the controller was last active.
+	LastSeen time.Time
+
+	// CommissionedAt is when the device joined this zone.
+	CommissionedAt time.Time
+}
+
+// Priority returns the zone's numeric priority (1 = highest).
+func (z *Zone) Priority() uint8 {
+	return z.Type.Priority()
+}
+
+// ZoneValue represents a value set by a zone with its metadata.
+type ZoneValue struct {
+	// ZoneID identifies which zone set this value.
+	ZoneID string
+
+	// ZoneType is the type of zone that set this value.
+	ZoneType cert.ZoneType
+
+	// Value is the actual value.
+	Value int64
+
+	// Duration is how long the value is valid (0 = indefinite).
+	Duration time.Duration
+
+	// SetAt is when the value was set.
+	SetAt time.Time
+
+	// ExpiresAt is when the value expires (zero if indefinite).
+	ExpiresAt time.Time
+}
+
+// IsExpired returns true if the value has expired.
+func (v *ZoneValue) IsExpired() bool {
+	if v.ExpiresAt.IsZero() {
+		return false
+	}
+	return time.Now().After(v.ExpiresAt)
+}
+
+// Priority returns the zone's priority for resolution.
+func (v *ZoneValue) Priority() uint8 {
+	return v.ZoneType.Priority()
+}
+
+// MultiZoneValue tracks values from multiple zones for a single attribute.
+type MultiZoneValue struct {
+	// Values holds the value from each zone, keyed by zone ID.
+	Values map[string]*ZoneValue
+
+	// EffectiveValue is the resolved value after priority/limit resolution.
+	EffectiveValue *int64
+
+	// WinningZoneID is the zone whose value is currently effective.
+	WinningZoneID string
+}
+
+// NewMultiZoneValue creates a new multi-zone value tracker.
+func NewMultiZoneValue() *MultiZoneValue {
+	return &MultiZoneValue{
+		Values: make(map[string]*ZoneValue),
+	}
+}
+
+// Set sets a value for a specific zone.
+func (m *MultiZoneValue) Set(zoneID string, zoneType cert.ZoneType, value int64, duration time.Duration) {
+	now := time.Now()
+	zv := &ZoneValue{
+		ZoneID:   zoneID,
+		ZoneType: zoneType,
+		Value:    value,
+		Duration: duration,
+		SetAt:    now,
+	}
+	if duration > 0 {
+		zv.ExpiresAt = now.Add(duration)
+	}
+	m.Values[zoneID] = zv
+}
+
+// Clear clears the value for a specific zone.
+func (m *MultiZoneValue) Clear(zoneID string) {
+	delete(m.Values, zoneID)
+}
+
+// Get returns the value for a specific zone, or nil if not set.
+func (m *MultiZoneValue) Get(zoneID string) *ZoneValue {
+	return m.Values[zoneID]
+}
+
+// RemoveExpired removes all expired values.
+func (m *MultiZoneValue) RemoveExpired() {
+	for zoneID, v := range m.Values {
+		if v.IsExpired() {
+			delete(m.Values, zoneID)
+		}
+	}
+}
+
+// ResolveLimits resolves multiple limit values using "most restrictive wins".
+// For consumption limits (positive), this means the smallest value.
+// For production limits (negative), this means the value closest to zero.
+// Returns nil if no values are set.
+func (m *MultiZoneValue) ResolveLimits() (*int64, string) {
+	m.RemoveExpired()
+
+	if len(m.Values) == 0 {
+		m.EffectiveValue = nil
+		m.WinningZoneID = ""
+		return nil, ""
+	}
+
+	var effectiveValue *int64
+	var winningZoneID string
+
+	for zoneID, v := range m.Values {
+		if effectiveValue == nil {
+			val := v.Value
+			effectiveValue = &val
+			winningZoneID = zoneID
+			continue
+		}
+
+		// Most restrictive wins:
+		// - For positive values (consumption): smaller is more restrictive
+		// - For negative values (production): closer to zero is more restrictive
+		// - Mixed: the one that restricts more overall
+
+		// Simple approach: for limits, smaller absolute restriction wins
+		// Consumption limit of 3000W is more restrictive than 5000W
+		// Production limit of -3000W is more restrictive than -5000W
+		if v.Value >= 0 && *effectiveValue >= 0 {
+			// Both consumption limits: smaller wins
+			if v.Value < *effectiveValue {
+				val := v.Value
+				effectiveValue = &val
+				winningZoneID = zoneID
+			}
+		} else if v.Value < 0 && *effectiveValue < 0 {
+			// Both production limits: closer to zero wins (less negative)
+			if v.Value > *effectiveValue {
+				val := v.Value
+				effectiveValue = &val
+				winningZoneID = zoneID
+			}
+		} else {
+			// Mixed: consumption limit (positive) takes precedence for safety
+			if v.Value >= 0 && *effectiveValue < 0 {
+				val := v.Value
+				effectiveValue = &val
+				winningZoneID = zoneID
+			}
+		}
+	}
+
+	m.EffectiveValue = effectiveValue
+	m.WinningZoneID = winningZoneID
+	return effectiveValue, winningZoneID
+}
+
+// ResolveSetpoints resolves multiple setpoint values using "highest priority wins".
+// The zone with the lowest priority number wins.
+// Returns nil if no values are set.
+func (m *MultiZoneValue) ResolveSetpoints() (*int64, string) {
+	m.RemoveExpired()
+
+	if len(m.Values) == 0 {
+		m.EffectiveValue = nil
+		m.WinningZoneID = ""
+		return nil, ""
+	}
+
+	var effectiveValue *int64
+	var winningZoneID string
+	var winningPriority uint8 = 255
+
+	for zoneID, v := range m.Values {
+		if v.Priority() < winningPriority {
+			val := v.Value
+			effectiveValue = &val
+			winningZoneID = zoneID
+			winningPriority = v.Priority()
+		}
+	}
+
+	m.EffectiveValue = effectiveValue
+	m.WinningZoneID = winningZoneID
+	return effectiveValue, winningZoneID
+}
+
+// Effective returns the current effective value and winning zone.
+func (m *MultiZoneValue) Effective() (*int64, string) {
+	return m.EffectiveValue, m.WinningZoneID
+}

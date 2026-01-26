@@ -1,0 +1,376 @@
+package zone
+
+import (
+	"testing"
+	"time"
+
+	"github.com/mash-protocol/mash-go/pkg/cert"
+)
+
+func TestMultiZoneValueLimits(t *testing.T) {
+	t.Run("EmptyReturnsNil", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		val, zoneID := mzv.ResolveLimits()
+		if val != nil {
+			t.Errorf("ResolveLimits() = %v, want nil", *val)
+		}
+		if zoneID != "" {
+			t.Errorf("zoneID = %q, want empty", zoneID)
+		}
+	})
+
+	t.Run("SingleValue", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-1", cert.ZoneTypeHomeManager, 5000, 0)
+
+		val, zoneID := mzv.ResolveLimits()
+		if val == nil || *val != 5000 {
+			t.Errorf("ResolveLimits() = %v, want 5000", val)
+		}
+		if zoneID != "zone-1" {
+			t.Errorf("zoneID = %q, want %q", zoneID, "zone-1")
+		}
+	})
+
+	t.Run("MostRestrictiveWins", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-grid", cert.ZoneTypeGridOperator, 3000, 0)  // Most restrictive
+		mzv.Set("zone-home", cert.ZoneTypeHomeManager, 5000, 0)  // Less restrictive
+
+		val, zoneID := mzv.ResolveLimits()
+		if val == nil || *val != 3000 {
+			t.Errorf("ResolveLimits() = %v, want 3000 (most restrictive)", val)
+		}
+		if zoneID != "zone-grid" {
+			t.Errorf("zoneID = %q, want %q", zoneID, "zone-grid")
+		}
+	})
+
+	t.Run("ProductionLimits", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-grid", cert.ZoneTypeGridOperator, -3000, 0)  // Less restrictive (more export)
+		mzv.Set("zone-home", cert.ZoneTypeHomeManager, -2000, 0)   // More restrictive (less export)
+
+		val, zoneID := mzv.ResolveLimits()
+		// -2000 is more restrictive (closer to zero)
+		if val == nil || *val != -2000 {
+			t.Errorf("ResolveLimits() = %v, want -2000 (more restrictive)", val)
+		}
+		if zoneID != "zone-home" {
+			t.Errorf("zoneID = %q, want %q", zoneID, "zone-home")
+		}
+	})
+
+	t.Run("ExpiredValuesIgnored", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+
+		// Set a value that expires immediately
+		mzv.Set("zone-1", cert.ZoneTypeGridOperator, 1000, 1*time.Millisecond)
+		mzv.Set("zone-2", cert.ZoneTypeHomeManager, 5000, 0) // No expiry
+
+		// Wait for first to expire
+		time.Sleep(5 * time.Millisecond)
+
+		val, zoneID := mzv.ResolveLimits()
+		if val == nil || *val != 5000 {
+			t.Errorf("ResolveLimits() = %v, want 5000 (expired value ignored)", val)
+		}
+		if zoneID != "zone-2" {
+			t.Errorf("zoneID = %q, want %q", zoneID, "zone-2")
+		}
+	})
+}
+
+func TestMultiZoneValueSetpoints(t *testing.T) {
+	t.Run("HighestPriorityWins", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-user", cert.ZoneTypeUserApp, 10000, 0)       // Priority 4
+		mzv.Set("zone-home", cert.ZoneTypeHomeManager, 8000, 0)    // Priority 3
+		mzv.Set("zone-grid", cert.ZoneTypeGridOperator, 5000, 0)   // Priority 1 (highest)
+
+		val, zoneID := mzv.ResolveSetpoints()
+		if val == nil || *val != 5000 {
+			t.Errorf("ResolveSetpoints() = %v, want 5000 (highest priority)", val)
+		}
+		if zoneID != "zone-grid" {
+			t.Errorf("zoneID = %q, want %q", zoneID, "zone-grid")
+		}
+	})
+
+	t.Run("SamePriorityFirstWins", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-home-1", cert.ZoneTypeHomeManager, 5000, 0)
+		mzv.Set("zone-home-2", cert.ZoneTypeHomeManager, 8000, 0)
+
+		val, _ := mzv.ResolveSetpoints()
+		// Either value is valid since same priority - just check one wins
+		if val == nil {
+			t.Error("ResolveSetpoints() = nil, want a value")
+		}
+	})
+}
+
+func TestZoneValueExpiry(t *testing.T) {
+	t.Run("NoExpiry", func(t *testing.T) {
+		v := &ZoneValue{
+			ZoneID:   "zone-1",
+			ZoneType: cert.ZoneTypeHomeManager,
+			Value:    5000,
+			Duration: 0,
+			SetAt:    time.Now(),
+		}
+		if v.IsExpired() {
+			t.Error("Value with no expiry should not be expired")
+		}
+	})
+
+	t.Run("NotYetExpired", func(t *testing.T) {
+		v := &ZoneValue{
+			ZoneID:    "zone-1",
+			ZoneType:  cert.ZoneTypeHomeManager,
+			Value:     5000,
+			Duration:  1 * time.Hour,
+			SetAt:     time.Now(),
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+		}
+		if v.IsExpired() {
+			t.Error("Value should not be expired yet")
+		}
+	})
+
+	t.Run("Expired", func(t *testing.T) {
+		v := &ZoneValue{
+			ZoneID:    "zone-1",
+			ZoneType:  cert.ZoneTypeHomeManager,
+			Value:     5000,
+			Duration:  1 * time.Millisecond,
+			SetAt:     time.Now().Add(-1 * time.Second),
+			ExpiresAt: time.Now().Add(-1 * time.Millisecond),
+		}
+		if !v.IsExpired() {
+			t.Error("Value should be expired")
+		}
+	})
+}
+
+func TestManager(t *testing.T) {
+	t.Run("AddAndRemoveZone", func(t *testing.T) {
+		m := NewManager()
+
+		// Add zone
+		err := m.AddZone("zone-1", cert.ZoneTypeHomeManager)
+		if err != nil {
+			t.Fatalf("AddZone() error = %v", err)
+		}
+
+		// Verify added
+		if !m.HasZone("zone-1") {
+			t.Error("HasZone(zone-1) = false, want true")
+		}
+		if m.ZoneCount() != 1 {
+			t.Errorf("ZoneCount() = %d, want 1", m.ZoneCount())
+		}
+
+		// Add duplicate
+		err = m.AddZone("zone-1", cert.ZoneTypeHomeManager)
+		if err != ErrZoneExists {
+			t.Errorf("AddZone(duplicate) error = %v, want ErrZoneExists", err)
+		}
+
+		// Remove zone
+		err = m.RemoveZone("zone-1")
+		if err != nil {
+			t.Errorf("RemoveZone() error = %v", err)
+		}
+
+		if m.HasZone("zone-1") {
+			t.Error("HasZone(zone-1) = true after removal")
+		}
+
+		// Remove non-existent
+		err = m.RemoveZone("zone-1")
+		if err != ErrZoneNotFound {
+			t.Errorf("RemoveZone(non-existent) error = %v, want ErrZoneNotFound", err)
+		}
+	})
+
+	t.Run("MaxZones", func(t *testing.T) {
+		m := NewManager()
+
+		// Add maximum zones
+		for i := range MaxZones {
+			err := m.AddZone(string(rune('A'+i)), cert.ZoneTypeHomeManager)
+			if err != nil {
+				t.Fatalf("AddZone(%d) error = %v", i, err)
+			}
+		}
+
+		// Try to add one more
+		err := m.AddZone("overflow", cert.ZoneTypeUserApp)
+		if err != ErrMaxZonesExceeded {
+			t.Errorf("AddZone(6th) error = %v, want ErrMaxZonesExceeded", err)
+		}
+	})
+
+	t.Run("ForceRemoveZone", func(t *testing.T) {
+		m := NewManager()
+		m.AddZone("zone-home", cert.ZoneTypeHomeManager)
+
+		// User app cannot force remove home manager
+		err := m.ForceRemoveZone("zone-home", cert.ZoneTypeUserApp)
+		if err != ErrInsufficientPriority {
+			t.Errorf("ForceRemoveZone(user→home) error = %v, want ErrInsufficientPriority", err)
+		}
+
+		// Same priority cannot force remove
+		err = m.ForceRemoveZone("zone-home", cert.ZoneTypeHomeManager)
+		if err != ErrInsufficientPriority {
+			t.Errorf("ForceRemoveZone(home→home) error = %v, want ErrInsufficientPriority", err)
+		}
+
+		// Grid operator can force remove home manager
+		err = m.ForceRemoveZone("zone-home", cert.ZoneTypeGridOperator)
+		if err != nil {
+			t.Errorf("ForceRemoveZone(grid→home) error = %v", err)
+		}
+
+		if m.HasZone("zone-home") {
+			t.Error("Zone should have been removed")
+		}
+	})
+
+	t.Run("ConnectionState", func(t *testing.T) {
+		m := NewManager()
+		m.AddZone("zone-1", cert.ZoneTypeHomeManager)
+
+		// Initially not connected
+		zone, _ := m.GetZone("zone-1")
+		if zone.Connected {
+			t.Error("Zone should not be connected initially")
+		}
+
+		// Set connected
+		err := m.SetConnected("zone-1")
+		if err != nil {
+			t.Errorf("SetConnected() error = %v", err)
+		}
+
+		zone, _ = m.GetZone("zone-1")
+		if !zone.Connected {
+			t.Error("Zone should be connected")
+		}
+		if zone.LastSeen.IsZero() {
+			t.Error("LastSeen should be set")
+		}
+
+		// Connected zones
+		connected := m.ConnectedZones()
+		if len(connected) != 1 || connected[0] != "zone-1" {
+			t.Errorf("ConnectedZones() = %v, want [zone-1]", connected)
+		}
+
+		// Set disconnected
+		err = m.SetDisconnected("zone-1")
+		if err != nil {
+			t.Errorf("SetDisconnected() error = %v", err)
+		}
+
+		zone, _ = m.GetZone("zone-1")
+		if zone.Connected {
+			t.Error("Zone should be disconnected")
+		}
+	})
+
+	t.Run("HighestPriorityZone", func(t *testing.T) {
+		m := NewManager()
+		m.AddZone("zone-user", cert.ZoneTypeUserApp)
+		m.AddZone("zone-home", cert.ZoneTypeHomeManager)
+		m.AddZone("zone-grid", cert.ZoneTypeGridOperator)
+
+		highest := m.HighestPriorityZone()
+		if highest == nil || highest.ID != "zone-grid" {
+			t.Errorf("HighestPriorityZone() = %v, want zone-grid", highest)
+		}
+	})
+
+	t.Run("HighestPriorityConnectedZone", func(t *testing.T) {
+		m := NewManager()
+		m.AddZone("zone-user", cert.ZoneTypeUserApp)
+		m.AddZone("zone-home", cert.ZoneTypeHomeManager)
+		m.AddZone("zone-grid", cert.ZoneTypeGridOperator)
+
+		// None connected
+		highest := m.HighestPriorityConnectedZone()
+		if highest != nil {
+			t.Errorf("HighestPriorityConnectedZone() = %v, want nil", highest)
+		}
+
+		// Connect user and home
+		m.SetConnected("zone-user")
+		m.SetConnected("zone-home")
+
+		highest = m.HighestPriorityConnectedZone()
+		if highest == nil || highest.ID != "zone-home" {
+			t.Errorf("HighestPriorityConnectedZone() = %v, want zone-home", highest)
+		}
+	})
+
+	t.Run("Callbacks", func(t *testing.T) {
+		m := NewManager()
+
+		var addedZoneID string
+		var removedZoneID string
+		var connectedZoneID string
+		var disconnectedZoneID string
+
+		m.OnZoneAdded(func(z *Zone) { addedZoneID = z.ID })
+		m.OnZoneRemoved(func(id string) { removedZoneID = id })
+		m.OnConnect(func(id string) { connectedZoneID = id })
+		m.OnDisconnect(func(id string) { disconnectedZoneID = id })
+
+		m.AddZone("zone-1", cert.ZoneTypeHomeManager)
+		if addedZoneID != "zone-1" {
+			t.Errorf("OnZoneAdded callback not called correctly")
+		}
+
+		m.SetConnected("zone-1")
+		if connectedZoneID != "zone-1" {
+			t.Errorf("OnConnect callback not called correctly")
+		}
+
+		m.SetDisconnected("zone-1")
+		if disconnectedZoneID != "zone-1" {
+			t.Errorf("OnDisconnect callback not called correctly")
+		}
+
+		m.RemoveZone("zone-1")
+		if removedZoneID != "zone-1" {
+			t.Errorf("OnZoneRemoved callback not called correctly")
+		}
+	})
+}
+
+func TestCanRemoveZone(t *testing.T) {
+	m := NewManager()
+	m.AddZone("zone-home", cert.ZoneTypeHomeManager)
+
+	tests := []struct {
+		requester cert.ZoneType
+		canRemove bool
+	}{
+		{cert.ZoneTypeGridOperator, true},      // Priority 1 can remove 3
+		{cert.ZoneTypeBuildingManager, true},   // Priority 2 can remove 3
+		{cert.ZoneTypeHomeManager, false},      // Priority 3 cannot remove 3
+		{cert.ZoneTypeUserApp, false},          // Priority 4 cannot remove 3
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.requester.String(), func(t *testing.T) {
+			got := m.CanRemoveZone(tt.requester, "zone-home")
+			if got != tt.canRemove {
+				t.Errorf("CanRemoveZone(%s, zone-home) = %v, want %v",
+					tt.requester.String(), got, tt.canRemove)
+			}
+		})
+	}
+}
