@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -656,4 +657,144 @@ func TestE2E_SubscriptionNotification(t *testing.T) {
 	notifMu.Unlock()
 
 	t.Log("Subscription and notification handler setup successful")
+}
+
+// TestE2E_NotificationDelivery tests that attribute changes are delivered as notifications.
+func TestE2E_NotificationDelivery(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create device with Measurement feature
+	device := createTestDevice()
+
+	// Add a Measurement feature on endpoint 1 for testing notifications
+	ep1 := model.NewEndpoint(1, model.EndpointEVCharger, "EV Charger")
+	measurementFeature := model.NewFeature(model.FeatureMeasurement, 1)
+	// Add ACActivePower attribute (ID 1)
+	measurementFeature.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:      1, // MeasurementAttrACActivePower
+		Name:    "ACActivePower",
+		Type:    model.DataTypeInt64,
+		Access:  model.AccessReadWrite, // Need write access for device-side updates
+		Default: int64(0),
+	}))
+	ep1.AddFeature(measurementFeature)
+	_ = device.AddEndpoint(ep1)
+
+	// Create device service
+	deviceConfig := validDeviceConfig()
+	deviceConfig.Discriminator = 2345 // Max is 4095
+	deviceConfig.SetupCode = "12345678"
+	deviceConfig.ListenAddress = "127.0.0.1:0"
+
+	deviceSvc, err := NewDeviceService(device, deviceConfig)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	if err := deviceSvc.Start(ctx); err != nil {
+		t.Fatalf("Device Start failed: %v", err)
+	}
+	defer func() { _ = deviceSvc.Stop() }()
+
+	addr := deviceSvc.TLSAddr()
+	port := addr.(*net.TCPAddr).Port
+	t.Logf("Device listening on port %d", port)
+
+	// Enter commissioning mode
+	if err := deviceSvc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	// Create controller
+	controllerConfig := DefaultControllerConfig()
+	controllerConfig.ZoneName = "Test Controller"
+
+	controllerSvc, err := NewControllerService(controllerConfig)
+	if err != nil {
+		t.Fatalf("NewControllerService failed: %v", err)
+	}
+	controllerSvc.SetBrowser(newMockBrowser())
+
+	if err := controllerSvc.Start(ctx); err != nil {
+		t.Fatalf("Controller Start failed: %v", err)
+	}
+	defer func() { _ = controllerSvc.Stop() }()
+
+	// Commission device
+	discoveryService := &discovery.CommissionableService{
+		Host:      "localhost",
+		Port:      uint16(port),
+		Addresses: []string{"127.0.0.1"},
+	}
+
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	if err != nil {
+		t.Fatalf("Commission failed: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	session := controllerSvc.GetSession(connectedDevice.ID)
+	if session == nil {
+		t.Fatal("No session found for commissioned device")
+	}
+
+	// Set up notification handler
+	var receivedNotif *wire.Notification
+	var notifMu sync.Mutex
+	notifReceived := make(chan struct{}, 1)
+
+	session.SetNotificationHandler(func(notif *wire.Notification) {
+		notifMu.Lock()
+		receivedNotif = notif
+		notifMu.Unlock()
+		select {
+		case notifReceived <- struct{}{}:
+		default:
+		}
+	})
+
+	// Subscribe to Measurement feature on endpoint 1
+	subID, priming, err := session.Subscribe(ctx, 1, uint8(model.FeatureMeasurement), nil)
+	if err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+	t.Logf("Subscribed with ID %d, priming: %v", subID, priming)
+
+	// Trigger an attribute change on the device side
+	const attrACActivePower = uint16(1)
+	newPower := int64(5000000) // 5 kW
+
+	if err := deviceSvc.NotifyAttributeChange(1, uint8(model.FeatureMeasurement), attrACActivePower, newPower); err != nil {
+		t.Fatalf("NotifyAttributeChange failed: %v", err)
+	}
+
+	// Wait for notification to arrive
+	select {
+	case <-notifReceived:
+		notifMu.Lock()
+		if receivedNotif == nil {
+			t.Fatal("Notification received signal but notif is nil")
+		}
+		if receivedNotif.SubscriptionID != subID {
+			t.Errorf("Expected subscription ID %d, got %d", subID, receivedNotif.SubscriptionID)
+		}
+		if receivedNotif.EndpointID != 1 {
+			t.Errorf("Expected endpoint ID 1, got %d", receivedNotif.EndpointID)
+		}
+		if receivedNotif.FeatureID != uint8(model.FeatureMeasurement) {
+			t.Errorf("Expected feature ID %d, got %d", model.FeatureMeasurement, receivedNotif.FeatureID)
+		}
+		if val, ok := receivedNotif.Changes[attrACActivePower]; !ok {
+			t.Error("Notification missing ACActivePower attribute")
+		} else {
+			t.Logf("Received notification: power = %v", val)
+		}
+		notifMu.Unlock()
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timed out waiting for notification")
+	}
+
+	t.Log("Notification delivery test passed")
 }

@@ -454,3 +454,32 @@ func (h *ProtocolHandler) SubscriptionCount() int {
 	defer h.mu.RUnlock()
 	return len(h.subscriptions)
 }
+
+// GetMatchingSubscriptions returns subscription IDs that match the given endpoint, feature, and attribute.
+// If attrID is 0, it matches subscriptions to any attribute of the feature.
+func (h *ProtocolHandler) GetMatchingSubscriptions(endpointID uint8, featureID uint8, attrID uint16) []uint32 {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	var matches []uint32
+	for id, sub := range h.subscriptions {
+		if sub.EndpointID != endpointID || sub.FeatureID != featureID {
+			continue
+		}
+
+		// Empty AttributeIDs means subscribed to all attributes
+		if len(sub.AttributeIDs) == 0 {
+			matches = append(matches, id)
+			continue
+		}
+
+		// Check if specific attribute is in the subscription
+		for _, subAttrID := range sub.AttributeIDs {
+			if subAttrID == attrID {
+				matches = append(matches, id)
+				break
+			}
+		}
+	}
+	return matches
+}

@@ -80,6 +80,15 @@ type Config struct {
 var (
 	config        Config
 	discriminator uint // Temp var for flag parsing
+
+	// Simulation control
+	simCtx       context.Context
+	simCancel    context.CancelFunc
+	simRunning   bool
+	connectedCnt int
+
+	// Device service (for simulation to update attributes)
+	deviceSvc *service.DeviceService
 )
 
 func init() {
@@ -140,6 +149,9 @@ func main() {
 		log.Fatalf("Failed to create device service: %v", err)
 	}
 
+	// Store for simulation
+	deviceSvc = svc
+
 	// Register event handler
 	svc.OnEvent(handleEvent)
 
@@ -160,9 +172,9 @@ func main() {
 		printCommissioningInfo()
 	}
 
-	// Start simulation if enabled
+	// Note: Simulation starts automatically when a zone connects (see handleEvent)
 	if config.Simulate {
-		go runSimulation(ctx, config.Type)
+		log.Println("Simulation mode enabled (will start when controller connects)")
 	}
 
 	// Wait for shutdown signal
@@ -347,19 +359,63 @@ func handleEvent(event service.Event) {
 	switch event.Type {
 	case service.EventConnected:
 		log.Printf("[EVENT] Zone connected: %s", event.ZoneID)
+		connectedCnt++
+		// Start simulation on first connection
+		if config.Simulate && !simRunning && connectedCnt == 1 {
+			startSimulation()
+		}
+
 	case service.EventDisconnected:
 		log.Printf("[EVENT] Zone disconnected: %s", event.ZoneID)
+		connectedCnt--
+		// Stop simulation when all zones disconnect
+		if connectedCnt <= 0 {
+			connectedCnt = 0
+			stopSimulation()
+		}
+
 	case service.EventCommissioningOpened:
 		log.Println("[EVENT] Commissioning window opened")
+
 	case service.EventCommissioningClosed:
 		log.Println("[EVENT] Commissioning window closed")
+
 	case service.EventFailsafeTriggered:
 		log.Printf("[EVENT] FAILSAFE triggered for zone %s!", event.ZoneID)
+		// Stop simulation on failsafe - device should go to safe state
+		stopSimulation()
+
 	case service.EventFailsafeCleared:
 		log.Printf("[EVENT] Failsafe cleared for zone %s", event.ZoneID)
+		// Resume simulation if still connected
+		if config.Simulate && !simRunning && connectedCnt > 0 {
+			startSimulation()
+		}
+
 	case service.EventValueChanged:
 		log.Printf("[EVENT] Value changed (zone: %s)", event.ZoneID)
 	}
+}
+
+func startSimulation() {
+	if simRunning {
+		return
+	}
+	simCtx, simCancel = context.WithCancel(context.Background())
+	simRunning = true
+	go runSimulation(simCtx, config.Type)
+	log.Println("[SIM] Simulation started")
+}
+
+func stopSimulation() {
+	if !simRunning {
+		return
+	}
+	if simCancel != nil {
+		simCancel()
+	}
+	simRunning = false
+	log.Println("[SIM] Simulation stopped")
 }
 
 func printCommissioningInfo() {
@@ -379,18 +435,23 @@ func printCommissioningInfo() {
 }
 
 func runSimulation(ctx context.Context, deviceType DeviceType) {
-	log.Println("Simulation mode enabled")
-
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	var power int64
+
+	// Attribute IDs from features package
+	const (
+		attrACActivePower = uint16(1)  // features.MeasurementAttrACActivePower
+		attrDCPower       = uint16(40) // features.MeasurementAttrDCPower
+	)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			var attrID uint16
 			switch deviceType {
 			case DeviceTypeEVSE:
 				// Simulate varying charging power
@@ -398,28 +459,39 @@ func runSimulation(ctx context.Context, deviceType DeviceType) {
 				if power == 0 {
 					power = 1380000
 				}
+				attrID = attrACActivePower
 				log.Printf("[SIM] EVSE charging at %.1f kW", float64(power)/1000000)
 
 			case DeviceTypeInverter:
 				// Simulate varying PV production based on time
 				hour := time.Now().Hour()
 				if hour >= 6 && hour <= 20 {
-					// Daytime - produce power
-					power = int64((10 - abs(hour-13)) * 1000000)
+					// Daytime - produce power (negative = production)
+					power = -int64((10 - abs(hour-13)) * 1000000)
 				} else {
 					power = 0
 				}
-				log.Printf("[SIM] Inverter producing %.1f kW", float64(power)/1000000)
+				attrID = attrACActivePower
+				log.Printf("[SIM] Inverter producing %.1f kW", float64(-power)/1000000)
 
 			case DeviceTypeBattery:
 				// Simulate charge/discharge cycles
 				power = (power + 500000) % 10000000 - 5000000
+				attrID = attrDCPower
 				if power > 0 {
 					log.Printf("[SIM] Battery charging at %.1f kW", float64(power)/1000000)
 				} else if power < 0 {
 					log.Printf("[SIM] Battery discharging at %.1f kW", float64(-power)/1000000)
 				} else {
 					log.Println("[SIM] Battery idle")
+				}
+			}
+
+			// Update the attribute and notify subscribed zones
+			// Endpoint 1 = functional endpoint, FeatureMeasurement = 0x0002
+			if deviceSvc != nil && attrID != 0 {
+				if err := deviceSvc.NotifyAttributeChange(1, uint8(model.FeatureMeasurement), attrID, power); err != nil {
+					log.Printf("[SIM] Failed to notify attribute change: %v", err)
 				}
 			}
 		}

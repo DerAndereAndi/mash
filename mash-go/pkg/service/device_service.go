@@ -16,6 +16,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/subscription"
 	"github.com/mash-protocol/mash-go/pkg/transport"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 	"github.com/mash-protocol/mash-go/pkg/zone"
 )
 
@@ -653,6 +654,53 @@ func (s *DeviceService) emitEvent(event Event) {
 	for _, handler := range s.eventHandlers {
 		go handler(event)
 	}
+}
+
+// NotifyAttributeChange updates an attribute and sends notifications to subscribed zones.
+// This should be called when device-side logic (e.g., simulation) changes a value.
+func (s *DeviceService) NotifyAttributeChange(endpointID uint8, featureID uint8, attrID uint16, value any) error {
+	// Update the device model
+	endpoint, err := s.device.GetEndpoint(endpointID)
+	if err != nil {
+		return err
+	}
+
+	feature, err := endpoint.GetFeatureByID(featureID)
+	if err != nil {
+		return err
+	}
+
+	if err := feature.WriteAttribute(attrID, value); err != nil {
+		return err
+	}
+
+	// Send notifications to all subscribed zones
+	s.mu.RLock()
+	sessions := make([]*ZoneSession, 0, len(s.zoneSessions))
+	for _, session := range s.zoneSessions {
+		sessions = append(sessions, session)
+	}
+	s.mu.RUnlock()
+
+	changes := map[uint16]any{attrID: value}
+
+	for _, session := range sessions {
+		// Get matching subscriptions from this session's handler
+		matchingSubIDs := session.handler.GetMatchingSubscriptions(endpointID, featureID, attrID)
+
+		for _, subID := range matchingSubIDs {
+			notif := &wire.Notification{
+				SubscriptionID: subID,
+				EndpointID:     endpointID,
+				FeatureID:      featureID,
+				Changes:        changes,
+			}
+			// Send notification (ignore errors - zone may have disconnected)
+			session.SendNotification(notif)
+		}
+	}
+
+	return nil
 }
 
 // SetAdvertiser sets the discovery advertiser (for testing/DI).
