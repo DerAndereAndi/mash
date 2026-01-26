@@ -1,6 +1,7 @@
 package service
 
 import (
+	"log/slog"
 	"sync"
 
 	"github.com/mash-protocol/mash-go/pkg/model"
@@ -17,6 +18,7 @@ type ZoneSession struct {
 	conn    Sendable
 	handler *ProtocolHandler
 	closed  bool
+	logger  *slog.Logger
 }
 
 // NewZoneSession creates a new zone session.
@@ -108,16 +110,49 @@ func (s *ZoneSession) SendNotification(notif *wire.Notification) error {
 	s.mu.RLock()
 	if s.closed {
 		s.mu.RUnlock()
+		if s.logger != nil {
+			s.logger.Debug("SendNotification: session closed",
+				"zoneID", s.zoneID,
+				"subscriptionID", notif.SubscriptionID)
+		}
 		return ErrSessionClosed
 	}
+	logger := s.logger
 	s.mu.RUnlock()
+
+	if logger != nil {
+		logger.Debug("SendNotification: encoding notification",
+			"zoneID", s.zoneID,
+			"subscriptionID", notif.SubscriptionID,
+			"endpointID", notif.EndpointID,
+			"featureID", notif.FeatureID,
+			"changesCount", len(notif.Changes))
+	}
 
 	data, err := wire.EncodeNotification(notif)
 	if err != nil {
+		if logger != nil {
+			logger.Debug("SendNotification: encode failed",
+				"zoneID", s.zoneID,
+				"error", err)
+		}
 		return err
 	}
 
+	if logger != nil {
+		logger.Debug("SendNotification: sending",
+			"zoneID", s.zoneID,
+			"dataLen", len(data))
+	}
+
 	return s.conn.Send(data)
+}
+
+// SetLogger sets the logger for this session.
+func (s *ZoneSession) SetLogger(logger *slog.Logger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.logger = logger
 }
 
 // SubscriptionCount returns the number of active subscriptions.

@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/tls"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
@@ -107,6 +108,10 @@ type DeviceConfig struct {
 
 	// EnableAutoReconnect enables automatic reconnection to zones.
 	EnableAutoReconnect bool
+
+	// Logger is the optional logger for debug output.
+	// If nil, logging is disabled.
+	Logger *slog.Logger
 }
 
 // ControllerConfig configures a ControllerService.
@@ -149,6 +154,10 @@ type ControllerConfig struct {
 
 	// EnableBounceBackSuppression enables subscription bounce-back suppression.
 	EnableBounceBackSuppression bool
+
+	// Logger is the optional logger for debug output.
+	// If nil, logging is disabled.
+	Logger *slog.Logger
 }
 
 // BackoffConfig configures exponential backoff for reconnection.

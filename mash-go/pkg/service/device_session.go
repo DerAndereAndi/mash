@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/mash-protocol/mash-go/pkg/interaction"
@@ -19,6 +20,7 @@ type DeviceSession struct {
 	client   *interaction.Client
 	sender   *TransportRequestSender
 	closed   bool
+	logger   *slog.Logger
 }
 
 // NewDeviceSession creates a new device session.
@@ -48,11 +50,17 @@ func (s *DeviceSession) OnMessage(data []byte) {
 		return
 	}
 	client := s.client
+	logger := s.logger
 	s.mu.RUnlock()
 
 	// Determine message type
 	msgType, err := wire.PeekMessageType(data)
 	if err != nil {
+		if logger != nil {
+			logger.Debug("OnMessage: failed to peek message type",
+				"deviceID", s.deviceID,
+				"error", err)
+		}
 		return
 	}
 
@@ -61,6 +69,11 @@ func (s *DeviceSession) OnMessage(data []byte) {
 		// Decode and deliver to client
 		resp, err := wire.DecodeResponse(data)
 		if err != nil {
+			if logger != nil {
+				logger.Debug("OnMessage: failed to decode response",
+					"deviceID", s.deviceID,
+					"error", err)
+			}
 			return
 		}
 		client.HandleResponse(resp)
@@ -69,10 +82,36 @@ func (s *DeviceSession) OnMessage(data []byte) {
 		// Decode and deliver to client
 		notif, err := wire.DecodeNotification(data)
 		if err != nil {
+			if logger != nil {
+				logger.Debug("OnMessage: failed to decode notification",
+					"deviceID", s.deviceID,
+					"error", err)
+			}
 			return
+		}
+		if logger != nil {
+			logger.Debug("OnMessage: received notification",
+				"deviceID", s.deviceID,
+				"subscriptionID", notif.SubscriptionID,
+				"endpointID", notif.EndpointID,
+				"featureID", notif.FeatureID,
+				"changesCount", len(notif.Changes))
+			for attrID, val := range notif.Changes {
+				logger.Debug("OnMessage: notification change",
+					"attrID", attrID,
+					"valueType", slog.AnyValue(val).Kind().String(),
+					"value", val)
+			}
 		}
 		client.HandleNotification(notif)
 	}
+}
+
+// SetLogger sets the logger for this session.
+func (s *DeviceSession) SetLogger(logger *slog.Logger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.logger = logger
 }
 
 // Read reads attributes from a feature on the device.

@@ -8,6 +8,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // DeviceClient is an interface for interacting with a remote device.
@@ -228,14 +229,20 @@ func (c *CEM) ReadEnergyControlState(ctx context.Context, deviceID string, endpo
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if v, ok := attrs[features.EnergyControlAttrDeviceType].(uint8); ok {
-		device.DeviceType = features.DeviceType(v)
+	if rawVal, exists := attrs[features.EnergyControlAttrDeviceType]; exists {
+		if v, ok := wire.ToUint8Public(rawVal); ok {
+			device.DeviceType = features.DeviceType(v)
+		}
 	}
-	if v, ok := attrs[features.EnergyControlAttrControlState].(uint8); ok {
-		device.ControlState = features.ControlState(v)
+	if rawVal, exists := attrs[features.EnergyControlAttrControlState]; exists {
+		if v, ok := wire.ToUint8Public(rawVal); ok {
+			device.ControlState = features.ControlState(v)
+		}
 	}
-	if v, ok := attrs[features.EnergyControlAttrEffectiveConsumptionLimit].(int64); ok {
-		device.EffectiveLimit = &v
+	if rawVal, exists := attrs[features.EnergyControlAttrEffectiveConsumptionLimit]; exists {
+		if v, ok := wire.ToInt64(rawVal); ok {
+			device.EffectiveLimit = &v
+		}
 	}
 
 	return nil
@@ -261,9 +268,11 @@ func (c *CEM) SubscribeToMeasurement(ctx context.Context, deviceID string, endpo
 	c.mu.Lock()
 	device.SubscriptionIDs = append(device.SubscriptionIDs, subID)
 
-	// Process priming report
-	if v, ok := values[features.MeasurementAttrACActivePower].(int64); ok {
-		device.CurrentPower = v
+	// Process priming report using type-safe coercion
+	if rawVal, exists := values[features.MeasurementAttrACActivePower]; exists {
+		if v, ok := wire.ToInt64(rawVal); ok {
+			device.CurrentPower = v
+		}
 	}
 	c.mu.Unlock()
 
@@ -294,15 +303,21 @@ func (c *CEM) SubscribeToChargingSession(ctx context.Context, deviceID string, e
 	c.mu.Lock()
 	device.SubscriptionIDs = append(device.SubscriptionIDs, subID)
 
-	// Process priming report
-	if v, ok := values[features.ChargingSessionAttrState].(uint8); ok {
-		device.ChargingState = features.ChargingState(v)
+	// Process priming report using type-safe coercion
+	if rawVal, exists := values[features.ChargingSessionAttrState]; exists {
+		if v, ok := wire.ToUint8Public(rawVal); ok {
+			device.ChargingState = features.ChargingState(v)
+		}
 	}
-	if v, ok := values[features.ChargingSessionAttrEVStateOfCharge].(uint8); ok {
-		device.EVStateOfCharge = &v
+	if rawVal, exists := values[features.ChargingSessionAttrEVStateOfCharge]; exists {
+		if v, ok := wire.ToUint8Public(rawVal); ok {
+			device.EVStateOfCharge = &v
+		}
 	}
-	if v, ok := values[features.ChargingSessionAttrEVTargetEnergyRequest].(int64); ok {
-		device.EVTargetEnergyRequest = &v
+	if rawVal, exists := values[features.ChargingSessionAttrEVTargetEnergyRequest]; exists {
+		if v, ok := wire.ToInt64(rawVal); ok {
+			device.EVTargetEnergyRequest = &v
+		}
 	}
 	c.mu.Unlock()
 
@@ -329,11 +344,13 @@ func (c *CEM) SetPowerLimit(ctx context.Context, deviceID string, endpointID uin
 		return err
 	}
 
-	// Update cached state from response
+	// Update cached state from response using type-safe coercion
 	if resultMap, ok := result.(map[string]any); ok {
 		c.mu.Lock()
-		if v, ok := resultMap["effectiveConsumptionLimit"].(int64); ok {
-			device.EffectiveLimit = &v
+		if rawVal, exists := resultMap["effectiveConsumptionLimit"]; exists {
+			if v, ok := wire.ToInt64(rawVal); ok {
+				device.EffectiveLimit = &v
+			}
 		}
 		device.ControlState = features.ControlStateLimited
 		c.mu.Unlock()
@@ -434,6 +451,7 @@ func (c *CEM) SetChargingMode(ctx context.Context, deviceID string, endpointID u
 
 // HandleNotification processes incoming notifications from subscribed devices.
 // Call this when a notification is received from a connected device.
+// Uses wire.ToInt64/ToUint8Public for type-safe CBOR value extraction.
 func (c *CEM) HandleNotification(deviceID string, endpointID uint8, featureID uint8, changes map[uint16]any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -445,27 +463,39 @@ func (c *CEM) HandleNotification(deviceID string, endpointID uint8, featureID ui
 
 	switch model.FeatureType(featureID) {
 	case model.FeatureMeasurement:
-		if v, ok := changes[features.MeasurementAttrACActivePower].(int64); ok {
-			device.CurrentPower = v
+		if rawVal, exists := changes[features.MeasurementAttrACActivePower]; exists {
+			if v, ok := wire.ToInt64(rawVal); ok {
+				device.CurrentPower = v
+			}
 		}
 
 	case model.FeatureEnergyControl:
-		if v, ok := changes[features.EnergyControlAttrControlState].(uint8); ok {
-			device.ControlState = features.ControlState(v)
+		if rawVal, exists := changes[features.EnergyControlAttrControlState]; exists {
+			if v, ok := wire.ToUint8Public(rawVal); ok {
+				device.ControlState = features.ControlState(v)
+			}
 		}
-		if v, ok := changes[features.EnergyControlAttrEffectiveConsumptionLimit].(int64); ok {
-			device.EffectiveLimit = &v
+		if rawVal, exists := changes[features.EnergyControlAttrEffectiveConsumptionLimit]; exists {
+			if v, ok := wire.ToInt64(rawVal); ok {
+				device.EffectiveLimit = &v
+			}
 		}
 
 	case model.FeatureChargingSession:
-		if v, ok := changes[features.ChargingSessionAttrState].(uint8); ok {
-			device.ChargingState = features.ChargingState(v)
+		if rawVal, exists := changes[features.ChargingSessionAttrState]; exists {
+			if v, ok := wire.ToUint8Public(rawVal); ok {
+				device.ChargingState = features.ChargingState(v)
+			}
 		}
-		if v, ok := changes[features.ChargingSessionAttrEVStateOfCharge].(uint8); ok {
-			device.EVStateOfCharge = &v
+		if rawVal, exists := changes[features.ChargingSessionAttrEVStateOfCharge]; exists {
+			if v, ok := wire.ToUint8Public(rawVal); ok {
+				device.EVStateOfCharge = &v
+			}
 		}
-		if v, ok := changes[features.ChargingSessionAttrEVTargetEnergyRequest].(int64); ok {
-			device.EVTargetEnergyRequest = &v
+		if rawVal, exists := changes[features.ChargingSessionAttrEVTargetEnergyRequest]; exists {
+			if v, ok := wire.ToInt64(rawVal); ok {
+				device.EVTargetEnergyRequest = &v
+			}
 		}
 	}
 }

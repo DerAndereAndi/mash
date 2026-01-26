@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/tls"
+	"log/slog"
 	"net"
 	"strconv"
 	"sync"
@@ -64,6 +65,9 @@ type DeviceService struct {
 	// Event handlers
 	eventHandlers []EventHandler
 
+	// Logger for debug output (optional)
+	logger *slog.Logger
+
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -84,6 +88,7 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 		zoneSessions:   make(map[string]*ZoneSession),
 		failsafeTimers: make(map[string]*failsafe.Timer),
 		zoneIndexMap:   make(map[string]uint8),
+		logger:         config.Logger,
 	}
 
 	// Initialize duration manager with expiry callback
@@ -306,6 +311,7 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 
 	// Create zone session for this connection
 	zoneSession := NewZoneSession(zoneID, framedConn, s.device)
+	zoneSession.SetLogger(s.logger)
 
 	// Store the session
 	s.mu.Lock()
@@ -656,23 +662,40 @@ func (s *DeviceService) emitEvent(event Event) {
 	}
 }
 
+// debugLog logs a debug message if logging is enabled.
+func (s *DeviceService) debugLog(msg string, args ...any) {
+	if s.logger != nil {
+		s.logger.Debug(msg, args...)
+	}
+}
+
 // NotifyAttributeChange updates an attribute and sends notifications to subscribed zones.
 // This should be called when device-side logic (e.g., simulation) changes a value.
 func (s *DeviceService) NotifyAttributeChange(endpointID uint8, featureID uint8, attrID uint16, value any) error {
+	s.debugLog("NotifyAttributeChange called",
+		"endpointID", endpointID,
+		"featureID", featureID,
+		"attrID", attrID,
+		"valueType", slog.AnyValue(value).Kind().String(),
+		"value", value)
+
 	// Update the device model
 	endpoint, err := s.device.GetEndpoint(endpointID)
 	if err != nil {
+		s.debugLog("NotifyAttributeChange: endpoint not found", "endpointID", endpointID, "error", err)
 		return err
 	}
 
 	feature, err := endpoint.GetFeatureByID(featureID)
 	if err != nil {
+		s.debugLog("NotifyAttributeChange: feature not found", "featureID", featureID, "error", err)
 		return err
 	}
 
 	// Use SetAttributeInternal to bypass access checks for device-side updates
 	// (measurement attributes are read-only for controllers but writable internally)
 	if err := feature.SetAttributeInternal(attrID, value); err != nil {
+		s.debugLog("NotifyAttributeChange: failed to set attribute", "attrID", attrID, "error", err)
 		return err
 	}
 
@@ -684,11 +707,18 @@ func (s *DeviceService) NotifyAttributeChange(endpointID uint8, featureID uint8,
 	}
 	s.mu.RUnlock()
 
+	s.debugLog("NotifyAttributeChange: checking zone sessions", "sessionCount", len(sessions))
+
 	changes := map[uint16]any{attrID: value}
+	notificationsSent := 0
 
 	for _, session := range sessions {
 		// Get matching subscriptions from this session's handler
 		matchingSubIDs := session.handler.GetMatchingSubscriptions(endpointID, featureID, attrID)
+		s.debugLog("NotifyAttributeChange: found matching subscriptions",
+			"zoneID", session.ZoneID(),
+			"matchCount", len(matchingSubIDs),
+			"subscriptionIDs", matchingSubIDs)
 
 		for _, subID := range matchingSubIDs {
 			notif := &wire.Notification{
@@ -697,11 +727,22 @@ func (s *DeviceService) NotifyAttributeChange(endpointID uint8, featureID uint8,
 				FeatureID:      featureID,
 				Changes:        changes,
 			}
-			// Send notification (ignore errors - zone may have disconnected)
-			session.SendNotification(notif)
+			// Send notification (log errors but don't fail - zone may have disconnected)
+			if err := session.SendNotification(notif); err != nil {
+				s.debugLog("NotifyAttributeChange: failed to send notification",
+					"zoneID", session.ZoneID(),
+					"subscriptionID", subID,
+					"error", err)
+			} else {
+				notificationsSent++
+				s.debugLog("NotifyAttributeChange: notification sent",
+					"zoneID", session.ZoneID(),
+					"subscriptionID", subID)
+			}
 		}
 	}
 
+	s.debugLog("NotifyAttributeChange: complete", "notificationsSent", notificationsSent)
 	return nil
 }
 

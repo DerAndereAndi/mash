@@ -430,3 +430,168 @@ func TestEqual(t *testing.T) {
 		t.Errorf("Equal(a, c) should be false")
 	}
 }
+
+// TestToInt64 tests the type coercion helper for all supported numeric types.
+func TestToInt64(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    any
+		want     int64
+		wantOK   bool
+	}{
+		{"int64", int64(12345), 12345, true},
+		{"int", int(12345), 12345, true},
+		{"int32", int32(12345), 12345, true},
+		{"int16", int16(12345), 12345, true},
+		{"int8", int8(123), 123, true},
+		{"uint64", uint64(12345), 12345, true},
+		{"uint32", uint32(12345), 12345, true},
+		{"uint16", uint16(12345), 12345, true},
+		{"uint8", uint8(123), 123, true},
+		{"float64", float64(12345.0), 12345, true},
+		{"float32", float32(12345.0), 12345, true},
+		{"negative int64", int64(-5000000), -5000000, true},
+		{"negative int", int(-5000000), -5000000, true},
+		{"large int64", int64(5000000000), 5000000000, true},
+		{"string", "12345", 0, false},
+		{"nil", nil, 0, false},
+		{"bool", true, 0, false},
+		{"slice", []int{1, 2, 3}, 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ToInt64(tt.input)
+			if ok != tt.wantOK {
+				t.Errorf("ToInt64(%v) ok = %v, want %v", tt.input, ok, tt.wantOK)
+			}
+			if got != tt.want {
+				t.Errorf("ToInt64(%v) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestToUint8Public tests the type coercion helper for uint8 conversion.
+func TestToUint8Public(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  any
+		want   uint8
+		wantOK bool
+	}{
+		{"uint8", uint8(123), 123, true},
+		{"uint64", uint64(123), 123, true},
+		{"uint32", uint32(123), 123, true},
+		{"uint16", uint16(123), 123, true},
+		{"int64", int64(123), 123, true},
+		{"int32", int32(123), 123, true},
+		{"int16", int16(123), 123, true},
+		{"int8", int8(123), 123, true},
+		{"int", int(123), 123, true},
+		{"string", "123", 0, false},
+		{"nil", nil, 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ToUint8Public(tt.input)
+			if ok != tt.wantOK {
+				t.Errorf("ToUint8Public(%v) ok = %v, want %v", tt.input, ok, tt.wantOK)
+			}
+			if got != tt.want {
+				t.Errorf("ToUint8Public(%v) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCBORIntegerTypeRoundtrip verifies that int64 values survive CBOR encode/decode
+// and can be correctly extracted using ToInt64 regardless of the decoded type.
+func TestCBORIntegerTypeRoundtrip(t *testing.T) {
+	tests := []struct {
+		name  string
+		value int64
+	}{
+		{"small positive", 5},
+		{"medium positive", 12345},
+		{"large positive", 5000000000},
+		{"small negative", -5},
+		{"medium negative", -12345},
+		{"large negative", -5000000000},
+		{"power milliwatts", 7200000}, // 7.2 kW
+		{"zero", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Encode a map with the int64 value (simulating notification changes)
+			original := map[uint16]any{
+				1: tt.value,
+			}
+
+			data, err := Marshal(original)
+			if err != nil {
+				t.Fatalf("Marshal failed: %v", err)
+			}
+
+			var decoded map[uint16]any
+			if err := Unmarshal(data, &decoded); err != nil {
+				t.Fatalf("Unmarshal failed: %v", err)
+			}
+
+			// Extract using ToInt64 - this should work regardless of decoded type
+			rawVal := decoded[1]
+			got, ok := ToInt64(rawVal)
+			if !ok {
+				t.Errorf("ToInt64 failed for decoded value %v (type %T)", rawVal, rawVal)
+			}
+			if got != tt.value {
+				t.Errorf("Value mismatch: got %d, want %d (decoded type: %T)", got, tt.value, rawVal)
+			}
+		})
+	}
+}
+
+// TestNotificationChangesTypeCoercion tests the full notification path type handling.
+func TestNotificationChangesTypeCoercion(t *testing.T) {
+	// Create a notification with int64 power value
+	notif := Notification{
+		SubscriptionID: 5001,
+		EndpointID:     1,
+		FeatureID:      2,
+		Changes: map[uint16]any{
+			1: int64(7200000), // ACActivePower: 7.2 kW in mW
+		},
+	}
+
+	// Encode and decode
+	data, err := EncodeNotification(&notif)
+	if err != nil {
+		t.Fatalf("EncodeNotification failed: %v", err)
+	}
+
+	decoded, err := DecodeNotification(data)
+	if err != nil {
+		t.Fatalf("DecodeNotification failed: %v", err)
+	}
+
+	// The raw value may be decoded as a different integer type
+	rawVal := decoded.Changes[1]
+	t.Logf("Decoded type: %T, value: %v", rawVal, rawVal)
+
+	// Using ToInt64 should always work
+	power, ok := ToInt64(rawVal)
+	if !ok {
+		t.Fatalf("ToInt64 failed for %v (type %T)", rawVal, rawVal)
+	}
+	if power != 7200000 {
+		t.Errorf("Power mismatch: got %d, want 7200000", power)
+	}
+
+	// Direct type assertion may fail depending on CBOR decoder behavior
+	// This demonstrates why ToInt64 is needed
+	if _, directOK := rawVal.(int64); !directOK {
+		t.Logf("Note: Direct int64 assertion failed (type is %T), ToInt64 correctly handles this", rawVal)
+	}
+}

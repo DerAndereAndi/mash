@@ -290,3 +290,62 @@ func Equal(a, b any) bool {
 	}
 	return bytes.Equal(dataA, dataB)
 }
+
+// ToInt64 safely converts any numeric type to int64.
+// CBOR decoding into `any` may produce different integer types depending on value size,
+// so this helper handles all cases. Returns (0, false) if v is not a numeric type.
+func ToInt64(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int64:
+		return n, true
+	case int:
+		return int64(n), true
+	case int32:
+		return int64(n), true
+	case int16:
+		return int64(n), true
+	case int8:
+		return int64(n), true
+	case uint64:
+		return int64(n), true
+	case uint32:
+		return int64(n), true
+	case uint16:
+		return int64(n), true
+	case uint8:
+		return int64(n), true
+	case float64:
+		return int64(n), true
+	case float32:
+		return int64(n), true
+	default:
+		return 0, false
+	}
+}
+
+// ToUint8Public safely converts any numeric type to uint8.
+// This is the public version of toUint8 for use by notification handlers.
+func ToUint8Public(v any) (uint8, bool) {
+	switch n := v.(type) {
+	case uint8:
+		return n, true
+	case uint64:
+		return uint8(n), true
+	case uint32:
+		return uint8(n), true
+	case uint16:
+		return uint8(n), true
+	case int64:
+		return uint8(n), true
+	case int32:
+		return uint8(n), true
+	case int16:
+		return uint8(n), true
+	case int8:
+		return uint8(n), true
+	case int:
+		return uint8(n), true
+	default:
+		return 0, false
+	}
+}
