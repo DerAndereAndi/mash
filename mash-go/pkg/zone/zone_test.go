@@ -212,33 +212,6 @@ func TestManager(t *testing.T) {
 		}
 	})
 
-	t.Run("ForceRemoveZone", func(t *testing.T) {
-		m := NewManager()
-		m.AddZone("zone-home", cert.ZoneTypeHomeManager)
-
-		// User app cannot force remove home manager
-		err := m.ForceRemoveZone("zone-home", cert.ZoneTypeUserApp)
-		if err != ErrInsufficientPriority {
-			t.Errorf("ForceRemoveZone(user→home) error = %v, want ErrInsufficientPriority", err)
-		}
-
-		// Same priority cannot force remove
-		err = m.ForceRemoveZone("zone-home", cert.ZoneTypeHomeManager)
-		if err != ErrInsufficientPriority {
-			t.Errorf("ForceRemoveZone(home→home) error = %v, want ErrInsufficientPriority", err)
-		}
-
-		// Grid operator can force remove home manager
-		err = m.ForceRemoveZone("zone-home", cert.ZoneTypeGridOperator)
-		if err != nil {
-			t.Errorf("ForceRemoveZone(grid→home) error = %v", err)
-		}
-
-		if m.HasZone("zone-home") {
-			t.Error("Zone should have been removed")
-		}
-	})
-
 	t.Run("ConnectionState", func(t *testing.T) {
 		m := NewManager()
 		m.AddZone("zone-1", cert.ZoneTypeHomeManager)

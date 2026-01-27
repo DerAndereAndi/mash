@@ -9,11 +9,10 @@ import (
 
 // Zone errors.
 var (
-	ErrZoneNotFound       = errors.New("zone not found")
-	ErrZoneExists         = errors.New("zone already exists")
-	ErrMaxZonesExceeded   = errors.New("maximum zones exceeded")
-	ErrInsufficientPriority = errors.New("insufficient priority")
-	ErrZoneNotConnected   = errors.New("zone not connected")
+	ErrZoneNotFound     = errors.New("zone not found")
+	ErrZoneExists       = errors.New("zone already exists")
+	ErrMaxZonesExceeded = errors.New("maximum zones exceeded")
+	ErrZoneNotConnected = errors.New("zone not connected")
 )
 
 // MaxZones is the maximum number of zones a device can belong to.

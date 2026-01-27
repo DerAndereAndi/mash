@@ -392,8 +392,7 @@ When device cert is 7 days from expiry, device sends:
 ### 5.2 Device Behavior on RemoveZone
 
 1. **Validate request:**
-   - Command must come from the zone being removed (self-removal)
-   - OR from a higher-priority zone (forced removal)
+   - Command must come from the zone being removed (self-removal only)
 
 2. **Clean up zone state:**
    ```
@@ -428,45 +427,6 @@ When device cert is 7 days from expiry, device sends:
    - Clear any cached data
    ```
 4. **Connection will be closed by device**
-
-### 5.4 Forced Removal (Higher Priority)
-
-A higher-priority zone can remove a device from a lower-priority zone:
-
-**Scenario:** GRID_OPERATOR (priority 1) removes device from HOME_MANAGER (priority 3)
-
-```
-SMGW                                          Device
-  │                                              │
-  │─── RemoveZone(zoneId="ems-zone-id") ────────►│
-  │                                              │
-  │    (Device verifies: priority 1 > 3)         │
-  │                                              │
-  │◄── Success ─────────────────────────────────┤
-  │                                              │
-  │    (Device closes connection to EMS zone)    │
-  │    (Device notifies EMS of removal if online)│
-```
-
-### 5.5 Removal Notification
-
-If device is connected to other zones when removed:
-
-```cbor
-// Event notification to other zones
-{
-  1: 0,
-  2: <subscriptionId>,
-  3: 0,
-  4: <DeviceInfo>,
-  5: {
-    "event": "zone_removed",
-    "removedZoneId": "ems-zone-id",
-    "removedBy": "smgw-zone-id",     // null if self-removal
-    "remainingZones": 1
-  }
-}
-```
 
 ---
 
@@ -675,7 +635,6 @@ If device private key is compromised:
 ```
 # Zone capacity
 MASH.S.ZONE.MAX_ZONES=5               # Maximum zone slots
-MASH.S.ZONE.SUPPORTS_FORCED_REMOVAL=1 # Higher priority can remove
 
 # Certificate lifecycle
 MASH.S.CERT.VALIDITY_DAYS=365         # Operational cert validity
@@ -735,10 +694,9 @@ MASH.S.D2D.PUBLISHES_ZONE_ID=0        # Zone ID in mDNS TXT
 | ID | Description | Steps | Expected |
 |----|-------------|-------|----------|
 | TC-ZONE-REMOVE-1 | Self removal | RemoveZone from zone | Device removed |
-| TC-ZONE-REMOVE-2 | Forced removal | Higher priority removes | Lower zone removed |
-| TC-ZONE-REMOVE-3 | Last zone | Remove only zone | Device uncommissioned |
-| TC-ZONE-REMOVE-4 | Partial removal | Remove one of two | Other zone unaffected |
-| TC-ZONE-REMOVE-5 | Offline removal | Device offline | Pending, expires |
+| TC-ZONE-REMOVE-2 | Last zone | Remove only zone | Device uncommissioned |
+| TC-ZONE-REMOVE-3 | Partial removal | Remove one of two | Other zone unaffected |
+| TC-ZONE-REMOVE-4 | Offline removal | Device offline | Pending, expires |
 
 ### TC-D2D-*: Device-to-Device
 

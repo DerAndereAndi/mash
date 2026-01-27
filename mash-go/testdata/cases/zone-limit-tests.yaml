@@ -471,117 +471,8 @@ tags:
   - resolution
 
 ---
-# TC-ZONE-008: Force Remove Lower Priority Zone
+# TC-ZONE-008: Per-Phase Limit Resolution
 id: TC-ZONE-008
-name: Force Remove Lower Priority Zone
-description: |
-  Verifies that a higher priority zone can force remove a lower
-  priority zone from the device.
-
-pics_requirements:
-  - MASH.S.ZONE
-  - MASH.S.ZONE.B_FORCE_REMOVE
-  - MASH.S.ZONE.FORCE_REMOVE
-
-preconditions:
-  - session_established: true
-  - zone_type: GRID_OPERATOR   # High priority
-  - other_zone_connected: USER_APP  # Low priority
-
-steps:
-  - name: Verify USER_APP zone is connected
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: connectedZones
-    expect:
-      read_success: true
-      contains_zone: USER_APP
-
-  - name: Force remove USER_APP zone
-    action: invoke
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      command: ForceRemoveZone
-      args:
-        zoneId: "user-app-zone-id"
-    expect:
-      invoke_success: true
-
-  - name: Verify USER_APP zone is no longer connected
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: connectedZones
-    expect:
-      read_success: true
-      not_contains_zone: USER_APP
-
-postconditions:
-  - zone_force_removed: true
-
-timeout: "10s"
-tags:
-  - zone
-  - force-remove
-  - priority
-
----
-# TC-ZONE-009: Cannot Force Remove Higher Priority Zone
-id: TC-ZONE-009
-name: Cannot Force Remove Higher Priority Zone
-description: |
-  Verifies that a lower priority zone cannot force remove a
-  higher priority zone from the device.
-
-pics_requirements:
-  - MASH.S.ZONE
-  - MASH.S.ZONE.B_FORCE_REMOVE
-
-preconditions:
-  - session_established: true
-  - zone_type: USER_APP        # Low priority
-  - other_zone_connected: GRID_OPERATOR  # High priority
-
-steps:
-  - name: Attempt to force remove GRID_OPERATOR zone
-    action: invoke
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      command: ForceRemoveZone
-      args:
-        zoneId: "grid-operator-zone-id"
-    expect:
-      invoke_success: false
-      error_code: PERMISSION_DENIED
-
-  - name: Verify GRID_OPERATOR zone is still connected
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: connectedZones
-    expect:
-      read_success: true
-      contains_zone: GRID_OPERATOR
-
-postconditions:
-  - higher_priority_protected: true
-
-timeout: "10s"
-tags:
-  - zone
-  - force-remove
-  - priority
-  - negative
-
----
-# TC-ZONE-010: Per-Phase Limit Resolution
-id: TC-ZONE-010
 name: Per-Phase Current Limit Resolution
 description: |
   Verifies that per-phase current limits from multiple zones are
@@ -655,8 +546,8 @@ tags:
   - per-phase
 
 ---
-# TC-ZONE-011: Zone Reconnect Restores Values
-id: TC-ZONE-011
+# TC-ZONE-009: Zone Reconnect Restores Values
+id: TC-ZONE-009
 name: Zone Reconnect Restores Previous Values
 description: |
   Verifies that when a zone reconnects, its previously set values
@@ -729,8 +620,8 @@ tags:
   - persistence
 
 ---
-# TC-ZONE-012: Maximum 5 Zones Enforcement
-id: TC-ZONE-012
+# TC-ZONE-010: Maximum 5 Zones Enforcement
+id: TC-ZONE-010
 name: Maximum 5 Zones Enforcement
 description: |
   Verifies that a device enforces the maximum of 5 zones and
@@ -781,8 +672,8 @@ tags:
   - limit
 
 ---
-# TC-ZONE-013: All Zones Clear Limit Returns to Unlimited
-id: TC-ZONE-013
+# TC-ZONE-011: All Zones Clear Limit Returns to Unlimited
+id: TC-ZONE-011
 name: All Zones Clear Limit Returns to Unlimited
 description: |
   Verifies that when all zones clear their limits, the effective

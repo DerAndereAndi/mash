@@ -22,7 +22,7 @@
 // # Zone Lifecycle
 //
 //   - Addition: Via commissioning (SPAKE2+ + certificate issuance)
-//   - Removal: Via RemoveZone command or higher-priority forced removal
+//   - Removal: Via RemoveZone command (self-removal only)
 //   - Maximum: 5 zones per device
 //
 // The [Manager] coordinates zone membership, value resolution, and lifecycle.

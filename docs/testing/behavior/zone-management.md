@@ -133,44 +133,7 @@ if len(m.zones) >= MaxZones {
 |-------|-----------|
 | `ErrZoneNotFound` | Zone does not exist |
 
-**Note:** `RemoveZone` does NOT check priority - it assumes the request is authorized (self-removal or already verified by caller).
-
-### 4.3 ForceRemoveZone
-
-**Signature:** `ForceRemoveZone(zoneID string, requesterType ZoneType) error`
-
-**Preconditions:**
-- Zone with `zoneID` exists
-- Requester has strictly higher priority than target zone
-
-**Behavior:**
-1. Verify zone exists
-2. Check priority: `requesterType.Priority() < targetZone.Priority()`
-3. If priority insufficient, return error
-4. Delete zone from internal map
-5. Invoke `onZoneRemoved` callback if registered
-
-**Errors:**
-| Error | Condition |
-|-------|-----------|
-| `ErrZoneNotFound` | Zone does not exist |
-| `ErrInsufficientPriority` | Requester priority >= target priority |
-
-**Priority enforcement:**
-```go
-// Requester must have strictly higher priority (lower number)
-if requesterType.Priority() >= zone.Type.Priority() {
-    return ErrInsufficientPriority
-}
-```
-
-**Examples:**
-| Requester | Target | Result |
-|-----------|--------|--------|
-| GRID_OPERATOR (1) | HOME_MANAGER (3) | Success (1 < 3) |
-| HOME_MANAGER (3) | USER_APP (4) | Success (3 < 4) |
-| HOME_MANAGER (3) | HOME_MANAGER (3) | Fail (3 >= 3) |
-| USER_APP (4) | HOME_MANAGER (3) | Fail (4 >= 3) |
+**Note:** `RemoveZone` is for self-removal only - a zone removing itself from a device.
 
 ---
 
@@ -358,8 +321,7 @@ MASH.S.ZONE.USER_APP             # USER_APP zone (priority 4)
 
 # Zone operations
 MASH.S.ZONE.ADD                  # AddZone operation
-MASH.S.ZONE.REMOVE               # RemoveZone operation
-MASH.S.ZONE.FORCE_REMOVE         # ForceRemoveZone operation
+MASH.S.ZONE.REMOVE               # RemoveZone operation (self-removal)
 
 # Connection tracking
 MASH.S.ZONE.CONNECT              # Connection state tracking
@@ -368,7 +330,6 @@ MASH.S.ZONE.LAST_SEEN            # LastSeen timestamp tracking
 # Priority behaviors
 MASH.S.ZONE.B_PRIORITY           # Highest priority zone wins (setpoints)
 MASH.S.ZONE.B_RESTRICT           # Most restrictive wins (limits)
-MASH.S.ZONE.B_FORCE_REMOVE       # Force removal requires higher priority
 ```
 
 ---
@@ -382,13 +343,10 @@ MASH.S.ZONE.B_FORCE_REMOVE       # Force removal requires higher priority
 | TC-ZONE-MGT-003 | AddZone at capacity | Add 6th zone | ErrMaxZonesExceeded |
 | TC-ZONE-MGT-004 | RemoveZone success | Remove existing zone | Zone removed |
 | TC-ZONE-MGT-005 | RemoveZone not found | Remove non-existent | ErrZoneNotFound |
-| TC-ZONE-MGT-006 | ForceRemove lower priority | GRID_OP removes HOME_MGR | Success |
-| TC-ZONE-MGT-007 | ForceRemove same priority | HOME_MGR removes HOME_MGR | ErrInsufficientPriority |
-| TC-ZONE-MGT-008 | ForceRemove higher priority | USER_APP removes HOME_MGR | ErrInsufficientPriority |
-| TC-ZONE-MGT-009 | SetConnected | Mark zone connected | Connected=true, LastSeen updated |
-| TC-ZONE-MGT-010 | SetDisconnected | Mark zone disconnected | Connected=false, LastSeen preserved |
-| TC-ZONE-MGT-011 | HighestPriorityZone | Query with multiple zones | Returns lowest priority number |
-| TC-ZONE-MGT-012 | HighestPriorityConnectedZone | Query with mixed connection | Returns connected zone with lowest priority |
+| TC-ZONE-MGT-006 | SetConnected | Mark zone connected | Connected=true, LastSeen updated |
+| TC-ZONE-MGT-007 | SetDisconnected | Mark zone disconnected | Connected=false, LastSeen preserved |
+| TC-ZONE-MGT-008 | HighestPriorityZone | Query with multiple zones | Returns lowest priority number |
+| TC-ZONE-MGT-009 | HighestPriorityConnectedZone | Query with mixed connection | Returns connected zone with lowest priority |
 
 ---
 

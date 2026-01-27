@@ -153,9 +153,8 @@ This registry defines PICS codes for the pairing and connection layer of MASH. T
 | PICS Code | Description | Values | Conformance |
 |-----------|-------------|--------|-------------|
 | MASH.S.ZONE.ADD | AddZone command support | 1 | M |
-| MASH.S.ZONE.REMOVE | RemoveZone command support | 1 | M |
+| MASH.S.ZONE.REMOVE | RemoveZone command support (self-removal) | 1 | M |
 | MASH.S.ZONE.LIST | ListZones command support | 1 | M |
-| MASH.S.ZONE.FORCED_REMOVAL | Higher priority can remove lower | 0, 1 | M |
 
 ### 5.4 Admin Delegation
 

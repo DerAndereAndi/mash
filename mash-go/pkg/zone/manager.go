@@ -79,31 +79,6 @@ func (m *Manager) RemoveZone(zoneID string) error {
 	return nil
 }
 
-// ForceRemoveZone removes a zone by a higher priority zone.
-// Returns ErrInsufficientPriority if the requester doesn't have sufficient priority.
-func (m *Manager) ForceRemoveZone(zoneID string, requesterType cert.ZoneType) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	zone, exists := m.zones[zoneID]
-	if !exists {
-		return ErrZoneNotFound
-	}
-
-	// Requester must have strictly higher priority (lower number)
-	if requesterType.Priority() >= zone.Type.Priority() {
-		return ErrInsufficientPriority
-	}
-
-	delete(m.zones, zoneID)
-
-	if m.onZoneRemoved != nil {
-		m.onZoneRemoved(zoneID)
-	}
-
-	return nil
-}
-
 // GetZone returns a zone by ID.
 func (m *Manager) GetZone(zoneID string) (*Zone, error) {
 	m.mu.RLock()

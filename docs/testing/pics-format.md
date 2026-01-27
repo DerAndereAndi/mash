@@ -375,13 +375,11 @@ MASH.S.CTRL.C09.Rsp=1   # Pause
 | MASH.S.ZONE.HOME_MGR | HOME_MANAGER zone (priority 3) | O |
 | MASH.S.ZONE.USER_APP | USER_APP zone (priority 4) | O |
 | MASH.S.ZONE.ADD | AddZone operation | M |
-| MASH.S.ZONE.REMOVE | RemoveZone operation | M |
-| MASH.S.ZONE.FORCE_REMOVE | ForceRemoveZone operation | M |
+| MASH.S.ZONE.REMOVE | RemoveZone operation (self-removal) | M |
 | MASH.S.ZONE.CONNECT | Connection state tracking | M |
 | MASH.S.ZONE.LAST_SEEN | LastSeen timestamp | M |
 | MASH.S.ZONE.B_PRIORITY | Highest priority zone wins (setpoints) | M |
 | MASH.S.ZONE.B_RESTRICT | Most restrictive wins (limits) | M |
-| MASH.S.ZONE.B_FORCE_REMOVE | Priority enforcement on force remove | M |
 | MASH.S.ZONE.B_SESSION | Per-zone session management | M |
 | MASH.S.ZONE.FAILSAFE | Per-zone failsafe tracking | M |
 | MASH.S.ZONE.FAILSAFE_DUR | Configurable failsafe duration | M |
