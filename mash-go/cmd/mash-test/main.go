@@ -9,20 +9,26 @@
 //
 // Flags:
 //
-//	-target string      Target address (host:port) of device/controller under test
-//	-mode string        Test mode: device, controller (default "device")
-//	-pics string        Path to PICS file for the target
-//	-tests string       Path to test cases directory
-//	-timeout duration   Test timeout (default 30s)
-//	-verbose            Enable verbose output
-//	-json               Output results as JSON
-//	-junit              Output results as JUnit XML
-//	-insecure           Skip TLS certificate verification
+//	-target string          Target address (host:port) of device/controller under test
+//	-mode string            Test mode: device, controller (default "device")
+//	-pics string            Path to PICS file for the target
+//	-tests string           Path to test cases directory
+//	-timeout duration       Test timeout (default 30s)
+//	-verbose                Enable verbose output
+//	-json                   Output results as JSON
+//	-junit                  Output results as JUnit XML
+//	-insecure               Skip TLS certificate verification
+//	-setup-code string      PASE setup code (8-digit numeric string)
+//	-client-identity string Client identity for PASE (default: test-client)
+//	-server-identity string Server identity for PASE (default: test-device)
 //
 // Examples:
 //
 //	# Test a device at localhost:8443
 //	mash-test -target localhost:8443 -mode device
+//
+//	# Test with PASE commissioning
+//	mash-test -target localhost:8443 -setup-code 12345678
 //
 //	# Test specific patterns with PICS file
 //	mash-test -target 192.168.1.100:8443 -pics device.pics -tests ./testdata/cases
@@ -43,15 +49,18 @@ import (
 )
 
 var (
-	target   = flag.String("target", "", "Target address (host:port) of device/controller under test")
-	mode     = flag.String("mode", "device", "Test mode: device, controller")
-	pics     = flag.String("pics", "", "Path to PICS file for the target")
-	tests    = flag.String("tests", "./testdata/cases", "Path to test cases directory")
-	timeout  = flag.Duration("timeout", 30*time.Second, "Test timeout")
-	verbose  = flag.Bool("verbose", false, "Enable verbose output")
-	jsonOut  = flag.Bool("json", false, "Output results as JSON")
-	junitOut = flag.Bool("junit", false, "Output results as JUnit XML")
-	insecure = flag.Bool("insecure", false, "Skip TLS certificate verification")
+	target         = flag.String("target", "", "Target address (host:port) of device/controller under test")
+	mode           = flag.String("mode", "device", "Test mode: device, controller")
+	pics           = flag.String("pics", "", "Path to PICS file for the target")
+	tests          = flag.String("tests", "./testdata/cases", "Path to test cases directory")
+	timeout        = flag.Duration("timeout", 30*time.Second, "Test timeout")
+	verbose        = flag.Bool("verbose", false, "Enable verbose output")
+	jsonOut        = flag.Bool("json", false, "Output results as JSON")
+	junitOut       = flag.Bool("junit", false, "Output results as JUnit XML")
+	insecure       = flag.Bool("insecure", false, "Skip TLS certificate verification")
+	setupCode      = flag.String("setup-code", "", "PASE setup code (8-digit numeric string)")
+	clientIdentity = flag.String("client-identity", "", "Client identity for PASE (default: test-client)")
+	serverIdentity = flag.String("server-identity", "", "Server identity for PASE (default: test-device)")
 )
 
 func main() {
@@ -114,6 +123,9 @@ func main() {
 		Output:             os.Stdout,
 		OutputFormat:       outputFormat,
 		InsecureSkipVerify: *insecure,
+		SetupCode:          *setupCode,
+		ClientIdentity:     *clientIdentity,
+		ServerIdentity:     *serverIdentity,
 	}
 
 	// Create and run test runner

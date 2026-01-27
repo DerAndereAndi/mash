@@ -25,6 +25,7 @@ type Runner struct {
 	conn      *Connection
 	resolver  *Resolver
 	messageID uint32 // Atomic counter for message IDs
+	paseState *PASEState
 }
 
 // Config configures the test runner.
@@ -58,6 +59,15 @@ type Config struct {
 
 	// InsecureSkipVerify skips TLS certificate verification.
 	InsecureSkipVerify bool
+
+	// SetupCode is the PASE password/setup code (8-digit numeric string).
+	SetupCode string
+
+	// ClientIdentity for PASE (defaults to "test-client").
+	ClientIdentity string
+
+	// ServerIdentity for PASE (defaults to "test-device").
+	ServerIdentity string
 }
 
 // Connection represents a connection to the target.
@@ -178,12 +188,8 @@ func (r *Runner) registerHandlers() {
 	r.engine.RegisterHandler("stop_discovery", r.handleStopDiscovery)
 	r.engine.RegisterHandler("verify_txt_records", r.handleVerifyTXTRecords)
 
-	// PASE handlers
-	r.engine.RegisterHandler("pase_request", r.handlePASERequest)
-	r.engine.RegisterHandler("pase_receive_response", r.handlePASEReceiveResponse)
-	r.engine.RegisterHandler("pase_confirm", r.handlePASEConfirm)
-	r.engine.RegisterHandler("pase_receive_verify", r.handlePASEReceiveVerify)
-	r.engine.RegisterHandler("verify_session_key", r.handleVerifySessionKey)
+	// PASE commissioning handlers
+	r.registerPASEHandlers()
 
 	// Utility handlers
 	r.engine.RegisterHandler("wait", r.handleWait)
@@ -209,11 +215,23 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		insecure = i
 	}
 
+	// Check if this is a commissioning connection
+	commissioning := false
+	if c, ok := step.Params["commissioning"].(bool); ok {
+		commissioning = c
+	}
+
 	// Create TLS config
-	tlsConfig := &tls.Config{
-		MinVersion:         tls.VersionTLS13,
-		InsecureSkipVerify: insecure,
-		NextProtos:         []string{"mash/1"},
+	var tlsConfig *tls.Config
+	if commissioning {
+		// Use proper commissioning TLS config for PASE
+		tlsConfig = transport.NewCommissioningTLSConfig()
+	} else {
+		tlsConfig = &tls.Config{
+			MinVersion:         tls.VersionTLS13,
+			InsecureSkipVerify: insecure,
+			NextProtos:         []string{transport.ALPNProtocol},
+		}
 	}
 
 	// Connect with timeout
@@ -504,39 +522,6 @@ func (r *Runner) handleStopDiscovery(ctx context.Context, step *loader.Step, sta
 
 func (r *Runner) handleVerifyTXTRecords(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	return map[string]any{"txt_valid": true}, nil
-}
-
-// PASE handlers (stubs - would integrate with commissioning package)
-func (r *Runner) handlePASERequest(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	return map[string]any{
-		"request_sent": true,
-		"pA_generated": true,
-	}, nil
-}
-
-func (r *Runner) handlePASEReceiveResponse(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	return map[string]any{
-		"response_received": true,
-		"pB_received":       true,
-	}, nil
-}
-
-func (r *Runner) handlePASEConfirm(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	return map[string]any{"confirm_sent": true}, nil
-}
-
-func (r *Runner) handlePASEReceiveVerify(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	return map[string]any{
-		"verify_received":     true,
-		"session_established": true,
-	}, nil
-}
-
-func (r *Runner) handleVerifySessionKey(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	return map[string]any{
-		"key_length":   32,
-		"key_not_zero": true,
-	}, nil
 }
 
 // Utility handlers

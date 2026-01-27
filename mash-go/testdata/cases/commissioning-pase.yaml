@@ -1,11 +1,19 @@
 # Test Case: PASE Commissioning
-# Verifies password-authenticated session establishment
+# Verifies password-authenticated session establishment using SPAKE2+
 
 id: TC-COMM-001
 name: PASE Commissioning Handshake
 description: |
   Verifies that a controller can establish a secure session
   with a device using PASE (Password-Authenticated Session Establishment).
+
+  This test performs the full SPAKE2+ handshake:
+  1. Client sends PASERequest with public value (pA)
+  2. Server responds with PASEResponse containing its public value (pB)
+  3. Client sends PASEConfirm with its confirmation MAC
+  4. Server sends PASEComplete with its confirmation MAC
+
+  Upon success, both parties derive a shared 32-byte session key.
 
 pics_requirements:
   - D.COMM.SC     # Device supports secure connection
@@ -16,34 +24,12 @@ preconditions:
   - tls_connection_established: true
 
 steps:
-  - name: Send PASE request with public value
-    action: pase_request
+  - name: Perform PASE commissioning
+    action: commission
     params:
-      password: "test-password"
+      setup_code: "12345678"
     expect:
-      request_sent: true
-      pA_generated: true
-
-  - name: Receive PASE response with server public value
-    action: pase_receive_response
-    expect:
-      response_received: true
-      pB_received: true
-
-  - name: Send PASE confirm
-    action: pase_confirm
-    expect:
-      confirm_sent: true
-
-  - name: Receive PASE verify
-    action: pase_receive_verify
-    expect:
-      verify_received: true
       session_established: true
-
-  - name: Verify session key derived
-    action: verify_session_key
-    expect:
       key_length: 32
       key_not_zero: true
 
@@ -51,8 +37,9 @@ postconditions:
   - session_active: true
   - commissioning_complete: true
 
-timeout: "5s"
+timeout: "10s"
 tags:
   - commissioning
   - PASE
   - security
+  - SPAKE2+
