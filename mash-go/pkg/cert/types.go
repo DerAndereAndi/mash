@@ -10,7 +10,8 @@ import (
 // Certificate validity periods as defined in security.md.
 const (
 	// ZoneCAValidity is the validity period for Zone CA certificates.
-	ZoneCAValidity = 10 * 365 * 24 * time.Hour // 10 years
+	// 20 years to match expected device lifetime and avoid mass re-commissioning.
+	ZoneCAValidity = 20 * 365 * 24 * time.Hour // 20 years
 
 	// OperationalCertValidity is the validity period for operational certificates.
 	OperationalCertValidity = 365 * 24 * time.Hour // 1 year
