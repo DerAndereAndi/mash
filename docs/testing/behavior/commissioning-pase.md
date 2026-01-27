@@ -544,13 +544,14 @@ def create_operational_cert(
 | 0 | SUCCESS | Operation successful |
 | 1 | VERIFICATION_FAILED | SPAKE2+ verification failed |
 | 2 | TIMEOUT | Operation timed out |
-| 3 | ZONE_FULL | Device has 5 zones, cannot add more |
+| 3 | ZONE_FULL | Device has 2 zones, cannot add more |
 | 4 | ALREADY_COMMISSIONED | Device already commissioned to this zone |
 | 5 | INVALID_CERT | Certificate validation failed |
 | 6 | STORAGE_ERROR | Cannot store certificate |
 | 7 | KEY_GENERATION_ERROR | Cannot generate key pair |
 | 8 | INVALID_FORMAT | Message format error |
 | 9 | INTERNAL_ERROR | Device internal error |
+| 10 | ZONE_TYPE_EXISTS | Device already has a zone of this type |
 
 ### 6.3 Connection Loss During Commissioning
 
@@ -567,13 +568,23 @@ def create_operational_cert(
 
 ### 6.4 Zone Capacity
 
-When device already has 5 zones:
+A device can have at most one zone per zone type (see DEC-043):
+- Max 1 GRID zone
+- Max 1 LOCAL zone
+
+**When device already has a zone of the same type:**
+1. Device accepts TLS connection
+2. Device sends PASE_CONFIRM with status = 10 (ZONE_TYPE_EXISTS)
+3. Connection closed
+4. Controller reports: "Device already has a zone of this type"
+
+**When device already has both zone types (2 zones):**
 1. Device accepts TLS connection
 2. Device sends PASE_CONFIRM with status = 3 (ZONE_FULL)
 3. Connection closed
 4. Controller reports: "Device has maximum zones"
 
-**To add a 6th zone:**
+**To add another zone of the same type:**
 1. Controller must remove existing zone first (RemoveZone command)
 2. Then retry commissioning
 
@@ -583,17 +594,16 @@ When device already has 5 zones:
 
 ### 7.1 Zone Slots
 
-Device maintains up to 5 zone slots:
+Device maintains up to 2 zone slots (one per zone type):
 
 ```
-zoneSlots[5] = {
-  [0]: { zoneCA: <cert>, opCert: <cert>, zoneType: GRID, priority: 1 },
-  [1]: { zoneCA: <cert>, opCert: <cert>, zoneType: LOCAL, priority: 2 },
-  [2]: null,  // empty slot
-  [3]: null,  // empty slot
-  [4]: null   // empty slot
+zoneSlots[2] = {
+  [GRID]:  { zoneCA: <cert>, opCert: <cert>, priority: 1 } or null,
+  [LOCAL]: { zoneCA: <cert>, opCert: <cert>, priority: 2 } or null
 }
 ```
+
+Only one zone per type is allowed. See DEC-043.
 
 ### 7.2 Concurrent Commissioning
 
@@ -798,9 +808,9 @@ MASH.S.PASE.RETRY_BACKOFF=0          # No backoff between retries
 
 | ID | Description | Steps | Expected |
 |----|-------------|-------|----------|
-| TC-ZONE-1 | Second zone | Commission after first | Both zones active |
-| TC-ZONE-2 | Fifth zone | Commission 5th | Success |
-| TC-ZONE-3 | Sixth zone | Commission 6th | ZONE_FULL error |
+| TC-ZONE-1 | Second zone | Commission LOCAL after GRID | Both zones active |
+| TC-ZONE-2 | Same type | Commission second GRID | ZONE_TYPE_EXISTS error |
+| TC-ZONE-3 | Third zone | Commission when both slots full | ZONE_FULL error |
 | TC-ZONE-4 | Same zone | Re-commission | ALREADY_COMMISSIONED |
 | TC-ZONE-5 | Concurrent | Two controllers | Second rejected |
 

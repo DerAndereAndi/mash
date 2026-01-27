@@ -16,6 +16,10 @@ const (
 	// ServiceTypeCommissioner is the service type for zone controllers.
 	ServiceTypeCommissioner = "_mashd._udp"
 
+	// ServiceTypePairingRequest is the service type for pairing requests.
+	// Controllers announce this to signal a specific device to open its commissioning window.
+	ServiceTypePairingRequest = "_mashp._udp"
+
 	// Domain is the mDNS domain.
 	Domain = "local"
 
@@ -50,13 +54,24 @@ const (
 // Timing constants.
 const (
 	// CommissioningWindowDuration is how long commissioning mode stays open.
-	CommissioningWindowDuration = 120 * time.Second
+	// Default is 3 hours to accommodate installation scenarios (EVSE, heat pumps, etc.)
+	// where pairing may not happen immediately after power-on.
+	CommissioningWindowDuration = 3 * time.Hour
+
+	// MinCommissioningWindowDuration is the minimum configurable window duration.
+	MinCommissioningWindowDuration = 1 * time.Hour
+
+	// MaxCommissioningWindowDuration is the maximum configurable window duration.
+	MaxCommissioningWindowDuration = 24 * time.Hour
 
 	// BrowseTimeout is the default timeout for mDNS browsing.
 	BrowseTimeout = 10 * time.Second
 
 	// MDNSUpdateDelay is the maximum delay for mDNS updates.
 	MDNSUpdateDelay = 1 * time.Second
+
+	// PairingRequestTTL is how often controllers should re-announce pairing requests.
+	PairingRequestTTL = 2 * time.Minute
 )
 
 // Limits.

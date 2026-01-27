@@ -819,7 +819,7 @@ MASH.S.TRANS.B_MULTI_ZONE_CONN=1          # Supports multiple zone connections
 | ID | Description | Precondition | Steps | Expected |
 |----|-------------|--------------|-------|----------|
 | TC-MULTI-1 | Two zones | Device listening | Two controllers connect | Both OPERATIONAL |
-| TC-MULTI-2 | Zone limit | 5 zones connected | 6th connects | Rejected |
+| TC-MULTI-2 | Zone limit | 2 zones connected | 6th connects | Rejected |
 | TC-MULTI-3 | Zone isolation | Two zones connected | Zone A subscribes | Zone B sees nothing |
 | TC-MULTI-4 | Partial loss | Two zones connected | Zone A disconnects | Zone B unaffected |
 

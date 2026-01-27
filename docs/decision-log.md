@@ -2346,6 +2346,161 @@ Service layer changes needed:
 
 ---
 
+### DEC-042: Pairing Request Mechanism for Deferred Commissioning
+
+**Date:** 2026-01-27
+**Status:** Accepted
+
+**Context:** The original commissioning window duration (120 seconds) is too short for real-world installation scenarios:
+
+1. **Energy devices take time to install** - EVSE, heat pumps, inverters require significant setup before pairing
+2. **SMGW commissioning is deferred** - QR code is scanned at installation, but SMGW may not receive credentials for days or weeks
+3. **Matter's approach insufficient** - Even Matter's 48-hour extended window doesn't solve the SMGW scenario
+
+The EEBUS SHIP Pairing Service was analyzed as a reference. It uses a separate `_shippairing` mDNS service where the controller (devZ) announces a pairing request, and the device (devA) listens and responds. This inverts the traditional "device opens window, controller connects" model.
+
+**Options Evaluated:**
+
+1. **Longer commissioning window (Matter-style)**
+   - Extend window to 48 hours for uncommissioned devices
+   - Problem: Still doesn't solve weeks-long SMGW delays
+   - Problem: Continuous advertising wastes resources
+
+2. **Always-open window until first commissioning**
+   - Device stays in commissioning mode indefinitely
+   - Problem: No way to re-commission for additional zones
+   - Problem: Security concerns (window never closes)
+
+3. **Pairing request mechanism (EEBUS-inspired)**
+   - Controller announces "I want to pair with device X"
+   - Device listens, opens window when it sees matching request
+   - Solves arbitrary delay scenarios
+   - Unified mechanism for all commissioning scenarios
+
+4. **Authenticated pairing request (HMAC)**
+   - Add HMAC to pairing request using a separate secret
+   - Problem: Low-entropy passcode enables offline brute-force if used for HMAC
+   - Problem: Separate secret adds QR code complexity
+
+**Decision:** Pairing Request Mechanism (Option 3) without authentication (Option 4 rejected)
+
+**Rationale:**
+
+The pairing request is a "wake up" signal, not an authentication mechanism. Security is provided by PASE:
+
+1. **PASE authenticates commissioning** - Only controllers with the correct passcode can complete PASE
+2. **Physical access required** - Passcode comes from QR code on device
+3. **Opening window is not a breach** - Attacker without passcode cannot complete commissioning
+4. **Equivalent to Matter security** - Matter opens windows without HMAC; PASE is the gatekeeper
+
+**Design:**
+
+New service type: `_mashp._udp` (pairing request)
+
+| TXT Key | Description |
+|---------|-------------|
+| `D` | Target discriminator (which device should respond) |
+| `ZI` | Zone ID (who is requesting) |
+| `ZN` | Zone name (optional, for display) |
+
+**Device behavior:**
+- Listen for `_mashp._udp` when uncommissioned or accepting additional zones
+- When matching discriminator seen: open commissioning window, start advertising `_mashc._udp`
+- Default window duration: 3 hours (configurable 1-24 hours)
+
+**Controller behavior:**
+- Browse `_mashc._udp` first
+- If device not found: announce `_mashp._udp` with target discriminator
+- Continue until device appears or timeout
+
+**Commissioning Flow:**
+
+```
+Standard:
+1. Scan QR → discriminator + passcode
+2. Browse _mashc._udp → find device
+3. Connect, PASE with passcode
+
+Deferred (SMGW scenario):
+1. QR scan → data to backend → [days/weeks] → SMGW provisioned
+2. SMGW browses _mashc._udp → NOT found
+3. SMGW announces _mashp._udp with D=<discriminator>
+4. Device sees request → opens window → advertises _mashc._udp
+5. SMGW discovers device → connect, PASE with passcode
+```
+
+**Commissioning Window Duration:**
+
+Changed default from 120 seconds to 3 hours because:
+- Energy devices (EVSE, heat pumps) require significant installation time
+- Pairing rarely happens immediately after power-on
+- 3 hours accommodates realistic installer workflows
+- Configurable range: 1-24 hours
+
+**What We Avoided:**
+
+| Rejected Complexity | Reason |
+|--------------------|--------|
+| Separate pairing secret | PASE already authenticates; adds QR complexity |
+| HMAC on pairing request | Low-entropy passcode enables offline brute-force |
+| Complex state machine | Simple "listen and respond" model sufficient |
+| Window expiration events | Device just stops advertising when window closes |
+
+**Related:** DEC-040 (Device Identity), [EEBUS SHIP Pairing Service Spec]
+
+---
+
+### DEC-043: One Zone Per Zone Type Constraint
+
+**Date:** 2026-01-27
+**Status:** Accepted
+
+**Context:** With the simplified zone type model (GRID, LOCAL), we need to define how many zones a device can belong to.
+
+The original design allowed up to 5 zones per device. However, this creates complexity:
+- Multiple SMGWs controlling the same device (whose limits apply?)
+- Multiple EMSs controlling the same device (conflicting optimization strategies)
+- Complex multi-zone conflict resolution logic
+
+**Decision:** A device can belong to at most **one zone per zone type**:
+- Max 1 GRID zone (typically SMGW/grid operator)
+- Max 1 LOCAL zone (typically EMS/home app)
+- **Total: 2 zones maximum per device**
+
+**Rationale:**
+
+1. **GRID zones are regulatory** - A device should only be subject to one grid operator's control. Multiple grid authorities would create conflicting requirements.
+
+2. **LOCAL zones optimize** - One EMS should manage local energy optimization. Multiple EMSs would have competing strategies.
+
+3. **Simplifies conflict resolution** - With only 2 zones (one per type), the rules are clear:
+   - GRID limits always apply (safety/regulatory)
+   - LOCAL optimizes within GRID constraints
+   - No need for complex N-way conflict resolution
+
+4. **Matches real-world topology** - A device is typically at one grid connection point (one SMGW) and managed by one local system (one EMS).
+
+**Enforcement:**
+
+When a device receives a commissioning request:
+1. Check if a zone of the same type already exists
+2. If yes: reject commissioning (device already has a zone of this type)
+3. If no: proceed with commissioning
+
+**What This Replaces:**
+
+| Old | New |
+|-----|-----|
+| MaxZones = 5 | MaxZones = 2 |
+| Any combination of zones | One GRID + one LOCAL |
+| Complex N-way conflict resolution | Simple two-zone priority |
+
+**Migration:** Devices with >2 zones would need to decommission excess zones. This is unlikely in practice since the old limit was rarely used.
+
+**Related:** DEC-024 (Limit Resolution), DEC-023 (Zone Terminology)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)

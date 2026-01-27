@@ -9,13 +9,15 @@
 
 ## 1. Overview
 
-A MASH device can belong to **up to 5 zones** simultaneously. Each zone represents a controller relationship with its own trust domain and priority level. This document specifies the operational behaviors of zone management.
+A MASH device can belong to **up to 2 zones**: one GRID zone (SMGW/utility) and one LOCAL zone (EMS/home app). Each zone represents a controller relationship with its own trust domain and priority level. This document specifies the operational behaviors of zone management.
 
 **Related documents:**
 - `zone-lifecycle.md` - Certificate and commissioning lifecycle
 - `multi-zone-resolution.md` - Limit/setpoint resolution rules
 
 **Reference implementation:** `pkg/zone/manager.go`
+
+**Design decision:** See DEC-043 (One Zone Per Zone Type Constraint)
 
 ---
 
@@ -58,26 +60,34 @@ func (zt ZoneType) Priority() uint8 {
 ### 3.1 Maximum Zones
 
 ```go
-const MaxZones = 5
+const MaxZones = 2  // 1 GRID + 1 LOCAL
 ```
 
-**Constraint:** A device MUST support up to 5 simultaneous zone memberships.
+**Constraint:** A device MUST support exactly one zone per zone type:
+- Max 1 GRID zone (SMGW, DSO, utility)
+- Max 1 LOCAL zone (EMS, home app)
 
-**Rationale:** This allows for typical deployment scenarios:
-- Multiple GRID zones (e.g., DSO + regional grid operator)
-- Multiple LOCAL zones (e.g., home EMS + building EMS)
+**Rationale:** See DEC-043. This simplifies conflict resolution and matches real-world topology where a device is at one grid connection point and managed by one local system.
 
 ### 3.2 Capacity Enforcement
 
-When `AddZone` is called and the device already has 5 zones:
+When `AddZone` is called:
 
 ```go
+// Check if zone of same type already exists
+for _, z := range m.zones {
+    if z.Type == newZone.Type {
+        return ErrZoneTypeExists
+    }
+}
+
+// Check total capacity (should never trigger with type check, but defensive)
 if len(m.zones) >= MaxZones {
     return ErrMaxZonesExceeded
 }
 ```
 
-**Behavior:** Return error `ErrMaxZonesExceeded` without modifying state.
+**Behavior:** Return error `ErrZoneTypeExists` if a zone of the same type exists, or `ErrMaxZonesExceeded` if at capacity.
 
 ---
 
@@ -89,24 +99,27 @@ if len(m.zones) >= MaxZones {
 
 **Preconditions:**
 - Zone with `zoneID` does not already exist
-- Current zone count < MaxZones (5)
+- No zone of the same type already exists
+- Current zone count < MaxZones (2)
 
 **Behavior:**
 1. Check for duplicate zone ID
-2. Check capacity limit
-3. Create zone with:
+2. Check if zone of same type exists
+3. Check capacity limit
+4. Create zone with:
    - `ID` = provided zoneID
    - `Type` = provided zoneType
    - `Connected` = false
    - `CommissionedAt` = current time
-4. Add zone to internal map
-5. Invoke `onZoneAdded` callback if registered
+5. Add zone to internal map
+6. Invoke `onZoneAdded` callback if registered
 
 **Errors:**
 | Error | Condition |
 |-------|-----------|
 | `ErrZoneExists` | Zone with same ID already exists |
-| `ErrMaxZonesExceeded` | Already at 5 zones |
+| `ErrZoneTypeExists` | Zone of same type already exists |
+| `ErrMaxZonesExceeded` | Already at 2 zones |
 
 **Note:** `AddZone` does NOT automatically mark the zone as connected. The commissioning flow must call `SetConnected` after certificate installation.
 

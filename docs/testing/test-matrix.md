@@ -196,7 +196,7 @@ This document provides traceability between:
 | TC-ZONE-009 | Cannot force remove higher priority | Priority protection |
 | TC-ZONE-010 | Per-phase limit resolution | Phase-specific |
 | TC-ZONE-011 | Zone reconnect restores values | State persistence |
-| TC-ZONE-012 | Maximum 5 zones enforcement | Capacity limit |
+| TC-ZONE-012 | Maximum 2 zones enforcement | Capacity limit |
 | TC-ZONE-013 | All zones clear limit | Unlimited behavior |
 
 ### 3.3 Subscriptions

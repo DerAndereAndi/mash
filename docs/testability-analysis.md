@@ -392,7 +392,7 @@ Is processState mandatory or optional when PROCESS flag is set?
 ### 6.3 Multi-Zone Commissioning
 
 **Current Design:**
-- Device supports up to 5 zones
+- Device supports up to 2 zones (one per zone type)
 - Each zone has independent CA
 
 **Hidden Complexity:**

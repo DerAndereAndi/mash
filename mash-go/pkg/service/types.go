@@ -91,7 +91,8 @@ type DeviceConfig struct {
 	// DeviceName is an optional user-configurable name.
 	DeviceName string
 
-	// MaxZones is the maximum number of zones (default: 5).
+	// MaxZones is the maximum number of zones a device can belong to.
+	// Default is 2: one GRID zone (SMGW) and one LOCAL zone (EMS/home app).
 	MaxZones int
 
 	// FailsafeTimeout is the default failsafe duration.
@@ -179,10 +180,10 @@ type BackoffConfig struct {
 func DefaultDeviceConfig() DeviceConfig {
 	return DeviceConfig{
 		ListenAddress:               ":8443",
-		MaxZones:                    5,
+		MaxZones:                    2, // 1 GRID + 1 LOCAL
 		FailsafeTimeout:             2 * time.Hour,
 		HeartbeatInterval:           30 * time.Second,
-		CommissioningWindowDuration: 120 * time.Second,
+		CommissioningWindowDuration: 3 * time.Hour,
 		EnableAutoReconnect:         true,
 		ReconnectBackoff: BackoffConfig{
 			InitialInterval: 1 * time.Second,
