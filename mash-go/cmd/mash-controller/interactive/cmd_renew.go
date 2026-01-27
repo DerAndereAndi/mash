@@ -92,7 +92,7 @@ func (c *Controller) showRenewalStatus() {
 
 // renewDevice renews the certificate for a single device.
 func (c *Controller) renewDevice(ctx context.Context, deviceID string) {
-	// Check if device is connected
+	// Check if device exists
 	device := c.svc.GetDevice(deviceID)
 	if device == nil {
 		fmt.Fprintf(c.rl.Stdout(), "Device not found: %s\n", deviceID)
@@ -104,12 +104,6 @@ func (c *Controller) renewDevice(ctx context.Context, deviceID string) {
 		return
 	}
 
-	session := c.svc.GetSession(deviceID)
-	if session == nil {
-		fmt.Fprintf(c.rl.Stdout(), "No active session for device %s\n", deviceID)
-		return
-	}
-
 	// Short device ID for display
 	shortID := deviceID
 	if len(shortID) > 16 {
@@ -118,18 +112,14 @@ func (c *Controller) renewDevice(ctx context.Context, deviceID string) {
 
 	fmt.Fprintf(c.rl.Stdout(), "Renewing certificate for %s...\n", shortID)
 
-	// TODO: Implement actual renewal using ControllerRenewalHandler
-	// This requires:
-	// 1. Getting the Zone CA from certStore
-	// 2. Creating a ControllerRenewalHandler with the session's connection
-	// 3. Calling RenewDevice
-	// 4. Updating the RenewalTracker
-	//
-	// For now, show that the infrastructure is in place
-	fmt.Fprintln(c.rl.Stdout(), "Certificate renewal not yet fully integrated.")
-	fmt.Fprintln(c.rl.Stdout(), "The renewal protocol is implemented in:")
-	fmt.Fprintln(c.rl.Stdout(), "  - pkg/service/controller_renewal.go")
-	fmt.Fprintln(c.rl.Stdout(), "  - pkg/service/device_renewal.go")
+	// Call the service method - handles all protocol complexity
+	err := c.svc.RenewDevice(ctx, deviceID)
+	if err != nil {
+		fmt.Fprintf(c.rl.Stdout(), "Renewal failed: %v\n", err)
+		return
+	}
+
+	fmt.Fprintf(c.rl.Stdout(), "Certificate renewed successfully for %s\n", shortID)
 }
 
 // renewAllDevices renews all devices that need renewal.
@@ -140,31 +130,46 @@ func (c *Controller) renewAllDevices(ctx context.Context) {
 		return
 	}
 
-	// Find devices needing renewal
+	// Find devices needing renewal (within 30 days of expiry) AND connected
 	var needsRenewal []*service.ConnectedDevice
 	for _, d := range devices {
-		// Estimate expiry as 1 year from last seen
+		// Estimate expiry as 1 year from last seen (commissioning time proxy)
+		// In production, this would come from actual certificate expiry
 		expiryEst := d.LastSeen.Add(365 * 24 * time.Hour)
 		daysUntil := int(time.Until(expiryEst).Hours() / 24)
 
-		if daysUntil <= 30 {
+		if daysUntil <= 30 && d.Connected {
 			needsRenewal = append(needsRenewal, d)
 		}
 	}
 
 	if len(needsRenewal) == 0 {
-		fmt.Fprintln(c.rl.Stdout(), "No devices need renewal at this time")
+		fmt.Fprintln(c.rl.Stdout(), "No connected devices need renewal at this time")
 		return
 	}
 
-	fmt.Fprintf(c.rl.Stdout(), "Found %d device(s) needing renewal:\n", len(needsRenewal))
+	fmt.Fprintf(c.rl.Stdout(), "Renewing %d device(s):\n", len(needsRenewal))
+
+	successCount := 0
+	failCount := 0
+
 	for _, d := range needsRenewal {
 		shortID := d.ID
 		if len(shortID) > 16 {
 			shortID = shortID[:16]
 		}
-		fmt.Fprintf(c.rl.Stdout(), "  - %s\n", shortID)
+
+		fmt.Fprintf(c.rl.Stdout(), "  %s... ", shortID)
+
+		err := c.svc.RenewDevice(ctx, d.ID)
+		if err != nil {
+			fmt.Fprintf(c.rl.Stdout(), "FAILED: %v\n", err)
+			failCount++
+		} else {
+			fmt.Fprintln(c.rl.Stdout(), "OK")
+			successCount++
+		}
 	}
 
-	fmt.Fprintln(c.rl.Stdout(), "\nRenewal not yet fully integrated.")
+	fmt.Fprintf(c.rl.Stdout(), "\nRenewal complete: %d succeeded, %d failed\n", successCount, failCount)
 }
