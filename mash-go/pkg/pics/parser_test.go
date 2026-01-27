@@ -194,8 +194,8 @@ func TestParseControllerPICS(t *testing.T) {
 	input := `
 MASH.C=1
 MASH.C.VERSION=1
-MASH.C.ZONE.TYPE="HOME_MANAGER"
-MASH.C.ZONE.PRIORITY=3
+MASH.C.ZONE.TYPE="LOCAL"
+MASH.C.ZONE.PRIORITY=2
 `
 
 	pics, err := ParseString(input)
@@ -216,8 +216,8 @@ MASH.C.ZONE.PRIORITY=3
 	}
 
 	zoneType := pics.GetString("MASH.C.ZONE.TYPE")
-	if zoneType != "HOME_MANAGER" {
-		t.Errorf("expected ZONE.TYPE=HOME_MANAGER, got %s", zoneType)
+	if zoneType != "LOCAL" {
+		t.Errorf("expected ZONE.TYPE=LOCAL, got %s", zoneType)
 	}
 }
 

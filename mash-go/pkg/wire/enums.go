@@ -137,34 +137,22 @@ func (s OperatingState) String() string {
 type ZoneType uint8
 
 const (
-	// ZoneTypeGridOperator has the highest priority (1).
-	// Typically DSO/TSO systems or Smart Meter Gateways.
-	ZoneTypeGridOperator ZoneType = 1
+	// ZoneTypeGrid has the highest priority (1).
+	// External/regulatory authority - DSO, smart meter gateway, aggregators.
+	ZoneTypeGrid ZoneType = 1
 
-	// ZoneTypeBuildingManager has priority 2.
-	// Commercial building management systems.
-	ZoneTypeBuildingManager ZoneType = 2
-
-	// ZoneTypeHomeManager has priority 3.
-	// Residential energy management systems.
-	ZoneTypeHomeManager ZoneType = 3
-
-	// ZoneTypeUserApp has the lowest priority (4).
-	// End-user mobile apps and interfaces.
-	ZoneTypeUserApp ZoneType = 4
+	// ZoneTypeLocal has priority 2.
+	// Local energy management - EMS (residential or commercial).
+	ZoneTypeLocal ZoneType = 2
 )
 
 // String returns the zone type name.
 func (z ZoneType) String() string {
 	switch z {
-	case ZoneTypeGridOperator:
-		return "GRID_OPERATOR"
-	case ZoneTypeBuildingManager:
-		return "BUILDING_MANAGER"
-	case ZoneTypeHomeManager:
-		return "HOME_MANAGER"
-	case ZoneTypeUserApp:
-		return "USER_APP"
+	case ZoneTypeGrid:
+		return "GRID"
+	case ZoneTypeLocal:
+		return "LOCAL"
 	default:
 		return "UNKNOWN"
 	}

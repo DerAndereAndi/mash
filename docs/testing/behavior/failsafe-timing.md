@@ -212,7 +212,7 @@ If device is commanded to shut down during FAILSAFE:
 Each zone's connection is tracked independently:
 
 ```
-Device with Zone 1 (GRID_OPERATOR) and Zone 2 (HOME_MANAGER):
+Device with Zone 1 (GRID) and Zone 2 (LOCAL):
 
 T+0s:    Zone 2 connection lost
          → Zone 2 limits cleared (treated as if ClearLimit)

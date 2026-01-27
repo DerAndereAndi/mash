@@ -1,9 +1,9 @@
-# MASH PICS File - Home Manager Controller (Pairing/Connection)
+# MASH PICS File - Local Controller (Pairing/Connection)
 # Device: Home Energy Management System Controller
 # Version: 1.0
 # Date: 2025-01-25
 #
-# This PICS file represents a HOME_MANAGER controller (client-side).
+# This PICS file represents a LOCAL controller (client-side).
 # Controllers connect to devices, not the other way around.
 # This file declares what the controller supports when pairing with devices.
 
@@ -60,8 +60,8 @@ MASH.C.COMM.VERIFY_ATTESTATION=1
 #=============================================================================
 
 MASH.C.ZONE=1
-MASH.C.ZONE.TYPE="HOME_MANAGER"
-MASH.C.ZONE.PRIORITY=3
+MASH.C.ZONE.TYPE="LOCAL"
+MASH.C.ZONE.PRIORITY=2
 
 # Zone CA Management
 MASH.C.ZONE.CA_GENERATE=1

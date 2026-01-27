@@ -24,7 +24,7 @@ func TestMemoryStore(t *testing.T) {
 		}
 
 		// Generate and store (use Zone CA to generate a test cert)
-		ca, _ := GenerateZoneCA("test-zone", ZoneTypeHomeManager)
+		ca, _ := GenerateZoneCA("test-zone", ZoneTypeLocal)
 		kp, _ := GenerateKeyPair()
 		csrDER, _ := CreateCSR(kp, &CSRInfo{
 			Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1234, ProductID: 5678},
@@ -49,7 +49,7 @@ func TestMemoryStore(t *testing.T) {
 
 	t.Run("OperationalCerts", func(t *testing.T) {
 		// Create Zone CA
-		ca, _ := GenerateZoneCA("zone-1", ZoneTypeHomeManager)
+		ca, _ := GenerateZoneCA("zone-1", ZoneTypeLocal)
 
 		// Generate device cert
 		deviceKP, _ := GenerateKeyPair()
@@ -63,7 +63,7 @@ func TestMemoryStore(t *testing.T) {
 			Certificate: cert,
 			PrivateKey:  deviceKP.PrivateKey,
 			ZoneID:      "zone-1",
-			ZoneType:    ZoneTypeHomeManager,
+			ZoneType:    ZoneTypeLocal,
 			ZoneCACert:  ca.Certificate,
 		}
 
@@ -125,7 +125,7 @@ func TestMemoryStoreMaxZones(t *testing.T) {
 
 	// Create 5 zones (the maximum)
 	for i := 0; i < MaxZones; i++ {
-		ca, _ := GenerateZoneCA("zone-"+string(rune('A'+i)), ZoneTypeHomeManager)
+		ca, _ := GenerateZoneCA("zone-"+string(rune('A'+i)), ZoneTypeLocal)
 		deviceKP, _ := GenerateKeyPair()
 		csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
 			Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1, ProductID: 1},
@@ -137,7 +137,7 @@ func TestMemoryStoreMaxZones(t *testing.T) {
 			Certificate: cert,
 			PrivateKey:  deviceKP.PrivateKey,
 			ZoneID:      ca.ZoneID,
-			ZoneType:    ZoneTypeHomeManager,
+			ZoneType:    ZoneTypeLocal,
 			ZoneCACert:  ca.Certificate,
 		}
 
@@ -152,7 +152,7 @@ func TestMemoryStoreMaxZones(t *testing.T) {
 	}
 
 	// Try to add a 6th zone
-	ca6, _ := GenerateZoneCA("zone-6", ZoneTypeUserApp)
+	ca6, _ := GenerateZoneCA("zone-6", ZoneTypeGrid)
 	deviceKP, _ := GenerateKeyPair()
 	csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
 		Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1, ProductID: 1},
@@ -164,7 +164,7 @@ func TestMemoryStoreMaxZones(t *testing.T) {
 		Certificate: cert6,
 		PrivateKey:  deviceKP.PrivateKey,
 		ZoneID:      "zone-6",
-		ZoneType:    ZoneTypeUserApp,
+		ZoneType:    ZoneTypeGrid,
 		ZoneCACert:  ca6.Certificate,
 	}
 
@@ -184,7 +184,7 @@ func TestMemoryStoreZoneCACerts(t *testing.T) {
 	}
 
 	// Add Zone CA
-	ca, _ := GenerateZoneCA("zone-1", ZoneTypeHomeManager)
+	ca, _ := GenerateZoneCA("zone-1", ZoneTypeLocal)
 	err := store.SetZoneCACert("zone-1", ca.Certificate)
 	if err != nil {
 		t.Fatalf("SetZoneCACert() error = %v", err)
@@ -223,7 +223,7 @@ func TestMemoryControllerStore(t *testing.T) {
 	})
 
 	t.Run("SetAndGetZoneCA", func(t *testing.T) {
-		ca, _ := GenerateZoneCA("my-zone", ZoneTypeHomeManager)
+		ca, _ := GenerateZoneCA("my-zone", ZoneTypeLocal)
 		err := store.SetZoneCA(ca)
 		if err != nil {
 			t.Fatalf("SetZoneCA() error = %v", err)

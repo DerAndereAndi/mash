@@ -71,7 +71,7 @@ func TestControllerService_RemoveDevice_Success(t *testing.T) {
 	// Create controller service
 	config := ControllerConfig{
 		ZoneName: "Test Zone",
-		ZoneType: cert.ZoneTypeHomeManager,
+		ZoneType: cert.ZoneTypeLocal,
 	}
 	svc, err := NewControllerService(config)
 	if err != nil {
@@ -140,7 +140,7 @@ func TestControllerService_RemoveDevice_Success(t *testing.T) {
 func TestControllerService_RemoveDevice_NotFound(t *testing.T) {
 	config := ControllerConfig{
 		ZoneName: "Test Zone",
-		ZoneType: cert.ZoneTypeHomeManager,
+		ZoneType: cert.ZoneTypeLocal,
 	}
 	svc, err := NewControllerService(config)
 	if err != nil {

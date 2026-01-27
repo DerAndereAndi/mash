@@ -207,21 +207,21 @@ func TestDeviceHandlers(t *testing.T) {
 }
 
 func TestControllerBasic(t *testing.T) {
-	ctrl := mock.NewController("ctrl-1", "HOME_MANAGER", 3)
+	ctrl := mock.NewController("ctrl-1", "LOCAL", 2)
 
 	if ctrl.ID != "ctrl-1" {
 		t.Errorf("Expected ID ctrl-1, got %s", ctrl.ID)
 	}
-	if ctrl.Zone != "HOME_MANAGER" {
-		t.Errorf("Expected zone HOME_MANAGER, got %s", ctrl.Zone)
+	if ctrl.Zone != "LOCAL" {
+		t.Errorf("Expected zone LOCAL, got %s", ctrl.Zone)
 	}
-	if ctrl.Priority != 3 {
-		t.Errorf("Expected priority 3, got %d", ctrl.Priority)
+	if ctrl.Priority != 2 {
+		t.Errorf("Expected priority 2, got %d", ctrl.Priority)
 	}
 }
 
 func TestControllerDevices(t *testing.T) {
-	ctrl := mock.NewController("ctrl-1", "HOME_MANAGER", 3)
+	ctrl := mock.NewController("ctrl-1", "LOCAL", 2)
 	device := mock.NewDevice("device-1")
 
 	var connectedID string
@@ -267,7 +267,7 @@ func TestControllerDevices(t *testing.T) {
 }
 
 func TestControllerOperations(t *testing.T) {
-	ctrl := mock.NewController("ctrl-1", "HOME_MANAGER", 3)
+	ctrl := mock.NewController("ctrl-1", "LOCAL", 2)
 	device := mock.NewDevice("device-1")
 	device.AddEndpoint(1, "EV_CHARGER")
 	device.AddFeature(1, "Measurement", 0x01)
@@ -319,7 +319,7 @@ func TestControllerOperations(t *testing.T) {
 }
 
 func TestControllerNotifications(t *testing.T) {
-	ctrl := mock.NewController("ctrl-1", "HOME_MANAGER", 3)
+	ctrl := mock.NewController("ctrl-1", "LOCAL", 2)
 
 	var notifDevice, notifPath string
 	var notifValue any
@@ -353,7 +353,7 @@ func TestControllerNotifications(t *testing.T) {
 }
 
 func TestControllerClearMessages(t *testing.T) {
-	ctrl := mock.NewController("ctrl-1", "HOME_MANAGER", 3)
+	ctrl := mock.NewController("ctrl-1", "LOCAL", 2)
 	device := mock.NewDevice("device-1")
 	ctrl.ConnectDevice(device)
 

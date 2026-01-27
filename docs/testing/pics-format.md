@@ -370,10 +370,8 @@ MASH.S.CTRL.C09.Rsp=1   # Pause
 |-----------|-------------|-------------|
 | MASH.S.ZONE | Multi-zone support | M |
 | MASH.S.ZONE.MAX | Maximum zones per device (default 5) | M |
-| MASH.S.ZONE.GRID_OP | GRID_OPERATOR zone (priority 1) | M |
-| MASH.S.ZONE.BLDG_MGR | BUILDING_MANAGER zone (priority 2) | O |
-| MASH.S.ZONE.HOME_MGR | HOME_MANAGER zone (priority 3) | O |
-| MASH.S.ZONE.USER_APP | USER_APP zone (priority 4) | O |
+| MASH.S.ZONE.GRID | GRID zone (priority 1) - external/regulatory | M |
+| MASH.S.ZONE.LOCAL | LOCAL zone (priority 2) - local energy management | M |
 | MASH.S.ZONE.ADD | AddZone operation | M |
 | MASH.S.ZONE.REMOVE | RemoveZone operation (self-removal) | M |
 | MASH.S.ZONE.CONNECT | Connection state tracking | M |
@@ -388,10 +386,8 @@ MASH.S.CTRL.C09.Rsp=1   # Pause
 
 | Priority | Zone Type | Description |
 |----------|-----------|-------------|
-| 1 (highest) | GRID_OPERATOR | Grid emergency/regulatory |
-| 2 | BUILDING_MANAGER | Building-level EMS |
-| 3 | HOME_MANAGER | Home energy management |
-| 4 (lowest) | USER_APP | User applications |
+| 1 (highest) | GRID | External/regulatory authority (DSO, utility, SMGW) |
+| 2 | LOCAL | Local energy management (home EMS, building EMS) |
 
 #### Multi-Zone Resolution Rules
 
@@ -402,7 +398,7 @@ MASH.S.CTRL.C09.Rsp=1   # Pause
 
 **Setpoints (highest priority wins):**
 - Zone with lowest priority number wins
-- GRID_OPERATOR (1) > BUILDING_MANAGER (2) > HOME_MANAGER (3) > USER_APP (4)
+- GRID (1) > LOCAL (2)
 
 ---
 
@@ -697,5 +693,5 @@ steps:
 |---------|-------------|
 | [Minimal Device](pics/examples/minimal-device-pairing.pics) | Constrained device with mandatory features only |
 | [Full-Featured Device](pics/examples/full-featured-device-pairing.pics) | High-end device with all optional features |
-| [Home Manager Controller](pics/examples/home-manager-controller.pics) | HOME_MANAGER zone controller |
-| [Grid Operator Controller](pics/examples/grid-operator-controller.pics) | GRID_OPERATOR zone controller (highest priority) |
+| [Local Controller](pics/examples/home-manager-controller.pics) | LOCAL zone controller |
+| [Grid Controller](pics/examples/grid-operator-controller.pics) | GRID zone controller (highest priority) |

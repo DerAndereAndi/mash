@@ -14,7 +14,7 @@ pics:
     - MASH.S.CTRL.C01.Rsp  # SetLimit accepted
 
 preconditions:
-  - Device commissioned to Zone 1 (HOME_MANAGER)
+  - Device commissioned to Zone 1 (LOCAL)
   - No active limits (effectiveConsumptionLimit = null)
 
 steps:
@@ -62,13 +62,13 @@ pics:
     - MASH.S.CTRL.C01.Rsp
 
 preconditions:
-  - Device commissioned to Zone 1 (GRID_OPERATOR) and Zone 2 (HOME_MANAGER)
+  - Device commissioned to Zone 1 (GRID) and Zone 2 (LOCAL)
   - No active limits
 
 steps:
   - id: 1
     action: |
-      Zone 1 (GRID_OPERATOR) sends SetLimit:
+      Zone 1 (GRID) sends SetLimit:
         consumptionLimit: 6000000
         cause: GRID_OPTIMIZATION
     expected:
@@ -78,7 +78,7 @@ steps:
 
   - id: 2
     action: |
-      Zone 2 (HOME_MANAGER) sends SetLimit:
+      Zone 2 (LOCAL) sends SetLimit:
         consumptionLimit: 5000000
         cause: LOCAL_PROTECTION
     expected:
@@ -119,7 +119,7 @@ pics:
     - MASH.S.CTRL.C02.Rsp  # ClearLimit accepted
 
 preconditions:
-  - Device commissioned to Zone 1 (HOME_MANAGER)
+  - Device commissioned to Zone 1 (LOCAL)
   - Zone 1 has set consumptionLimit = 5000000
 
 steps:
@@ -163,7 +163,7 @@ pics:
     - MASH.S.CTRL.C02.Rsp
 
 preconditions:
-  - Device commissioned to Zone 1 (GRID_OPERATOR) and Zone 2 (HOME_MANAGER)
+  - Device commissioned to Zone 1 (GRID) and Zone 2 (LOCAL)
   - Zone 1 has set consumptionLimit = 5000000
   - Zone 2 has set consumptionLimit = 6000000
   - effectiveConsumptionLimit = 5000000 (Zone 1 is more restrictive)
@@ -360,7 +360,7 @@ pics:
     - MASH.S.CTRL.C01.Rsp
 
 preconditions:
-  - Device commissioned to Zone 1 (HOME_MANAGER)
+  - Device commissioned to Zone 1 (LOCAL)
   - No active limits
 
 steps:
@@ -453,7 +453,7 @@ pics:
     - MASH.S.CTRL.C01.Rsp
 
 preconditions:
-  - Device commissioned to Zone 1 (GRID_OPERATOR)
+  - Device commissioned to Zone 1 (GRID)
   - Device is consuming power
 
 steps:

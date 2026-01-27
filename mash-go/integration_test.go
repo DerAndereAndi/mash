@@ -344,7 +344,7 @@ func TestE2E_Failsafe(t *testing.T) {
 
 	// Simulate zone connection
 	zoneID := "test-zone-001"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Wait for connection event
 	select {
@@ -502,9 +502,9 @@ func TestE2E_MultiZone(t *testing.T) {
 		zoneID   string
 		zoneType cert.ZoneType
 	}{
-		{"grid-operator-zone", cert.ZoneTypeGridOperator},
-		{"home-manager-zone", cert.ZoneTypeHomeManager},
-		{"user-app-zone", cert.ZoneTypeUserApp},
+		{"grid-operator-zone", cert.ZoneTypeGrid},
+		{"home-manager-zone", cert.ZoneTypeLocal},
+		{"user-app-zone", cert.ZoneTypeLocal},
 	}
 
 	// Create TLS server

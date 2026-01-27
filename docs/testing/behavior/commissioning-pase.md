@@ -365,8 +365,8 @@ def handle_attestation(response: AttestationResponse, policy: Policy) -> Attesta
   1: "cert_install",     // type
   2: <bytes[]>,          // operational_cert (DER-encoded X.509)
   3: <bytes[]>,          // zone_ca_cert (DER-encoded X.509)
-  4: <uint8>,            // zone_type (GRID_OPERATOR, HOME_MANAGER, etc.)
-  5: <uint8>             // zone_priority (1-4)
+  4: <uint8>,            // zone_type (GRID, LOCAL)
+  5: <uint8>             // zone_priority (1-2)
 }
 ```
 
@@ -587,8 +587,8 @@ Device maintains up to 5 zone slots:
 
 ```
 zoneSlots[5] = {
-  [0]: { zoneCA: <cert>, opCert: <cert>, zoneType: GRID_OPERATOR, priority: 1 },
-  [1]: { zoneCA: <cert>, opCert: <cert>, zoneType: HOME_MANAGER, priority: 3 },
+  [0]: { zoneCA: <cert>, opCert: <cert>, zoneType: GRID, priority: 1 },
+  [1]: { zoneCA: <cert>, opCert: <cert>, zoneType: LOCAL, priority: 2 },
   [2]: null,  // empty slot
   [3]: null,  // empty slot
   [4]: null   // empty slot
@@ -612,8 +612,8 @@ zoneSlots[5] = {
 **Rule:** Existing zone connections remain OPERATIONAL.
 
 **Behavior:**
-- Controller A (HOME_MANAGER) is connected and OPERATIONAL
-- Controller B (GRID_OPERATOR) starts commissioning
+- Controller A (LOCAL) is connected and OPERATIONAL
+- Controller B (GRID) starts commissioning
 - Controller A continues normal operation
 - Controller B completes commissioning
 - Controller B establishes OPERATIONAL connection

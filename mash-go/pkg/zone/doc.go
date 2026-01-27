@@ -1,16 +1,14 @@
 // Package zone provides multi-zone management for MASH devices.
 //
 // MASH devices can belong to up to 5 zones simultaneously. Each zone represents
-// a controller relationship (e.g., grid operator, home manager, user app).
+// a controller relationship (e.g., grid operator, local energy manager).
 //
 // # Zone Types and Priority
 //
 // Zones have a type that determines their priority:
 //
-//   - GRID_OPERATOR (priority 1): Highest priority - DSO, smart meter gateway
-//   - BUILDING_MANAGER (priority 2): Commercial building EMS
-//   - HOME_MANAGER (priority 3): Residential energy management system
-//   - USER_APP (priority 4): Lowest priority - mobile apps, voice assistants
+//   - GRID (priority 1): External/regulatory authority - DSO, smart meter gateway, aggregators
+//   - LOCAL (priority 2): Local energy management - EMS (residential or commercial)
 //
 // # Priority Resolution
 //

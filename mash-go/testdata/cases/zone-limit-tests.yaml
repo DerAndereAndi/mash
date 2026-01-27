@@ -4,7 +4,7 @@
 # Key rules:
 # - LIMITS: Most restrictive wins (smaller for consumption, closer to zero for production)
 # - SETPOINTS: Highest priority zone wins (lower priority number = higher priority)
-# - Zone priorities: GRID_OPERATOR(1) > BUILDING_MANAGER(2) > HOME_MANAGER(3) > USER_APP(4)
+# - Zone priorities: GRID(1) > LOCAL(2)
 
 ---
 # TC-ZONE-001: Single Zone Sets Limit
@@ -22,7 +22,7 @@ pics_requirements:
 
 preconditions:
   - session_established: true
-  - zone_type: HOME_MANAGER
+  - zone_type: LOCAL
   - no_other_zones_connected: true
 
 steps:
@@ -81,11 +81,11 @@ pics_requirements:
 
 preconditions:
   - session_established: true
-  - zone_type: HOME_MANAGER
-  - second_zone_connected: GRID_OPERATOR
+  - zone_type: LOCAL
+  - second_zone_connected: GRID
 
 steps:
-  - name: Zone 1 (HOME_MANAGER) sets 8 kW limit
+  - name: Zone 1 (LOCAL) sets 8 kW limit
     action: invoke
     params:
       endpoint: 1
@@ -96,10 +96,10 @@ steps:
     expect:
       invoke_success: true
 
-  - name: Zone 2 (GRID_OPERATOR) sets 5 kW limit
+  - name: Zone 2 (GRID) sets 5 kW limit
     action: invoke_as_zone
     params:
-      zone: GRID_OPERATOR
+      zone: GRID
       endpoint: 1
       feature: EnergyControl
       command: SetLimit
@@ -116,9 +116,9 @@ steps:
       attribute: effectiveConsumptionLimit
     expect:
       read_success: true
-      value: 5000000           # Grid operator's limit wins
+      value: 5000000           # Grid's limit wins
 
-  - name: Verify HOME_MANAGER's own limit is still 8 kW
+  - name: Verify LOCAL's own limit is still 8 kW
     action: read
     params:
       endpoint: 1
@@ -172,7 +172,7 @@ steps:
   - name: Zone 2 sets production limit -3 kW
     action: invoke_as_zone
     params:
-      zone: BUILDING_MANAGER
+      zone: GRID
       endpoint: 1
       feature: EnergyControl
       command: SetLimit
@@ -235,7 +235,7 @@ steps:
   - name: Zone 2 sets production limit
     action: invoke_as_zone
     params:
-      zone: GRID_OPERATOR
+      zone: GRID
       endpoint: 1
       feature: EnergyControl
       command: SetLimit
@@ -334,7 +334,7 @@ id: TC-ZONE-006
 name: Higher Priority Zone Setpoint Wins
 description: |
   Verifies that for setpoints, the highest priority zone's value wins.
-  GRID_OPERATOR (priority 1) > HOME_MANAGER (priority 3).
+  GRID (priority 1) > LOCAL (priority 2).
 
 pics_requirements:
   - MASH.S.ZONE
@@ -348,7 +348,7 @@ preconditions:
   - accepts_setpoints: true
 
 steps:
-  - name: HOME_MANAGER (priority 3) sets setpoint
+  - name: LOCAL (priority 2) sets setpoint
     action: invoke
     params:
       endpoint: 1
@@ -359,10 +359,10 @@ steps:
     expect:
       invoke_success: true
 
-  - name: GRID_OPERATOR (priority 1) sets setpoint
+  - name: GRID (priority 1) sets setpoint
     action: invoke_as_zone
     params:
-      zone: GRID_OPERATOR
+      zone: GRID
       endpoint: 1
       feature: EnergyControl
       command: SetSetpoint
@@ -371,7 +371,7 @@ steps:
     expect:
       invoke_success: true
 
-  - name: Verify effective setpoint is GRID_OPERATOR's (4 kW)
+  - name: Verify effective setpoint is GRID's (4 kW)
     action: read
     params:
       endpoint: 1
@@ -409,7 +409,7 @@ preconditions:
   - two_zones_connected: true
 
 steps:
-  - name: Zone 1 (HOME_MANAGER) sets 8 kW limit
+  - name: Zone 1 (LOCAL) sets 8 kW limit
     action: invoke
     params:
       endpoint: 1
@@ -420,10 +420,10 @@ steps:
     expect:
       invoke_success: true
 
-  - name: Zone 2 (GRID_OPERATOR) sets 3 kW limit
+  - name: Zone 2 (GRID) sets 3 kW limit
     action: invoke_as_zone
     params:
-      zone: GRID_OPERATOR
+      zone: GRID
       endpoint: 1
       feature: EnergyControl
       command: SetLimit
@@ -441,17 +441,17 @@ steps:
     expect:
       value: 3000000
 
-  - name: Disconnect Zone 2 (GRID_OPERATOR)
+  - name: Disconnect Zone 2 (GRID)
     action: disconnect_zone
     params:
-      zone: GRID_OPERATOR
+      zone: GRID
 
   - name: Wait for disconnect to be detected
     action: wait
     params:
       duration: "2s"
 
-  - name: Verify effective limit is now 8 kW (HOME_MANAGER's)
+  - name: Verify effective limit is now 8 kW (LOCAL's)
     action: read
     params:
       endpoint: 1
@@ -509,7 +509,7 @@ steps:
   - name: Zone 2 sets different per-phase limits
     action: invoke_as_zone
     params:
-      zone: GRID_OPERATOR
+      zone: GRID
       endpoint: 1
       feature: EnergyControl
       command: SetCurrentLimits
@@ -638,7 +638,7 @@ steps:
   - name: Connect 5th zone (should succeed)
     action: connect_as_zone
     params:
-      zone_type: USER_APP
+      zone_type: LOCAL
       zone_id: "zone-5"
     expect:
       connection_success: true
@@ -656,7 +656,7 @@ steps:
   - name: Attempt to connect 6th zone (should fail)
     action: connect_as_zone
     params:
-      zone_type: USER_APP
+      zone_type: LOCAL
       zone_id: "zone-6"
     expect:
       connection_success: false
@@ -713,7 +713,7 @@ steps:
   - name: Zone 2 clears its limit
     action: invoke_as_zone
     params:
-      zone: GRID_OPERATOR
+      zone: GRID
       endpoint: 1
       feature: EnergyControl
       command: ClearLimit

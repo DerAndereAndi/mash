@@ -490,8 +490,8 @@ SETPOINTS: Highest priority zone wins (only one controller active)
 ### Power Limits - Most Restrictive Wins
 
 ```
-Zone 1 (GRID_OPERATOR): SetLimit(consumptionLimit: 6000000)
-Zone 2 (HOME_MANAGER):  SetLimit(consumptionLimit: 5000000)
+Zone 1 (GRID): SetLimit(consumptionLimit: 6000000)
+Zone 2 (LOCAL):  SetLimit(consumptionLimit: 5000000)
 
 effectiveConsumptionLimit = min(6000000, 5000000) = 5000000 mW
 ```
@@ -512,8 +512,8 @@ effectiveCurrentLimitsConsumption = {
 ### Power Setpoints - Highest Priority Wins
 
 ```
-Zone 1 (GRID_OPERATOR, priority 1): SetSetpoint(consumptionSetpoint: 3000000)
-Zone 2 (HOME_MANAGER, priority 2):  SetSetpoint(consumptionSetpoint: 5000000)
+Zone 1 (GRID, priority 1): SetSetpoint(consumptionSetpoint: 3000000)
+Zone 2 (LOCAL, priority 2):  SetSetpoint(consumptionSetpoint: 5000000)
 
 effectiveConsumptionSetpoint = 3000000 mW (grid operator wins)
 ```

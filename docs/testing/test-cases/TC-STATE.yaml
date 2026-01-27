@@ -455,7 +455,7 @@ pics:
     - MASH.S.CTRL
 
 preconditions:
-  - Device commissioned to Zone 1 (GRID_OPERATOR) and Zone 2 (HOME_MANAGER)
+  - Device commissioned to Zone 1 (GRID) and Zone 2 (LOCAL)
   - Zone 1 has consumptionLimit = 5000000
   - Zone 2 has consumptionLimit = 6000000
   - Both zones connected

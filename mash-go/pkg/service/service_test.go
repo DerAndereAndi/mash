@@ -66,7 +66,7 @@ func validDeviceConfig() DeviceConfig {
 func validControllerConfig() ControllerConfig {
 	config := DefaultControllerConfig()
 	config.ZoneName = "Test Zone"
-	config.ZoneType = cert.ZoneTypeHomeManager
+	config.ZoneType = cert.ZoneTypeLocal
 	return config
 }
 
@@ -163,7 +163,7 @@ func TestDeviceServiceZoneManagement(t *testing.T) {
 
 	// Connect a zone
 	zoneID := "zone-001"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	if svc.ZoneCount() != 1 {
 		t.Errorf("expected 1 zone, got %d", svc.ZoneCount())
@@ -178,7 +178,7 @@ func TestDeviceServiceZoneManagement(t *testing.T) {
 		t.Errorf("expected zone ID %s, got %s", zoneID, zone.ID)
 	}
 
-	if zone.Type != cert.ZoneTypeHomeManager {
+	if zone.Type != cert.ZoneTypeLocal {
 		t.Errorf("expected zone type HomeManager, got %v", zone.Type)
 	}
 
@@ -231,7 +231,7 @@ func TestDeviceServiceEventHandlers(t *testing.T) {
 	defer func() { _ = svc.Stop() }()
 
 	// Trigger events
-	svc.HandleZoneConnect("zone-001", cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect("zone-001", cert.ZoneTypeLocal)
 	svc.HandleZoneDisconnect("zone-001")
 
 	// Wait for async handlers
@@ -663,7 +663,7 @@ func TestDeviceServiceOperationalAdvertisingOnZoneConnect(t *testing.T) {
 
 	// Simulate zone connect (as happens after commissioning)
 	zoneID := "a1b2c3d4e5f6a7b8"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Verify operational advertising was called with correct zone ID
 	if capturedOpInfo == nil {
@@ -705,7 +705,7 @@ func TestDeviceServiceOperationalAdvertisingPersistsOnDisconnect(t *testing.T) {
 
 	// Simulate zone connect
 	zoneID := "a1b2c3d4e5f6a7b8"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Simulate disconnect - operational advertising should PERSIST
 	svc.HandleZoneDisconnect(zoneID)
@@ -739,8 +739,8 @@ func TestDeviceServiceMultipleZonesOperationalAdvertising(t *testing.T) {
 	zone1 := "zone1111111111111"
 	zone2 := "zone2222222222222"
 
-	svc.HandleZoneConnect(zone1, cert.ZoneTypeHomeManager)
-	svc.HandleZoneConnect(zone2, cert.ZoneTypeBuildingManager)
+	svc.HandleZoneConnect(zone1, cert.ZoneTypeLocal)
+	svc.HandleZoneConnect(zone2, cert.ZoneTypeGrid)
 
 	// Mock expectations verify both zones were advertised
 }
@@ -775,7 +775,7 @@ func TestDeviceServiceOperationalAdvertisingInfo(t *testing.T) {
 
 	// Simulate zone connect
 	zoneID := "a1b2c3d4e5f6a7b8"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Verify operational info contains expected fields
 	if capturedOpInfo == nil {

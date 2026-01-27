@@ -446,7 +446,7 @@ pics_requirements:
 
 preconditions:
   - session_established: true
-  - zone_type: HOME_MANAGER
+  - zone_type: LOCAL
 
 steps:
   - name: Create subscription
@@ -469,8 +469,8 @@ steps:
   - name: Connect another zone
     action: connect_as_zone
     params:
-      zone_type: GRID_OPERATOR
-      zone_id: "grid-op-1"
+      zone_type: GRID
+      zone_id: "grid-1"
     expect:
       connection_success: true
 

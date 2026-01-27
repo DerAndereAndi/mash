@@ -107,13 +107,13 @@ This document analyzes the MASH protocol design for **testability** and **hidden
 
 **Current Design:**
 - "Highest priority zone wins"
-- Priority: GRID_OPERATOR > BUILDING_MANAGER > HOME_MANAGER > USER_APP
+- Priority: GRID > LOCAL
 
 **Hidden Complexity:**
 
 | Scenario | Problem |
 |----------|---------|
-| Same priority | Two HOME_MANAGER zones - who wins? |
+| Same priority | Two LOCAL zones - who wins? |
 | Higher priority clears | Does lower priority's setpoint become active? |
 | Setpoint exceeds limit | Limit constrains setpoint - but what's reported? |
 | Conflicting directions | Consumption setpoint + production setpoint from different zones |

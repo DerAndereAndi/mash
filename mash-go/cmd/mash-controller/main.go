@@ -266,16 +266,12 @@ func setupLogging(level string) {
 
 func parseZoneType(s string) (cert.ZoneType, error) {
 	switch strings.ToLower(s) {
-	case "grid", "gridoperator":
-		return cert.ZoneTypeGridOperator, nil
-	case "building", "buildingmanager":
-		return cert.ZoneTypeBuildingManager, nil
-	case "home", "homemanager":
-		return cert.ZoneTypeHomeManager, nil
-	case "user", "userapp":
-		return cert.ZoneTypeUserApp, nil
+	case "grid":
+		return cert.ZoneTypeGrid, nil
+	case "local":
+		return cert.ZoneTypeLocal, nil
 	default:
-		return 0, fmt.Errorf("unknown zone type: %s (use: grid, building, home, user)", s)
+		return 0, fmt.Errorf("unknown zone type: %s (use: grid, local)", s)
 	}
 }
 

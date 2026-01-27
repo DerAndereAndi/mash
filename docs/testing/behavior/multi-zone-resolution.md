@@ -208,20 +208,18 @@ effectiveConsumptionSetpoint = setpoint from zone with highest priority
 
 | Zone Type | Priority | Wins Against |
 |-----------|----------|--------------|
-| GRID_OPERATOR | 1 | All others |
-| BUILDING_MANAGER | 2 | HOME_MANAGER, USER_APP |
-| HOME_MANAGER | 3 | USER_APP |
-| USER_APP | 4 | None |
+| GRID | 1 | LOCAL |
+| LOCAL | 2 | None |
 
 ### 3.3 Same Priority Tie-Breaking
 
-If two zones have the same priority (e.g., two HOME_MANAGER zones):
+If two zones have the same priority (e.g., two LOCAL zones):
 
 **Rule:** Most recently set setpoint wins.
 
 ```
-Zone 1 (HOME_MANAGER): SetSetpoint(5000000) at T=100
-Zone 2 (HOME_MANAGER): SetSetpoint(3000000) at T=200
+Zone 1 (LOCAL): SetSetpoint(5000000) at T=100
+Zone 2 (LOCAL): SetSetpoint(3000000) at T=200
 
 effectiveConsumptionSetpoint = 3000000 (Zone 2, more recent)
 ```
@@ -237,12 +235,12 @@ When a zone clears its setpoint:
 
 **Example:**
 ```
-Zone 1 (GRID_OPERATOR): 3000000 → effective
-Zone 2 (HOME_MANAGER):  5000000 → inactive
+Zone 1 (GRID): 3000000 → effective
+Zone 2 (LOCAL):  5000000 → inactive
 
 Zone 1 clears setpoint.
 
-Zone 2 (HOME_MANAGER):  5000000 → now effective
+Zone 2 (LOCAL):  5000000 → now effective
 ```
 
 ### 3.5 Setpoint vs Limit Interaction

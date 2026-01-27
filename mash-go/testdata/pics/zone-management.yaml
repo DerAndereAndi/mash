@@ -3,7 +3,7 @@
 #
 # This file describes the multi-zone management capabilities for test filtering.
 # Zone management defines how multiple controllers interact with a single device,
-# including priority-based resolution and force removal.
+# including priority-based resolution.
 
 # Device Identification
 device:
@@ -25,10 +25,8 @@ items:
   # Zone Types Supported
   # ==========================================================================
 
-  MASH.S.ZONE.GRID_OP: true       # GRID_OPERATOR zone (priority 1, highest)
-  MASH.S.ZONE.BLDG_MGR: true      # BUILDING_MANAGER zone (priority 2)
-  MASH.S.ZONE.HOME_MGR: true      # HOME_MANAGER zone (priority 3)
-  MASH.S.ZONE.USER_APP: true      # USER_APP zone (priority 4, lowest)
+  MASH.S.ZONE.GRID: true          # GRID zone (priority 1, highest) - external/regulatory
+  MASH.S.ZONE.LOCAL: true         # LOCAL zone (priority 2) - local energy management
 
   # ==========================================================================
   # Zone Operations
@@ -71,21 +69,15 @@ items:
 # =============================================================================
 # Zone Type Priority Hierarchy
 # =============================================================================
-# 1. GRID_OPERATOR (highest priority)
+# 1. GRID (highest priority)
+#    - External/regulatory authority (DSO, utility, grid operator)
 #    - Grid emergency response, regulatory requirements
-#    - Can override all other zones
+#    - Can override LOCAL zones
 #
-# 2. BUILDING_MANAGER
-#    - Building-level energy management
-#    - Can override HOME_MANAGER and USER_APP
-#
-# 3. HOME_MANAGER
-#    - Home energy management system
-#    - Can override USER_APP
-#
-# 4. USER_APP (lowest priority)
-#    - User-facing applications
-#    - No override capability
+# 2. LOCAL (lower priority)
+#    - Local energy management (home EMS, building EMS)
+#    - Manages local optimization
+#    - Cannot override GRID zones
 
 # =============================================================================
 # Multi-Zone Resolution Rules
@@ -98,12 +90,7 @@ items:
 #
 # SETPOINTS (highest priority wins):
 # - Zone with lowest priority number wins
-# - GRID_OPERATOR (1) > BUILDING_MANAGER (2) > HOME_MANAGER (3) > USER_APP (4)
-#
-# FORCE REMOVAL:
-# - Requester must have higher priority than target
-# - GRID_OPERATOR can force remove any zone
-# - USER_APP cannot force remove any zone
+# - GRID (1) > LOCAL (2)
 
 # =============================================================================
 # Test Case to PICS Mapping

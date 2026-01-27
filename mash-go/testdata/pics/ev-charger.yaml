@@ -50,6 +50,5 @@ items:
 
   # Multi-zone support
   D.ZONE.MAX: 3           # Maximum 3 zones supported
-  D.ZONE.GRID_OP: true    # Grid operator zone supported
-  D.ZONE.HOME_MGR: true   # Home manager zone supported
-  D.ZONE.USER_APP: true   # User app zone supported
+  D.ZONE.GRID: true       # Grid zone supported (external/regulatory)
+  D.ZONE.LOCAL: true      # Local zone supported (local energy management)

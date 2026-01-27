@@ -232,7 +232,7 @@ func TestCertInstallEncoding(t *testing.T) {
 		MsgType:         commissioning.MsgCertInstall,
 		OperationalCert: []byte("mock-op-cert"),
 		CACert:          []byte("mock-ca-cert"),
-		ZoneType:        3, // HOME_MANAGER
+		ZoneType:        2, // LOCAL
 		ZonePriority:    1,
 	}
 

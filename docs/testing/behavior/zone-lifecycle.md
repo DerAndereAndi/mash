@@ -58,8 +58,8 @@ Format: 16 hex characters (e.g., "a1b2c3d4e5f6a7b8")
 zoneState = {
   zoneId: <hex string>,
   zoneName: <user-friendly name>,
-  zoneType: GRID_OPERATOR | BUILDING_MANAGER | HOME_MANAGER | USER_APP,
-  zonePriority: 1-4,
+  zoneType: GRID | LOCAL,
+  zonePriority: 1-2,
   caPrivateKey: <encrypted PKCS#8>,
   caCertificate: <DER-encoded X.509>,
   createdAt: <timestamp>,
@@ -72,10 +72,8 @@ zoneState = {
 
 | Zone Type | Priority | Typical Owner | Use Case |
 |-----------|----------|---------------|----------|
-| GRID_OPERATOR | 1 | SMGW, DSO | Grid regulation, 14a compliance |
-| BUILDING_MANAGER | 2 | Building EMS | Commercial load management |
-| HOME_MANAGER | 3 | Residential EMS | Home energy optimization |
-| USER_APP | 4 | Mobile app | User convenience, monitoring |
+| GRID | 1 | SMGW, DSO, utility | Grid regulation, 14a compliance, external authority |
+| LOCAL | 2 | Home EMS, building EMS | Local energy management, optimization |
 
 ### 2.3 Zone Metadata
 
@@ -85,8 +83,8 @@ Zone owner maintains:
 {
   "zoneId": "a1b2c3d4e5f6a7b8",
   "zoneName": "Home Energy",
-  "zoneType": 3,                    // HOME_MANAGER
-  "zonePriority": 3,
+  "zoneType": 2,                    // LOCAL
+  "zonePriority": 2,
   "caCertFingerprint": "<sha256>",
   "createdAt": 1706140800,
   "members": [
@@ -219,8 +217,8 @@ zoneSlot[n] = {
   zoneCACert: <DER bytes>,         // For verifying zone members
   opCertPrivateKey: <encrypted>,   // Generated during CSR
   opCertificate: <DER bytes>,      // Signed by Zone CA
-  zoneType: 3,                     // HOME_MANAGER
-  zonePriority: 3,
+  zoneType: 2,                     // LOCAL
+  zonePriority: 2,
   commissionedAt: <timestamp>
 }
 ```

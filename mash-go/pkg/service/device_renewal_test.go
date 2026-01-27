@@ -95,7 +95,7 @@ func TestDeviceRenewalHandler_HandleInstall(t *testing.T) {
 	}
 
 	// Sign CSR with a test Zone CA
-	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeHomeManager)
+	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("Failed to create Zone CA: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestDeviceRenewalHandler_RejectInvalidCert(t *testing.T) {
 		t.Fatalf("Failed to create wrong CSR: %v", err)
 	}
 
-	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeHomeManager)
+	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("Failed to create Zone CA: %v", err)
 	}

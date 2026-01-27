@@ -87,7 +87,7 @@ FORECAST          = 0x03  // Expected generation/consumption
 ### SignalSourceEnum
 
 ```
-GRID_OPERATOR     = 0x00  // DSO/TSO
+GRID              = 0x00  // DSO/TSO
 ENERGY_SUPPLIER   = 0x01  // Electricity retailer
 AGGREGATOR        = 0x02  // Flexibility aggregator
 LOCAL_EMS         = 0x03  // Home/building EMS
@@ -171,7 +171,7 @@ Response:
 {
   signalId: 2001,
   type: CONSTRAINT,
-  source: GRID_OPERATOR,
+  source: GRID,
   priority: 1,
   startTime: 1706180400,
   slots: [

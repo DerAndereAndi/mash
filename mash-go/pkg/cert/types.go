@@ -45,7 +45,7 @@ type ZoneCA struct {
 	// ZoneID is a unique identifier for this zone.
 	ZoneID string
 
-	// ZoneType indicates the type of zone (grid operator, home manager, etc.).
+	// ZoneType indicates the type of zone (GRID or LOCAL).
 	ZoneType ZoneType
 }
 
@@ -54,23 +54,17 @@ type ZoneType uint8
 
 // Zone types with their priorities (lower number = higher priority).
 const (
-	ZoneTypeGridOperator    ZoneType = 1 // Highest priority (DSO, SMGW)
-	ZoneTypeBuildingManager ZoneType = 2 // Commercial building EMS
-	ZoneTypeHomeManager     ZoneType = 3 // Residential EMS
-	ZoneTypeUserApp         ZoneType = 4 // Lowest priority (apps, voice assistants)
+	ZoneTypeGrid  ZoneType = 1 // External/regulatory authority (DSO, SMGW, aggregators)
+	ZoneTypeLocal ZoneType = 2 // Local energy management (EMS, residential or commercial)
 )
 
 // String returns a human-readable zone type name.
 func (zt ZoneType) String() string {
 	switch zt {
-	case ZoneTypeGridOperator:
-		return "GRID_OPERATOR"
-	case ZoneTypeBuildingManager:
-		return "BUILDING_MANAGER"
-	case ZoneTypeHomeManager:
-		return "HOME_MANAGER"
-	case ZoneTypeUserApp:
-		return "USER_APP"
+	case ZoneTypeGrid:
+		return "GRID"
+	case ZoneTypeLocal:
+		return "LOCAL"
 	default:
 		return "UNKNOWN"
 	}

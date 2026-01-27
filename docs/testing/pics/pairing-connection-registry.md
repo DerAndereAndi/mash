@@ -143,10 +143,8 @@ This registry defines PICS codes for the pairing and connection layer of MASH. T
 
 | PICS Code | Description | Values | Conformance |
 |-----------|-------------|--------|-------------|
-| MASH.S.ZONE.GRID_OPERATOR | Accepts GRID_OPERATOR zones | 0, 1 | M |
-| MASH.S.ZONE.BUILDING_MANAGER | Accepts BUILDING_MANAGER zones | 0, 1 | M |
-| MASH.S.ZONE.HOME_MANAGER | Accepts HOME_MANAGER zones | 0, 1 | M |
-| MASH.S.ZONE.USER_APP | Accepts USER_APP zones | 0, 1 | M |
+| MASH.S.ZONE.GRID | Accepts GRID zones (external/regulatory) | 0, 1 | M |
+| MASH.S.ZONE.LOCAL | Accepts LOCAL zones (local energy management) | 0, 1 | M |
 
 ### 5.3 Zone Operations
 

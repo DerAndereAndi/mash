@@ -504,10 +504,8 @@ device_id / endpoint_id / feature_id / attribute_or_command
 
 **Zone Types (priority order):**
 ```
-GRID_OPERATOR = 1     // DSO, SMGW - highest
-BUILDING_MANAGER = 2  // Commercial EMS
-HOME_MANAGER = 3      // Residential EMS
-USER_APP = 4          // Mobile apps - lowest
+GRID = 1   // DSO, SMGW, utility - external/regulatory authority
+LOCAL = 2  // Residential/building EMS - local energy management
 ```
 
 **Behavior:**
@@ -557,7 +555,7 @@ USER_APP = 4          // Mobile apps - lowest
 2. App uploads setup code + device info to DSO backend
 3. Backend securely forwards to SMGW
 4. SMGW uses setup code to commission device via SPAKE2+
-5. Device gets SMGW's operational cert (GRID_OPERATOR zone)
+5. Device gets SMGW's operational cert (GRID zone)
 
 **QR Code Content (sufficient for backend delegation):**
 ```
@@ -702,8 +700,8 @@ SLAAC
 
 **Critical Example - Why Priority Override Fails:**
 ```
-SMGW (GRID_OPERATOR, priority 1): "Grid allows 6 kW"
-EMS (HOME_MANAGER, priority 3):   "House fuse is 5 kW"
+SMGW (GRID, priority 1): "Grid allows 6 kW"
+EMS (LOCAL, priority 2):   "House fuse is 5 kW"
 
 Priority-based: 6 kW → exceeds fuse capacity → dangerous
 Stacked limits: min(6, 5) = 5 kW → safe
@@ -715,8 +713,8 @@ Stacked limits: min(6, 5) = 5 kW → safe
 ```
 Device internal state (not exposed):
   zoneLimits: map[zoneID] → limit
-    Zone 1 (GRID_OPERATOR): 6000 W
-    Zone 2 (HOME_MANAGER):  5000 W
+    Zone 1 (GRID): 6000 W
+    Zone 2 (LOCAL):  5000 W
 
 Exposed via API (per-zone scoped):
   effectiveLimit: min(all) = 5000 W    // same for all zones
@@ -852,7 +850,7 @@ Inverter
   - "Device supports up to 5 zones"
   - "Add device to EMS zone"
   - "Zone owner vs zone admin"
-  - "GRID_OPERATOR zone has priority"
+  - "GRID zone has priority"
 
 **Terminology Mapping:**
 | Matter | MASH |
@@ -2286,7 +2284,7 @@ The key insight is that **commissioning IS authorization**. The network topology
 
 ```
 SMGW (Smart Meter Gateway)
-├── ControllerService (GRID_OPERATOR zone)
+├── ControllerService (GRID zone)
 │   └── controls: EMS-DeviceService
 │       └── Can write grid limits to EMS
 │
@@ -2295,7 +2293,7 @@ SMGW (Smart Meter Gateway)
         └── EMS can read meter values
 
 EMS (Energy Management System)
-├── ControllerService (HOME_MANAGER zone)
+├── ControllerService (LOCAL zone)
 │   ├── controls: SMGW-DeviceService (meter) → reads grid meter
 │   ├── controls: EVSE
 │   └── controls: Heat Pump

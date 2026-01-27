@@ -59,7 +59,7 @@ func TestDeviceServiceRemoveZone(t *testing.T) {
 
 	// Simulate a zone connection
 	zoneID := "test-zone-001"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Verify zone is connected
 	zone := svc.GetZone(zoneID)
@@ -115,7 +115,7 @@ func TestDeviceServiceRemoveZoneWithFailsafe(t *testing.T) {
 
 	// Connect zone
 	zoneID := "test-zone-002"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Note: Failsafe timer is not created automatically if config duration is invalid
 	// (MinDuration is 2 hours). Instead, manually set a timer for testing.
@@ -160,7 +160,7 @@ func TestDeviceServiceRemoveZoneEmitsEvent(t *testing.T) {
 
 	// Connect and remove zone
 	zoneID := "test-zone-003"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Clear events from connect
 	events = nil
@@ -196,9 +196,9 @@ func TestDeviceServiceGetAllZonesAfterRemove(t *testing.T) {
 	defer svc.Stop()
 
 	// Connect 3 zones
-	svc.HandleZoneConnect("zone-1", cert.ZoneTypeGridOperator)
-	svc.HandleZoneConnect("zone-2", cert.ZoneTypeHomeManager)
-	svc.HandleZoneConnect("zone-3", cert.ZoneTypeUserApp)
+	svc.HandleZoneConnect("zone-1", cert.ZoneTypeGrid)
+	svc.HandleZoneConnect("zone-2", cert.ZoneTypeLocal)
+	svc.HandleZoneConnect("zone-3", cert.ZoneTypeLocal)
 
 	if svc.ZoneCount() != 3 {
 		t.Fatalf("ZoneCount = %d, want 3", svc.ZoneCount())
@@ -245,7 +245,7 @@ func TestDeviceServiceRemoveZoneCleanupSessionSubscriptions(t *testing.T) {
 
 	// Connect zone
 	zoneID := "test-zone-subs"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Note: Full subscription testing would require setting up a real session
 	// with subscriptions. Here we just verify the remove doesn't panic.
@@ -267,7 +267,7 @@ func TestDeviceServiceRemoveZoneWhileFailsafeActive(t *testing.T) {
 
 	// Connect zone
 	zoneID := "test-zone-failsafe"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Create a short-duration failsafe timer and manually set it
 	timer := failsafe.NewTimer()
@@ -308,8 +308,8 @@ func TestDeviceServiceListZoneIDs(t *testing.T) {
 	defer svc.Stop()
 
 	// Connect zones
-	svc.HandleZoneConnect("zone-a", cert.ZoneTypeGridOperator)
-	svc.HandleZoneConnect("zone-b", cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect("zone-a", cert.ZoneTypeGrid)
+	svc.HandleZoneConnect("zone-b", cert.ZoneTypeLocal)
 
 	// Get zone IDs
 	ids := svc.ListZoneIDs()

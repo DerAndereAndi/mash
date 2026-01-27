@@ -41,10 +41,8 @@ Priority is determined by zone type (lower number = higher priority):
 
 | Zone Type | Priority | Constant | Description |
 |-----------|----------|----------|-------------|
-| GRID_OPERATOR | 1 (highest) | `ZoneTypeGridOperator` | DSO, smart meter gateway |
-| BUILDING_MANAGER | 2 | `ZoneTypeBuildingManager` | Commercial building EMS |
-| HOME_MANAGER | 3 | `ZoneTypeHomeManager` | Residential EMS |
-| USER_APP | 4 (lowest) | `ZoneTypeUserApp` | Mobile apps, voice assistants |
+| GRID | 1 (highest) | `ZoneTypeGrid` | External/regulatory authority (DSO, utility, SMGW) |
+| LOCAL | 2 | `ZoneTypeLocal` | Local energy management (home EMS, building EMS) |
 
 **Priority method:**
 ```go
@@ -66,11 +64,8 @@ const MaxZones = 5
 **Constraint:** A device MUST support up to 5 simultaneous zone memberships.
 
 **Rationale:** This allows for typical deployment scenarios:
-- Grid operator (regulatory)
-- Building manager (commercial)
-- Home manager (residential EMS)
-- User app #1 (primary phone)
-- User app #2 (secondary device/voice assistant)
+- Multiple GRID zones (e.g., DSO + regional grid operator)
+- Multiple LOCAL zones (e.g., home EMS + building EMS)
 
 ### 3.2 Capacity Enforcement
 
@@ -314,10 +309,8 @@ MASH.S.ZONE                      # Multi-zone support present
 MASH.S.ZONE.MAX=5                # Maximum zones per device
 
 # Zone types supported
-MASH.S.ZONE.GRID_OP              # GRID_OPERATOR zone (priority 1)
-MASH.S.ZONE.BLDG_MGR             # BUILDING_MANAGER zone (priority 2)
-MASH.S.ZONE.HOME_MGR             # HOME_MANAGER zone (priority 3)
-MASH.S.ZONE.USER_APP             # USER_APP zone (priority 4)
+MASH.S.ZONE.GRID                 # GRID zone (priority 1) - external/regulatory
+MASH.S.ZONE.LOCAL                # LOCAL zone (priority 2) - local energy management
 
 # Zone operations
 MASH.S.ZONE.ADD                  # AddZone operation

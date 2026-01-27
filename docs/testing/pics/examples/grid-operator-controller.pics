@@ -1,11 +1,11 @@
-# MASH PICS File - Grid Operator Controller (Pairing/Connection)
+# MASH PICS File - Grid Controller (Pairing/Connection)
 # Device: Smart Meter Gateway / DSO Controller
 # Version: 1.0
 # Date: 2025-01-25
 #
-# This PICS file represents a GRID_OPERATOR controller (highest priority).
+# This PICS file represents a GRID controller (highest priority).
 # Typically deployed as SMGW (Smart Meter Gateway) or DSO system.
-# Has authority to override lower-priority zones.
+# Has authority to override LOCAL zones.
 
 #=============================================================================
 # PROTOCOL SUPPORT
@@ -58,11 +58,11 @@ MASH.C.COMM.VERIFY_ATTESTATION=1
 MASH.C.COMM.REQUIRE_ATTESTATION=1
 
 #=============================================================================
-# ZONE MANAGEMENT (Client as Zone Owner - GRID_OPERATOR)
+# ZONE MANAGEMENT (Client as Zone Owner - GRID)
 #=============================================================================
 
 MASH.C.ZONE=1
-MASH.C.ZONE.TYPE="GRID_OPERATOR"
+MASH.C.ZONE.TYPE="GRID"
 MASH.C.ZONE.PRIORITY=1
 
 # Zone CA Management

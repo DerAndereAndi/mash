@@ -295,14 +295,14 @@ pics:
     - MASH.S.CTRL.F07
 
 preconditions:
-  - Device commissioned to Zone 1 (HOME_MANAGER) and Zone 2 (GRID_OPERATOR)
+  - Device commissioned to Zone 1 (LOCAL) and Zone 2 (GRID)
   - Zone 1 has scheduled process (processState = SCHEDULED)
   - Zone 1 is process owner
 
 steps:
   - id: 1
     action: |
-      Zone 2 (GRID_OPERATOR, higher priority) sends ScheduleProcess:
+      Zone 2 (GRID, higher priority) sends ScheduleProcess:
         processId: 1001
         requestedStart: now + 600  # Different time
         cause: GRID_REQUEST
@@ -337,21 +337,21 @@ pics:
     - MASH.S.CTRL.F07
 
 preconditions:
-  - Device commissioned to Zone 1 (HOME_MANAGER) and Zone 2 (USER_APP)
+  - Device commissioned to Zone 1 (GRID) and Zone 2 (LOCAL)
   - Zone 1 scheduled and owns the running process
   - processState = RUNNING
   - Process has run past minRunDuration
 
 steps:
   - id: 1
-    action: Zone 2 (USER_APP, lower priority than owner) sends Pause()
+    action: Zone 2 (LOCAL, lower priority than owner) sends Pause()
     expected:
       - Rejected (insufficient priority)
     verify:
       - response.success == false
 
   - id: 2
-    action: Zone 1 (HOME_MANAGER, owner) sends Pause()
+    action: Zone 1 (GRID, owner) sends Pause()
     expected:
       - success = true
       - processState = PAUSED

@@ -54,7 +54,7 @@ func TestFileStore(t *testing.T) {
 		store := NewFileStore(dir)
 
 		// Generate and store identity cert
-		ca, _ := GenerateZoneCA("test-zone", ZoneTypeHomeManager)
+		ca, _ := GenerateZoneCA("test-zone", ZoneTypeLocal)
 		kp, _ := GenerateKeyPair()
 		csrDER, _ := CreateCSR(kp, &CSRInfo{
 			Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1234, ProductID: 5678},
@@ -101,7 +101,7 @@ func TestFileStore(t *testing.T) {
 		store := NewFileStore(dir)
 
 		// Create Zone CA and operational cert
-		ca, _ := GenerateZoneCA("zone-1", ZoneTypeHomeManager)
+		ca, _ := GenerateZoneCA("zone-1", ZoneTypeLocal)
 		deviceKP, _ := GenerateKeyPair()
 		csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
 			Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1, ProductID: 1},
@@ -113,7 +113,7 @@ func TestFileStore(t *testing.T) {
 			Certificate: cert,
 			PrivateKey:  deviceKP.PrivateKey,
 			ZoneID:      "zone-1",
-			ZoneType:    ZoneTypeHomeManager,
+			ZoneType:    ZoneTypeLocal,
 			ZoneCACert:  ca.Certificate,
 		}
 
@@ -153,8 +153,8 @@ func TestFileStore(t *testing.T) {
 		if got.ZoneID != "zone-1" {
 			t.Errorf("ZoneID = %q, want %q", got.ZoneID, "zone-1")
 		}
-		if got.ZoneType != ZoneTypeHomeManager {
-			t.Errorf("ZoneType = %v, want %v", got.ZoneType, ZoneTypeHomeManager)
+		if got.ZoneType != ZoneTypeLocal {
+			t.Errorf("ZoneType = %v, want %v", got.ZoneType, ZoneTypeLocal)
 		}
 		if got.ZoneCACert == nil {
 			t.Error("ZoneCACert should not be nil")
@@ -167,7 +167,7 @@ func TestFileStore(t *testing.T) {
 
 		// Add multiple zones
 		for _, zoneID := range []string{"zone-a", "zone-b", "zone-c"} {
-			ca, _ := GenerateZoneCA(zoneID, ZoneTypeHomeManager)
+			ca, _ := GenerateZoneCA(zoneID, ZoneTypeLocal)
 			deviceKP, _ := GenerateKeyPair()
 			csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
 				Identity: DeviceIdentity{DeviceID: "device-001"},
@@ -179,7 +179,7 @@ func TestFileStore(t *testing.T) {
 				Certificate: cert,
 				PrivateKey:  deviceKP.PrivateKey,
 				ZoneID:      zoneID,
-				ZoneType:    ZoneTypeHomeManager,
+				ZoneType:    ZoneTypeLocal,
 				ZoneCACert:  ca.Certificate,
 			}
 			if err := store.SetOperationalCert(opCert); err != nil {
@@ -213,7 +213,7 @@ func TestFileStore(t *testing.T) {
 		store := NewFileStore(dir)
 
 		// Add a zone
-		ca, _ := GenerateZoneCA("zone-remove", ZoneTypeHomeManager)
+		ca, _ := GenerateZoneCA("zone-remove", ZoneTypeLocal)
 		deviceKP, _ := GenerateKeyPair()
 		csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
 			Identity: DeviceIdentity{DeviceID: "device-001"},
@@ -225,7 +225,7 @@ func TestFileStore(t *testing.T) {
 			Certificate: cert,
 			PrivateKey:  deviceKP.PrivateKey,
 			ZoneID:      "zone-remove",
-			ZoneType:    ZoneTypeHomeManager,
+			ZoneType:    ZoneTypeLocal,
 			ZoneCACert:  ca.Certificate,
 		}
 		_ = store.SetOperationalCert(opCert)
@@ -261,7 +261,7 @@ func TestFileControllerStore(t *testing.T) {
 		dir := t.TempDir()
 		store := NewFileControllerStore(dir)
 
-		ca, _ := GenerateZoneCA("my-zone", ZoneTypeHomeManager)
+		ca, _ := GenerateZoneCA("my-zone", ZoneTypeLocal)
 		if err := store.SetZoneCA(ca); err != nil {
 			t.Fatalf("SetZoneCA() error = %v", err)
 		}
@@ -295,8 +295,8 @@ func TestFileControllerStore(t *testing.T) {
 		if got.ZoneID != "my-zone" {
 			t.Errorf("ZoneID = %q, want %q", got.ZoneID, "my-zone")
 		}
-		if got.ZoneType != ZoneTypeHomeManager {
-			t.Errorf("ZoneType = %v, want %v", got.ZoneType, ZoneTypeHomeManager)
+		if got.ZoneType != ZoneTypeLocal {
+			t.Errorf("ZoneType = %v, want %v", got.ZoneType, ZoneTypeLocal)
 		}
 		if got.PrivateKey == nil {
 			t.Error("PrivateKey should not be nil")
@@ -402,7 +402,7 @@ func TestFileControllerStore(t *testing.T) {
 		store := NewFileControllerStore(dir)
 
 		// Create Zone CA first (required for controller cert)
-		ca, err := GenerateZoneCA("my-zone", ZoneTypeHomeManager)
+		ca, err := GenerateZoneCA("my-zone", ZoneTypeLocal)
 		if err != nil {
 			t.Fatalf("GenerateZoneCA() error = %v", err)
 		}
@@ -457,8 +457,8 @@ func TestFileControllerStore(t *testing.T) {
 		if loadedCert.ZoneID != "my-zone" {
 			t.Errorf("ZoneID = %q, want %q", loadedCert.ZoneID, "my-zone")
 		}
-		if loadedCert.ZoneType != ZoneTypeHomeManager {
-			t.Errorf("ZoneType = %v, want %v", loadedCert.ZoneType, ZoneTypeHomeManager)
+		if loadedCert.ZoneType != ZoneTypeLocal {
+			t.Errorf("ZoneType = %v, want %v", loadedCert.ZoneType, ZoneTypeLocal)
 		}
 	})
 

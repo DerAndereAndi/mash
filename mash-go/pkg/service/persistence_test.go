@@ -59,7 +59,7 @@ func TestDeviceServiceSaveLoadState(t *testing.T) {
 
 	// Connect a zone
 	zoneID := "zone-persist-001"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Set up persistence
 	dir := t.TempDir()
@@ -102,7 +102,7 @@ func TestDeviceServiceSaveLoadState(t *testing.T) {
 	if zones[0].ID != zoneID {
 		t.Errorf("zone ID = %q, want %q", zones[0].ID, zoneID)
 	}
-	if zones[0].Type != cert.ZoneTypeHomeManager {
+	if zones[0].Type != cert.ZoneTypeLocal {
 		t.Errorf("zone type = %v, want HomeManager", zones[0].Type)
 	}
 	if zones[0].Connected {
@@ -134,7 +134,7 @@ func TestDeviceServiceSaveStateWithFailsafeTimer(t *testing.T) {
 
 	// Connect a zone with a failsafe timer
 	zoneID := "zone-failsafe-001"
-	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Set failsafe timer using the existing method (this starts the timer)
 	timer := svc.GetFailsafeTimer(zoneID)
@@ -218,7 +218,7 @@ func TestDeviceServiceLoadStateBackwardCompatibility(t *testing.T) {
 
 	// Check that zones were created with default type (HomeManager)
 	for _, z := range zones {
-		if z.Type != cert.ZoneTypeHomeManager {
+		if z.Type != cert.ZoneTypeLocal {
 			t.Errorf("zone %s: type = %v, want HomeManager", z.ID, z.Type)
 		}
 		if z.Connected {

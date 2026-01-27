@@ -239,13 +239,13 @@ evse-001  / 1           / Measurement / acActivePower
 ┌─────────────────────────────────────────────────────────────┐
 │                      Device (EVSE)                           │
 ├─────────────────────────────────────────────────────────────┤
-│  Zone 1: GRID_OPERATOR                                       │
+│  Zone 1: GRID                                                │
 │    └── Operational Cert from SMGW                           │
 │    └── Priority 1 for LoadControl                           │
 │                                                              │
-│  Zone 2: HOME_MANAGER                                        │
+│  Zone 2: LOCAL                                               │
 │    └── Operational Cert from EMS                            │
-│    └── Priority 3 for LoadControl                           │
+│    └── Priority 2 for LoadControl                           │
 │                                                              │
 │  Max Zones: 5                                                │
 └─────────────────────────────────────────────────────────────┘
@@ -253,10 +253,8 @@ evse-001  / 1           / Measurement / acActivePower
 
 **Zone Types (priority order):**
 ```
-GRID_OPERATOR = 1     // DSO, SMGW - highest priority
-BUILDING_MANAGER = 2  // Commercial building EMS
-HOME_MANAGER = 3      // Residential EMS
-USER_APP = 4          // Mobile apps, voice - lowest priority
+GRID = 1   // DSO, SMGW, utility - external/regulatory authority
+LOCAL = 2  // Residential/building EMS - local energy management
 ```
 
 **Priority Resolution:**
@@ -1310,8 +1308,8 @@ SETPOINTS: Highest priority zone wins (only one controller active)
 
 **Power limits** - most restrictive wins:
 ```
-Zone 1 (GRID_OPERATOR): SetLimit(consumptionLimit: 6000000)
-Zone 2 (HOME_MANAGER):  SetLimit(consumptionLimit: 5000000)
+Zone 1 (GRID): SetLimit(consumptionLimit: 6000000)
+Zone 2 (LOCAL):  SetLimit(consumptionLimit: 5000000)
 
 effectiveConsumptionLimit = min(6000000, 5000000) = 5000000 mW
 ```
@@ -1330,15 +1328,15 @@ effectiveCurrentLimitsConsumption = {
 
 **Power setpoints** - highest priority zone wins:
 ```
-Zone 1 (GRID_OPERATOR, priority 1): SetSetpoint(consumptionSetpoint: 3000000)
-Zone 2 (HOME_MANAGER, priority 2):  SetSetpoint(consumptionSetpoint: 5000000)
+Zone 1 (GRID, priority 1): SetSetpoint(consumptionSetpoint: 3000000)
+Zone 2 (LOCAL, priority 2):  SetSetpoint(consumptionSetpoint: 5000000)
 
 effectiveConsumptionSetpoint = 3000000 mW (grid operator wins)
 ```
 
 **Per-phase current setpoints** - highest priority zone wins:
 ```
-Zone 2 (HOME_MANAGER): SetCurrentSetpoints({A: 10000, B: 2000, C: 5000}, PRODUCTION)
+Zone 2 (LOCAL): SetCurrentSetpoints({A: 10000, B: 2000, C: 5000}, PRODUCTION)
 
 effectiveCurrentSetpointsProduction = {A: 10000, B: 2000, C: 5000}
 ```
@@ -2232,10 +2230,10 @@ COMBINED          = 0x04  // Mix of price + constraints (CEVC input)
 
 **SignalSourceEnum:**
 ```
-GRID_OPERATOR     = 0x00  // DSO, TSO - highest authority for limits
+GRID              = 0x00  // DSO, TSO - highest authority for limits
 ENERGY_SUPPLIER   = 0x01  // Utility, retailer - price source
 AGGREGATOR        = 0x02  // VPP, flexibility provider
-HOME_EMS          = 0x03  // Local energy manager
+LOCAL_EMS         = 0x03  // Local energy manager
 USER              = 0x04  // Manual user input
 FORECAST_SERVICE  = 0x05  // Weather service, prediction provider
 SPOT_MARKET       = 0x06  // Direct spot price feed
@@ -2335,7 +2333,7 @@ Response:
 ```cbor
 {
   1: 2001,                        // signalId
-  2: 0x00,                        // source: GRID_OPERATOR
+  2: 0x00,                        // source: GRID
   3: 200,                         // priority (high - must respect)
   4: 1706140800,                  // validFrom
   5: 1706227200,                  // validUntil: +24h
@@ -2494,7 +2492,7 @@ PowerTierDefinition {
 **TariffSourceEnum:**
 ```
 ENERGY_SUPPLIER   = 0x00  // Utility/retailer
-GRID_OPERATOR     = 0x01  // DSO/TSO network charges
+GRID              = 0x01  // DSO/TSO network charges
 GOVERNMENT        = 0x02  // Tax authority
 AGGREGATOR        = 0x03  // Flexibility provider
 USER              = 0x04  // Manual configuration
@@ -2621,7 +2619,7 @@ Drawing 8kW → Tier 2 applies → all consumption priced at 1.3× base rate.
 {
   1: 2,                           // tariffId
   2: "Feed-in Compensation",      // name
-  3: 0x01,                        // source: GRID_OPERATOR
+  3: 0x01,                        // source: GRID
   4: 0x01,                        // scope: PRODUCTION (feed-in)
   10: "EUR",
   11: -4,

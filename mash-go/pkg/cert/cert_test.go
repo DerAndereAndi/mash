@@ -61,9 +61,8 @@ func TestGenerateZoneCA(t *testing.T) {
 		zoneID   string
 		zoneType ZoneType
 	}{
-		{"GridOperator", "grid-operator-1", ZoneTypeGridOperator},
-		{"HomeManager", "home-ems-1", ZoneTypeHomeManager},
-		{"UserApp", "mobile-app-1", ZoneTypeUserApp},
+		{"Grid", "grid-operator-1", ZoneTypeGrid},
+		{"Local", "home-ems-1", ZoneTypeLocal},
 	}
 
 	for _, tt := range tests {
@@ -114,7 +113,7 @@ func TestGenerateZoneCA(t *testing.T) {
 
 func TestCreateCSRAndSign(t *testing.T) {
 	// Create a Zone CA
-	ca, err := GenerateZoneCA("test-zone", ZoneTypeHomeManager)
+	ca, err := GenerateZoneCA("test-zone", ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("GenerateZoneCA() error = %v", err)
 	}
@@ -180,7 +179,7 @@ func TestCreateCSRAndSign(t *testing.T) {
 
 func TestVerifyOperationalCert(t *testing.T) {
 	// Create Zone CA
-	ca, err := GenerateZoneCA("test-zone", ZoneTypeHomeManager)
+	ca, err := GenerateZoneCA("test-zone", ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("GenerateZoneCA() error = %v", err)
 	}
@@ -201,7 +200,7 @@ func TestVerifyOperationalCert(t *testing.T) {
 	})
 
 	t.Run("WrongCA", func(t *testing.T) {
-		otherCA, _ := GenerateZoneCA("other-zone", ZoneTypeGridOperator)
+		otherCA, _ := GenerateZoneCA("other-zone", ZoneTypeGrid)
 		err := VerifyOperationalCert(cert, otherCA.Certificate)
 		if err == nil {
 			t.Error("VerifyOperationalCert() should fail with wrong CA")
@@ -225,7 +224,7 @@ func TestVerifyOperationalCert(t *testing.T) {
 
 func TestOperationalCertExpiry(t *testing.T) {
 	// Create a cert with known expiry
-	ca, _ := GenerateZoneCA("test-zone", ZoneTypeHomeManager)
+	ca, _ := GenerateZoneCA("test-zone", ZoneTypeLocal)
 	deviceKP, _ := GenerateKeyPair()
 	csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
 		Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1, ProductID: 1},
@@ -237,7 +236,7 @@ func TestOperationalCertExpiry(t *testing.T) {
 		Certificate: cert,
 		PrivateKey:  deviceKP.PrivateKey,
 		ZoneID:      "test-zone",
-		ZoneType:    ZoneTypeHomeManager,
+		ZoneType:    ZoneTypeLocal,
 		ZoneCACert:  ca.Certificate,
 	}
 
@@ -275,10 +274,8 @@ func TestZoneTypeString(t *testing.T) {
 		want     string
 		priority uint8
 	}{
-		{ZoneTypeGridOperator, "GRID_OPERATOR", 1},
-		{ZoneTypeBuildingManager, "BUILDING_MANAGER", 2},
-		{ZoneTypeHomeManager, "HOME_MANAGER", 3},
-		{ZoneTypeUserApp, "USER_APP", 4},
+		{ZoneTypeGrid, "GRID", 1},
+		{ZoneTypeLocal, "LOCAL", 2},
 		{ZoneType(99), "UNKNOWN", 99},
 	}
 
@@ -296,7 +293,7 @@ func TestZoneTypeString(t *testing.T) {
 
 // TC-IMPL-CERT-GEN-001: Generate Controller Operational Certificate
 func TestGenerateControllerOperationalCert(t *testing.T) {
-	ca, err := GenerateZoneCA("home-ems", ZoneTypeHomeManager)
+	ca, err := GenerateZoneCA("home-ems", ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("GenerateZoneCA() error = %v", err)
 	}
@@ -362,8 +359,8 @@ func TestGenerateControllerOperationalCert(t *testing.T) {
 	if opCert.ZoneID != "home-ems" {
 		t.Errorf("ZoneID = %q, want %q", opCert.ZoneID, "home-ems")
 	}
-	if opCert.ZoneType != ZoneTypeHomeManager {
-		t.Errorf("ZoneType = %v, want %v", opCert.ZoneType, ZoneTypeHomeManager)
+	if opCert.ZoneType != ZoneTypeLocal {
+		t.Errorf("ZoneType = %v, want %v", opCert.ZoneType, ZoneTypeLocal)
 	}
 	if opCert.ZoneCACert != ca.Certificate {
 		t.Error("ZoneCACert should be set to Zone CA certificate")
@@ -372,7 +369,7 @@ func TestGenerateControllerOperationalCert(t *testing.T) {
 
 // TC-IMPL-CERT-GEN-002: Controller Cert Subject Contains Zone Info
 func TestGenerateControllerOperationalCertSubject(t *testing.T) {
-	ca, err := GenerateZoneCA("home-ems", ZoneTypeHomeManager)
+	ca, err := GenerateZoneCA("home-ems", ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("GenerateZoneCA() error = %v", err)
 	}
@@ -402,7 +399,7 @@ func TestGenerateControllerOperationalCertSubject(t *testing.T) {
 	hasZoneType := false
 	hasZoneID := false
 	for _, ou := range cert.Subject.OrganizationalUnit {
-		if ou == "HOME_MANAGER" {
+		if ou == "LOCAL" {
 			hasZoneType = true
 		}
 		if ou == "home-ems" {
@@ -419,7 +416,7 @@ func TestGenerateControllerOperationalCertSubject(t *testing.T) {
 
 // TC-IMPL-CERT-GEN-003: Controller Cert Uses Fresh Key Pair
 func TestGenerateControllerOperationalCertFreshKeys(t *testing.T) {
-	ca, err := GenerateZoneCA("home-ems", ZoneTypeHomeManager)
+	ca, err := GenerateZoneCA("home-ems", ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("GenerateZoneCA() error = %v", err)
 	}
@@ -448,7 +445,7 @@ func TestGenerateControllerOperationalCertFreshKeys(t *testing.T) {
 
 // TC-IMPL-CERT-GEN-004: Controller Cert Verification
 func TestGenerateControllerOperationalCertVerification(t *testing.T) {
-	ca, err := GenerateZoneCA("home-ems", ZoneTypeHomeManager)
+	ca, err := GenerateZoneCA("home-ems", ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("GenerateZoneCA() error = %v", err)
 	}
@@ -465,7 +462,7 @@ func TestGenerateControllerOperationalCertVerification(t *testing.T) {
 	}
 
 	// Verify against a different Zone CA should fail
-	otherCA, _ := GenerateZoneCA("other-zone", ZoneTypeGridOperator)
+	otherCA, _ := GenerateZoneCA("other-zone", ZoneTypeGrid)
 	err = VerifyOperationalCert(opCert.Certificate, otherCA.Certificate)
 	if err == nil {
 		t.Error("Certificate should NOT verify against different Zone CA")

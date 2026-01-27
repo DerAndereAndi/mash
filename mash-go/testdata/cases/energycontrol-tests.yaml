@@ -350,7 +350,7 @@ steps:
   - name: Other zone sets 5 kW limit
     action: invoke_as_zone
     params:
-      zone: GRID_OPERATOR
+      zone: GRID
       endpoint: 1
       feature: EnergyControl
       command: SetLimit

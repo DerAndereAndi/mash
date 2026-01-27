@@ -45,7 +45,7 @@ func (c *mockRenewalConn) GetSent() [][]byte {
 // TestControllerRenewalHandler_InitiateRenewal tests renewal initiation.
 func TestControllerRenewalHandler_InitiateRenewal(t *testing.T) {
 	// Create Zone CA
-	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeHomeManager)
+	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("Failed to create Zone CA: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestControllerRenewalHandler_InitiateRenewal(t *testing.T) {
 // TestControllerRenewalHandler_CompleteRenewal tests full renewal flow.
 func TestControllerRenewalHandler_CompleteRenewal(t *testing.T) {
 	// Create Zone CA
-	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeHomeManager)
+	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("Failed to create Zone CA: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestControllerRenewalHandler_CompleteRenewal(t *testing.T) {
 // TestControllerRenewalHandler_PreservesSession tests session continuity.
 func TestControllerRenewalHandler_PreservesSession(t *testing.T) {
 	// This test verifies that renewal doesn't close the connection
-	zoneCA, _ := cert.GenerateZoneCA("test-zone", cert.ZoneTypeHomeManager)
+	zoneCA, _ := cert.GenerateZoneCA("test-zone", cert.ZoneTypeLocal)
 
 	deviceIdentity := &cert.DeviceIdentity{
 		DeviceID:     "test-device-001",
@@ -262,7 +262,7 @@ func TestControllerRenewalHandler_PreservesSession(t *testing.T) {
 // TC-IMPL-RENEWAL-001: Controller Cert Needs Renewal Check
 func TestControllerCertNeedsRenewal(t *testing.T) {
 	// Create Zone CA and controller cert
-	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeHomeManager)
+	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("Failed to create Zone CA: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestControllerService_RenewControllerCert(t *testing.T) {
 	certStore := cert.NewFileControllerStore(tempDir)
 
 	// Generate Zone CA
-	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeHomeManager)
+	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeLocal)
 	if err != nil {
 		t.Fatalf("Failed to create Zone CA: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestControllerService_ControllerCertNeedsRenewal(t *testing.T) {
 	certStore := cert.NewFileControllerStore(tempDir)
 
 	// Setup Zone CA and controller cert
-	zoneCA, _ := cert.GenerateZoneCA("test-zone", cert.ZoneTypeHomeManager)
+	zoneCA, _ := cert.GenerateZoneCA("test-zone", cert.ZoneTypeLocal)
 	certStore.SetZoneCA(zoneCA)
 	controllerCert, _ := cert.GenerateControllerOperationalCert(zoneCA, "controller-test")
 	certStore.SetControllerCert(controllerCert)
@@ -430,7 +430,7 @@ func TestControllerService_LoadsExistingCertOnStart(t *testing.T) {
 	certStore := cert.NewFileControllerStore(tempDir)
 
 	// Pre-create Zone CA and controller cert
-	zoneCA, _ := cert.GenerateZoneCA("existing-test", cert.ZoneTypeHomeManager)
+	zoneCA, _ := cert.GenerateZoneCA("existing-test", cert.ZoneTypeLocal)
 	certStore.SetZoneCA(zoneCA)
 	existingCert, _ := cert.GenerateControllerOperationalCert(zoneCA, "controller-existing")
 	certStore.SetControllerCert(existingCert)

@@ -203,8 +203,8 @@ EMS Fabric (Home):
     └── User's Tablet
 
 Device (EVSE):
-  ├── Fabric 1: SMGW (GRID_OPERATOR)
-  └── Fabric 2: EMS (HOME_MANAGER)
+  ├── Fabric 1: SMGW (GRID)
+  └── Fabric 2: EMS (LOCAL)
 ```
 
 **Commissioning Flows:**

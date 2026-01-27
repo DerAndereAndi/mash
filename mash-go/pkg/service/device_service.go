@@ -427,8 +427,8 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	zoneID := deriveZoneID(sharedSecret)
 
 	// Register the zone connection
-	// For now, assume HomeManager type since we don't have certificate-based zone typing yet
-	s.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
+	// For now, assume Local type since we don't have certificate-based zone typing yet
+	s.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Persist state immediately after commissioning
 	_ = s.SaveState()
@@ -1079,9 +1079,9 @@ func (s *DeviceService) LoadState() error {
 		}
 	} else if len(state.ZoneIndexMap) > 0 {
 		// Backward compatibility: derive zones from zone_index_map
-		// We don't have zone type info, assume HomeManager as default
+		// We don't have zone type info, assume Local as default
 		for zoneID := range state.ZoneIndexMap {
-			zoneType := cert.ZoneTypeHomeManager
+			zoneType := cert.ZoneTypeLocal
 			cz := &ConnectedZone{
 				ID:        zoneID,
 				Type:      zoneType,

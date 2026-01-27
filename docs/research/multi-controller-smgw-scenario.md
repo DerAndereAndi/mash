@@ -150,21 +150,19 @@ User                Phone App           DSO Backend         SMGW              De
 
 **Per-Cluster Priority Matrix:**
 
-| Cluster | Grid Operator (SMGW) | Home Manager (EMS) | User App |
-|---------|---------------------|-------------------|----------|
-| LoadControl | **Priority 1** | Priority 2 | Priority 3 |
-| Measurement | Read-only | Read + Subscribe | Read |
-| ChargingSession | Override only | Full control | View only |
-| DeviceInfo | Read-only | Read-only | Read-only |
-| UserPreferences | No access | Full control | Full control |
+| Cluster | Grid (SMGW) | Local (EMS) |
+|---------|-------------|-------------|
+| LoadControl | **Priority 1** | Priority 2 |
+| Measurement | Read-only | Read + Subscribe |
+| ChargingSession | Override only | Full control |
+| DeviceInfo | Read-only | Read-only |
+| UserPreferences | No access | Full control |
 
 **Fabric Types (announced during commissioning):**
 ```
 enum FabricType {
-  GRID_OPERATOR = 1,    // DSO, utility - highest priority for grid functions
-  BUILDING_MANAGER = 2, // Commercial building EMS
-  HOME_MANAGER = 3,     // Residential EMS
-  USER_APP = 4,         // Mobile apps, voice assistants
+  GRID = 1,   // DSO, utility, SMGW - external/regulatory authority
+  LOCAL = 2,  // Residential/building EMS - local energy management
 }
 ```
 
@@ -187,7 +185,7 @@ User                    EMS                  Device
  │   (via EMS app)       │                     │
  │                       │── SPAKE2+ ─────────►│
  │                       │◄── Accept ──────────┤
- │                       │── Install OpCert ──►│  (Fabric: HOME_MANAGER)
+ │                       │── Install OpCert ──►│  (Fabric: LOCAL)
  │                       │◄── Done ────────────┤
 ```
 
@@ -201,15 +199,15 @@ User              Phone App        Backend         SMGW           Device
  │                    │              │── Forward ──►│               │
  │                    │              │              │── SPAKE2+ ───►│
  │                    │              │              │◄── Accept ────┤
- │                    │              │              │── OpCert ────►│  (Fabric: GRID_OP)
+ │                    │              │              │── OpCert ────►│  (Fabric: GRID)
 ```
 
 **Result: Device has two fabrics**
 ```
 Device State:
   Fabrics:
-    - fabric_1: {type: GRID_OPERATOR, ca: smgw_ca, cert: op_cert_1}
-    - fabric_2: {type: HOME_MANAGER, ca: ems_ca, cert: op_cert_2}
+    - fabric_1: {type: GRID, ca: smgw_ca, cert: op_cert_1}
+    - fabric_2: {type: LOCAL, ca: ems_ca, cert: op_cert_2}
 ```
 
 ---
@@ -327,7 +325,7 @@ EMS App:
 - Configurable: Device announces max in DeviceInfo
 - Unlimited: Limited only by storage
 
-**Recommendation:** 5 fabrics max (covers grid, building, home, 2 apps)
+**Recommendation:** 5 fabrics max (covers multiple GRID and LOCAL zones)
 
 ### Q2: Can fabrics see each other?
 
@@ -363,7 +361,7 @@ EMS App:
 **Key Design Decisions Needed:**
 
 1. **Multi-fabric support** - Device can be in multiple fabrics simultaneously
-2. **Fabric types** - Enum defining priority (GRID > BUILDING > HOME > USER)
+2. **Fabric types** - Enum defining priority (GRID > LOCAL)
 3. **Per-cluster priority** - Not global, different clusters may have different priority
 4. **Delegated commissioning** - QR code info can be uploaded to backend
 5. **Limit source tracking** - Device tracks which fabric set each limit

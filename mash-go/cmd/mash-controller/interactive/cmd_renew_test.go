@@ -26,7 +26,7 @@ func TestRenewDevice_NoDevices(t *testing.T) {
 	// Create a minimal controller service (no devices)
 	cfg := service.ControllerConfig{
 		ZoneName: "test-zone",
-		ZoneType: 3, // HOME_MANAGER
+		ZoneType: 2, // LOCAL
 	}
 	svc, err := service.NewControllerService(cfg)
 	if err != nil {

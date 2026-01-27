@@ -196,7 +196,7 @@ func DefaultDeviceConfig() DeviceConfig {
 // DefaultControllerConfig returns a ControllerConfig with sensible defaults.
 func DefaultControllerConfig() ControllerConfig {
 	return ControllerConfig{
-		ZoneType:                    cert.ZoneTypeHomeManager,
+		ZoneType:                    cert.ZoneTypeLocal,
 		DiscoveryTimeout:            10 * time.Second,
 		ConnectionTimeout:           30 * time.Second,
 		HeartbeatInterval:           30 * time.Second,
@@ -235,7 +235,7 @@ func (c *ControllerConfig) Validate() error {
 	if c.ZoneName == "" {
 		return ErrInvalidConfig
 	}
-	if c.ZoneType < cert.ZoneTypeGridOperator || c.ZoneType > cert.ZoneTypeUserApp {
+	if c.ZoneType < cert.ZoneTypeGrid || c.ZoneType > cert.ZoneTypeLocal {
 		return ErrInvalidConfig
 	}
 	return nil

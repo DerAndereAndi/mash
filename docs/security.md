@@ -36,7 +36,7 @@ MASH uses binary trust: **paired or not paired**.
 Priority determines who can override whom, not who is "more trusted":
 
 ```
-GRID_OPERATOR (priority 1) > BUILDING_MANAGER (2) > HOME_MANAGER (3) > USER_APP (4)
+GRID (priority 1) > LOCAL (priority 2)
 ```
 
 All paired controllers are fully trusted within their zone. Priority only affects conflict resolution.
@@ -231,13 +231,13 @@ Devices can belong to multiple zones simultaneously.
 ┌─────────────────────────────────────────────────────────────┐
 │                      Device (EVSE)                           │
 ├─────────────────────────────────────────────────────────────┤
-│  Zone 1: GRID_OPERATOR                                       │
+│  Zone 1: GRID                                                │
 │    └── Operational Cert from SMGW                           │
 │    └── Priority 1 for LoadControl                           │
 │                                                              │
-│  Zone 2: HOME_MANAGER                                        │
+│  Zone 2: LOCAL                                               │
 │    └── Operational Cert from EMS                            │
-│    └── Priority 3 for LoadControl                           │
+│    └── Priority 2 for LoadControl                           │
 │                                                              │
 │  Max Zones: 5                                                │
 └─────────────────────────────────────────────────────────────┘
@@ -247,10 +247,8 @@ Devices can belong to multiple zones simultaneously.
 
 | Zone Type | Priority | Typical Owner |
 |-----------|----------|---------------|
-| GRID_OPERATOR | 1 (highest) | DSO, SMGW |
-| BUILDING_MANAGER | 2 | Commercial building EMS |
-| HOME_MANAGER | 3 | Residential EMS |
-| USER_APP | 4 (lowest) | Mobile apps, voice assistants |
+| GRID | 1 (highest) | DSO, SMGW, utility |
+| LOCAL | 2 | Residential/building EMS |
 
 ### 6.3 Priority Resolution
 

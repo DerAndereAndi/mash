@@ -36,7 +36,7 @@ type ZoneMembership struct {
 	// ZoneID is the unique identifier for the zone.
 	ZoneID string `json:"zone_id"`
 
-	// ZoneType is the zone type (1=GRID_OPERATOR, 2=BUILDING_MANAGER, etc.).
+	// ZoneType is the zone type (1=GRID, 2=LOCAL).
 	ZoneType uint8 `json:"zone_type"`
 
 	// ControllerID identifies the controller that commissioned this device.

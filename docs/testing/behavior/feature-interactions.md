@@ -73,8 +73,8 @@ effectiveLimit = min(
 **Example:**
 ```
 Electrical.nominalMaxConsumption = 11000000 mW (11 kW hardware)
-EnergyControl.effectiveConsumptionLimit = 7400000 mW (7.4 kW from HOME_MANAGER)
-Signals.activeSlot.maxPower = 5000000 mW (5 kW from GRID_OPERATOR)
+EnergyControl.effectiveConsumptionLimit = 7400000 mW (7.4 kW from LOCAL)
+Signals.activeSlot.maxPower = 5000000 mW (5 kW from GRID)
 
 Device operates at: max 5000000 mW (most restrictive wins)
 ```
@@ -116,10 +116,10 @@ When multiple zones send Signals:
 **Rule: Zone priority applies, same as setpoints (highest priority wins)**
 
 ```
-Zone 1 (GRID_OPERATOR): Signal with maxPower = 3000000 mW
-Zone 2 (HOME_MANAGER): Signal with maxPower = 5000000 mW
+Zone 1 (GRID): Signal with maxPower = 3000000 mW
+Zone 2 (LOCAL): Signal with maxPower = 5000000 mW
 
-Active Signal: Zone 1's signal (GRID_OPERATOR priority wins)
+Active Signal: Zone 1's signal (GRID priority wins)
 effectiveLimit from Signals = 3000000 mW
 ```
 
@@ -428,21 +428,21 @@ Device SHOULD update Plan when any of these change:
 ### TC-FI-008: Multi-Zone Signal Priority
 
 **Preconditions:**
-- Zone 1 (GRID_OPERATOR): Signal maxPower = 3000000 mW
-- Zone 2 (HOME_MANAGER): Signal maxPower = 5000000 mW
+- Zone 1 (GRID): Signal maxPower = 3000000 mW
+- Zone 2 (LOCAL): Signal maxPower = 5000000 mW
 
 **Test:**
 - Read effective signal constraint
 
 **Expected:**
-- Active signal is Zone 1's (GRID_OPERATOR priority wins)
+- Active signal is Zone 1's (GRID priority wins)
 - Effective constraint from signals = 3000000 mW
 
 ### TC-FI-009: EnergyControl Limit vs Signal - Both Apply
 
 **Preconditions:**
-- Zone 1 (GRID_OPERATOR): EnergyControl.myConsumptionLimit = 6000000 mW
-- Zone 2 (HOME_MANAGER): Signal maxPower = 4000000 mW
+- Zone 1 (GRID): EnergyControl.myConsumptionLimit = 6000000 mW
+- Zone 2 (LOCAL): Signal maxPower = 4000000 mW
 
 **Test:**
 - Calculate effective operating envelope
