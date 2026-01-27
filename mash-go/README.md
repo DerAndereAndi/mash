@@ -14,11 +14,52 @@ This implementation provides:
 
 ```bash
 # Build all commands
-go build ./...
+make build
+# or: go build ./...
 
-# Run tests
-go test ./...
+# Run unit tests (fast)
+make test-unit
+# or: go test ./...
+
+# Run all tests including integration tests
+make test
 ```
+
+## Development
+
+### Testing
+
+Tests are separated into unit tests and integration tests using Go build tags.
+
+```bash
+# Run unit tests (fast, no network required)
+make test-unit
+# or: go test ./...
+
+# Run integration tests (requires network, slower)
+make test-integration
+# or: go test -tags=integration ./...
+
+# Run all tests
+make test
+```
+
+### Mock Generation
+
+Mocks are generated using [mockery v2](https://github.com/vektra/mockery).
+
+```bash
+# Install mockery (one-time setup)
+make install-mockery
+
+# Regenerate mocks after interface changes
+make mocks
+# or: go generate ./...
+```
+
+Generated mocks are in `mocks/` subdirectories:
+- `pkg/transport/mocks/` - Transport layer mocks
+- `pkg/discovery/mocks/` - Discovery layer mocks
 
 ## Commands
 

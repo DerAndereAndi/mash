@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
 	"github.com/mash-protocol/mash-go/pkg/failsafe"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/persistence"
@@ -42,7 +45,10 @@ func TestDeviceServiceSaveLoadState(t *testing.T) {
 	}
 
 	// Set up mock advertiser and start
-	advertiser := newMockAdvertiser()
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 
 	ctx := context.Background()
@@ -114,7 +120,10 @@ func TestDeviceServiceSaveStateWithFailsafeTimer(t *testing.T) {
 	}
 
 	// Set up mock advertiser and start
-	advertiser := newMockAdvertiser()
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 
 	ctx := context.Background()
@@ -275,7 +284,8 @@ func TestControllerServiceSaveLoadState(t *testing.T) {
 	}
 
 	// Set up mock browser and start
-	browser := newMockBrowser()
+	browser := mocks.NewMockBrowser(t)
+	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
 	ctx := context.Background()

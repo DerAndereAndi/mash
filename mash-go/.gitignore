@@ -30,3 +30,7 @@ vendor/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime state and identity files (generated per-instance)
+cmd/*/state.json
+cmd/*/identity/

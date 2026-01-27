@@ -6,183 +6,45 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
+	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
 
-// mockAdvertiser is a test double for discovery.Advertiser.
-type mockAdvertiser struct {
-	mu                      sync.Mutex
-	commissionableInfo      *discovery.CommissionableInfo
-	operationalZones        map[string]*discovery.OperationalInfo
-	commissionerZones       map[string]*discovery.CommissionerInfo
-	isCommissioningActive   bool
-}
+// Test helpers
 
-func newMockAdvertiser() *mockAdvertiser {
-	return &mockAdvertiser{
-		operationalZones:  make(map[string]*discovery.OperationalInfo),
-		commissionerZones: make(map[string]*discovery.CommissionerInfo),
-	}
-}
-
-func (m *mockAdvertiser) AdvertiseCommissionable(_ context.Context, info *discovery.CommissionableInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.commissionableInfo = info
-	m.isCommissioningActive = true
-	return nil
-}
-
-func (m *mockAdvertiser) StopCommissionable() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.isCommissioningActive = false
-	return nil
-}
-
-func (m *mockAdvertiser) AdvertiseOperational(_ context.Context, info *discovery.OperationalInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.operationalZones[info.ZoneID] = info
-	return nil
-}
-
-func (m *mockAdvertiser) UpdateOperational(zoneID string, info *discovery.OperationalInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.operationalZones[zoneID] = info
-	return nil
-}
-
-func (m *mockAdvertiser) StopOperational(zoneID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.operationalZones, zoneID)
-	return nil
-}
-
-func (m *mockAdvertiser) AdvertiseCommissioner(_ context.Context, info *discovery.CommissionerInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.commissionerZones[info.ZoneID] = info
-	return nil
-}
-
-func (m *mockAdvertiser) UpdateCommissioner(zoneID string, info *discovery.CommissionerInfo) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.commissionerZones[zoneID] = info
-	return nil
-}
-
-func (m *mockAdvertiser) StopCommissioner(zoneID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.commissionerZones, zoneID)
-	return nil
-}
-
-func (m *mockAdvertiser) StopAll() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.commissionableInfo = nil
-	m.isCommissioningActive = false
-	m.operationalZones = make(map[string]*discovery.OperationalInfo)
-	m.commissionerZones = make(map[string]*discovery.CommissionerInfo)
-}
-
-// mockBrowser is a test double for discovery.Browser.
-type mockBrowser struct {
-	mu                    sync.Mutex
-	commissionableDevices []*discovery.CommissionableService
-	operationalDevices    []*discovery.OperationalService
-	commissioners         []*discovery.CommissionerService
-}
-
-func newMockBrowser() *mockBrowser {
-	return &mockBrowser{}
-}
-
-func (m *mockBrowser) BrowseCommissionable(_ context.Context) (<-chan *discovery.CommissionableService, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+// makeCommissionableChannel creates a channel that emits the given services then closes.
+func makeCommissionableChannel(services ...*discovery.CommissionableService) <-chan *discovery.CommissionableService {
 	ch := make(chan *discovery.CommissionableService)
 	go func() {
 		defer close(ch)
-		for _, svc := range m.commissionableDevices {
+		for _, svc := range services {
 			ch <- svc
 		}
 	}()
-	return ch, nil
+	return ch
 }
 
-func (m *mockBrowser) BrowseOperational(_ context.Context, _ string) (<-chan *discovery.OperationalService, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+// makeOperationalChannel creates a channel that emits the given services then closes.
+func makeOperationalChannel(services ...*discovery.OperationalService) <-chan *discovery.OperationalService {
 	ch := make(chan *discovery.OperationalService)
 	go func() {
 		defer close(ch)
-		for _, svc := range m.operationalDevices {
+		for _, svc := range services {
 			ch <- svc
 		}
 	}()
-	return ch, nil
-}
-
-func (m *mockBrowser) BrowseCommissioners(_ context.Context) (<-chan *discovery.CommissionerService, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	ch := make(chan *discovery.CommissionerService)
-	go func() {
-		defer close(ch)
-		for _, svc := range m.commissioners {
-			ch <- svc
-		}
-	}()
-	return ch, nil
-}
-
-func (m *mockBrowser) FindByDiscriminator(_ context.Context, discriminator uint16) (*discovery.CommissionableService, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for _, svc := range m.commissionableDevices {
-		if svc.Discriminator == discriminator {
-			return svc, nil
-		}
-	}
-	return nil, discovery.ErrNotFound
-}
-
-func (m *mockBrowser) Stop() {}
-
-func (m *mockBrowser) AddDevice(svc *discovery.CommissionableService) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.commissionableDevices = append(m.commissionableDevices, svc)
-}
-
-func (m *mockBrowser) AddOperationalDevice(svc *discovery.OperationalService) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.operationalDevices = append(m.operationalDevices, svc)
-}
-
-func (m *mockBrowser) ClearOperationalDevices() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.operationalDevices = nil
+	return ch
 }
 
 // Test helpers
 
 func validDeviceConfig() DeviceConfig {
 	config := DefaultDeviceConfig()
+	config.ListenAddress = "127.0.0.1:0" // Use dynamic port to avoid conflicts
 	config.Discriminator = 1234
 	config.SetupCode = "12345678"
 	config.SerialNumber = "SN001"
@@ -403,7 +265,10 @@ func TestDeviceServiceCommissioningMode(t *testing.T) {
 	}
 
 	// Set up mock advertiser
-	advertiser := newMockAdvertiser()
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Once()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Once()
+	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 
 	// Start service
@@ -418,26 +283,12 @@ func TestDeviceServiceCommissioningMode(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	advertiser.mu.Lock()
-	active := advertiser.isCommissioningActive
-	advertiser.mu.Unlock()
-
-	if !active {
-		t.Error("expected commissioning to be active")
-	}
-
 	// Exit commissioning mode
 	if err := svc.ExitCommissioningMode(); err != nil {
 		t.Fatalf("ExitCommissioningMode failed: %v", err)
 	}
 
-	advertiser.mu.Lock()
-	active = advertiser.isCommissioningActive
-	advertiser.mu.Unlock()
-
-	if active {
-		t.Error("expected commissioning to be inactive")
-	}
+	// Mock expectations are automatically verified by NewMockAdvertiser(t)
 }
 
 // ControllerService tests
@@ -576,22 +427,35 @@ func TestControllerServiceDiscovery(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
-	// Set up mock browser
-	browser := newMockBrowser()
-	browser.AddDevice(&discovery.CommissionableService{
+	// Test data
+	device1 := &discovery.CommissionableService{
 		InstanceName:  "MASH-1234",
 		Host:          "evse-001.local",
 		Port:          8443,
 		Discriminator: 1234,
 		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
-	})
-	browser.AddDevice(&discovery.CommissionableService{
+	}
+	device2 := &discovery.CommissionableService{
 		InstanceName:  "MASH-5678",
 		Host:          "inverter-001.local",
 		Port:          8443,
 		Discriminator: 5678,
 		Categories:    []discovery.DeviceCategory{discovery.CategoryInverter},
-	})
+	}
+
+	// Set up mock browser
+	browser := mocks.NewMockBrowser(t)
+	// BrowseCommissionable is called multiple times (once per Discover call)
+	// Use RunAndReturn to create a fresh channel for each call (channels can only be consumed once)
+	browser.EXPECT().BrowseCommissionable(mock.Anything).
+		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, error) {
+			return makeCommissionableChannel(device1, device2), nil
+		}).Times(2)
+	browser.EXPECT().FindByDiscriminator(mock.Anything, uint16(5678)).
+		Return(device2, nil).Once()
+	browser.EXPECT().FindByDiscriminator(mock.Anything, uint16(9999)).
+		Return(nil, discovery.ErrNotFound).Once()
+	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
 	// Start service
@@ -770,8 +634,14 @@ func TestDeviceServiceOperationalAdvertisingOnZoneConnect(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
-	// Set up mock advertiser
-	advertiser := newMockAdvertiser()
+	// Set up mock advertiser - capture the operational info for verification
+	var capturedOpInfo *discovery.OperationalInfo
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, info *discovery.OperationalInfo) {
+			capturedOpInfo = info
+		}).Return(nil).Once()
+	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 
 	// Start service
@@ -785,21 +655,17 @@ func TestDeviceServiceOperationalAdvertisingOnZoneConnect(t *testing.T) {
 	zoneID := "a1b2c3d4e5f6a7b8"
 	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
 
-	// Verify operational advertising started
-	advertiser.mu.Lock()
-	opInfo, exists := advertiser.operationalZones[zoneID]
-	advertiser.mu.Unlock()
-
-	if !exists {
+	// Verify operational advertising was called with correct zone ID
+	if capturedOpInfo == nil {
 		t.Fatal("expected operational advertising to start after zone connect")
 	}
 
-	if opInfo.ZoneID != zoneID {
-		t.Errorf("expected zone ID %s, got %s", zoneID, opInfo.ZoneID)
+	if capturedOpInfo.ZoneID != zoneID {
+		t.Errorf("expected zone ID %s, got %s", zoneID, capturedOpInfo.ZoneID)
 	}
 
 	// Device ID should be set (derived from certificate fingerprint)
-	if opInfo.DeviceID == "" {
+	if capturedOpInfo.DeviceID == "" {
 		t.Error("expected device ID to be set in operational info")
 	}
 }
@@ -813,8 +679,11 @@ func TestDeviceServiceOperationalAdvertisingPersistsOnDisconnect(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
-	// Set up mock advertiser
-	advertiser := newMockAdvertiser()
+	// Set up mock advertiser - we expect AdvertiseOperational but NOT StopOperational
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Once()
+	// Note: We explicitly do NOT expect StopOperational to be called on disconnect
+	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 
 	// Start service
@@ -828,26 +697,10 @@ func TestDeviceServiceOperationalAdvertisingPersistsOnDisconnect(t *testing.T) {
 	zoneID := "a1b2c3d4e5f6a7b8"
 	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
 
-	// Verify advertising started
-	advertiser.mu.Lock()
-	_, exists := advertiser.operationalZones[zoneID]
-	advertiser.mu.Unlock()
-
-	if !exists {
-		t.Fatal("expected operational advertising to start")
-	}
-
-	// Simulate disconnect
+	// Simulate disconnect - operational advertising should PERSIST
 	svc.HandleZoneDisconnect(zoneID)
 
-	// Operational advertising should PERSIST (so controller can rediscover)
-	advertiser.mu.Lock()
-	_, stillExists := advertiser.operationalZones[zoneID]
-	advertiser.mu.Unlock()
-
-	if !stillExists {
-		t.Error("operational advertising should persist after disconnect for reconnection")
-	}
+	// If StopOperational was called, the mock would fail the test
 }
 
 func TestDeviceServiceMultipleZonesOperationalAdvertising(t *testing.T) {
@@ -859,8 +712,10 @@ func TestDeviceServiceMultipleZonesOperationalAdvertising(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
-	// Set up mock advertiser
-	advertiser := newMockAdvertiser()
+	// Set up mock advertiser - expect two AdvertiseOperational calls
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Times(2)
+	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 
 	// Start service
@@ -877,22 +732,7 @@ func TestDeviceServiceMultipleZonesOperationalAdvertising(t *testing.T) {
 	svc.HandleZoneConnect(zone1, cert.ZoneTypeHomeManager)
 	svc.HandleZoneConnect(zone2, cert.ZoneTypeBuildingManager)
 
-	// Verify both zones are advertised
-	advertiser.mu.Lock()
-	_, zone1Exists := advertiser.operationalZones[zone1]
-	_, zone2Exists := advertiser.operationalZones[zone2]
-	zoneCount := len(advertiser.operationalZones)
-	advertiser.mu.Unlock()
-
-	if !zone1Exists {
-		t.Error("expected zone1 to be advertised")
-	}
-	if !zone2Exists {
-		t.Error("expected zone2 to be advertised")
-	}
-	if zoneCount != 2 {
-		t.Errorf("expected 2 operational zones, got %d", zoneCount)
-	}
+	// Mock expectations verify both zones were advertised
 }
 
 func TestDeviceServiceOperationalAdvertisingInfo(t *testing.T) {
@@ -906,8 +746,14 @@ func TestDeviceServiceOperationalAdvertisingInfo(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
-	// Set up mock advertiser
-	advertiser := newMockAdvertiser()
+	// Set up mock advertiser - capture the operational info for verification
+	var capturedOpInfo *discovery.OperationalInfo
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, info *discovery.OperationalInfo) {
+			capturedOpInfo = info
+		}).Return(nil).Once()
+	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 
 	// Start service
@@ -922,23 +768,19 @@ func TestDeviceServiceOperationalAdvertisingInfo(t *testing.T) {
 	svc.HandleZoneConnect(zoneID, cert.ZoneTypeHomeManager)
 
 	// Verify operational info contains expected fields
-	advertiser.mu.Lock()
-	opInfo := advertiser.operationalZones[zoneID]
-	advertiser.mu.Unlock()
-
-	if opInfo == nil {
+	if capturedOpInfo == nil {
 		t.Fatal("expected operational info to exist")
 	}
 
 	// Check vendor:product ID format
 	expectedVP := "1234:5678" // From device vendor/product IDs
-	if opInfo.VendorProduct != expectedVP {
-		t.Errorf("expected vendor:product %s, got %s", expectedVP, opInfo.VendorProduct)
+	if capturedOpInfo.VendorProduct != expectedVP {
+		t.Errorf("expected vendor:product %s, got %s", expectedVP, capturedOpInfo.VendorProduct)
 	}
 
 	// Endpoint count should match device
-	if opInfo.EndpointCount != uint8(device.EndpointCount()) {
-		t.Errorf("expected endpoint count %d, got %d", device.EndpointCount(), opInfo.EndpointCount)
+	if capturedOpInfo.EndpointCount != uint8(device.EndpointCount()) {
+		t.Errorf("expected endpoint count %d, got %d", device.EndpointCount(), capturedOpInfo.EndpointCount)
 	}
 }
 
@@ -952,20 +794,28 @@ func TestControllerServiceStartDiscovery(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
-	// Set up mock browser with devices
-	browser := newMockBrowser()
-	browser.AddDevice(&discovery.CommissionableService{
+	// Test data
+	device1 := &discovery.CommissionableService{
 		InstanceName:  "MASH-1234",
 		Host:          "evse-001.local",
 		Port:          8443,
 		Discriminator: 1234,
-	})
-	browser.AddDevice(&discovery.CommissionableService{
+	}
+	device2 := &discovery.CommissionableService{
 		InstanceName:  "MASH-5678",
 		Host:          "inverter-001.local",
 		Port:          8443,
 		Discriminator: 5678,
-	})
+	}
+
+	// Set up mock browser
+	browser := mocks.NewMockBrowser(t)
+	// Use RunAndReturn to create a fresh channel each time (channels can only be consumed once)
+	browser.EXPECT().BrowseCommissionable(mock.Anything).
+		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, error) {
+			return makeCommissionableChannel(device1, device2), nil
+		}).Once()
+	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
 	ctx := context.Background()
@@ -1015,18 +865,26 @@ func TestControllerServiceStartDiscoveryWithFilter(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
-	// Set up mock browser with devices
-	browser := newMockBrowser()
-	browser.AddDevice(&discovery.CommissionableService{
+	// Test data - both devices returned, filter applied by service
+	device1 := &discovery.CommissionableService{
 		InstanceName:  "MASH-1234",
 		Discriminator: 1234,
 		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
-	})
-	browser.AddDevice(&discovery.CommissionableService{
+	}
+	device2 := &discovery.CommissionableService{
 		InstanceName:  "MASH-5678",
 		Discriminator: 5678,
 		Categories:    []discovery.DeviceCategory{discovery.CategoryInverter},
-	})
+	}
+
+	// Set up mock browser
+	browser := mocks.NewMockBrowser(t)
+	// Use RunAndReturn to create a fresh channel each time (channels can only be consumed once)
+	browser.EXPECT().BrowseCommissionable(mock.Anything).
+		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, error) {
+			return makeCommissionableChannel(device1, device2), nil
+		}).Once()
+	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
 	ctx := context.Background()
@@ -1075,19 +933,34 @@ func TestControllerServiceStopDiscovery(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
-	browser := newMockBrowser()
+	// Set up mock browser
+	browser := mocks.NewMockBrowser(t)
+	// Create a channel that stays open until we close it
+	// This simulates a real browser that keeps the channel open for discovery
+	discoveryCh := make(chan *discovery.CommissionableService)
+	browser.EXPECT().BrowseCommissionable(mock.Anything).
+		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, error) {
+			return discoveryCh, nil
+		}).Once()
+	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
 	ctx := context.Background()
 	if err := svc.Start(ctx); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer func() { _ = svc.Stop() }()
+	defer func() {
+		close(discoveryCh) // Clean up the channel
+		_ = svc.Stop()
+	}()
 
 	// Start discovery
 	if err := svc.StartDiscovery(ctx, nil); err != nil {
 		t.Fatalf("StartDiscovery failed: %v", err)
 	}
+
+	// Wait for the discovery goroutine to start and call BrowseCommissionable
+	time.Sleep(50 * time.Millisecond)
 
 	if !svc.IsDiscovering() {
 		t.Error("expected IsDiscovering to be true")
@@ -1095,6 +968,9 @@ func TestControllerServiceStopDiscovery(t *testing.T) {
 
 	// Stop discovery
 	svc.StopDiscovery()
+
+	// Give the goroutine time to process the cancellation
+	time.Sleep(50 * time.Millisecond)
 
 	if svc.IsDiscovering() {
 		t.Error("expected IsDiscovering to be false after StopDiscovery")
@@ -1118,8 +994,21 @@ func TestControllerOperationalDiscoveryMatchesDeviceID(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
+	// Test data
+	knownDeviceID := "abc123def456789a"
+	opDevice := &discovery.OperationalService{
+		InstanceName: "zone123456789abc-abc123def456789a",
+		Host:         "device.local",
+		Port:         8443,
+		ZoneID:       "zone123456789abc",
+		DeviceID:     knownDeviceID,
+	}
+
 	// Set up mock browser
-	browser := newMockBrowser()
+	browser := mocks.NewMockBrowser(t)
+	browser.EXPECT().BrowseOperational(mock.Anything, "zone123456789abc").
+		Return(makeOperationalChannel(opDevice), nil).Once()
+	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
 	ctx := context.Background()
@@ -1134,8 +1023,6 @@ func TestControllerOperationalDiscoveryMatchesDeviceID(t *testing.T) {
 	svc.mu.Unlock()
 
 	// Simulate a known device that was previously commissioned
-	// The device ID must be exactly what the device advertises
-	knownDeviceID := "abc123def456789a"
 	svc.mu.Lock()
 	svc.connectedDevices[knownDeviceID] = &ConnectedDevice{
 		ID:        knownDeviceID,
@@ -1160,15 +1047,6 @@ func TestControllerOperationalDiscoveryMatchesDeviceID(t *testing.T) {
 			default:
 			}
 		}
-	})
-
-	// Add operational device with MATCHING device ID to mock browser
-	browser.AddOperationalDevice(&discovery.OperationalService{
-		InstanceName: "zone123456789abc-abc123def456789a",
-		Host:         "device.local",
-		Port:         8443,
-		ZoneID:       "zone123456789abc",
-		DeviceID:     knownDeviceID, // Same ID as stored
 	})
 
 	// Start operational discovery
@@ -1202,7 +1080,20 @@ func TestControllerOperationalDiscoveryIgnoresUnknownDevices(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
-	browser := newMockBrowser()
+	// Test data - device with unknown ID
+	unknownDevice := &discovery.OperationalService{
+		InstanceName: "zone123456789abc-unknowndevice123",
+		Host:         "unknown.local",
+		Port:         8443,
+		ZoneID:       "zone123456789abc",
+		DeviceID:     "unknowndevice123",
+	}
+
+	// Set up mock browser
+	browser := mocks.NewMockBrowser(t)
+	browser.EXPECT().BrowseOperational(mock.Anything, "zone123456789abc").
+		Return(makeOperationalChannel(unknownDevice), nil).Once()
+	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
 	ctx := context.Background()
@@ -1234,15 +1125,6 @@ func TestControllerOperationalDiscoveryIgnoresUnknownDevices(t *testing.T) {
 		if e.Type == EventDeviceRediscovered {
 			gotRediscovered = true
 		}
-	})
-
-	// Add operational device with DIFFERENT device ID (unknown device)
-	browser.AddOperationalDevice(&discovery.OperationalService{
-		InstanceName: "zone123456789abc-unknowndevice123",
-		Host:         "unknown.local",
-		Port:         8443,
-		ZoneID:       "zone123456789abc",
-		DeviceID:     "unknowndevice123", // Different from known device
 	})
 
 	// Start operational discovery

@@ -9,8 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
+	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 )
@@ -28,7 +31,8 @@ func TestDeviceServiceStartsTLSServer(t *testing.T) {
 	}
 
 	// Use mock advertiser to avoid mDNS
-	advertiser := newMockAdvertiser()
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 
 	ctx := context.Background()
@@ -64,7 +68,11 @@ func TestDeviceServicePASEHandshake(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
-	advertiser := newMockAdvertiser()
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 
 	// Track events
@@ -149,7 +157,10 @@ func TestDeviceServicePASEWrongSetupCode(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
-	advertiser := newMockAdvertiser()
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 
 	// Track events - should NOT see EventConnected
@@ -229,7 +240,11 @@ func TestControllerServiceCommission(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
-	deviceAdvertiser := newMockAdvertiser()
+	deviceAdvertiser := mocks.NewMockAdvertiser(t)
+	deviceAdvertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	deviceAdvertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	deviceAdvertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Maybe()
+	deviceAdvertiser.EXPECT().StopAll().Return().Maybe()
 	deviceSvc.SetAdvertiser(deviceAdvertiser)
 
 	ctx := context.Background()
@@ -255,7 +270,8 @@ func TestControllerServiceCommission(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
-	browser := newMockBrowser()
+	browser := mocks.NewMockBrowser(t)
+	browser.EXPECT().Stop().Return().Maybe()
 	controllerSvc.SetBrowser(browser)
 
 	if err := controllerSvc.Start(ctx); err != nil {
@@ -329,7 +345,10 @@ func TestControllerServiceCommissionWrongCode(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
-	deviceAdvertiser := newMockAdvertiser()
+	deviceAdvertiser := mocks.NewMockAdvertiser(t)
+	deviceAdvertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	deviceAdvertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	deviceAdvertiser.EXPECT().StopAll().Return().Maybe()
 	deviceSvc.SetAdvertiser(deviceAdvertiser)
 
 	ctx := context.Background()
@@ -354,7 +373,8 @@ func TestControllerServiceCommissionWrongCode(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
-	browser := newMockBrowser()
+	browser := mocks.NewMockBrowser(t)
+	browser.EXPECT().Stop().Return().Maybe()
 	controllerSvc.SetBrowser(browser)
 
 	if err := controllerSvc.Start(ctx); err != nil {
@@ -454,7 +474,8 @@ func TestCommissioningWithNotRunningDevice(t *testing.T) {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
 
-	browser := newMockBrowser()
+	browser := mocks.NewMockBrowser(t)
+	browser.EXPECT().Stop().Return().Maybe()
 	controllerSvc.SetBrowser(browser)
 
 	ctx := context.Background()

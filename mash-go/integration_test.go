@@ -1,3 +1,5 @@
+//go:build integration
+
 package mash_test
 
 import (
@@ -45,6 +47,7 @@ func TestE2E_Discovery(t *testing.T) {
 	defer advertiser.StopAll()
 
 	discriminator := uint16(1234)
+	testPort := uint16(30000 + (time.Now().UnixNano() % 10000))
 	commInfo := &discovery.CommissionableInfo{
 		Discriminator: discriminator,
 		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility}, // EV charging
@@ -52,7 +55,7 @@ func TestE2E_Discovery(t *testing.T) {
 		Brand:         "MASHTest",
 		Model:         "E2E",
 		DeviceName:    "Test EVSE",
-		Port:          8443,
+		Port:          testPort,
 	}
 
 	if err := advertiser.AdvertiseCommissionable(ctx, commInfo); err != nil {
@@ -85,8 +88,8 @@ func TestE2E_Discovery(t *testing.T) {
 	if found.Brand != "MASHTest" {
 		t.Errorf("Brand mismatch: expected MASHTest, got %s", found.Brand)
 	}
-	if found.Port != 8443 {
-		t.Errorf("Port mismatch: expected 8443, got %d", found.Port)
+	if found.Port != testPort {
+		t.Errorf("Port mismatch: expected %d, got %d", testPort, found.Port)
 	}
 }
 

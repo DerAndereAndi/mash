@@ -1,0 +1,20 @@
+with-expecter: true
+mockname: "Mock{{.InterfaceName}}"
+filename: "mock_{{.InterfaceNameSnake}}.go"
+outpkg: "mocks"
+packages:
+  github.com/mash-protocol/mash-go/pkg/transport:
+    config:
+      dir: "{{.InterfaceDir}}/mocks"
+    interfaces:
+      ServerConnection:
+      ClientConnection:
+      TransportServer:
+      FrameReadWriter:
+      ConnectionHandler:
+  github.com/mash-protocol/mash-go/pkg/discovery:
+    config:
+      dir: "{{.InterfaceDir}}/mocks"
+    interfaces:
+      Advertiser:
+      Browser:
