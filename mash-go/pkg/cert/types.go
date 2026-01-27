@@ -2,6 +2,7 @@ package cert
 
 import (
 	"crypto/ecdsa"
+	"crypto/tls"
 	"crypto/x509"
 	"time"
 )
@@ -165,4 +166,28 @@ type CSRInfo struct {
 
 	// ZoneID is the zone this CSR is for.
 	ZoneID string
+}
+
+// TLSCertificate converts the operational certificate to a tls.Certificate
+// for use in TLS connections.
+func (oc *OperationalCert) TLSCertificate() tls.Certificate {
+	if oc == nil || oc.Certificate == nil || oc.PrivateKey == nil {
+		return tls.Certificate{}
+	}
+	return tls.Certificate{
+		Certificate: [][]byte{oc.Certificate.Raw},
+		PrivateKey:  oc.PrivateKey,
+		Leaf:        oc.Certificate,
+	}
+}
+
+// TLSClientCAs returns an x509.CertPool containing the Zone CA certificate,
+// suitable for use as tls.Config.RootCAs to verify peer certificates.
+func (ca *ZoneCA) TLSClientCAs() *x509.CertPool {
+	if ca == nil || ca.Certificate == nil {
+		return nil
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(ca.Certificate)
+	return pool
 }

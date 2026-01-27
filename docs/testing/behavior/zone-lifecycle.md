@@ -757,6 +757,17 @@ MASH.S.D2D.PUBLISHES_ZONE_ID=0        # Zone ID in mDNS TXT
 | TC-QR-GEN-3 | Unique per device | Two devices | Different codes |
 | TC-QR-GEN-4 | Display mode | Enter commissioning | QR shown (if capable) |
 
+### TC-CTRL-CERT-*: Controller Certificate Lifecycle
+
+| ID | Description | Setup | Expected |
+|----|-------------|-------|----------|
+| TC-CTRL-CERT-1 | Auto-generate on zone creation | New controller, no existing cert | Controller cert generated with Zone CA |
+| TC-CTRL-CERT-2 | Load existing on restart | Controller restarts with existing cert | Same controller cert loaded (not regenerated) |
+| TC-CTRL-CERT-3 | Renewal triggers at 30 days | Cert expires in 25 days | New cert generated automatically |
+| TC-CTRL-CERT-4 | Renewal does not disrupt sessions | Active device connections during renewal | Sessions continue uninterrupted |
+| TC-CTRL-CERT-5 | Controller ID stable across renewal | Renew controller cert | Same SKI/controller ID maintained |
+| TC-CTRL-CERT-6 | Cert matches Zone CA | Zone CA rotated | Old controller cert invalid, new one generated |
+
 ---
 
 ## 12. Security Considerations

@@ -617,6 +617,19 @@ MASH.S.TLS.HANDSHAKE_TIMEOUT=15           # Handshake timeout (seconds)
 | TC-TLS-ALERT-3 | Expired certificate | Expired cert | `certificate_expired` alert |
 | TC-TLS-ALERT-4 | Unknown CA | Wrong zone cert | `unknown_ca` alert |
 
+### TC-TLS-CTRL-*: Controller Certificate
+
+| ID | Description | Setup | Expected |
+|----|-------------|-------|----------|
+| TC-TLS-CTRL-1 | Controller presents operational cert | Operational TLS connection | TLS handshake includes client certificate |
+| TC-TLS-CTRL-2 | Controller cert signed by Zone CA | Valid controller cert | Device verifies signature succeeds |
+| TC-TLS-CTRL-3 | Controller cert expired | Expired controller cert | Device rejects, TLS alert `bad_certificate` |
+| TC-TLS-CTRL-4 | Controller cert wrong Zone CA | Cert from different Zone CA | Device rejects, TLS alert `unknown_ca` |
+| TC-TLS-CTRL-5 | Controller cert missing clientAuth EKU | Cert without clientAuth | Device rejects, TLS alert |
+| TC-TLS-CTRL-6 | Controller cert is CA:TRUE | Cert with CA:TRUE | Device rejects (must be end-entity) |
+| TC-TLS-CTRL-7 | Commissioning without controller cert | PASE commissioning | Handshake succeeds (PASE security) |
+| TC-TLS-CTRL-8 | Controller cert before notBefore | Cert not yet valid | Device rejects, TLS alert |
+
 ---
 
 ## 17. Security Considerations

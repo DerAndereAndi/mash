@@ -293,3 +293,181 @@ func TestZoneTypeString(t *testing.T) {
 		})
 	}
 }
+
+// TC-IMPL-CERT-GEN-001: Generate Controller Operational Certificate
+func TestGenerateControllerOperationalCert(t *testing.T) {
+	ca, err := GenerateZoneCA("home-ems", ZoneTypeHomeManager)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA() error = %v", err)
+	}
+
+	controllerID := "controller-abc123"
+	opCert, err := GenerateControllerOperationalCert(ca, controllerID)
+	if err != nil {
+		t.Fatalf("GenerateControllerOperationalCert() error = %v", err)
+	}
+
+	// Verify certificate is not nil
+	if opCert.Certificate == nil {
+		t.Fatal("Certificate should not be nil")
+	}
+	if opCert.PrivateKey == nil {
+		t.Fatal("PrivateKey should not be nil")
+	}
+
+	cert := opCert.Certificate
+
+	// Verify signed by Zone CA (AuthorityKeyId matches Zone CA's SubjectKeyId)
+	if !bytesEqual(cert.AuthorityKeyId, ca.Certificate.SubjectKeyId) {
+		t.Error("Certificate should be signed by Zone CA (AKI should match Zone CA SKI)")
+	}
+
+	// Verify not a CA
+	if cert.IsCA {
+		t.Error("Controller operational certificate should not be a CA")
+	}
+
+	// Verify key usage includes DigitalSignature and KeyEncipherment
+	expectedKeyUsage := x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
+	if cert.KeyUsage&expectedKeyUsage != expectedKeyUsage {
+		t.Errorf("KeyUsage = %v, want at least %v", cert.KeyUsage, expectedKeyUsage)
+	}
+
+	// Verify extended key usage includes ClientAuth and ServerAuth
+	hasClientAuth := false
+	hasServerAuth := false
+	for _, usage := range cert.ExtKeyUsage {
+		if usage == x509.ExtKeyUsageClientAuth {
+			hasClientAuth = true
+		}
+		if usage == x509.ExtKeyUsageServerAuth {
+			hasServerAuth = true
+		}
+	}
+	if !hasClientAuth {
+		t.Error("ExtKeyUsage should include ClientAuth")
+	}
+	if !hasServerAuth {
+		t.Error("ExtKeyUsage should include ServerAuth")
+	}
+
+	// Verify validity is 1 year (OperationalCertValidity)
+	expectedDuration := OperationalCertValidity
+	actualDuration := cert.NotAfter.Sub(cert.NotBefore)
+	if actualDuration < expectedDuration-time.Second || actualDuration > expectedDuration+time.Second {
+		t.Errorf("Validity duration = %v, want ~%v", actualDuration, expectedDuration)
+	}
+
+	// Verify ZoneID and ZoneType are set
+	if opCert.ZoneID != "home-ems" {
+		t.Errorf("ZoneID = %q, want %q", opCert.ZoneID, "home-ems")
+	}
+	if opCert.ZoneType != ZoneTypeHomeManager {
+		t.Errorf("ZoneType = %v, want %v", opCert.ZoneType, ZoneTypeHomeManager)
+	}
+	if opCert.ZoneCACert != ca.Certificate {
+		t.Error("ZoneCACert should be set to Zone CA certificate")
+	}
+}
+
+// TC-IMPL-CERT-GEN-002: Controller Cert Subject Contains Zone Info
+func TestGenerateControllerOperationalCertSubject(t *testing.T) {
+	ca, err := GenerateZoneCA("home-ems", ZoneTypeHomeManager)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA() error = %v", err)
+	}
+
+	controllerID := "controller-abc123"
+	opCert, err := GenerateControllerOperationalCert(ca, controllerID)
+	if err != nil {
+		t.Fatalf("GenerateControllerOperationalCert() error = %v", err)
+	}
+
+	cert := opCert.Certificate
+
+	// Verify CN contains controller ID
+	if cert.Subject.CommonName != controllerID {
+		t.Errorf("Subject.CommonName = %q, want %q", cert.Subject.CommonName, controllerID)
+	}
+
+	// Verify O is "MASH Controller"
+	if len(cert.Subject.Organization) != 1 || cert.Subject.Organization[0] != "MASH Controller" {
+		t.Errorf("Subject.Organization = %v, want [\"MASH Controller\"]", cert.Subject.Organization)
+	}
+
+	// Verify OU contains zone type and zone ID (order may vary due to ASN.1 encoding)
+	if len(cert.Subject.OrganizationalUnit) != 2 {
+		t.Fatalf("Subject.OrganizationalUnit has %d elements, want 2", len(cert.Subject.OrganizationalUnit))
+	}
+	hasZoneType := false
+	hasZoneID := false
+	for _, ou := range cert.Subject.OrganizationalUnit {
+		if ou == "HOME_MANAGER" {
+			hasZoneType = true
+		}
+		if ou == "home-ems" {
+			hasZoneID = true
+		}
+	}
+	if !hasZoneType {
+		t.Errorf("Subject.OrganizationalUnit should contain zone type, got %v", cert.Subject.OrganizationalUnit)
+	}
+	if !hasZoneID {
+		t.Errorf("Subject.OrganizationalUnit should contain zone ID, got %v", cert.Subject.OrganizationalUnit)
+	}
+}
+
+// TC-IMPL-CERT-GEN-003: Controller Cert Uses Fresh Key Pair
+func TestGenerateControllerOperationalCertFreshKeys(t *testing.T) {
+	ca, err := GenerateZoneCA("home-ems", ZoneTypeHomeManager)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA() error = %v", err)
+	}
+
+	// Generate two controller certs
+	cert1, err := GenerateControllerOperationalCert(ca, "controller-1")
+	if err != nil {
+		t.Fatalf("First GenerateControllerOperationalCert() error = %v", err)
+	}
+
+	cert2, err := GenerateControllerOperationalCert(ca, "controller-2")
+	if err != nil {
+		t.Fatalf("Second GenerateControllerOperationalCert() error = %v", err)
+	}
+
+	// Verify different SubjectKeyIds (different keys)
+	if bytesEqual(cert1.Certificate.SubjectKeyId, cert2.Certificate.SubjectKeyId) {
+		t.Error("Each call should generate different key pairs (different SKIs)")
+	}
+
+	// Verify different serial numbers
+	if cert1.Certificate.SerialNumber.Cmp(cert2.Certificate.SerialNumber) == 0 {
+		t.Error("Each call should generate different serial numbers")
+	}
+}
+
+// TC-IMPL-CERT-GEN-004: Controller Cert Verification
+func TestGenerateControllerOperationalCertVerification(t *testing.T) {
+	ca, err := GenerateZoneCA("home-ems", ZoneTypeHomeManager)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA() error = %v", err)
+	}
+
+	opCert, err := GenerateControllerOperationalCert(ca, "controller-abc123")
+	if err != nil {
+		t.Fatalf("GenerateControllerOperationalCert() error = %v", err)
+	}
+
+	// Verify certificate chain using VerifyOperationalCert
+	err = VerifyOperationalCert(opCert.Certificate, ca.Certificate)
+	if err != nil {
+		t.Errorf("Certificate should verify against Zone CA: %v", err)
+	}
+
+	// Verify against a different Zone CA should fail
+	otherCA, _ := GenerateZoneCA("other-zone", ZoneTypeGridOperator)
+	err = VerifyOperationalCert(opCert.Certificate, otherCA.Certificate)
+	if err == nil {
+		t.Error("Certificate should NOT verify against different Zone CA")
+	}
+}

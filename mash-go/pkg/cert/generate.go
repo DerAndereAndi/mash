@@ -199,6 +199,74 @@ func SignCSR(ca *ZoneCA, csrDER []byte) (*x509.Certificate, error) {
 	return cert, nil
 }
 
+// GenerateControllerOperationalCert creates an operational certificate for a controller.
+// This is signed by the Zone CA and used for mutual TLS authentication with devices.
+// Unlike device certificates (which are issued via CSR during commissioning),
+// controller certificates are generated directly by the controller that owns the Zone CA.
+func GenerateControllerOperationalCert(ca *ZoneCA, controllerID string) (*OperationalCert, error) {
+	if ca == nil || ca.PrivateKey == nil || ca.Certificate == nil {
+		return nil, fmt.Errorf("valid Zone CA is required")
+	}
+	if controllerID == "" {
+		return nil, fmt.Errorf("controller ID is required")
+	}
+
+	// Generate a fresh key pair for this certificate
+	keyPair, err := GenerateKeyPair()
+	if err != nil {
+		return nil, fmt.Errorf("generate key pair: %w", err)
+	}
+
+	ski, err := ComputeSKI(keyPair.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("compute SKI: %w", err)
+	}
+
+	serialNumber, err := generateSerialNumber()
+	if err != nil {
+		return nil, fmt.Errorf("generate serial number: %w", err)
+	}
+
+	now := time.Now()
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			CommonName:   controllerID,
+			Organization: []string{"MASH Controller"},
+			OrganizationalUnit: []string{
+				ca.ZoneType.String(),
+				ca.ZoneID,
+			},
+		},
+		NotBefore:             now,
+		NotAfter:              now.Add(OperationalCertValidity),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  false,
+		SubjectKeyId:          ski,
+		AuthorityKeyId:        ca.Certificate.SubjectKeyId,
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, ca.Certificate, keyPair.PublicKey, ca.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("create certificate: %w", err)
+	}
+
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return nil, fmt.Errorf("parse certificate: %w", err)
+	}
+
+	return &OperationalCert{
+		Certificate: cert,
+		PrivateKey:  keyPair.PrivateKey,
+		ZoneID:      ca.ZoneID,
+		ZoneType:    ca.ZoneType,
+		ZoneCACert:  ca.Certificate,
+	}, nil
+}
+
 // GenerateDeviceAttestationCert creates a device attestation certificate.
 // This is typically done at manufacturing time and proves device identity.
 // If manufacturerCA is nil, the certificate will be self-signed.

@@ -149,6 +149,9 @@ func (c *Controller) Run(ctx context.Context, cancel context.CancelFunc) {
 		case "renew":
 			c.cmdRenew(ctx, args)
 
+		case "cert", "certs":
+			c.cmdCert(args)
+
 		case "quit", "exit", "q":
 			fmt.Fprintln(c.rl.Stdout(), "Exiting...")
 			cancel()
@@ -182,6 +185,9 @@ MASH Controller Commands:
     resume <device-id>                - Resume device
 
   Certificate Management:
+    cert                              - Show Zone CA and controller cert
+    cert <device-id>                  - Show device certificate details
+    cert --all                        - Show summary of all certificates
     renew <device-id>                 - Renew device certificate
     renew --all                       - Renew all devices needing renewal
     renew --status                    - Show certificate expiry status

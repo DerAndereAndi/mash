@@ -191,3 +191,39 @@ func VerifyConnection(state tls.ConnectionState) error {
 	}
 	return nil
 }
+
+// OperationalTLSConfig holds the certificates needed for operational TLS connections.
+// This is a convenience wrapper for building TLS configs for controllers connecting
+// to devices after commissioning, when both sides have operational certificates.
+type OperationalTLSConfig struct {
+	// ControllerCert is the controller's operational certificate as tls.Certificate.
+	ControllerCert tls.Certificate
+
+	// ZoneCAs is the pool of Zone CA certificates for verifying device certs.
+	ZoneCAs *x509.CertPool
+
+	// ServerName is the expected server name (typically device ID).
+	ServerName string
+}
+
+// NewOperationalClientTLSConfig creates a TLS configuration for a controller
+// connecting to a device for operational (post-commissioning) communication.
+// Both sides present operational certificates signed by the same Zone CA.
+func NewOperationalClientTLSConfig(cfg *OperationalTLSConfig) (*tls.Config, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("OperationalTLSConfig is required")
+	}
+	if len(cfg.ControllerCert.Certificate) == 0 {
+		return nil, fmt.Errorf("controller certificate is required")
+	}
+	if cfg.ZoneCAs == nil {
+		return nil, fmt.Errorf("zone CA pool is required for peer verification")
+	}
+
+	// Use NewClientTLSConfig with the operational certificates
+	return NewClientTLSConfig(&TLSConfig{
+		Certificate: cfg.ControllerCert,
+		RootCAs:     cfg.ZoneCAs,
+		ServerName:  cfg.ServerName,
+	})
+}

@@ -25,8 +25,9 @@ type CommissionedDevice struct {
 // FileControllerStore extends FileStore with Zone CA storage for controllers.
 type FileControllerStore struct {
 	*FileStore
-	zoneCA  *ZoneCA
-	devices map[string]*CommissionedDevice
+	zoneCA         *ZoneCA
+	controllerCert *OperationalCert
+	devices        map[string]*CommissionedDevice
 
 	// Track removed devices for cleanup on Save
 	removedDevices map[string]bool
@@ -62,6 +63,30 @@ func (s *FileControllerStore) SetZoneCA(ca *ZoneCA) error {
 	defer s.mu.Unlock()
 
 	s.zoneCA = ca
+	return nil
+}
+
+// GetControllerCert returns the controller's operational certificate.
+func (s *FileControllerStore) GetControllerCert() (*OperationalCert, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.controllerCert == nil {
+		return nil, ErrCertNotFound
+	}
+	return s.controllerCert, nil
+}
+
+// SetControllerCert stores the controller's operational certificate.
+func (s *FileControllerStore) SetControllerCert(cert *OperationalCert) error {
+	if cert == nil || cert.Certificate == nil || cert.PrivateKey == nil {
+		return ErrInvalidCert
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.controllerCert = cert
 	return nil
 }
 
@@ -134,6 +159,13 @@ func (s *FileControllerStore) Save() error {
 		}
 	}
 
+	// Save Controller Operational Cert
+	if s.controllerCert != nil {
+		if err := s.saveControllerCert(); err != nil {
+			return err
+		}
+	}
+
 	// Save devices
 	for deviceID, device := range s.devices {
 		if err := s.saveDevice(deviceID, device); err != nil {
@@ -162,6 +194,11 @@ func (s *FileControllerStore) Load() error {
 
 	// Load Zone CA
 	if err := s.loadZoneCA(); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	// Load Controller Operational Cert
+	if err := s.loadControllerCert(); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 
@@ -261,6 +298,56 @@ func (s *FileControllerStore) loadZoneCA() error {
 		PrivateKey:  key,
 		ZoneID:      meta.ZoneID,
 		ZoneType:    meta.ZoneType,
+	}
+
+	return nil
+}
+
+func (s *FileControllerStore) saveControllerCert() error {
+	dir := filepath.Join(s.baseDir, "identity")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	// Save certificate
+	certPath := filepath.Join(dir, "controller.pem")
+	if err := WriteCertFile(certPath, s.controllerCert.Certificate); err != nil {
+		return err
+	}
+
+	// Save private key
+	keyPath := filepath.Join(dir, "controller.key")
+	if err := WriteKeyFile(keyPath, s.controllerCert.PrivateKey); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *FileControllerStore) loadControllerCert() error {
+	dir := filepath.Join(s.baseDir, "identity")
+
+	// Load certificate
+	certPath := filepath.Join(dir, "controller.pem")
+	cert, err := ReadCertFile(certPath)
+	if err != nil {
+		return err
+	}
+
+	// Load private key
+	keyPath := filepath.Join(dir, "controller.key")
+	key, err := ReadKeyFile(keyPath)
+	if err != nil {
+		return err
+	}
+
+	// Controller cert metadata comes from Zone CA (same zone)
+	s.controllerCert = &OperationalCert{
+		Certificate: cert,
+		PrivateKey:  key,
+		ZoneID:      s.zoneCA.ZoneID,
+		ZoneType:    s.zoneCA.ZoneType,
+		ZoneCACert:  s.zoneCA.Certificate,
 	}
 
 	return nil

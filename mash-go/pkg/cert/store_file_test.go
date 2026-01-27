@@ -394,6 +394,102 @@ func TestFileControllerStore(t *testing.T) {
 			t.Error("device should be removed")
 		}
 	})
+
+	// TC-IMPL-CERT-STORE-001: Save Controller Operational Cert
+	t.Run("ControllerCertRoundTrip", func(t *testing.T) {
+		dir := t.TempDir()
+		store := NewFileControllerStore(dir)
+
+		// Create Zone CA first (required for controller cert)
+		ca, err := GenerateZoneCA("my-zone", ZoneTypeHomeManager)
+		if err != nil {
+			t.Fatalf("GenerateZoneCA() error = %v", err)
+		}
+		if err := store.SetZoneCA(ca); err != nil {
+			t.Fatalf("SetZoneCA() error = %v", err)
+		}
+
+		// Generate controller operational cert
+		controllerCert, err := GenerateControllerOperationalCert(ca, "controller-001")
+		if err != nil {
+			t.Fatalf("GenerateControllerOperationalCert() error = %v", err)
+		}
+
+		// Store controller cert
+		if err := store.SetControllerCert(controllerCert); err != nil {
+			t.Fatalf("SetControllerCert() error = %v", err)
+		}
+
+		// Save to disk
+		if err := store.Save(); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+
+		// Verify files exist
+		ctrlDir := filepath.Join(dir, "identity")
+		if _, err := os.Stat(filepath.Join(ctrlDir, "controller.pem")); err != nil {
+			t.Errorf("controller.pem not found: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(ctrlDir, "controller.key")); err != nil {
+			t.Errorf("controller.key not found: %v", err)
+		}
+
+		// TC-IMPL-CERT-STORE-002: Load Controller Operational Cert
+		// Load into new store
+		store2 := NewFileControllerStore(dir)
+		if err := store2.Load(); err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		loadedCert, err := store2.GetControllerCert()
+		if err != nil {
+			t.Fatalf("GetControllerCert() error = %v", err)
+		}
+
+		// Verify loaded cert matches original
+		if loadedCert.Certificate == nil {
+			t.Fatal("Loaded certificate should not be nil")
+		}
+		if loadedCert.Certificate.Subject.CommonName != "controller-001" {
+			t.Errorf("Subject.CommonName = %q, want %q", loadedCert.Certificate.Subject.CommonName, "controller-001")
+		}
+		if loadedCert.ZoneID != "my-zone" {
+			t.Errorf("ZoneID = %q, want %q", loadedCert.ZoneID, "my-zone")
+		}
+		if loadedCert.ZoneType != ZoneTypeHomeManager {
+			t.Errorf("ZoneType = %v, want %v", loadedCert.ZoneType, ZoneTypeHomeManager)
+		}
+	})
+
+	// TC-IMPL-CERT-STORE-003: Controller Cert Not Found
+	t.Run("ControllerCertNotFound", func(t *testing.T) {
+		dir := t.TempDir()
+		store := NewFileControllerStore(dir)
+
+		// Should return error when no cert exists
+		_, err := store.GetControllerCert()
+		if err != ErrCertNotFound {
+			t.Errorf("GetControllerCert() error = %v, want ErrCertNotFound", err)
+		}
+	})
+
+	// TC-IMPL-CERT-STORE: Invalid controller cert rejected
+	t.Run("ControllerCertInvalid", func(t *testing.T) {
+		dir := t.TempDir()
+		store := NewFileControllerStore(dir)
+
+		// Should reject nil cert
+		err := store.SetControllerCert(nil)
+		if err != ErrInvalidCert {
+			t.Errorf("SetControllerCert(nil) error = %v, want ErrInvalidCert", err)
+		}
+
+		// Should reject cert with nil Certificate
+		err = store.SetControllerCert(&OperationalCert{})
+		if err != ErrInvalidCert {
+			t.Errorf("SetControllerCert(empty) error = %v, want ErrInvalidCert", err)
+		}
+	})
 }
 
 func TestFileStoreInterfaceImplementation(t *testing.T) {

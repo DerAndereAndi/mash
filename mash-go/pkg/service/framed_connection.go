@@ -1,6 +1,7 @@
 package service
 
 import (
+	"crypto/tls"
 	"io"
 	"sync"
 
@@ -53,4 +54,17 @@ func (c *framedConnection) Close() error {
 	c.closed = true
 
 	return c.conn.Close()
+}
+
+// TLSConnectionState returns the TLS connection state if the underlying
+// connection is a TLS connection. Returns nil if not a TLS connection.
+func (c *framedConnection) TLSConnectionState() *tls.ConnectionState {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if tlsConn, ok := c.conn.(*tls.Conn); ok {
+		state := tlsConn.ConnectionState()
+		return &state
+	}
+	return nil
 }

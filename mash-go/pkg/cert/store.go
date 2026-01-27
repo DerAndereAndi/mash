@@ -70,7 +70,7 @@ type Store interface {
 }
 
 // ControllerStore defines additional storage for zone owners (controllers).
-// Controllers need to store their Zone CA private keys.
+// Controllers need to store their Zone CA private keys and operational certificate.
 type ControllerStore interface {
 	Store
 
@@ -80,4 +80,12 @@ type ControllerStore interface {
 
 	// SetZoneCA stores the Zone CA (including private key).
 	SetZoneCA(ca *ZoneCA) error
+
+	// GetControllerCert returns the controller's operational certificate.
+	// This certificate is used for mutual TLS with devices.
+	// Returns ErrCertNotFound if no controller certificate exists.
+	GetControllerCert() (*OperationalCert, error)
+
+	// SetControllerCert stores the controller's operational certificate.
+	SetControllerCert(cert *OperationalCert) error
 }

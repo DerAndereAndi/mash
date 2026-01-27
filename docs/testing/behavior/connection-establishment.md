@@ -1091,6 +1091,17 @@ MASH.C.MULTIIF.CACHE_LAST_GOOD=1      # Caches last working address
 | TC-CERT-VAL-4 | Clock skew 200s | Verification succeeds |
 | TC-CERT-VAL-5 | Clock skew 400s | Verification fails |
 
+### TC-CERT-VAL-CTRL-*: Controller Certificate Validation
+
+| ID | Description | Expected |
+|----|-------------|----------|
+| TC-CERT-VAL-CTRL-1 | Valid controller cert | Device accepts, session established |
+| TC-CERT-VAL-CTRL-2 | Expired controller cert | Device rejects connection |
+| TC-CERT-VAL-CTRL-3 | Wrong Zone CA issuer | Device rejects connection |
+| TC-CERT-VAL-CTRL-4 | Self-signed controller cert | Device rejects (must chain to Zone CA) |
+| TC-CERT-VAL-CTRL-5 | Clock skew 200s | Device accepts (within tolerance) |
+| TC-CERT-VAL-CTRL-6 | Clock skew 400s | Device rejects (exceeds tolerance) |
+
 ### TC-IPV6-*: IPv6 Address Handling
 
 | ID | Description | Expected |

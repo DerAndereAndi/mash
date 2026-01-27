@@ -173,7 +173,8 @@ var _ Store = (*MemoryStore)(nil)
 // MemoryControllerStore extends MemoryStore with Zone CA storage for controllers.
 type MemoryControllerStore struct {
 	*MemoryStore
-	zoneCA *ZoneCA
+	zoneCA         *ZoneCA
+	controllerCert *OperationalCert
 }
 
 // NewMemoryControllerStore creates a new in-memory controller certificate store.
@@ -204,6 +205,30 @@ func (s *MemoryControllerStore) SetZoneCA(ca *ZoneCA) error {
 	defer s.mu.Unlock()
 
 	s.zoneCA = ca
+	return nil
+}
+
+// GetControllerCert returns the controller's operational certificate.
+func (s *MemoryControllerStore) GetControllerCert() (*OperationalCert, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.controllerCert == nil {
+		return nil, ErrCertNotFound
+	}
+	return s.controllerCert, nil
+}
+
+// SetControllerCert stores the controller's operational certificate.
+func (s *MemoryControllerStore) SetControllerCert(cert *OperationalCert) error {
+	if cert == nil || cert.Certificate == nil || cert.PrivateKey == nil {
+		return ErrInvalidCert
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.controllerCert = cert
 	return nil
 }
 

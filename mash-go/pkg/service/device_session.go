@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
 	"log/slog"
 	"sync"
 
@@ -248,4 +249,21 @@ func (s *DeviceSession) handleRenewalResponse(data []byte, handler *ControllerRe
 // Conn returns the underlying connection (for renewal handler initialization).
 func (s *DeviceSession) Conn() Sendable {
 	return s.conn
+}
+
+// TLSConnectionState returns the TLS connection state for this session.
+// Returns nil if the session is closed or connection is not TLS.
+func (s *DeviceSession) TLSConnectionState() *tls.ConnectionState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.closed {
+		return nil
+	}
+
+	// Try to get TLS state from framed connection
+	if fc, ok := s.conn.(*framedConnection); ok {
+		return fc.TLSConnectionState()
+	}
+	return nil
 }
