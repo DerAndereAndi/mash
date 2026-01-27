@@ -16,7 +16,7 @@
 //
 //	-config string      Configuration file path
 //	-zone-name string   Zone name for this controller (default "Home Energy")
-//	-zone-type string   Zone type: grid, building, home, user (default "home")
+//	-zone-type string   Zone type: grid, local (default "local")
 //	-log-level string   Log level: debug, info, warn, error (default "info")
 //	-interactive        Enable interactive command mode
 //	-auto-commission    Automatically commission discovered devices
@@ -105,7 +105,7 @@ var (
 func init() {
 	flag.StringVar(&config.ConfigFile, "config", "", "Configuration file path")
 	flag.StringVar(&config.ZoneNameValue, "zone-name", "Home Energy", "Zone name for this controller")
-	flag.StringVar(&config.ZoneTypeValue, "zone-type", "home", "Zone type: grid, building, home, user")
+	flag.StringVar(&config.ZoneTypeValue, "zone-type", "local", "Zone type: grid, local")
 	flag.StringVar(&config.LogLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	flag.BoolVar(&config.Interactive, "interactive", false, "Enable interactive command mode")
 	flag.BoolVar(&config.AutoCommission, "auto-commission", false, "Automatically commission discovered devices")
