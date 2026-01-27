@@ -9,6 +9,16 @@ import (
 	"sync"
 )
 
+// File name constants for certificate storage.
+const (
+	identityDir      = "identity"
+	identityCertFile = "identity.pem"
+	identityKeyFile  = "identity.key"
+	zoneCACertFile   = "zone-ca.pem"
+	zoneCAKeyFile    = "zone-ca.key"
+	zoneCAMetaFile   = "zone-ca.json"
+)
+
 // FileStore is a file-based implementation of the Store interface.
 // Certificates are stored as PEM files with metadata in JSON.
 type FileStore struct {
@@ -239,18 +249,18 @@ func (s *FileStore) Load() error {
 }
 
 func (s *FileStore) saveIdentity() error {
-	dir := filepath.Join(s.baseDir, "identity")
+	dir := filepath.Join(s.baseDir, identityDir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
-	certPath := filepath.Join(dir, "identity.pem")
+	certPath := filepath.Join(dir, identityCertFile)
 	if err := WriteCertFile(certPath, s.identityCert); err != nil {
 		return err
 	}
 
 	if s.identityKey != nil {
-		keyPath := filepath.Join(dir, "identity.key")
+		keyPath := filepath.Join(dir, identityKeyFile)
 		if err := WriteKeyFile(keyPath, s.identityKey); err != nil {
 			return err
 		}
@@ -260,9 +270,9 @@ func (s *FileStore) saveIdentity() error {
 }
 
 func (s *FileStore) loadIdentity() error {
-	dir := filepath.Join(s.baseDir, "identity")
-	certPath := filepath.Join(dir, "identity.pem")
-	keyPath := filepath.Join(dir, "identity.key")
+	dir := filepath.Join(s.baseDir, identityDir)
+	certPath := filepath.Join(dir, identityCertFile)
+	keyPath := filepath.Join(dir, identityKeyFile)
 
 	cert, err := ReadCertFile(certPath)
 	if err != nil {
@@ -305,7 +315,7 @@ func (s *FileStore) saveOperationalCert(zoneID string, opCert *OperationalCert) 
 
 	// Save Zone CA cert
 	if opCert.ZoneCACert != nil {
-		caPath := filepath.Join(dir, "zone-ca.pem")
+		caPath := filepath.Join(dir, zoneCACertFile)
 		if err := WriteCertFile(caPath, opCert.ZoneCACert); err != nil {
 			return err
 		}
@@ -347,7 +357,7 @@ func (s *FileStore) loadOperationalCert(zoneID string) (*OperationalCert, error)
 
 	// Load Zone CA cert (optional)
 	var zoneCACert *x509.Certificate
-	caPath := filepath.Join(dir, "zone-ca.pem")
+	caPath := filepath.Join(dir, zoneCACertFile)
 	if zoneCACert, err = ReadCertFile(caPath); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}

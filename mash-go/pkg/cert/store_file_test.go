@@ -428,11 +428,11 @@ func TestFileControllerStore(t *testing.T) {
 
 		// Verify files exist
 		ctrlDir := filepath.Join(dir, "identity")
-		if _, err := os.Stat(filepath.Join(ctrlDir, "controller.pem")); err != nil {
-			t.Errorf("controller.pem not found: %v", err)
+		if _, err := os.Stat(filepath.Join(ctrlDir, "identity.pem")); err != nil {
+			t.Errorf("identity.pem not found: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(ctrlDir, "controller.key")); err != nil {
-			t.Errorf("controller.key not found: %v", err)
+		if _, err := os.Stat(filepath.Join(ctrlDir, "identity.key")); err != nil {
+			t.Errorf("identity.key not found: %v", err)
 		}
 
 		// TC-IMPL-CERT-STORE-002: Load Controller Operational Cert

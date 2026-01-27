@@ -231,19 +231,19 @@ type zoneCAMetadata struct {
 }
 
 func (s *FileControllerStore) saveZoneCA() error {
-	dir := filepath.Join(s.baseDir, "identity")
+	dir := filepath.Join(s.baseDir, identityDir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
 	// Save certificate
-	certPath := filepath.Join(dir, "zone-ca.pem")
+	certPath := filepath.Join(dir, zoneCACertFile)
 	if err := WriteCertFile(certPath, s.zoneCA.Certificate); err != nil {
 		return err
 	}
 
 	// Save private key
-	keyPath := filepath.Join(dir, "zone-ca.key")
+	keyPath := filepath.Join(dir, zoneCAKeyFile)
 	if err := WriteKeyFile(keyPath, s.zoneCA.PrivateKey); err != nil {
 		return err
 	}
@@ -253,7 +253,7 @@ func (s *FileControllerStore) saveZoneCA() error {
 		ZoneID:   s.zoneCA.ZoneID,
 		ZoneType: s.zoneCA.ZoneType,
 	}
-	metaPath := filepath.Join(dir, "zone-ca.json")
+	metaPath := filepath.Join(dir, zoneCAMetaFile)
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return err
@@ -266,17 +266,17 @@ func (s *FileControllerStore) saveZoneCA() error {
 }
 
 func (s *FileControllerStore) loadZoneCA() error {
-	dir := filepath.Join(s.baseDir, "identity")
+	dir := filepath.Join(s.baseDir, identityDir)
 
 	// Load certificate
-	certPath := filepath.Join(dir, "zone-ca.pem")
+	certPath := filepath.Join(dir, zoneCACertFile)
 	cert, err := ReadCertFile(certPath)
 	if err != nil {
 		return err
 	}
 
 	// Load private key
-	keyPath := filepath.Join(dir, "zone-ca.key")
+	keyPath := filepath.Join(dir, zoneCAKeyFile)
 	key, err := ReadKeyFile(keyPath)
 	if err != nil {
 		return err
@@ -284,7 +284,7 @@ func (s *FileControllerStore) loadZoneCA() error {
 
 	// Load metadata
 	meta := zoneCAMetadata{}
-	metaPath := filepath.Join(dir, "zone-ca.json")
+	metaPath := filepath.Join(dir, zoneCAMetaFile)
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		return err
@@ -304,19 +304,19 @@ func (s *FileControllerStore) loadZoneCA() error {
 }
 
 func (s *FileControllerStore) saveControllerCert() error {
-	dir := filepath.Join(s.baseDir, "identity")
+	dir := filepath.Join(s.baseDir, identityDir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
 	// Save certificate
-	certPath := filepath.Join(dir, "controller.pem")
+	certPath := filepath.Join(dir, identityCertFile)
 	if err := WriteCertFile(certPath, s.controllerCert.Certificate); err != nil {
 		return err
 	}
 
 	// Save private key
-	keyPath := filepath.Join(dir, "controller.key")
+	keyPath := filepath.Join(dir, identityKeyFile)
 	if err := WriteKeyFile(keyPath, s.controllerCert.PrivateKey); err != nil {
 		return err
 	}
@@ -325,17 +325,17 @@ func (s *FileControllerStore) saveControllerCert() error {
 }
 
 func (s *FileControllerStore) loadControllerCert() error {
-	dir := filepath.Join(s.baseDir, "identity")
+	dir := filepath.Join(s.baseDir, identityDir)
 
 	// Load certificate
-	certPath := filepath.Join(dir, "controller.pem")
+	certPath := filepath.Join(dir, identityCertFile)
 	cert, err := ReadCertFile(certPath)
 	if err != nil {
 		return err
 	}
 
 	// Load private key
-	keyPath := filepath.Join(dir, "controller.key")
+	keyPath := filepath.Join(dir, identityKeyFile)
 	key, err := ReadKeyFile(keyPath)
 	if err != nil {
 		return err
