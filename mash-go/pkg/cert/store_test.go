@@ -16,33 +16,34 @@ func TestMemoryStore(t *testing.T) {
 		}
 	})
 
-	t.Run("DeviceAttestation", func(t *testing.T) {
-		// Initially no attestation cert
-		_, _, err := store.GetDeviceAttestation()
+	t.Run("DeviceIdentity", func(t *testing.T) {
+		// Initially no identity cert
+		_, _, err := store.GetDeviceIdentity()
 		if err != ErrCertNotFound {
-			t.Errorf("GetDeviceAttestation() error = %v, want ErrCertNotFound", err)
+			t.Errorf("GetDeviceIdentity() error = %v, want ErrCertNotFound", err)
 		}
 
-		// Generate and store
+		// Generate and store (use Zone CA to generate a test cert)
+		ca, _ := GenerateZoneCA("test-zone", ZoneTypeHomeManager)
 		kp, _ := GenerateKeyPair()
-		cert, _ := GenerateDeviceAttestationCert(kp, &DeviceIdentity{
-			DeviceID:  "device-001",
-			VendorID:  1234,
-			ProductID: 5678,
-		}, nil)
+		csrDER, _ := CreateCSR(kp, &CSRInfo{
+			Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1234, ProductID: 5678},
+			ZoneID:   "test-zone",
+		})
+		cert, _ := SignCSR(ca, csrDER)
 
-		err = store.SetDeviceAttestation(cert, kp.PrivateKey)
+		err = store.SetDeviceIdentity(cert, kp.PrivateKey)
 		if err != nil {
-			t.Fatalf("SetDeviceAttestation() error = %v", err)
+			t.Fatalf("SetDeviceIdentity() error = %v", err)
 		}
 
 		// Retrieve
-		gotCert, gotKey, err := store.GetDeviceAttestation()
+		gotCert, gotKey, err := store.GetDeviceIdentity()
 		if err != nil {
-			t.Errorf("GetDeviceAttestation() error = %v", err)
+			t.Errorf("GetDeviceIdentity() error = %v", err)
 		}
 		if gotCert == nil || gotKey == nil {
-			t.Error("GetDeviceAttestation() returned nil")
+			t.Error("GetDeviceIdentity() returned nil")
 		}
 	})
 

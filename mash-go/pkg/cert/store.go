@@ -17,14 +17,15 @@ var (
 // Store defines the interface for certificate storage.
 // Implementations must be safe for concurrent access.
 type Store interface {
-	// Device attestation certificate (optional, pre-installed at manufacturing)
+	// Device identity certificate (persistent TLS identity for commissioning)
 
-	// GetDeviceAttestation returns the device attestation certificate and key.
-	// Returns ErrCertNotFound if no attestation certificate is stored.
-	GetDeviceAttestation() (*x509.Certificate, *ecdsa.PrivateKey, error)
+	// GetDeviceIdentity returns the device's persistent identity certificate and key.
+	// This certificate is self-signed and used for TLS during commissioning.
+	// Returns ErrCertNotFound if no identity certificate is stored.
+	GetDeviceIdentity() (*x509.Certificate, *ecdsa.PrivateKey, error)
 
-	// SetDeviceAttestation stores the device attestation certificate and key.
-	SetDeviceAttestation(cert *x509.Certificate, key *ecdsa.PrivateKey) error
+	// SetDeviceIdentity stores the device's identity certificate and key.
+	SetDeviceIdentity(cert *x509.Certificate, key *ecdsa.PrivateKey) error
 
 	// Operational certificates (one per zone, max 5 zones)
 

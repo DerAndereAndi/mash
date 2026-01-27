@@ -49,20 +49,21 @@ func TestFileStore(t *testing.T) {
 		}
 	})
 
-	t.Run("DeviceAttestationRoundTrip", func(t *testing.T) {
+	t.Run("DeviceIdentityRoundTrip", func(t *testing.T) {
 		dir := t.TempDir()
 		store := NewFileStore(dir)
 
-		// Generate and store attestation cert
+		// Generate and store identity cert
+		ca, _ := GenerateZoneCA("test-zone", ZoneTypeHomeManager)
 		kp, _ := GenerateKeyPair()
-		cert, _ := GenerateDeviceAttestationCert(kp, &DeviceIdentity{
-			DeviceID:  "device-001",
-			VendorID:  1234,
-			ProductID: 5678,
-		}, nil)
+		csrDER, _ := CreateCSR(kp, &CSRInfo{
+			Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1234, ProductID: 5678},
+			ZoneID:   "test-zone",
+		})
+		cert, _ := SignCSR(ca, csrDER)
 
-		if err := store.SetDeviceAttestation(cert, kp.PrivateKey); err != nil {
-			t.Fatalf("SetDeviceAttestation() error = %v", err)
+		if err := store.SetDeviceIdentity(cert, kp.PrivateKey); err != nil {
+			t.Fatalf("SetDeviceIdentity() error = %v", err)
 		}
 
 		if err := store.Save(); err != nil {
@@ -70,11 +71,11 @@ func TestFileStore(t *testing.T) {
 		}
 
 		// Verify files exist
-		if _, err := os.Stat(filepath.Join(dir, "identity", "attestation.pem")); err != nil {
-			t.Errorf("attestation.pem not found: %v", err)
+		if _, err := os.Stat(filepath.Join(dir, "identity", "identity.pem")); err != nil {
+			t.Errorf("identity.pem not found: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(dir, "identity", "attestation.key")); err != nil {
-			t.Errorf("attestation.key not found: %v", err)
+		if _, err := os.Stat(filepath.Join(dir, "identity", "identity.key")); err != nil {
+			t.Errorf("identity.key not found: %v", err)
 		}
 
 		// Load into new store
@@ -83,12 +84,12 @@ func TestFileStore(t *testing.T) {
 			t.Fatalf("Load() error = %v", err)
 		}
 
-		gotCert, gotKey, err := store2.GetDeviceAttestation()
+		gotCert, gotKey, err := store2.GetDeviceIdentity()
 		if err != nil {
-			t.Fatalf("GetDeviceAttestation() error = %v", err)
+			t.Fatalf("GetDeviceIdentity() error = %v", err)
 		}
 		if gotCert == nil || gotKey == nil {
-			t.Error("GetDeviceAttestation() returned nil")
+			t.Error("GetDeviceIdentity() returned nil")
 		}
 		if gotCert.Subject.CommonName != cert.Subject.CommonName {
 			t.Errorf("Subject = %q, want %q", gotCert.Subject.CommonName, cert.Subject.CommonName)

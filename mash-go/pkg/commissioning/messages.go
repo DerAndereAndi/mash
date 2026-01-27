@@ -90,12 +90,11 @@ type CSRRequest struct {
 }
 
 // CSRResponse contains the device's CSR.
-// CBOR: { 1: msgType, 2: csr, 3: attestationCert (optional), 4: errorCode }
+// CBOR: { 1: msgType, 2: csr, 3: errorCode }
 type CSRResponse struct {
-	MsgType         uint8  `cbor:"1,keyasint"`
-	CSR             []byte `cbor:"2,keyasint"`           // DER-encoded PKCS#10 CSR
-	AttestationCert []byte `cbor:"3,keyasint,omitempty"` // Optional device attestation cert
-	ErrorCode       uint8  `cbor:"4,keyasint"`
+	MsgType   uint8  `cbor:"1,keyasint"`
+	CSR       []byte `cbor:"2,keyasint"` // DER-encoded PKCS#10 CSR
+	ErrorCode uint8  `cbor:"3,keyasint"`
 }
 
 // CertInstall delivers the operational certificate to the device.

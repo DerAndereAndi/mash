@@ -186,7 +186,7 @@ func (s *DeviceService) Start(ctx context.Context) error {
 
 	if certStore != nil {
 		// Try to load existing certificate
-		deviceCert, deviceKey, err = certStore.GetDeviceAttestation()
+		deviceCert, deviceKey, err = certStore.GetDeviceIdentity()
 		if err != nil && err != cert.ErrCertNotFound {
 			s.mu.Lock()
 			s.state = StateIdle
@@ -210,7 +210,7 @@ func (s *DeviceService) Start(ctx context.Context) error {
 			parsedCert, parseErr := x509.ParseCertificate(s.tlsCert.Certificate[0])
 			if parseErr == nil {
 				if key, ok := s.tlsCert.PrivateKey.(*ecdsa.PrivateKey); ok {
-					_ = certStore.SetDeviceAttestation(parsedCert, key)
+					_ = certStore.SetDeviceIdentity(parsedCert, key)
 					_ = certStore.Save()
 				}
 			}

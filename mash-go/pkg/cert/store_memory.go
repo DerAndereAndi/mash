@@ -11,9 +11,9 @@ import (
 type MemoryStore struct {
 	mu sync.RWMutex
 
-	// Device attestation certificate
-	attestationCert *x509.Certificate
-	attestationKey  *ecdsa.PrivateKey
+	// Device identity certificate
+	identityCert *x509.Certificate
+	identityKey  *ecdsa.PrivateKey
 
 	// Operational certificates by zone ID
 	operationalCerts map[string]*OperationalCert
@@ -30,19 +30,19 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-// GetDeviceAttestation returns the device attestation certificate and key.
-func (s *MemoryStore) GetDeviceAttestation() (*x509.Certificate, *ecdsa.PrivateKey, error) {
+// GetDeviceIdentity returns the device identity certificate and key.
+func (s *MemoryStore) GetDeviceIdentity() (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if s.attestationCert == nil {
+	if s.identityCert == nil {
 		return nil, nil, ErrCertNotFound
 	}
-	return s.attestationCert, s.attestationKey, nil
+	return s.identityCert, s.identityKey, nil
 }
 
-// SetDeviceAttestation stores the device attestation certificate and key.
-func (s *MemoryStore) SetDeviceAttestation(cert *x509.Certificate, key *ecdsa.PrivateKey) error {
+// SetDeviceIdentity stores the device identity certificate and key.
+func (s *MemoryStore) SetDeviceIdentity(cert *x509.Certificate, key *ecdsa.PrivateKey) error {
 	if cert == nil {
 		return ErrInvalidCert
 	}
@@ -50,8 +50,8 @@ func (s *MemoryStore) SetDeviceAttestation(cert *x509.Certificate, key *ecdsa.Pr
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.attestationCert = cert
-	s.attestationKey = key
+	s.identityCert = cert
+	s.identityKey = key
 	return nil
 }
 

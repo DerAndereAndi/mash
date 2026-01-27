@@ -34,11 +34,10 @@
 //  2. Controller connects to device (TLS with InsecureSkipVerify)
 //  3. SPAKE2+ exchange using setup code from QR code
 //  4. Shared secret established and verified
-//  5. Controller requests device certificate (optional verification)
-//  6. Device generates new key pair and CSR
-//  7. Controller signs CSR with Zone CA
-//  8. Controller installs operational certificate on device
-//  9. Commissioning complete - device is now a zone member
+//  5. Device generates new key pair and CSR
+//  6. Controller signs CSR with Zone CA
+//  7. Controller installs operational certificate on device
+//  8. Commissioning complete - device is now a zone member
 //
 // # Security Properties
 //

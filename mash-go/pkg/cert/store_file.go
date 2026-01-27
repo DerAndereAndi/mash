@@ -16,8 +16,8 @@ type FileStore struct {
 	baseDir string
 
 	// In-memory state (same as MemoryStore)
-	attestationCert  *x509.Certificate
-	attestationKey   *ecdsa.PrivateKey
+	identityCert  *x509.Certificate
+	identityKey   *ecdsa.PrivateKey
 	operationalCerts map[string]*OperationalCert
 	zoneCACerts      map[string]*x509.Certificate
 
@@ -36,19 +36,19 @@ func NewFileStore(baseDir string) *FileStore {
 	}
 }
 
-// GetDeviceAttestation returns the device attestation certificate and key.
-func (s *FileStore) GetDeviceAttestation() (*x509.Certificate, *ecdsa.PrivateKey, error) {
+// GetDeviceIdentity returns the device identity certificate and key.
+func (s *FileStore) GetDeviceIdentity() (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if s.attestationCert == nil {
+	if s.identityCert == nil {
 		return nil, nil, ErrCertNotFound
 	}
-	return s.attestationCert, s.attestationKey, nil
+	return s.identityCert, s.identityKey, nil
 }
 
-// SetDeviceAttestation stores the device attestation certificate and key.
-func (s *FileStore) SetDeviceAttestation(cert *x509.Certificate, key *ecdsa.PrivateKey) error {
+// SetDeviceIdentity stores the device identity certificate and key.
+func (s *FileStore) SetDeviceIdentity(cert *x509.Certificate, key *ecdsa.PrivateKey) error {
 	if cert == nil {
 		return ErrInvalidCert
 	}
@@ -56,8 +56,8 @@ func (s *FileStore) SetDeviceAttestation(cert *x509.Certificate, key *ecdsa.Priv
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.attestationCert = cert
-	s.attestationKey = key
+	s.identityCert = cert
+	s.identityKey = key
 	return nil
 }
 
@@ -175,9 +175,9 @@ func (s *FileStore) Save() error {
 		return err
 	}
 
-	// Save attestation cert
-	if s.attestationCert != nil {
-		if err := s.saveAttestation(); err != nil {
+	// Save identity cert
+	if s.identityCert != nil {
+		if err := s.saveIdentity(); err != nil {
 			return err
 		}
 	}
@@ -208,8 +208,8 @@ func (s *FileStore) Load() error {
 		return nil // Empty store
 	}
 
-	// Load attestation cert
-	if err := s.loadAttestation(); err != nil && !os.IsNotExist(err) {
+	// Load identity cert
+	if err := s.loadIdentity(); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 
@@ -238,20 +238,20 @@ func (s *FileStore) Load() error {
 	return nil
 }
 
-func (s *FileStore) saveAttestation() error {
+func (s *FileStore) saveIdentity() error {
 	dir := filepath.Join(s.baseDir, "identity")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
-	certPath := filepath.Join(dir, "attestation.pem")
-	if err := WriteCertFile(certPath, s.attestationCert); err != nil {
+	certPath := filepath.Join(dir, "identity.pem")
+	if err := WriteCertFile(certPath, s.identityCert); err != nil {
 		return err
 	}
 
-	if s.attestationKey != nil {
-		keyPath := filepath.Join(dir, "attestation.key")
-		if err := WriteKeyFile(keyPath, s.attestationKey); err != nil {
+	if s.identityKey != nil {
+		keyPath := filepath.Join(dir, "identity.key")
+		if err := WriteKeyFile(keyPath, s.identityKey); err != nil {
 			return err
 		}
 	}
@@ -259,22 +259,22 @@ func (s *FileStore) saveAttestation() error {
 	return nil
 }
 
-func (s *FileStore) loadAttestation() error {
+func (s *FileStore) loadIdentity() error {
 	dir := filepath.Join(s.baseDir, "identity")
-	certPath := filepath.Join(dir, "attestation.pem")
-	keyPath := filepath.Join(dir, "attestation.key")
+	certPath := filepath.Join(dir, "identity.pem")
+	keyPath := filepath.Join(dir, "identity.key")
 
 	cert, err := ReadCertFile(certPath)
 	if err != nil {
 		return err
 	}
-	s.attestationCert = cert
+	s.identityCert = cert
 
 	key, err := ReadKeyFile(keyPath)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	s.attestationKey = key
+	s.identityKey = key
 
 	return nil
 }

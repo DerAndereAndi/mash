@@ -16,9 +16,6 @@ const (
 	// OperationalCertValidity is the validity period for operational certificates.
 	OperationalCertValidity = 365 * 24 * time.Hour // 1 year
 
-	// DeviceAttestationValidity is the validity period for device attestation certificates.
-	DeviceAttestationValidity = 20 * 365 * 24 * time.Hour // 20 years
-
 	// RenewalWindow is how long before expiry to start renewal.
 	RenewalWindow = 30 * 24 * time.Hour // 30 days
 
