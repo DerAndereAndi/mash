@@ -2225,6 +2225,129 @@ ChargingSession.evDemandMode: DYNAMIC_BIDIRECTIONAL
 
 ---
 
+### DEC-041: Bidirectional Feature Access and Topology-Based Permissions
+
+**Date:** 2026-01-27
+**Status:** Accepted
+
+**Context:** Need to support hierarchical controller scenarios where:
+1. SMGW (Grid Operator) controls an EMS by setting grid power limits
+2. EMS controls downstream devices (EVSE, heat pump, battery)
+3. EMS can read SMGW's grid meter values to optimize within grid limits
+
+This raised questions about:
+- Can both sides of a connection expose and access features?
+- What permission model governs who can access what?
+- How do we handle a device in multiple controller zones?
+
+**Options Evaluated:**
+
+1. **Zone-Type Priority Inheritance**
+   - Higher priority zones inherit all permissions of lower priority
+   - Simple but too coarse-grained
+
+2. **Feature-Declared Permissions (ACL)**
+   - Each feature declares which zone types can Read/Write/Subscribe/Invoke
+   - Fine-grained but verbose configuration overhead
+
+3. **Capability Grants in Certificate**
+   - Certificates include explicit capability grants
+   - Maximum flexibility but complex certificate management
+
+4. **Hybrid (Defaults + Feature Overrides)**
+   - Zone-type defaults with per-feature exceptions
+   - Good balance but adds permission layer complexity
+
+5. **Topology-Based Implicit Permissions**
+   - Commissioning defines access; no explicit permission model
+   - Simplest approach if topology naturally enforces access patterns
+
+**Decision:** Topology-Based Implicit Permissions (Option 5)
+
+**Rationale:**
+
+The key insight is that **commissioning IS authorization**. The network topology naturally enforces access control:
+
+1. **Controllers control devices in their zone** - If you commissioned a device, you can control it (Read/Write/Subscribe/Invoke). This is implicit.
+
+2. **Devices connect only to controllers** - Devices cannot connect to other devices. There is no device-to-device communication path.
+
+3. **Dual-service entities** - An EMS that needs to both control devices AND be controlled runs two separate services:
+   - A ControllerService (manages its own zone with downstream devices)
+   - A DeviceService (can be commissioned into another controller's zone)
+
+   These services are independent. Devices in the EMS's zone cannot see or access the EMS's device-side features - they're on different connections entirely.
+
+4. **Multi-zone conflict resolution already exists** - When a device belongs to multiple zones (e.g., EVSE in both SMGW and EMS zones), the existing rules apply:
+   - Limits: Most restrictive wins (DEC-024)
+   - Setpoints: Highest priority zone wins
+
+**Example Architecture:**
+
+```
+SMGW (Smart Meter Gateway)
+├── ControllerService (GRID_OPERATOR zone)
+│   └── controls: EMS-DeviceService
+│       └── Can write grid limits to EMS
+│
+└── DeviceService (exposes grid meter)
+    └── commissioned into: EMS zone
+        └── EMS can read meter values
+
+EMS (Energy Management System)
+├── ControllerService (HOME_MANAGER zone)
+│   ├── controls: SMGW-DeviceService (meter) → reads grid meter
+│   ├── controls: EVSE
+│   └── controls: Heat Pump
+│
+└── DeviceService (exposes GRID_CONNECTION aggregate)
+    └── commissioned into: SMGW zone
+        └── SMGW can write limits, read aggregate
+```
+
+**Wire Protocol Implications:**
+
+The wire protocol already supports bidirectional message flow (audit confirmed):
+- Message framing is symmetric
+- No role/direction fields in messages
+- MessageID spaces are independent per side
+
+Service layer changes needed:
+- Sessions must handle all message types (Request, Response, Notification)
+- Both sides can send Read/Write/Subscribe/Invoke
+- No permission checks needed beyond "is this a valid commissioned connection?"
+
+**What We DON'T Need:**
+
+| Eliminated Complexity | Reason |
+|----------------------|--------|
+| Explicit permission model | Topology defines access |
+| Feature-level ACLs | All features accessible to commissioned controller |
+| Zone-type permission matrix | Commissioning grants full access |
+| ExposeToRemote flags | Features visible on connection, no filtering |
+| Capability certificates | Zone type sufficient for conflict resolution |
+
+**What We DO Need:**
+
+| Requirement | Status |
+|-------------|--------|
+| Multi-zone limit resolution | Already implemented (DEC-024) |
+| Multi-zone setpoint resolution | Already implemented |
+| Dual-service support | Application-level composition |
+| Bidirectional message handling | Service layer refactoring needed |
+
+**Declined Alternatives:**
+
+- **Feature ACLs**: Unnecessary complexity when topology already constrains access
+- **Certificate capabilities**: Over-engineering for current use cases
+- **Zone-type permission matrix**: Adds a layer that topology already provides
+
+**Key Principle:** The act of commissioning a device into your zone IS the authorization. No additional permission layer required.
+
+**Related:** DEC-024 (Limit Resolution), DEC-023 (Zone Terminology)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
