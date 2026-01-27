@@ -23,7 +23,7 @@ func (_m *MockBrowser) EXPECT() *MockBrowser_Expecter {
 }
 
 // BrowseCommissionable provides a mock function with given fields: ctx
-func (_m *MockBrowser) BrowseCommissionable(ctx context.Context) (<-chan *discovery.CommissionableService, error) {
+func (_m *MockBrowser) BrowseCommissionable(ctx context.Context) (<-chan *discovery.CommissionableService, <-chan *discovery.CommissionableService, error) {
 	ret := _m.Called(ctx)
 
 	if len(ret) == 0 {
@@ -31,8 +31,9 @@ func (_m *MockBrowser) BrowseCommissionable(ctx context.Context) (<-chan *discov
 	}
 
 	var r0 <-chan *discovery.CommissionableService
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) (<-chan *discovery.CommissionableService, error)); ok {
+	var r1 <-chan *discovery.CommissionableService
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context) (<-chan *discovery.CommissionableService, <-chan *discovery.CommissionableService, error)); ok {
 		return rf(ctx)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context) <-chan *discovery.CommissionableService); ok {
@@ -43,13 +44,21 @@ func (_m *MockBrowser) BrowseCommissionable(ctx context.Context) (<-chan *discov
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context) <-chan *discovery.CommissionableService); ok {
 		r1 = rf(ctx)
 	} else {
-		r1 = ret.Error(1)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(<-chan *discovery.CommissionableService)
+		}
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(context.Context) error); ok {
+		r2 = rf(ctx)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
 // MockBrowser_BrowseCommissionable_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BrowseCommissionable'
@@ -70,12 +79,12 @@ func (_c *MockBrowser_BrowseCommissionable_Call) Run(run func(ctx context.Contex
 	return _c
 }
 
-func (_c *MockBrowser_BrowseCommissionable_Call) Return(_a0 <-chan *discovery.CommissionableService, _a1 error) *MockBrowser_BrowseCommissionable_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *MockBrowser_BrowseCommissionable_Call) Return(added <-chan *discovery.CommissionableService, removed <-chan *discovery.CommissionableService, err error) *MockBrowser_BrowseCommissionable_Call {
+	_c.Call.Return(added, removed, err)
 	return _c
 }
 
-func (_c *MockBrowser_BrowseCommissionable_Call) RunAndReturn(run func(context.Context) (<-chan *discovery.CommissionableService, error)) *MockBrowser_BrowseCommissionable_Call {
+func (_c *MockBrowser_BrowseCommissionable_Call) RunAndReturn(run func(context.Context) (<-chan *discovery.CommissionableService, <-chan *discovery.CommissionableService, error)) *MockBrowser_BrowseCommissionable_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -10,9 +10,9 @@ import (
 // Browser provides mDNS service browsing capabilities.
 type Browser interface {
 	// BrowseCommissionable searches for devices in commissioning mode.
-	// Results are sent to the returned channel.
-	// The channel is closed when the context is cancelled or browsing completes.
-	BrowseCommissionable(ctx context.Context) (<-chan *CommissionableService, error)
+	// Returns two channels: added (new devices) and removed (devices that disappeared).
+	// Both channels are closed when the context is cancelled or browsing completes.
+	BrowseCommissionable(ctx context.Context) (added, removed <-chan *CommissionableService, err error)
 
 	// BrowseOperational searches for commissioned devices.
 	// Optionally filter by zone ID.

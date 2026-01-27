@@ -28,6 +28,15 @@ func makeCommissionableChannel(services ...*discovery.CommissionableService) <-c
 	return ch
 }
 
+// makeCommissionableChannels creates added and removed channels for BrowseCommissionable mock.
+// The added channel emits the given services, the removed channel is empty and closed.
+func makeCommissionableChannels(services ...*discovery.CommissionableService) (<-chan *discovery.CommissionableService, <-chan *discovery.CommissionableService) {
+	added := makeCommissionableChannel(services...)
+	removed := make(chan *discovery.CommissionableService)
+	close(removed)
+	return added, removed
+}
+
 // makeOperationalChannel creates a channel that emits the given services then closes.
 func makeOperationalChannel(services ...*discovery.OperationalService) <-chan *discovery.OperationalService {
 	ch := make(chan *discovery.OperationalService)
@@ -448,8 +457,9 @@ func TestControllerServiceDiscovery(t *testing.T) {
 	// BrowseCommissionable is called multiple times (once per Discover call)
 	// Use RunAndReturn to create a fresh channel for each call (channels can only be consumed once)
 	browser.EXPECT().BrowseCommissionable(mock.Anything).
-		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, error) {
-			return makeCommissionableChannel(device1, device2), nil
+		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, <-chan *discovery.CommissionableService, error) {
+			added, removed := makeCommissionableChannels(device1, device2)
+			return added, removed, nil
 		}).Times(2)
 	browser.EXPECT().FindByDiscriminator(mock.Anything, uint16(5678)).
 		Return(device2, nil).Once()
@@ -812,8 +822,9 @@ func TestControllerServiceStartDiscovery(t *testing.T) {
 	browser := mocks.NewMockBrowser(t)
 	// Use RunAndReturn to create a fresh channel each time (channels can only be consumed once)
 	browser.EXPECT().BrowseCommissionable(mock.Anything).
-		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, error) {
-			return makeCommissionableChannel(device1, device2), nil
+		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, <-chan *discovery.CommissionableService, error) {
+			added, removed := makeCommissionableChannels(device1, device2)
+			return added, removed, nil
 		}).Once()
 	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
@@ -881,8 +892,9 @@ func TestControllerServiceStartDiscoveryWithFilter(t *testing.T) {
 	browser := mocks.NewMockBrowser(t)
 	// Use RunAndReturn to create a fresh channel each time (channels can only be consumed once)
 	browser.EXPECT().BrowseCommissionable(mock.Anything).
-		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, error) {
-			return makeCommissionableChannel(device1, device2), nil
+		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, <-chan *discovery.CommissionableService, error) {
+			added, removed := makeCommissionableChannels(device1, device2)
+			return added, removed, nil
 		}).Once()
 	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
@@ -935,12 +947,13 @@ func TestControllerServiceStopDiscovery(t *testing.T) {
 
 	// Set up mock browser
 	browser := mocks.NewMockBrowser(t)
-	// Create a channel that stays open until we close it
-	// This simulates a real browser that keeps the channel open for discovery
+	// Create channels that stay open until we close them
+	// This simulates a real browser that keeps the channels open for discovery
 	discoveryCh := make(chan *discovery.CommissionableService)
+	removedCh := make(chan *discovery.CommissionableService)
 	browser.EXPECT().BrowseCommissionable(mock.Anything).
-		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, error) {
-			return discoveryCh, nil
+		RunAndReturn(func(_ context.Context) (<-chan *discovery.CommissionableService, <-chan *discovery.CommissionableService, error) {
+			return discoveryCh, removedCh, nil
 		}).Once()
 	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
@@ -950,7 +963,8 @@ func TestControllerServiceStopDiscovery(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 	defer func() {
-		close(discoveryCh) // Clean up the channel
+		close(discoveryCh) // Clean up the channels
+		close(removedCh)
 		_ = svc.Stop()
 	}()
 

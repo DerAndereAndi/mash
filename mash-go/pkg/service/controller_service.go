@@ -289,14 +289,15 @@ func (s *ControllerService) Discover(ctx context.Context, filter discovery.Filte
 
 	// Start browsing
 	// Note: Browser handles aggregation/deduplication by instance name
-	results, err := browser.BrowseCommissionable(browseCtx)
+	// For one-shot discovery, we only care about added devices (ignore removed channel)
+	added, _, err := browser.BrowseCommissionable(browseCtx)
 	if err != nil {
 		return nil, err
 	}
 
 	// Collect results
 	var services []*discovery.CommissionableService
-	for svc := range results {
+	for svc := range added {
 		if filter == nil || filter(svc) {
 			services = append(services, svc)
 		}
@@ -626,7 +627,7 @@ func (s *ControllerService) StartDiscovery(ctx context.Context, filter discovery
 
 // runDiscoveryLoop runs the background discovery and emits events.
 func (s *ControllerService) runDiscoveryLoop(ctx context.Context, filter discovery.FilterFunc) {
-	results, err := s.browser.BrowseCommissionable(ctx)
+	added, removed, err := s.browser.BrowseCommissionable(ctx)
 	if err != nil {
 		s.mu.Lock()
 		s.discoveryActive = false
@@ -644,7 +645,7 @@ func (s *ControllerService) runDiscoveryLoop(ctx context.Context, filter discove
 			s.mu.Unlock()
 			return
 
-		case svc, ok := <-results:
+		case svc, ok := <-added:
 			if !ok {
 				s.mu.Lock()
 				s.discoveryActive = false
@@ -661,6 +662,23 @@ func (s *ControllerService) runDiscoveryLoop(ctx context.Context, filter discove
 			// Emit discovery event
 			s.emitEvent(Event{
 				Type:              EventDeviceDiscovered,
+				DiscoveredService: svc,
+			})
+
+		case svc, ok := <-removed:
+			if !ok {
+				// Removed channel closed, but added might still be open
+				continue
+			}
+
+			// Apply filter if provided
+			if filter != nil && !filter(svc) {
+				continue
+			}
+
+			// Emit removal event
+			s.emitEvent(Event{
+				Type:              EventDeviceGone,
 				DiscoveredService: svc,
 			})
 		}

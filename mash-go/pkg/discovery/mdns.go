@@ -318,19 +318,23 @@ func NewMDNSBrowser(config BrowserConfig) (*MDNSBrowser, error) {
 
 // BrowseCommissionable searches for devices in commissioning mode.
 // Services are aggregated by instance name - addresses from multiple interfaces
-// are combined into a single entry. Removals are handled when interfaces disappear.
-func (b *MDNSBrowser) BrowseCommissionable(ctx context.Context) (<-chan *CommissionableService, error) {
-	out := make(chan *CommissionableService)
+// are combined into a single entry.
+// Returns two channels: added (new devices) and removed (devices that disappeared).
+// Both channels are closed when the context is cancelled.
+func (b *MDNSBrowser) BrowseCommissionable(ctx context.Context) (added, removed <-chan *CommissionableService, err error) {
+	addedCh := make(chan *CommissionableService)
+	removedCh := make(chan *CommissionableService)
 
 	entries := make(chan *zeroconf.ServiceEntry)
-	removed := make(chan *zeroconf.ServiceEntry)
+	removedEntries := make(chan *zeroconf.ServiceEntry)
 
 	// Set up browser options
 	opts := b.browserOptions()
 
 	// Process entries with aggregation
 	go func() {
-		defer close(out)
+		defer close(addedCh)
+		defer close(removedCh)
 
 		// Track services by instance name, aggregating addresses
 		services := make(map[string]*CommissionableService)
@@ -354,22 +358,27 @@ func (b *MDNSBrowser) BrowseCommissionable(ctx context.Context) (<-chan *Commiss
 					// New service - store and emit
 					services[svc.InstanceName] = svc
 					select {
-					case out <- svc:
+					case addedCh <- svc:
 					case <-ctx.Done():
 						return
 					}
 				}
 
-			case entry, ok := <-removed:
+			case entry, ok := <-removedEntries:
 				if !ok {
 					continue
 				}
 				// Remove addresses that came from this interface
 				if existing, found := services[entry.Instance]; found {
 					existing.Addresses = removeAddresses(existing.Addresses, entry)
-					// If no addresses remain, remove the service
+					// If no addresses remain, remove the service and emit removal
 					if len(existing.Addresses) == 0 {
 						delete(services, entry.Instance)
+						select {
+						case removedCh <- existing:
+						case <-ctx.Done():
+							return
+						}
 					}
 				}
 
@@ -381,10 +390,10 @@ func (b *MDNSBrowser) BrowseCommissionable(ctx context.Context) (<-chan *Commiss
 
 	// Start browsing in background
 	go func() {
-		_ = zeroconf.Browse(ctx, ServiceTypeCommissionable, Domain, entries, removed, opts...)
+		_ = zeroconf.Browse(ctx, ServiceTypeCommissionable, Domain, entries, removedEntries, opts...)
 	}()
 
-	return out, nil
+	return addedCh, removedCh, nil
 }
 
 // BrowseOperational searches for commissioned devices.
@@ -532,14 +541,15 @@ func (b *MDNSBrowser) BrowseCommissioners(ctx context.Context) (<-chan *Commissi
 
 // FindByDiscriminator searches for a specific commissionable device.
 func (b *MDNSBrowser) FindByDiscriminator(ctx context.Context, discriminator uint16) (*CommissionableService, error) {
-	results, err := b.BrowseCommissionable(ctx)
+	// For search, we only care about added devices (ignore removed channel)
+	added, _, err := b.BrowseCommissionable(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	for {
 		select {
-		case svc, ok := <-results:
+		case svc, ok := <-added:
 			if !ok {
 				return nil, ErrNotFound
 			}

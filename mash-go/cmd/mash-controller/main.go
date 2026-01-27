@@ -300,6 +300,11 @@ func handleEvent(event service.Event) {
 				}
 			}
 		}
+	case service.EventDeviceGone:
+		if d, ok := event.DiscoveredService.(*discovery.CommissionableService); ok {
+			log.Printf("[EVENT] Device gone: %s (discriminator: %d)",
+				d.InstanceName, d.Discriminator)
+		}
 	case service.EventConnected:
 		log.Printf("[EVENT] Device connected: %s", event.DeviceID)
 	case service.EventDisconnected:

@@ -212,13 +212,16 @@ func TestMDNSBrowserCommissionable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	results, err := browser.BrowseCommissionable(ctx)
+	added, removed, err := browser.BrowseCommissionable(ctx)
 	if err != nil {
 		t.Fatalf("Failed to browse: %v", err)
 	}
 
-	// With mocks, we won't find any devices - just verify the channel works
-	for range results {
+	// With mocks, we won't find any devices - just verify the channels work
+	for range added {
+		// Drain channel
+	}
+	for range removed {
 		// Drain channel
 	}
 }

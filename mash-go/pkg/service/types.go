@@ -338,6 +338,9 @@ const (
 	// EventDeviceDiscovered - new device discovered via mDNS.
 	EventDeviceDiscovered
 
+	// EventDeviceGone - device disappeared from mDNS commissioning.
+	EventDeviceGone
+
 	// EventZoneRemoved - zone was removed from device.
 	EventZoneRemoved
 
@@ -385,6 +388,8 @@ func (e EventType) String() string {
 		return "COMMISSIONING_CLOSED"
 	case EventDeviceDiscovered:
 		return "DEVICE_DISCOVERED"
+	case EventDeviceGone:
+		return "DEVICE_GONE"
 	case EventZoneRemoved:
 		return "ZONE_REMOVED"
 	case EventZoneRestored:
