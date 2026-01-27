@@ -123,9 +123,12 @@ func TestMemoryStore(t *testing.T) {
 func TestMemoryStoreMaxZones(t *testing.T) {
 	store := NewMemoryStore()
 
-	// Create 5 zones (the maximum)
+	// Create MaxZones zones (one GRID + one LOCAL per DEC-043)
+	zoneTypes := []ZoneType{ZoneTypeGrid, ZoneTypeLocal}
 	for i := 0; i < MaxZones; i++ {
-		ca, _ := GenerateZoneCA("zone-"+string(rune('A'+i)), ZoneTypeLocal)
+		zoneID := "zone-" + string(rune('A'+i))
+		zoneType := zoneTypes[i]
+		ca, _ := GenerateZoneCA(zoneID, zoneType)
 		deviceKP, _ := GenerateKeyPair()
 		csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
 			Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1, ProductID: 1},
@@ -137,7 +140,7 @@ func TestMemoryStoreMaxZones(t *testing.T) {
 			Certificate: cert,
 			PrivateKey:  deviceKP.PrivateKey,
 			ZoneID:      ca.ZoneID,
-			ZoneType:    ZoneTypeLocal,
+			ZoneType:    zoneType,
 			ZoneCACert:  ca.Certificate,
 		}
 
@@ -151,26 +154,28 @@ func TestMemoryStoreMaxZones(t *testing.T) {
 		t.Errorf("ZoneCount() = %d, want %d", store.ZoneCount(), MaxZones)
 	}
 
-	// Try to add a 6th zone
-	ca6, _ := GenerateZoneCA("zone-6", ZoneTypeGrid)
+	// Try to add another zone - should fail with ErrMaxZonesExceed
+	// Note: The cert store doesn't check zone types, only capacity.
+	// Zone type enforcement is done at the zone.Manager level.
+	ca3, _ := GenerateZoneCA("zone-3", ZoneTypeGrid)
 	deviceKP, _ := GenerateKeyPair()
 	csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
 		Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1, ProductID: 1},
-		ZoneID:   "zone-6",
+		ZoneID:   "zone-3",
 	})
-	cert6, _ := SignCSR(ca6, csrDER)
+	cert3, _ := SignCSR(ca3, csrDER)
 
-	opCert6 := &OperationalCert{
-		Certificate: cert6,
+	opCert3 := &OperationalCert{
+		Certificate: cert3,
 		PrivateKey:  deviceKP.PrivateKey,
-		ZoneID:      "zone-6",
+		ZoneID:      "zone-3",
 		ZoneType:    ZoneTypeGrid,
-		ZoneCACert:  ca6.Certificate,
+		ZoneCACert:  ca3.Certificate,
 	}
 
-	err := store.SetOperationalCert(opCert6)
+	err := store.SetOperationalCert(opCert3)
 	if err != ErrMaxZonesExceed {
-		t.Errorf("SetOperationalCert(zone-6) error = %v, want ErrMaxZonesExceed", err)
+		t.Errorf("SetOperationalCert(zone-3) error = %v, want ErrMaxZonesExceed", err)
 	}
 }
 

@@ -22,11 +22,13 @@ type mockAdvertiser struct {
 	commissionable   *discovery.CommissionableInfo
 	operationalZones map[string]*discovery.OperationalInfo
 	commissionerZone *discovery.CommissionerInfo
+	pairingRequests  map[uint16]*discovery.PairingRequestInfo
 }
 
 func newMockAdvertiser() *mockAdvertiser {
 	return &mockAdvertiser{
 		operationalZones: make(map[string]*discovery.OperationalInfo),
+		pairingRequests:  make(map[uint16]*discovery.PairingRequestInfo),
 	}
 }
 
@@ -89,12 +91,27 @@ func (m *mockAdvertiser) StopCommissioner(zoneID string) error {
 	return nil
 }
 
+func (m *mockAdvertiser) AnnouncePairingRequest(ctx context.Context, info *discovery.PairingRequestInfo) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pairingRequests[info.Discriminator] = info
+	return nil
+}
+
+func (m *mockAdvertiser) StopPairingRequest(discriminator uint16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.pairingRequests, discriminator)
+	return nil
+}
+
 func (m *mockAdvertiser) StopAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.commissionable = nil
 	m.operationalZones = make(map[string]*discovery.OperationalInfo)
 	m.commissionerZone = nil
+	m.pairingRequests = make(map[uint16]*discovery.PairingRequestInfo)
 }
 
 // ============================================================================
@@ -152,6 +169,12 @@ func (m *mockBrowser) BrowseCommissioners(ctx context.Context) (<-chan *discover
 	ch := make(chan *discovery.CommissionerService)
 	close(ch)
 	return ch, nil
+}
+
+func (m *mockBrowser) BrowsePairingRequests(ctx context.Context, callback func(discovery.PairingRequestService)) error {
+	// Default implementation: block until cancelled
+	<-ctx.Done()
+	return nil
 }
 
 func (m *mockBrowser) FindByDiscriminator(ctx context.Context, discriminator uint16) (*discovery.CommissionableService, error) {

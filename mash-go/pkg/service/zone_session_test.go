@@ -25,10 +25,10 @@ func createTestDevice() *model.Device {
 
 // mockSendableConnection implements Sendable and tracks sent messages.
 type mockSendableConnection struct {
-	mu       sync.Mutex
-	sent     [][]byte
-	sendErr  error
-	closed   bool
+	mu      sync.Mutex
+	sent    [][]byte
+	sendErr error
+	closed  bool
 }
 
 func newMockSendableConnection() *mockSendableConnection {
@@ -303,11 +303,11 @@ func TestZoneSession_HandleMultipleRequests(t *testing.T) {
 // mockBidirectionalConnection extends mockSendableConnection with the ability
 // to inject responses when requests are sent.
 type mockBidirectionalConnection struct {
-	mu        sync.Mutex
-	sent      [][]byte
-	sendErr   error
-	onSend    func(data []byte) // Callback when data is sent
-	session   *ZoneSession      // Reference to inject responses
+	mu      sync.Mutex
+	sent    [][]byte
+	sendErr error
+	onSend  func(data []byte) // Callback when data is sent
+	session *ZoneSession      // Reference to inject responses
 }
 
 func newMockBidirectionalConnection() *mockBidirectionalConnection {

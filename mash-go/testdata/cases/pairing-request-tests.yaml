@@ -1,0 +1,364 @@
+# Test Suite: Pairing Request Tests
+# Verifies DEC-042: Pairing Request Mechanism for Deferred Commissioning
+#
+# Key concepts:
+# - Controllers announce pairing requests via _mashp._udp mDNS
+# - Uncommissioned devices listen for matching discriminators
+# - When discriminator matches, device opens commissioning window
+# - Device starts advertising _mashc._udp for commissioning
+# - Rate limiting: device ignores requests if window already open
+
+---
+# TC-PAIR-001: Device Opens Window on Pairing Request
+id: TC-PAIR-001
+name: Device Opens Window on Pairing Request
+description: |
+  An uncommissioned device receives a pairing request with a matching
+  discriminator. The device opens its commissioning window automatically
+  and starts advertising _mashc._udp for commissioning.
+
+  This enables deferred commissioning scenarios where the controller
+  (e.g., SMGW) announces intent to commission before the device is
+  installed or powered on.
+
+pics_requirements:
+  - MASH.S.DISC.PAIRING_REQUEST     # Device listens for pairing requests
+  - MASH.S.COMM.PAIRING_REQUEST     # Device responds to pairing requests
+
+preconditions:
+  - device_uncommissioned: true
+  - device_listening_for_pairing: true
+  - commissioning_window_closed: true
+
+steps:
+  - name: Verify device is not advertising commissioning
+    action: verify_mdns_not_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      not_advertising: true
+
+  - name: Controller announces pairing request
+    action: announce_pairing_request
+    params:
+      service_type: "_mashp._udp"
+      discriminator: "${device_discriminator}"
+      controller_id: "${controller_id}"
+    expect:
+      announcement_sent: true
+
+  - name: Wait for device to detect pairing request
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify device opens commissioning window
+    action: verify_mdns_advertising
+    params:
+      service_type: "_mashc._udp"
+      timeout_ms: 5000
+    expect:
+      advertising: true
+      txt_records:
+        id: "${device_id}"
+        disc: "${device_discriminator}"
+
+  - name: Commission device successfully
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+      zone_type: "LOCAL"
+    expect:
+      commission_success: true
+      session_established: true
+
+postconditions:
+  - device_commissioned: true
+  - commissioning_window_closed: true
+
+timeout: "30s"
+tags:
+  - pairing
+  - discovery
+  - commissioning
+  - deferred
+
+---
+# TC-PAIR-002: Device Ignores Mismatched Discriminator
+id: TC-PAIR-002
+name: Device Ignores Mismatched Discriminator
+description: |
+  An uncommissioned device receives a pairing request with a different
+  discriminator than its own. The device does NOT open its commissioning
+  window, as the request is intended for a different device.
+
+  This ensures that pairing requests are device-specific and don't cause
+  unintended commissioning windows to open.
+
+pics_requirements:
+  - MASH.S.DISC.PAIRING_REQUEST
+  - MASH.S.COMM.PAIRING_REQUEST
+
+preconditions:
+  - device_uncommissioned: true
+  - device_listening_for_pairing: true
+  - commissioning_window_closed: true
+
+steps:
+  - name: Verify device is not advertising commissioning
+    action: verify_mdns_not_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      not_advertising: true
+
+  - name: Controller announces pairing request with different discriminator
+    action: announce_pairing_request
+    params:
+      service_type: "_mashp._udp"
+      discriminator: "9999"          # Different from device's discriminator
+      controller_id: "${controller_id}"
+    expect:
+      announcement_sent: true
+
+  - name: Wait for potential response
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Verify device did NOT open commissioning window
+    action: verify_mdns_not_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      not_advertising: true
+
+postconditions:
+  - device_still_uncommissioned: true
+  - commissioning_window_still_closed: true
+
+timeout: "10s"
+tags:
+  - pairing
+  - discovery
+  - discriminator
+  - negative
+
+---
+# TC-PAIR-003: Rate Limiting - Window Already Open
+id: TC-PAIR-003
+name: Rate Limiting When Commissioning Window Already Open
+description: |
+  A device has its commissioning window already open (e.g., from first
+  boot or manual trigger). When it receives a pairing request, it ignores
+  it because a window is already open.
+
+  This prevents pairing requests from extending or resetting an existing
+  commissioning window, which could be a security concern.
+
+pics_requirements:
+  - MASH.S.DISC.PAIRING_REQUEST
+  - MASH.S.COMM.PAIRING_REQUEST
+
+preconditions:
+  - device_uncommissioned: true
+  - commissioning_window_open: true
+  - window_opened_at: "${window_start_time}"
+
+steps:
+  - name: Verify device is advertising commissioning
+    action: verify_mdns_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      advertising: true
+
+  - name: Record window expiry time
+    action: read_mdns_txt
+    params:
+      service_type: "_mashc._udp"
+      key: "wexp"                    # Window expiry timestamp
+    store_as: original_window_expiry
+    expect:
+      key_exists: true
+
+  - name: Controller announces pairing request
+    action: announce_pairing_request
+    params:
+      service_type: "_mashp._udp"
+      discriminator: "${device_discriminator}"
+      controller_id: "${controller_id}"
+    expect:
+      announcement_sent: true
+
+  - name: Wait for potential processing
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify window expiry unchanged (rate limited)
+    action: read_mdns_txt
+    params:
+      service_type: "_mashc._udp"
+      key: "wexp"
+    expect:
+      value: "${original_window_expiry}"    # Not extended
+
+postconditions:
+  - commissioning_window_unchanged: true
+
+timeout: "10s"
+tags:
+  - pairing
+  - rate-limiting
+  - security
+
+---
+# TC-PAIR-004: Deferred Commissioning Flow
+id: TC-PAIR-004
+name: Deferred Commissioning Flow
+description: |
+  Complete deferred commissioning scenario:
+  1. Controller announces pairing request
+  2. Device is initially offline
+  3. Device comes online, detects the pairing request
+  4. Device opens commissioning window
+  5. Controller detects device and commissions successfully
+
+  This tests the primary use case for pairing requests: SMGW commissioning
+  where the pairing code is registered days/weeks before the device is
+  installed.
+
+pics_requirements:
+  - MASH.S.DISC.PAIRING_REQUEST
+  - MASH.S.COMM.PAIRING_REQUEST
+  - D.COMM.PASE
+
+preconditions:
+  - device_powered_off: true
+  - controller_running: true
+
+steps:
+  - name: Controller announces pairing request (device offline)
+    action: announce_pairing_request
+    params:
+      service_type: "_mashp._udp"
+      discriminator: "${device_discriminator}"
+      controller_id: "${controller_id}"
+      ttl: 3600                      # Persist for 1 hour
+    expect:
+      announcement_sent: true
+
+  - name: Power on device
+    action: power_on_device
+    params:
+      device_id: "${device_id}"
+    expect:
+      device_powered: true
+
+  - name: Wait for device to initialize and detect pairing request
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Verify device advertises commissioning
+    action: verify_mdns_advertising
+    params:
+      service_type: "_mashc._udp"
+      timeout_ms: 10000
+    expect:
+      advertising: true
+      txt_records:
+        id: "${device_id}"
+        disc: "${device_discriminator}"
+
+  - name: Controller connects and commissions
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+      zone_type: "GRID"              # SMGW scenario
+    expect:
+      commission_success: true
+      session_established: true
+
+  - name: Verify pairing request removed after success
+    action: verify_mdns_not_advertising
+    params:
+      service_type: "_mashp._udp"
+      filter:
+        controller_id: "${controller_id}"
+        discriminator: "${device_discriminator}"
+    expect:
+      not_advertising: true
+
+postconditions:
+  - device_commissioned: true
+  - pairing_request_cleaned_up: true
+
+timeout: "60s"
+tags:
+  - pairing
+  - deferred
+  - commissioning
+  - smgw
+  - integration
+
+---
+# TC-PAIR-005: Commissioned Device Ignores Pairing Requests
+id: TC-PAIR-005
+name: Commissioned Device Ignores Pairing Requests
+description: |
+  A device that is already commissioned (has at least one zone) should
+  not listen for or respond to pairing requests. This prevents malicious
+  actors from triggering commissioning windows on commissioned devices.
+
+  Note: A commissioned device may still listen for pairing requests if
+  it has capacity for more zones (DEC-043), but this is tested separately.
+
+pics_requirements:
+  - MASH.S.DISC.PAIRING_REQUEST
+  - MASH.S.ZONE.MAX
+
+preconditions:
+  - device_commissioned: true
+  - zone_count: 2                    # At max capacity (1 GRID + 1 LOCAL)
+
+steps:
+  - name: Verify device is not listening for pairing requests
+    action: verify_mdns_not_browsing
+    params:
+      service_type: "_mashp._udp"
+    expect:
+      not_browsing: true
+
+  - name: Controller announces pairing request
+    action: announce_pairing_request
+    params:
+      service_type: "_mashp._udp"
+      discriminator: "${device_discriminator}"
+      controller_id: "new-controller-id"
+    expect:
+      announcement_sent: true
+
+  - name: Wait for potential response
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Verify device did NOT open commissioning window
+    action: verify_mdns_not_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      not_advertising: true
+
+postconditions:
+  - device_zones_unchanged: true
+  - no_commissioning_window: true
+
+timeout: "10s"
+tags:
+  - pairing
+  - security
+  - commissioned
+  - negative

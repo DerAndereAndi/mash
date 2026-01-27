@@ -10,11 +10,11 @@ import (
 
 // mockConnection is a minimal mock for testing TransportRequestSender.
 type mockConnection struct {
-	mu       sync.Mutex
-	sent     [][]byte
-	sendErr  error
-	state    transport.ConnectionState
-	onSend   func([]byte) error // Optional callback
+	mu      sync.Mutex
+	sent    [][]byte
+	sendErr error
+	state   transport.ConnectionState
+	onSend  func([]byte) error // Optional callback
 }
 
 func newMockConnection() *mockConnection {

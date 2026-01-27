@@ -244,7 +244,7 @@ ids := m.ConnectedZones()  // []string of connected zones only
 Returns total number of zones.
 
 ```go
-count := m.ZoneCount()  // 0-5
+count := m.ZoneCount()  // 0-2
 ```
 
 ### 6.7 HighestPriorityZone
@@ -317,9 +317,9 @@ Callbacks are invoked while holding the lock. Callback implementations:
 ## 9. PICS Items
 
 ```
-# Zone capacity
+# Zone capacity (DEC-043: one zone per type)
 MASH.S.ZONE                      # Multi-zone support present
-MASH.S.ZONE.MAX=5                # Maximum zones per device
+MASH.S.ZONE.MAX=2                # Maximum zones per device (1 GRID + 1 LOCAL)
 
 # Zone types supported
 MASH.S.ZONE.GRID                 # GRID zone (priority 1) - external/regulatory
@@ -346,7 +346,7 @@ MASH.S.ZONE.B_RESTRICT           # Most restrictive wins (limits)
 |----|------|-------------|----------|
 | TC-ZONE-MGT-001 | AddZone success | Add first zone | Zone added, Connected=false |
 | TC-ZONE-MGT-002 | AddZone duplicate | Add same zone twice | ErrZoneExists |
-| TC-ZONE-MGT-003 | AddZone at capacity | Add 6th zone | ErrMaxZonesExceeded |
+| TC-ZONE-MGT-003 | AddZone at capacity | Add 3rd zone (or same type) | ErrZoneTypeExists or ErrMaxZonesExceeded |
 | TC-ZONE-MGT-004 | RemoveZone success | Remove existing zone | Zone removed |
 | TC-ZONE-MGT-005 | RemoveZone not found | Remove non-existent | ErrZoneNotFound |
 | TC-ZONE-MGT-006 | SetConnected | Mark zone connected | Connected=true, LastSeen updated |
@@ -360,11 +360,12 @@ MASH.S.ZONE.B_RESTRICT           # Most restrictive wins (limits)
 
 ```go
 var (
-    ErrZoneNotFound       = errors.New("zone not found")
-    ErrZoneExists         = errors.New("zone already exists")
-    ErrMaxZonesExceeded   = errors.New("maximum zones exceeded")
+    ErrZoneNotFound         = errors.New("zone not found")
+    ErrZoneExists           = errors.New("zone already exists")
+    ErrZoneTypeExists       = errors.New("zone type already exists")  // DEC-043
+    ErrMaxZonesExceeded     = errors.New("maximum zones exceeded")
     ErrInsufficientPriority = errors.New("insufficient priority")
-    ErrZoneNotConnected   = errors.New("zone not connected")
+    ErrZoneNotConnected     = errors.New("zone not connected")
 )
 ```
 

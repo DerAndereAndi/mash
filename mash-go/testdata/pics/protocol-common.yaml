@@ -32,6 +32,20 @@ items:
   C.CERT.RENEWAL_INITIATE: true  # Controller can initiate renewal
   C.CERT.AUTO_RENEWAL: false     # Automatic renewal (optional)
 
+  # ==========================================================================
+  # Pairing Request Mechanism (DEC-042)
+  # ==========================================================================
+
+  MASH.S.DISC.PAIRING_REQUEST: true    # Device listens for pairing requests (_mashp._udp)
+  MASH.S.COMM.PAIRING_REQUEST: true    # Device opens window on matching pairing request
+  MASH.S.DISC.PAIRING_DISCRIMINATOR: true  # Device matches by discriminator
+
+  # ==========================================================================
+  # Controller Pairing Request
+  # ==========================================================================
+
+  MASH.C.DISC.PAIRING_REQUEST: true    # Controller can announce pairing requests
+
 # =============================================================================
 # Test Case to PICS Mapping
 # =============================================================================
@@ -52,3 +66,28 @@ items:
 #
 # TC-CERT-RENEW-5 (Grace Period):
 #   - D.CERT.GRACE_PERIOD: > 0
+#
+# =============================================================================
+# Pairing Request Tests (DEC-042)
+# =============================================================================
+#
+# TC-PAIR-001 (Device Opens Window on Pairing Request):
+#   - MASH.S.DISC.PAIRING_REQUEST: true
+#   - MASH.S.COMM.PAIRING_REQUEST: true
+#
+# TC-PAIR-002 (Device Ignores Mismatched Discriminator):
+#   - MASH.S.DISC.PAIRING_REQUEST: true
+#   - MASH.S.DISC.PAIRING_DISCRIMINATOR: true
+#
+# TC-PAIR-003 (Rate Limiting - Window Already Open):
+#   - MASH.S.DISC.PAIRING_REQUEST: true
+#   - MASH.S.COMM.PAIRING_REQUEST: true
+#
+# TC-PAIR-004 (Deferred Commissioning Flow):
+#   - MASH.S.DISC.PAIRING_REQUEST: true
+#   - MASH.S.COMM.PAIRING_REQUEST: true
+#   - D.COMM.PASE: true
+#
+# TC-PAIR-005 (Commissioned Device Ignores Pairing Requests):
+#   - MASH.S.DISC.PAIRING_REQUEST: true
+#   - MASH.S.ZONE.MAX: 2

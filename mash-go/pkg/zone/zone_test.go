@@ -194,21 +194,22 @@ func TestManager(t *testing.T) {
 		}
 	})
 
-	t.Run("MaxZones", func(t *testing.T) {
+	t.Run("MaxZonesExceeded", func(t *testing.T) {
 		m := NewManager()
 
-		// Add maximum zones
-		for i := range MaxZones {
-			err := m.AddZone(string(rune('A'+i)), cert.ZoneTypeLocal)
-			if err != nil {
-				t.Fatalf("AddZone(%d) error = %v", i, err)
-			}
+		// Add both allowed zone types (GRID + LOCAL = 2 zones = MaxZones)
+		err := m.AddZone("grid-zone", cert.ZoneTypeGrid)
+		if err != nil {
+			t.Fatalf("AddZone(grid-zone) error = %v", err)
+		}
+		err = m.AddZone("local-zone", cert.ZoneTypeLocal)
+		if err != nil {
+			t.Fatalf("AddZone(local-zone) error = %v", err)
 		}
 
-		// Try to add one more
-		err := m.AddZone("overflow", cert.ZoneTypeLocal)
-		if err != ErrMaxZonesExceeded {
-			t.Errorf("AddZone(6th) error = %v, want ErrMaxZonesExceeded", err)
+		// Verify we're at capacity
+		if m.ZoneCount() != MaxZones {
+			t.Errorf("ZoneCount() = %d, want %d", m.ZoneCount(), MaxZones)
 		}
 	})
 
@@ -349,4 +350,88 @@ func TestCanRemoveZone(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestZoneTypeEnforcement(t *testing.T) {
+	t.Run("DuplicateGridZoneRejected", func(t *testing.T) {
+		m := NewManager()
+
+		// Add first GRID zone
+		err := m.AddZone("grid-1", cert.ZoneTypeGrid)
+		if err != nil {
+			t.Fatalf("AddZone(grid-1) error = %v", err)
+		}
+
+		// Try to add second GRID zone - should fail with ErrZoneTypeExists
+		err = m.AddZone("grid-2", cert.ZoneTypeGrid)
+		if err != ErrZoneTypeExists {
+			t.Errorf("AddZone(grid-2) error = %v, want ErrZoneTypeExists", err)
+		}
+	})
+
+	t.Run("DuplicateLocalZoneRejected", func(t *testing.T) {
+		m := NewManager()
+
+		// Add first LOCAL zone
+		err := m.AddZone("local-1", cert.ZoneTypeLocal)
+		if err != nil {
+			t.Fatalf("AddZone(local-1) error = %v", err)
+		}
+
+		// Try to add second LOCAL zone - should fail with ErrZoneTypeExists
+		err = m.AddZone("local-2", cert.ZoneTypeLocal)
+		if err != ErrZoneTypeExists {
+			t.Errorf("AddZone(local-2) error = %v, want ErrZoneTypeExists", err)
+		}
+	})
+
+	t.Run("GridPlusLocalAllowed", func(t *testing.T) {
+		m := NewManager()
+
+		// Add GRID zone
+		err := m.AddZone("grid-1", cert.ZoneTypeGrid)
+		if err != nil {
+			t.Fatalf("AddZone(grid-1) error = %v", err)
+		}
+
+		// Add LOCAL zone - should succeed (different types)
+		err = m.AddZone("local-1", cert.ZoneTypeLocal)
+		if err != nil {
+			t.Errorf("AddZone(local-1) error = %v, want nil", err)
+		}
+
+		// Verify both zones exist
+		if m.ZoneCount() != 2 {
+			t.Errorf("ZoneCount() = %d, want 2", m.ZoneCount())
+		}
+	})
+
+	t.Run("TypeCheckBeforeCapacityCheck", func(t *testing.T) {
+		m := NewManager()
+
+		// Add both zone types to reach capacity (MaxZones = 2)
+		err := m.AddZone("grid-1", cert.ZoneTypeGrid)
+		if err != nil {
+			t.Fatalf("AddZone(grid-1) error = %v", err)
+		}
+		err = m.AddZone("local-1", cert.ZoneTypeLocal)
+		if err != nil {
+			t.Fatalf("AddZone(local-1) error = %v", err)
+		}
+
+		// Now at capacity. Try to add another GRID zone.
+		// Should get ErrZoneTypeExists (type check) NOT ErrMaxZonesExceeded (capacity check)
+		// This verifies type check happens BEFORE capacity check.
+		err = m.AddZone("grid-2", cert.ZoneTypeGrid)
+		if err != ErrZoneTypeExists {
+			t.Errorf("AddZone(grid-2) error = %v, want ErrZoneTypeExists (type check should happen before capacity check)", err)
+		}
+	})
+
+	t.Run("MaxZonesIsTwo", func(t *testing.T) {
+		// Verify MaxZones constant is 2 (one GRID + one LOCAL per DEC-043)
+		if MaxZones != 2 {
+			t.Errorf("MaxZones = %d, want 2", MaxZones)
+		}
+	})
 }

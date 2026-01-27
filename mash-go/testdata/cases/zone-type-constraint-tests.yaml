@@ -1,0 +1,501 @@
+# Test Suite: Zone Type Constraint Tests
+# Verifies DEC-043: One Zone Per Zone Type Constraint
+#
+# Key concepts:
+# - Device can belong to at most one zone per zone type
+# - Max 1 GRID zone (regulatory/external)
+# - Max 1 LOCAL zone (local energy management)
+# - Total: 2 zones maximum per device
+# - Same zone type commissioning is rejected with ZONE_TYPE_EXISTS
+
+---
+# TC-ZTYPE-001: First Zone Commission Success
+id: TC-ZTYPE-001
+name: First Zone Commission Success
+description: |
+  An uncommissioned device accepts commissioning from the first
+  controller. The zone is added successfully regardless of zone type.
+
+  This verifies the basic case: an uncommissioned device can be
+  commissioned by any zone type.
+
+pics_requirements:
+  - MASH.S.ZONE.MAX
+  - MASH.S.ZONE.GRID
+  - MASH.S.ZONE.LOCAL
+  - D.COMM.PASE
+
+preconditions:
+  - device_uncommissioned: true
+  - commissioning_window_open: true
+
+steps:
+  - name: Commission with GRID zone type
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+      zone_type: "GRID"
+      zone_id: "grid-zone-001"
+    expect:
+      commission_success: true
+      session_established: true
+
+  - name: Verify zone was added
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zones
+    expect:
+      read_success: true
+      zone_count: 1
+      zones:
+        - id: "grid-zone-001"
+          type: "GRID"
+
+postconditions:
+  - device_has_one_zone: true
+  - zone_type_is_grid: true
+
+timeout: "15s"
+tags:
+  - zone
+  - commissioning
+  - first-zone
+  - basic
+
+---
+# TC-ZTYPE-002: Second Zone Different Type Success
+id: TC-ZTYPE-002
+name: Second Zone Different Type Success
+description: |
+  A device that has one zone (GRID) can be commissioned by another
+  controller with a different zone type (LOCAL). This results in the
+  device having 2 zones - the maximum allowed.
+
+  This verifies that different zone types can coexist on the same device.
+
+pics_requirements:
+  - MASH.S.ZONE.MAX
+  - MASH.S.ZONE.GRID
+  - MASH.S.ZONE.LOCAL
+  - D.COMM.PASE
+
+preconditions:
+  - device_has_grid_zone: true
+  - zone_count: 1
+  - commissioning_window_open: true
+
+steps:
+  - name: Verify device has GRID zone
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zones
+    expect:
+      read_success: true
+      zone_count: 1
+      zones:
+        - type: "GRID"
+
+  - name: Commission with LOCAL zone type
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+      zone_type: "LOCAL"
+      zone_id: "local-zone-001"
+    expect:
+      commission_success: true
+      session_established: true
+
+  - name: Verify both zones exist
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zones
+    expect:
+      read_success: true
+      zone_count: 2
+      zones:
+        - type: "GRID"
+        - type: "LOCAL"
+
+postconditions:
+  - device_has_two_zones: true
+  - device_at_max_zones: true
+
+timeout: "15s"
+tags:
+  - zone
+  - commissioning
+  - multi-zone
+  - different-types
+
+---
+# TC-ZTYPE-003: Same Zone Type Rejected
+id: TC-ZTYPE-003
+name: Same Zone Type Commissioning Rejected
+description: |
+  A device that already has a GRID zone rejects commissioning from
+  another GRID controller. The error code is ZONE_TYPE_EXISTS (10).
+
+  This enforces the one-zone-per-type constraint to prevent:
+  - Multiple SMGWs controlling the same device
+  - Multiple EMSs with conflicting optimization strategies
+
+pics_requirements:
+  - MASH.S.ZONE.MAX
+  - MASH.S.ZONE.GRID
+
+preconditions:
+  - device_has_grid_zone: true
+  - zone_count: 1
+  - commissioning_window_open: true
+
+steps:
+  - name: Verify device has GRID zone
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zones
+    expect:
+      read_success: true
+      zones:
+        - type: "GRID"
+
+  - name: Attempt to commission another GRID zone
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+      zone_type: "GRID"
+      zone_id: "grid-zone-002"
+    expect:
+      commission_success: false
+      error_code: 10                   # ZONE_TYPE_EXISTS
+      error_message_contains: "zone type already exists"
+
+  - name: Verify zone count unchanged
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zones
+    expect:
+      read_success: true
+      zone_count: 1                    # Still just 1 zone
+
+postconditions:
+  - zone_count_unchanged: true
+  - same_type_rejected: true
+
+timeout: "15s"
+tags:
+  - zone
+  - commissioning
+  - constraint
+  - negative
+  - same-type
+
+---
+# TC-ZTYPE-004: Max Zones Stops Pairing Request Listening
+id: TC-ZTYPE-004
+name: Max Zones Stops Pairing Request Listening
+description: |
+  When a device has both GRID and LOCAL zones (maximum 2), it stops
+  listening for pairing requests via _mashp._udp. New pairing requests
+  are ignored because the device cannot accept more zones.
+
+  This ensures devices at capacity don't waste resources on pairing
+  discovery and don't create false expectations for controllers.
+
+pics_requirements:
+  - MASH.S.ZONE.MAX
+  - MASH.S.ZONE.GRID
+  - MASH.S.ZONE.LOCAL
+  - MASH.S.DISC.PAIRING_REQUEST
+
+preconditions:
+  - device_has_grid_zone: true
+  - device_has_local_zone: true
+  - zone_count: 2                      # At max
+
+steps:
+  - name: Verify device has both zone types
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zones
+    expect:
+      read_success: true
+      zone_count: 2
+      zones:
+        - type: "GRID"
+        - type: "LOCAL"
+
+  - name: Verify device is NOT listening for pairing requests
+    action: verify_mdns_not_browsing
+    params:
+      service_type: "_mashp._udp"
+    expect:
+      not_browsing: true
+
+  - name: Controller announces pairing request
+    action: announce_pairing_request
+    params:
+      service_type: "_mashp._udp"
+      discriminator: "${device_discriminator}"
+      controller_id: "new-controller"
+    expect:
+      announcement_sent: true
+
+  - name: Wait for potential response
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Verify device did NOT open commissioning window
+    action: verify_mdns_not_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      not_advertising: true
+
+postconditions:
+  - zone_count_unchanged: true
+  - pairing_request_ignored: true
+
+timeout: "10s"
+tags:
+  - zone
+  - pairing
+  - capacity
+  - max-zones
+
+---
+# TC-ZTYPE-005: Zone Removal Resumes Listening
+id: TC-ZTYPE-005
+name: Zone Removal Resumes Pairing Request Listening
+description: |
+  When a device at max capacity (2 zones) has a zone removed, it resumes
+  listening for pairing requests via _mashp._udp. This allows the device
+  to be commissioned by a new controller of the removed zone type.
+
+  This enables zone replacement scenarios where a controller is swapped
+  out for another of the same type.
+
+pics_requirements:
+  - MASH.S.ZONE.MAX
+  - MASH.S.ZONE.REMOVE
+  - MASH.S.DISC.PAIRING_REQUEST
+
+preconditions:
+  - device_has_grid_zone: true
+  - device_has_local_zone: true
+  - zone_count: 2
+
+steps:
+  - name: Verify device is NOT listening for pairing requests
+    action: verify_mdns_not_browsing
+    params:
+      service_type: "_mashp._udp"
+    expect:
+      not_browsing: true
+
+  - name: Remove LOCAL zone
+    action: invoke
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      command: RemoveZone
+      args:
+        zoneId: "${local_zone_id}"
+    expect:
+      invoke_success: true
+      response:
+        removed: true
+
+  - name: Wait for connection to close and state to update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify device resumed listening for pairing requests
+    action: verify_mdns_browsing
+    params:
+      service_type: "_mashp._udp"
+    expect:
+      browsing: true
+
+  - name: Verify only GRID zone remains
+    description: Connect as the remaining GRID zone to verify
+    action: connect_as_zone
+    params:
+      zone_id: "${grid_zone_id}"
+    expect:
+      connection_success: true
+
+  - name: Read zone list
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zones
+    expect:
+      read_success: true
+      zone_count: 1
+      zones:
+        - type: "GRID"
+
+postconditions:
+  - zone_removed: true
+  - pairing_listening_resumed: true
+  - can_accept_new_local_zone: true
+
+timeout: "15s"
+tags:
+  - zone
+  - removal
+  - pairing
+  - resume
+
+---
+# TC-ZTYPE-006: LOCAL Zone Type Duplicate Rejected
+id: TC-ZTYPE-006
+name: LOCAL Zone Type Duplicate Rejected
+description: |
+  A device that already has a LOCAL zone rejects commissioning from
+  another LOCAL controller. This is the symmetric case of TC-ZTYPE-003
+  for LOCAL zone types.
+
+  This prevents multiple EMSs from controlling the same device with
+  potentially conflicting optimization strategies.
+
+pics_requirements:
+  - MASH.S.ZONE.MAX
+  - MASH.S.ZONE.LOCAL
+
+preconditions:
+  - device_has_local_zone: true
+  - zone_count: 1
+  - commissioning_window_open: true
+
+steps:
+  - name: Verify device has LOCAL zone
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zones
+    expect:
+      read_success: true
+      zones:
+        - type: "LOCAL"
+
+  - name: Attempt to commission another LOCAL zone
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+      zone_type: "LOCAL"
+      zone_id: "local-zone-002"
+    expect:
+      commission_success: false
+      error_code: 10                   # ZONE_TYPE_EXISTS
+      error_message_contains: "zone type already exists"
+
+  - name: Verify zone count unchanged
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zones
+    expect:
+      read_success: true
+      zone_count: 1
+
+postconditions:
+  - zone_count_unchanged: true
+  - same_type_rejected: true
+
+timeout: "15s"
+tags:
+  - zone
+  - commissioning
+  - constraint
+  - negative
+  - local
+
+---
+# TC-ZTYPE-007: Zone Type Replacement After Removal
+id: TC-ZTYPE-007
+name: Zone Type Replacement After Removal
+description: |
+  A device that has a zone removed can be commissioned by a new
+  controller of the same zone type. This enables zone replacement
+  scenarios (e.g., replacing an SMGW with a new SMGW).
+
+pics_requirements:
+  - MASH.S.ZONE.MAX
+  - MASH.S.ZONE.GRID
+  - MASH.S.ZONE.REMOVE
+
+preconditions:
+  - device_has_grid_zone: true
+  - zone_count: 1
+
+steps:
+  - name: Remove existing GRID zone
+    action: invoke
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      command: RemoveZone
+      args:
+        zoneId: "${grid_zone_id}"
+    expect:
+      invoke_success: true
+      response:
+        removed: true
+
+  - name: Wait for cleanup
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Commission new GRID zone
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+      zone_type: "GRID"
+      zone_id: "new-grid-zone"
+    expect:
+      commission_success: true
+      session_established: true
+
+  - name: Verify new GRID zone is active
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zones
+    expect:
+      read_success: true
+      zone_count: 1
+      zones:
+        - id: "new-grid-zone"
+          type: "GRID"
+
+postconditions:
+  - old_zone_removed: true
+  - new_zone_added: true
+  - zone_type_replaced: true
+
+timeout: "20s"
+tags:
+  - zone
+  - replacement
+  - commissioning
+  - removal

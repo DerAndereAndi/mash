@@ -165,25 +165,32 @@ func TestFileStore(t *testing.T) {
 		dir := t.TempDir()
 		store := NewFileStore(dir)
 
-		// Add multiple zones
-		for _, zoneID := range []string{"zone-a", "zone-b", "zone-c"} {
-			ca, _ := GenerateZoneCA(zoneID, ZoneTypeLocal)
+		// Add MaxZones zones (one GRID + one LOCAL per DEC-043)
+		zoneConfigs := []struct {
+			id       string
+			zoneType ZoneType
+		}{
+			{"zone-grid", ZoneTypeGrid},
+			{"zone-local", ZoneTypeLocal},
+		}
+		for _, cfg := range zoneConfigs {
+			ca, _ := GenerateZoneCA(cfg.id, cfg.zoneType)
 			deviceKP, _ := GenerateKeyPair()
 			csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
 				Identity: DeviceIdentity{DeviceID: "device-001"},
-				ZoneID:   zoneID,
+				ZoneID:   cfg.id,
 			})
 			cert, _ := SignCSR(ca, csrDER)
 
 			opCert := &OperationalCert{
 				Certificate: cert,
 				PrivateKey:  deviceKP.PrivateKey,
-				ZoneID:      zoneID,
-				ZoneType:    ZoneTypeLocal,
+				ZoneID:      cfg.id,
+				ZoneType:    cfg.zoneType,
 				ZoneCACert:  ca.Certificate,
 			}
 			if err := store.SetOperationalCert(opCert); err != nil {
-				t.Fatalf("SetOperationalCert(%s) error = %v", zoneID, err)
+				t.Fatalf("SetOperationalCert(%s) error = %v", cfg.id, err)
 			}
 		}
 
@@ -197,13 +204,13 @@ func TestFileStore(t *testing.T) {
 			t.Fatalf("Load() error = %v", err)
 		}
 
-		if store2.ZoneCount() != 3 {
-			t.Errorf("ZoneCount() = %d, want 3", store2.ZoneCount())
+		if store2.ZoneCount() != MaxZones {
+			t.Errorf("ZoneCount() = %d, want %d", store2.ZoneCount(), MaxZones)
 		}
 
-		for _, zoneID := range []string{"zone-a", "zone-b", "zone-c"} {
-			if _, err := store2.GetOperationalCert(zoneID); err != nil {
-				t.Errorf("GetOperationalCert(%s) error = %v", zoneID, err)
+		for _, cfg := range zoneConfigs {
+			if _, err := store2.GetOperationalCert(cfg.id); err != nil {
+				t.Errorf("GetOperationalCert(%s) error = %v", cfg.id, err)
 			}
 		}
 	})

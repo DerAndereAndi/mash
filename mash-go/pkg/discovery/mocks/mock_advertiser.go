@@ -163,6 +163,53 @@ func (_c *MockAdvertiser_AdvertiseOperational_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// AnnouncePairingRequest provides a mock function with given fields: ctx, info
+func (_m *MockAdvertiser) AnnouncePairingRequest(ctx context.Context, info *discovery.PairingRequestInfo) error {
+	ret := _m.Called(ctx, info)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AnnouncePairingRequest")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *discovery.PairingRequestInfo) error); ok {
+		r0 = rf(ctx, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockAdvertiser_AnnouncePairingRequest_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AnnouncePairingRequest'
+type MockAdvertiser_AnnouncePairingRequest_Call struct {
+	*mock.Call
+}
+
+// AnnouncePairingRequest is a helper method to define mock.On call
+//   - ctx context.Context
+//   - info *discovery.PairingRequestInfo
+func (_e *MockAdvertiser_Expecter) AnnouncePairingRequest(ctx interface{}, info interface{}) *MockAdvertiser_AnnouncePairingRequest_Call {
+	return &MockAdvertiser_AnnouncePairingRequest_Call{Call: _e.mock.On("AnnouncePairingRequest", ctx, info)}
+}
+
+func (_c *MockAdvertiser_AnnouncePairingRequest_Call) Run(run func(ctx context.Context, info *discovery.PairingRequestInfo)) *MockAdvertiser_AnnouncePairingRequest_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*discovery.PairingRequestInfo))
+	})
+	return _c
+}
+
+func (_c *MockAdvertiser_AnnouncePairingRequest_Call) Return(_a0 error) *MockAdvertiser_AnnouncePairingRequest_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockAdvertiser_AnnouncePairingRequest_Call) RunAndReturn(run func(context.Context, *discovery.PairingRequestInfo) error) *MockAdvertiser_AnnouncePairingRequest_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // StopAll provides a mock function with no fields
 func (_m *MockAdvertiser) StopAll() {
 	_m.Called()
@@ -328,6 +375,52 @@ func (_c *MockAdvertiser_StopOperational_Call) Return(_a0 error) *MockAdvertiser
 }
 
 func (_c *MockAdvertiser_StopOperational_Call) RunAndReturn(run func(string) error) *MockAdvertiser_StopOperational_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// StopPairingRequest provides a mock function with given fields: discriminator
+func (_m *MockAdvertiser) StopPairingRequest(discriminator uint16) error {
+	ret := _m.Called(discriminator)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StopPairingRequest")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(uint16) error); ok {
+		r0 = rf(discriminator)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockAdvertiser_StopPairingRequest_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StopPairingRequest'
+type MockAdvertiser_StopPairingRequest_Call struct {
+	*mock.Call
+}
+
+// StopPairingRequest is a helper method to define mock.On call
+//   - discriminator uint16
+func (_e *MockAdvertiser_Expecter) StopPairingRequest(discriminator interface{}) *MockAdvertiser_StopPairingRequest_Call {
+	return &MockAdvertiser_StopPairingRequest_Call{Call: _e.mock.On("StopPairingRequest", discriminator)}
+}
+
+func (_c *MockAdvertiser_StopPairingRequest_Call) Run(run func(discriminator uint16)) *MockAdvertiser_StopPairingRequest_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(uint16))
+	})
+	return _c
+}
+
+func (_c *MockAdvertiser_StopPairingRequest_Call) Return(_a0 error) *MockAdvertiser_StopPairingRequest_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockAdvertiser_StopPairingRequest_Call) RunAndReturn(run func(uint16) error) *MockAdvertiser_StopPairingRequest_Call {
 	_c.Call.Return(run)
 	return _c
 }

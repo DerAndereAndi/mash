@@ -12,15 +12,33 @@ import (
 
 // Service errors.
 var (
-	ErrNotStarted       = errors.New("service not started")
-	ErrAlreadyStarted   = errors.New("service already started")
-	ErrCommissionFailed = errors.New("commissioning failed")
-	ErrNotConnected     = errors.New("not connected")
-	ErrDeviceNotFound   = errors.New("device not found")
-	ErrZoneFull         = errors.New("maximum zones reached")
-	ErrUnauthorized     = errors.New("unauthorized")
-	ErrInvalidConfig    = errors.New("invalid configuration")
-	ErrSessionClosed    = errors.New("session closed")
+	ErrNotStarted             = errors.New("service not started")
+	ErrAlreadyStarted         = errors.New("service already started")
+	ErrCommissionFailed       = errors.New("commissioning failed")
+	ErrNotConnected           = errors.New("not connected")
+	ErrDeviceNotFound         = errors.New("device not found")
+	ErrZoneFull               = errors.New("maximum zones reached")
+	ErrUnauthorized           = errors.New("unauthorized")
+	ErrInvalidConfig          = errors.New("invalid configuration")
+	ErrSessionClosed          = errors.New("session closed")
+	ErrPairingRequestTimeout  = errors.New("pairing request timeout")
+	ErrCommissioningCancelled = errors.New("commissioning cancelled")
+	ErrNoPairingRequestActive = errors.New("no pairing request active for discriminator")
+	ErrZoneIDRequired         = errors.New("zone ID required for pairing request")
+)
+
+// Pairing request timing constants.
+const (
+	// DefaultPairingRequestTimeout is the default timeout for pairing requests.
+	// This is suitable for interactive commissioning scenarios.
+	DefaultPairingRequestTimeout = 1 * time.Hour
+
+	// SMGWPairingRequestTimeout is a longer timeout for SMGW/backend scenarios
+	// where a device may be provisioned days before installation.
+	SMGWPairingRequestTimeout = 7 * 24 * time.Hour
+
+	// PairingRequestPollInterval is how often to poll for the device during pairing request.
+	PairingRequestPollInterval = 5 * time.Second
 )
 
 // ServiceState represents the service state.
@@ -107,6 +125,11 @@ type DeviceConfig struct {
 	// CommissioningWindowDuration is how long commissioning mode stays open.
 	CommissioningWindowDuration time.Duration
 
+	// ListenForPairingRequests enables automatic response to pairing requests.
+	// When true, the device will browse for _mashp._udp and open commissioning
+	// window when a matching request is found.
+	ListenForPairingRequests bool
+
 	// EnableAutoReconnect enables automatic reconnection to zones.
 	EnableAutoReconnect bool
 
@@ -155,6 +178,14 @@ type ControllerConfig struct {
 
 	// EnableBounceBackSuppression enables subscription bounce-back suppression.
 	EnableBounceBackSuppression bool
+
+	// PairingRequestTimeout is how long to wait for a device to respond to a pairing request.
+	// Default: 1 hour. Set longer (e.g., 7 days) for SMGW scenarios.
+	PairingRequestTimeout time.Duration
+
+	// PairingRequestPollInterval is how often to poll for the device during pairing request.
+	// Default: 5 seconds.
+	PairingRequestPollInterval time.Duration
 
 	// Logger is the optional logger for debug output.
 	// If nil, logging is disabled.

@@ -44,8 +44,46 @@ const (
 	ErrCodeConfirmFailed     uint8 = 2
 	ErrCodeCSRFailed         uint8 = 3
 	ErrCodeCertInstallFailed uint8 = 4
+	ErrCodeZoneTypeExists    uint8 = 10  // Device already has a zone of this type
 	ErrCodeInternalError     uint8 = 255
 )
+
+// ErrorCodeString returns a human-readable string for a commissioning error code.
+func ErrorCodeString(code uint8) string {
+	switch code {
+	case ErrCodeSuccess:
+		return "success"
+	case ErrCodeInvalidPublicKey:
+		return "invalid public key"
+	case ErrCodeConfirmFailed:
+		return "confirmation failed"
+	case ErrCodeCSRFailed:
+		return "CSR generation failed"
+	case ErrCodeCertInstallFailed:
+		return "certificate installation failed"
+	case ErrCodeZoneTypeExists:
+		return "zone type already exists"
+	case ErrCodeInternalError:
+		return "internal error"
+	default:
+		return "unknown error (" + itoa(code) + ")"
+	}
+}
+
+// itoa converts a uint8 to a string without importing strconv.
+func itoa(n uint8) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [3]byte // max 255
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
+}
 
 // Message errors.
 var (

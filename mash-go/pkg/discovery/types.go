@@ -103,17 +103,18 @@ const (
 
 // Discovery errors.
 var (
-	ErrInvalidQRCode       = errors.New("invalid QR code format")
-	ErrInvalidPrefix       = errors.New("invalid QR code prefix")
-	ErrInvalidVersion      = errors.New("invalid protocol version")
+	ErrInvalidQRCode        = errors.New("invalid QR code format")
+	ErrInvalidPrefix        = errors.New("invalid QR code prefix")
+	ErrInvalidVersion       = errors.New("invalid protocol version")
 	ErrInvalidDiscriminator = errors.New("discriminator out of range")
-	ErrInvalidSetupCode    = errors.New("invalid setup code format")
-	ErrInvalidFieldCount   = errors.New("invalid field count in QR code")
-	ErrInvalidTXTRecord    = errors.New("invalid TXT record format")
-	ErrMissingRequired     = errors.New("missing required field")
-	ErrInstanceNameTooLong = errors.New("instance name exceeds 63 characters")
-	ErrNotFound            = errors.New("service not found")
-	ErrBrowseTimeout       = errors.New("browse timeout")
+	ErrInvalidSetupCode     = errors.New("invalid setup code format")
+	ErrInvalidFieldCount    = errors.New("invalid field count in QR code")
+	ErrInvalidTXTRecord     = errors.New("invalid TXT record format")
+	ErrMissingRequired      = errors.New("missing required field")
+	ErrInstanceNameTooLong  = errors.New("instance name exceeds 63 characters")
+	ErrNotFound             = errors.New("service not found")
+	ErrBrowseTimeout        = errors.New("browse timeout")
+	ErrAlreadyExists        = errors.New("service already exists")
 )
 
 // DeviceCategory represents a device category.
@@ -387,4 +388,61 @@ type CommissionerInfo struct {
 
 	// Host is the hostname to advertise.
 	Host string
+}
+
+// PairingRequestInfo contains information for announcing a pairing request.
+// Controllers advertise this to signal a specific device to open its commissioning window.
+type PairingRequestInfo struct {
+	// Discriminator identifies the target device (0-4095).
+	Discriminator uint16
+
+	// ZoneID is the requesting zone's ID (16 hex chars).
+	ZoneID string
+
+	// ZoneName is an optional user-friendly zone name.
+	ZoneName string
+
+	// Host is the hostname to advertise.
+	Host string
+}
+
+// Validate checks if the PairingRequestInfo is valid.
+func (p *PairingRequestInfo) Validate() error {
+	if p.Discriminator > MaxDiscriminator {
+		return ErrInvalidDiscriminator
+	}
+	if len(p.ZoneID) != IDLength {
+		return ErrMissingRequired
+	}
+	if !isHexString(p.ZoneID) {
+		return ErrInvalidTXTRecord
+	}
+	if p.Host == "" {
+		return ErrMissingRequired
+	}
+	return nil
+}
+
+// PairingRequestService represents a pairing request found via mDNS.
+type PairingRequestService struct {
+	// InstanceName is the mDNS instance name (e.g., "A1B2C3D4E5F6A7B8-1234").
+	InstanceName string
+
+	// Host is the hostname.
+	Host string
+
+	// Port is the service port (always 0 for signaling only).
+	Port uint16
+
+	// Addresses contains resolved IP addresses.
+	Addresses []string
+
+	// Discriminator is the target device discriminator (from TXT "D").
+	Discriminator uint16
+
+	// ZoneID is the requesting zone's ID (from TXT "ZI", 16 hex chars).
+	ZoneID string
+
+	// ZoneName is the optional user-friendly zone name (from TXT "ZN").
+	ZoneName string
 }

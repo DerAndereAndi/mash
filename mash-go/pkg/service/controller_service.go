@@ -56,6 +56,9 @@ type ControllerService struct {
 	certStore  cert.ControllerStore
 	stateStore *persistence.ControllerStateStore
 
+	// Active pairing requests (keyed by discriminator)
+	activePairingRequests map[uint16]context.CancelFunc
+
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -68,11 +71,12 @@ func NewControllerService(config ControllerConfig) (*ControllerService, error) {
 	}
 
 	svc := &ControllerService{
-		config:           config,
-		state:            StateIdle,
-		zoneName:         config.ZoneName,
-		connectedDevices: make(map[string]*ConnectedDevice),
-		deviceSessions:   make(map[string]*DeviceSession),
+		config:                config,
+		state:                 StateIdle,
+		zoneName:              config.ZoneName,
+		connectedDevices:      make(map[string]*ConnectedDevice),
+		deviceSessions:        make(map[string]*DeviceSession),
+		activePairingRequests: make(map[uint16]context.CancelFunc),
 	}
 
 	// Initialize subscription manager
@@ -428,6 +432,161 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 	})
 
 	return device, nil
+}
+
+// CommissionDevice discovers and commissions a device by discriminator.
+// If the device is not immediately available, it announces a pairing request
+// and waits for the device to appear (up to PairingRequestTimeout).
+//
+// This method supports deferred commissioning scenarios like:
+// - SMGW pre-provisioning devices before installation
+// - Backend systems that provision devices ahead of time
+func (s *ControllerService) CommissionDevice(ctx context.Context, discriminator uint16, setupCode string) (*ConnectedDevice, error) {
+	s.mu.RLock()
+	if s.state != StateRunning {
+		s.mu.RUnlock()
+		return nil, ErrNotStarted
+	}
+	browser := s.browser
+	zoneID := s.zoneID
+	zoneName := s.zoneName
+	advertiser := s.advertiser
+	timeout := s.config.PairingRequestTimeout
+	s.mu.RUnlock()
+
+	if browser == nil {
+		return nil, ErrNotStarted
+	}
+
+	// Apply default timeout if not configured
+	if timeout == 0 {
+		timeout = DefaultPairingRequestTimeout
+	}
+
+	// First, try to find the device directly
+	discoverCtx, discoverCancel := context.WithTimeout(ctx, s.config.DiscoveryTimeout)
+	service, err := browser.FindByDiscriminator(discoverCtx, discriminator)
+	discoverCancel()
+
+	if err == nil && service != nil {
+		// Device found immediately - proceed with commissioning
+		return s.Commission(ctx, service, setupCode)
+	}
+
+	// Device not found - need to announce pairing request
+	// First check that we have a zone ID (required for pairing request)
+	if zoneID == "" {
+		return nil, ErrZoneIDRequired
+	}
+
+	// Check if there's already an active pairing request for this discriminator
+	s.mu.Lock()
+	if _, exists := s.activePairingRequests[discriminator]; exists {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("%w: discriminator %d", discovery.ErrAlreadyExists, discriminator)
+	}
+
+	// Create cancellable context for the pairing request
+	pairingCtx, pairingCancel := context.WithCancel(ctx)
+	s.activePairingRequests[discriminator] = pairingCancel
+	s.mu.Unlock()
+
+	// Ensure cleanup on exit
+	defer func() {
+		pairingCancel()
+		s.mu.Lock()
+		delete(s.activePairingRequests, discriminator)
+		s.mu.Unlock()
+	}()
+
+	// Create DiscoveryManager if needed for pairing request
+	if s.discoveryManager == nil && advertiser != nil {
+		s.mu.Lock()
+		if s.discoveryManager == nil {
+			s.discoveryManager = discovery.NewDiscoveryManager(advertiser)
+		}
+		s.mu.Unlock()
+	}
+
+	// Get the discovery manager
+	s.mu.RLock()
+	dm := s.discoveryManager
+	s.mu.RUnlock()
+
+	if dm == nil {
+		return nil, fmt.Errorf("no advertiser configured for pairing requests")
+	}
+
+	// Announce pairing request
+	pairingInfo := &discovery.PairingRequestInfo{
+		Discriminator: discriminator,
+		ZoneID:        zoneID,
+		ZoneName:      zoneName,
+		Host:          "controller.local", // TODO: Get actual hostname
+	}
+
+	if err := dm.AnnouncePairingRequest(pairingCtx, pairingInfo); err != nil {
+		return nil, fmt.Errorf("failed to announce pairing request: %w", err)
+	}
+
+	// Ensure pairing request is stopped on exit
+	defer func() {
+		_ = dm.StopPairingRequest(discriminator)
+	}()
+
+	// Poll for the device to appear
+	pollInterval := s.config.PairingRequestPollInterval
+	if pollInterval == 0 {
+		pollInterval = PairingRequestPollInterval
+	}
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	timeoutTimer := time.NewTimer(timeout)
+	defer timeoutTimer.Stop()
+
+	for {
+		select {
+		case <-pairingCtx.Done():
+			// Check if this was our cancellation or parent context
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, ErrCommissioningCancelled
+
+		case <-timeoutTimer.C:
+			return nil, ErrPairingRequestTimeout
+
+		case <-ticker.C:
+			// Try to find the device again
+			discoverCtx, discoverCancel := context.WithTimeout(pairingCtx, s.config.DiscoveryTimeout)
+			service, err := browser.FindByDiscriminator(discoverCtx, discriminator)
+			discoverCancel()
+
+			if err == nil && service != nil {
+				// Device found! Proceed with commissioning
+				return s.Commission(ctx, service, setupCode)
+			}
+			// Device not found yet, continue polling
+		}
+	}
+}
+
+// CancelCommissioning cancels an active commissioning operation for a discriminator.
+// This stops the pairing request and causes CommissionDevice to return with ErrCommissioningCancelled.
+func (s *ControllerService) CancelCommissioning(discriminator uint16) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cancel, exists := s.activePairingRequests[discriminator]
+	if !exists {
+		return ErrNoPairingRequestActive
+	}
+
+	// Cancel the pairing request context
+	cancel()
+
+	return nil
 }
 
 // runDeviceMessageLoop reads messages from the device and dispatches to the session.

@@ -19,7 +19,7 @@ items:
   # ==========================================================================
 
   MASH.S.ZONE: true               # Multi-zone support
-  MASH.S.ZONE.MAX: 5              # Maximum zones per device (hardcoded)
+  MASH.S.ZONE.MAX: 2              # Maximum zones per device (DEC-043: one per type)
 
   # ==========================================================================
   # Zone Types Supported
@@ -27,6 +27,9 @@ items:
 
   MASH.S.ZONE.GRID: true          # GRID zone (priority 1, highest) - external/regulatory
   MASH.S.ZONE.LOCAL: true         # LOCAL zone (priority 2) - local energy management
+
+  # Error Codes (DEC-043)
+  MASH.S.COMM.ERR_ZONE_TYPE_EXISTS: true  # Supports error code 10 (zone type already exists)
 
   # ==========================================================================
   # Zone Operations
@@ -127,9 +130,50 @@ items:
 #   - MASH.S.ZONE.CONNECT: true
 #   - MASH.S.ZONE.LAST_SEEN: true
 #
-# TC-ZONE-010 (Maximum 5 zones enforcement):
-#   - MASH.S.ZONE.MAX: 5
+# TC-ZONE-010 (Maximum 2 zones enforcement - one per type):
+#   - MASH.S.ZONE.MAX: 2
 #
 # TC-ZONE-011 (All zones clear limit):
 #   - MASH.S.ZONE: true
 #   - MASH.S.CTRL.C02.Rsp: true
+#
+# =============================================================================
+# Zone Type Constraint Tests (DEC-043)
+# =============================================================================
+#
+# TC-ZTYPE-001 (First Zone Commission Success):
+#   - MASH.S.ZONE.MAX: 2
+#   - MASH.S.ZONE.GRID: true
+#   - MASH.S.ZONE.LOCAL: true
+#   - D.COMM.PASE: true
+#
+# TC-ZTYPE-002 (Second Zone Different Type Success):
+#   - MASH.S.ZONE.MAX: 2
+#   - MASH.S.ZONE.GRID: true
+#   - MASH.S.ZONE.LOCAL: true
+#
+# TC-ZTYPE-003 (Same Zone Type Rejected):
+#   - MASH.S.ZONE.MAX: 2
+#   - MASH.S.ZONE.GRID: true
+#   - MASH.S.COMM.ERR_ZONE_TYPE_EXISTS: true
+#
+# TC-ZTYPE-004 (Max Zones Stops Pairing Request Listening):
+#   - MASH.S.ZONE.MAX: 2
+#   - MASH.S.ZONE.GRID: true
+#   - MASH.S.ZONE.LOCAL: true
+#   - MASH.S.DISC.PAIRING_REQUEST: true
+#
+# TC-ZTYPE-005 (Zone Removal Resumes Listening):
+#   - MASH.S.ZONE.MAX: 2
+#   - MASH.S.ZONE.REMOVE: true
+#   - MASH.S.DISC.PAIRING_REQUEST: true
+#
+# TC-ZTYPE-006 (LOCAL Zone Type Duplicate Rejected):
+#   - MASH.S.ZONE.MAX: 2
+#   - MASH.S.ZONE.LOCAL: true
+#   - MASH.S.COMM.ERR_ZONE_TYPE_EXISTS: true
+#
+# TC-ZTYPE-007 (Zone Type Replacement After Removal):
+#   - MASH.S.ZONE.MAX: 2
+#   - MASH.S.ZONE.GRID: true
+#   - MASH.S.ZONE.REMOVE: true

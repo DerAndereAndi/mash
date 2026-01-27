@@ -111,7 +111,7 @@ func TestRenewalTracker_NeedsRenewalIndividual(t *testing.T) {
 	}{
 		{"365 days", 365, false},
 		{"31 days", 31, false},
-		{"30 days", 30, true},  // Boundary
+		{"30 days", 30, true}, // Boundary
 		{"29 days", 29, true},
 		{"1 day", 1, true},
 		{"0 days", 0, true},

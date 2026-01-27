@@ -617,4 +617,3 @@ func TestDeviceSession_ExistingNotificationHandlingStillWorks(t *testing.T) {
 		t.Errorf("Expected subscription ID 123, got %d", received.SubscriptionID)
 	}
 }
-

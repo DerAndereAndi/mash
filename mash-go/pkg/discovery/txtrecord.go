@@ -268,3 +268,84 @@ func ValidateInstanceName(name string) error {
 	}
 	return nil
 }
+
+// EncodePairingRequestTXT creates TXT records for pairing request discovery.
+func EncodePairingRequestTXT(info *PairingRequestInfo) TXTRecordMap {
+	txt := make(TXTRecordMap)
+
+	// Required fields
+	txt[TXTKeyDiscriminator] = strconv.FormatUint(uint64(info.Discriminator), 10)
+	txt[TXTKeyZoneID] = info.ZoneID
+
+	// Optional fields
+	if info.ZoneName != "" {
+		txt[TXTKeyZoneName] = info.ZoneName
+	}
+
+	return txt
+}
+
+// DecodePairingRequestTXT parses TXT records from pairing request discovery.
+func DecodePairingRequestTXT(txt TXTRecordMap) (*PairingRequestInfo, error) {
+	info := &PairingRequestInfo{}
+
+	// Parse discriminator (required)
+	dStr, ok := txt[TXTKeyDiscriminator]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrMissingRequired, TXTKeyDiscriminator)
+	}
+	d, err := strconv.ParseUint(dStr, 10, 16)
+	if err != nil || d > MaxDiscriminator {
+		return nil, ErrInvalidDiscriminator
+	}
+	info.Discriminator = uint16(d)
+
+	// Parse zone ID (required)
+	info.ZoneID, ok = txt[TXTKeyZoneID]
+	if !ok || len(info.ZoneID) != IDLength {
+		return nil, fmt.Errorf("%w: %s", ErrMissingRequired, TXTKeyZoneID)
+	}
+	if !isHexString(info.ZoneID) {
+		return nil, fmt.Errorf("%w: invalid zone ID format", ErrInvalidTXTRecord)
+	}
+
+	// Optional fields
+	info.ZoneName = txt[TXTKeyZoneName]
+
+	return info, nil
+}
+
+// PairingRequestInstanceName creates an mDNS instance name for a pairing request.
+// Format: "{ZoneID}-{Discriminator}" (e.g., "A1B2C3D4E5F6A7B8-1234").
+func PairingRequestInstanceName(zoneID string, discriminator uint16) string {
+	return fmt.Sprintf("%s-%d", zoneID, discriminator)
+}
+
+// ParsePairingRequestInstanceName parses a pairing request instance name.
+// Returns the zone ID and discriminator.
+func ParsePairingRequestInstanceName(name string) (zoneID string, discriminator uint16, err error) {
+	// Find the last hyphen (discriminator comes after it)
+	lastHyphen := strings.LastIndex(name, "-")
+	if lastHyphen == -1 || lastHyphen == 0 || lastHyphen == len(name)-1 {
+		return "", 0, fmt.Errorf("%w: invalid pairing request instance name format", ErrInvalidTXTRecord)
+	}
+
+	zoneID = name[:lastHyphen]
+	discrimStr := name[lastHyphen+1:]
+
+	// Validate zone ID
+	if len(zoneID) != IDLength {
+		return "", 0, fmt.Errorf("%w: invalid zone ID length", ErrInvalidTXTRecord)
+	}
+	if !isHexString(zoneID) {
+		return "", 0, fmt.Errorf("%w: invalid zone ID format", ErrInvalidTXTRecord)
+	}
+
+	// Parse discriminator
+	d, err := strconv.ParseUint(discrimStr, 10, 16)
+	if err != nil || d > MaxDiscriminator {
+		return "", 0, ErrInvalidDiscriminator
+	}
+
+	return zoneID, uint16(d), nil
+}

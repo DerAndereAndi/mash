@@ -21,6 +21,11 @@ type Browser interface {
 	// BrowseCommissioners searches for zone controllers.
 	BrowseCommissioners(ctx context.Context) (<-chan *CommissionerService, error)
 
+	// BrowsePairingRequests searches for pairing requests from controllers.
+	// Devices use this to discover controllers that want to commission them.
+	// The callback is invoked for each discovered pairing request.
+	BrowsePairingRequests(ctx context.Context, callback func(PairingRequestService)) error
+
 	// FindByDiscriminator searches for a specific commissionable device.
 	// Returns when found or when context is cancelled/timeout.
 	FindByDiscriminator(ctx context.Context, discriminator uint16) (*CommissionableService, error)
@@ -205,5 +210,24 @@ func (e *ServiceEntry) ToCommissionerService() (*CommissionerService, error) {
 		VendorProduct:  info.VendorProduct,
 		ControllerName: info.ControllerName,
 		DeviceCount:    info.DeviceCount,
+	}, nil
+}
+
+// ToPairingRequestService converts a ServiceEntry to PairingRequestService.
+func (e *ServiceEntry) ToPairingRequestService() (*PairingRequestService, error) {
+	txt := StringsToTXTRecords(e.Text)
+	info, err := DecodePairingRequestTXT(txt)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PairingRequestService{
+		InstanceName:  e.Instance,
+		Host:          e.Host,
+		Port:          e.Port,
+		Addresses:     e.Addrs,
+		Discriminator: info.Discriminator,
+		ZoneID:        info.ZoneID,
+		ZoneName:      info.ZoneName,
 	}, nil
 }

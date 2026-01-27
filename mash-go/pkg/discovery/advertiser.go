@@ -37,6 +37,15 @@ type Advertiser interface {
 	// StopCommissioner stops advertising commissioner service for a specific zone.
 	StopCommissioner(zoneID string) error
 
+	// AnnouncePairingRequest starts advertising a pairing request.
+	// Controllers use this to signal devices that they want to commission them.
+	// The discriminator identifies the target device.
+	// Port is always 0 for pairing requests (signaling only, no actual connection).
+	AnnouncePairingRequest(ctx context.Context, info *PairingRequestInfo) error
+
+	// StopPairingRequest stops advertising a pairing request for a discriminator.
+	StopPairingRequest(discriminator uint16) error
+
 	// StopAll stops all advertisements.
 	StopAll()
 }
@@ -86,8 +95,15 @@ type DiscoveryManager struct {
 	// Commissioner zones (for zone controllers)
 	commissionerZones map[string]*CommissionerInfo
 
+	// Pairing requests (for zone controllers)
+	// Keyed by discriminator to support multiple concurrent requests
+	pairingRequests map[uint16]*PairingRequestInfo
+
 	// Commissioning window timer
 	commissioningTimer *time.Timer
+
+	// Commissioning window duration (defaults to CommissioningWindowDuration constant)
+	commissioningWindowDuration time.Duration
 
 	// Callback for state changes
 	onStateChange func(old, new DiscoveryState)
@@ -103,6 +119,7 @@ func NewDiscoveryManager(advertiser Advertiser) *DiscoveryManager {
 		advertiser:        advertiser,
 		operationalZones:  make(map[string]*OperationalInfo),
 		commissionerZones: make(map[string]*CommissionerInfo),
+		pairingRequests:   make(map[uint16]*PairingRequestInfo),
 	}
 }
 
@@ -135,6 +152,15 @@ func (m *DiscoveryManager) OnCommissioningTimeout(fn func()) {
 	m.onCommissioningTimeout = fn
 }
 
+// SetCommissioningWindowDuration sets the duration of the commissioning window.
+// If not set or set to 0, defaults to CommissioningWindowDuration constant (3 hours).
+// This must be called before EnterCommissioningMode for the setting to take effect.
+func (m *DiscoveryManager) SetCommissioningWindowDuration(d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.commissioningWindowDuration = d
+}
+
 // SetCommissionableInfo sets the device's commissionable information.
 // This should be called before entering commissioning mode.
 func (m *DiscoveryManager) SetCommissionableInfo(info *CommissionableInfo) {
@@ -159,7 +185,12 @@ func (m *DiscoveryManager) EnterCommissioningMode(ctx context.Context) error {
 	}
 
 	// Set up commissioning window timer
-	m.commissioningTimer = time.AfterFunc(CommissioningWindowDuration, func() {
+	// Use configured duration or default to CommissioningWindowDuration
+	windowDuration := m.commissioningWindowDuration
+	if windowDuration <= 0 {
+		windowDuration = CommissioningWindowDuration
+	}
+	m.commissioningTimer = time.AfterFunc(windowDuration, func() {
 		m.exitCommissioningModeInternal(false)
 	})
 
@@ -384,6 +415,7 @@ func (m *DiscoveryManager) Stop() {
 	// Clear state
 	m.operationalZones = make(map[string]*OperationalInfo)
 	m.commissionerZones = make(map[string]*CommissionerInfo)
+	m.pairingRequests = make(map[uint16]*PairingRequestInfo)
 
 	oldState := m.state
 	m.state = StateUnregistered
@@ -391,4 +423,58 @@ func (m *DiscoveryManager) Stop() {
 	if m.onStateChange != nil && oldState != m.state {
 		m.onStateChange(oldState, m.state)
 	}
+}
+
+// AnnouncePairingRequest starts advertising a pairing request for a specific device.
+// Controllers use this to signal devices that they want to commission them.
+// Multiple concurrent pairing requests are supported (keyed by discriminator).
+func (m *DiscoveryManager) AnnouncePairingRequest(ctx context.Context, info *PairingRequestInfo) error {
+	if info == nil {
+		return ErrMissingRequired
+	}
+
+	// Validate the info
+	if err := info.Validate(); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check for duplicate
+	if _, exists := m.pairingRequests[info.Discriminator]; exists {
+		return ErrAlreadyExists
+	}
+
+	// Start advertising
+	if err := m.advertiser.AnnouncePairingRequest(ctx, info); err != nil {
+		return err
+	}
+
+	m.pairingRequests[info.Discriminator] = info
+	return nil
+}
+
+// StopPairingRequest stops advertising a pairing request for a specific discriminator.
+func (m *DiscoveryManager) StopPairingRequest(discriminator uint16) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.pairingRequests[discriminator]; !exists {
+		return ErrNotFound
+	}
+
+	if err := m.advertiser.StopPairingRequest(discriminator); err != nil {
+		return err
+	}
+
+	delete(m.pairingRequests, discriminator)
+	return nil
+}
+
+// PairingRequestCount returns the number of active pairing requests.
+func (m *DiscoveryManager) PairingRequestCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.pairingRequests)
 }

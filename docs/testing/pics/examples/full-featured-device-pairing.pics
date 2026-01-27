@@ -76,8 +76,8 @@ MASH.S.CERT=1
 MASH.S.CERT.X509V3=1
 MASH.S.CERT.ECDSA_P256=1
 
-# Storage
-MASH.S.CERT.MAX_ZONES=5
+# Storage (DEC-043: one zone per type, max 2)
+MASH.S.CERT.MAX_ZONES=2
 MASH.S.CERT.PERSISTENT=1
 
 # Lifecycle (with grace period)
@@ -87,13 +87,13 @@ MASH.S.CERT.IN_SESSION_RENEWAL=1
 MASH.S.CERT.GRACE_PERIOD=7
 
 #=============================================================================
-# ZONE MANAGEMENT
+# ZONE MANAGEMENT (DEC-043: one zone per type)
 #=============================================================================
 
 MASH.S.ZONE=1
-MASH.S.ZONE.MAX_ZONES=5
+MASH.S.ZONE.MAX_ZONES=2
 
-# Zone Types (accepts both)
+# Zone Types (accepts both, but only one of each type)
 MASH.S.ZONE.GRID=1
 MASH.S.ZONE.LOCAL=1
 
@@ -194,3 +194,9 @@ MASH.S.DISC.TXT_FM=1
 MASH.S.DISC.QR=1
 MASH.S.DISC.QR_FORMAT=1
 MASH.S.DISC.MANUAL_ENTRY=1
+
+# Pairing Request Discovery (DEC-042 - FULL SUPPORT)
+MASH.S.DISC.PAIRING_REQUEST=1
+MASH.S.DISC.TXT_D_PAIRING=1
+MASH.S.DISC.TXT_ZI=1
+MASH.S.DISC.TXT_ZN=1

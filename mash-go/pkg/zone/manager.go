@@ -32,6 +32,7 @@ func NewManager() *Manager {
 
 // AddZone adds a zone membership.
 // Returns ErrZoneExists if the zone already exists.
+// Returns ErrZoneTypeExists if a zone of this type already exists.
 // Returns ErrMaxZonesExceeded if already at maximum zones.
 func (m *Manager) AddZone(zoneID string, zoneType cert.ZoneType) error {
 	m.mu.Lock()
@@ -39,6 +40,13 @@ func (m *Manager) AddZone(zoneID string, zoneType cert.ZoneType) error {
 
 	if _, exists := m.zones[zoneID]; exists {
 		return ErrZoneExists
+	}
+
+	// Check zone type constraint (before capacity check per DEC-043)
+	for _, z := range m.zones {
+		if z.Type == zoneType {
+			return ErrZoneTypeExists
+		}
 	}
 
 	if len(m.zones) >= MaxZones {

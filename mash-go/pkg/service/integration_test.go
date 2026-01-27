@@ -298,7 +298,7 @@ func TestE2E_MultipleCommissioning(t *testing.T) {
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
 	deviceConfig.SetupCode = "12345678"
-	deviceConfig.MaxZones = 5
+	// Per DEC-043: MaxZones is 2 (one GRID + one LOCAL)
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
 	if err != nil {

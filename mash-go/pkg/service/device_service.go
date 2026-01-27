@@ -42,6 +42,11 @@ type DeviceService struct {
 	// Discovery management
 	discoveryManager *discovery.DiscoveryManager
 	advertiser       discovery.Advertiser
+	browser          discovery.Browser
+
+	// Pairing request browsing
+	pairingRequestActive bool
+	pairingRequestCancel context.CancelFunc
 
 	// TLS server for commissioning and operational connections
 	tlsListener net.Listener
@@ -282,6 +287,11 @@ func (s *DeviceService) Start(ctx context.Context) error {
 			Port:          port,
 		})
 
+		// Set commissioning window duration from config
+		if s.config.CommissioningWindowDuration > 0 {
+			s.discoveryManager.SetCommissioningWindowDuration(s.config.CommissioningWindowDuration)
+		}
+
 		// Register callback for commissioning timeout
 		s.discoveryManager.OnCommissioningTimeout(func() {
 			s.emitEvent(Event{
@@ -294,6 +304,11 @@ func (s *DeviceService) Start(ctx context.Context) error {
 	s.mu.Lock()
 	s.state = StateRunning
 	s.mu.Unlock()
+
+	// Start pairing request listening if configured
+	if s.config.ListenForPairingRequests {
+		_ = s.StartPairingRequestListening(s.ctx)
+	}
 
 	return nil
 }
@@ -536,6 +551,9 @@ func (s *DeviceService) Stop() error {
 	s.state = StateStopping
 	s.mu.Unlock()
 
+	// Stop pairing request listening
+	_ = s.StopPairingRequestListening()
+
 	// Cancel context
 	if s.cancel != nil {
 		s.cancel()
@@ -638,7 +656,6 @@ func (s *DeviceService) GetAllZones() []*ConnectedZone {
 // HandleZoneConnect handles a new zone connection.
 func (s *DeviceService) HandleZoneConnect(zoneID string, zoneType cert.ZoneType) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Create connected zone record
 	cz := &ConnectedZone{
@@ -689,10 +706,16 @@ func (s *DeviceService) HandleZoneConnect(zoneID string, zoneType cert.ZoneType)
 		s.failsafeTimers[zoneID] = timer
 	}
 
+	s.mu.Unlock()
+
 	s.emitEvent(Event{
 		Type:   EventConnected,
 		ZoneID: zoneID,
 	})
+
+	// Update pairing request listening state based on zone count
+	// Must be called after releasing lock since it acquires its own lock
+	s.updatePairingRequestListening()
 }
 
 // HandleZoneDisconnect handles a zone disconnection.
@@ -927,6 +950,19 @@ func (s *DeviceService) SetAdvertiser(advertiser discovery.Advertiser) {
 		Model:         s.config.Model,
 		DeviceName:    s.config.DeviceName,
 		Port:          8443,
+	})
+
+	// Set commissioning window duration from config
+	if s.config.CommissioningWindowDuration > 0 {
+		s.discoveryManager.SetCommissioningWindowDuration(s.config.CommissioningWindowDuration)
+	}
+
+	// Register callback for commissioning timeout
+	s.discoveryManager.OnCommissioningTimeout(func() {
+		s.emitEvent(Event{
+			Type:   EventCommissioningClosed,
+			Reason: "timeout",
+		})
 	})
 }
 
@@ -1202,6 +1238,9 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 		ZoneID: zoneID,
 	})
 
+	// Update pairing request listening state based on zone count
+	s.updatePairingRequestListening()
+
 	return nil
 }
 
@@ -1257,5 +1296,163 @@ func (s *DeviceService) buildDeviceIdentity() *cert.DeviceIdentity {
 		DeviceID:  s.deviceID,
 		VendorID:  s.device.VendorID(),
 		ProductID: s.device.ProductID(),
+	}
+}
+
+// SetBrowser sets the discovery browser (for testing/DI).
+func (s *DeviceService) SetBrowser(browser discovery.Browser) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.browser = browser
+}
+
+// StartPairingRequestListening starts listening for pairing requests.
+// When a pairing request with a matching discriminator is discovered,
+// the device will automatically open its commissioning window.
+func (s *DeviceService) StartPairingRequestListening(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Already listening
+	if s.pairingRequestActive {
+		return nil
+	}
+
+	// Check if at max zones - don't listen if we can't accept more
+	if len(s.connectedZones) >= s.config.MaxZones {
+		s.debugLog("StartPairingRequestListening: at max zones, not starting")
+		return nil
+	}
+
+	// Need a browser to listen
+	if s.browser == nil {
+		s.debugLog("StartPairingRequestListening: no browser available")
+		return nil
+	}
+
+	// Create cancellable context for browsing
+	browseCtx, cancel := context.WithCancel(ctx)
+	s.pairingRequestCancel = cancel
+	s.pairingRequestActive = true
+
+	// Start browsing in background
+	go s.runPairingRequestListener(browseCtx)
+
+	s.debugLog("StartPairingRequestListening: started")
+	return nil
+}
+
+// StopPairingRequestListening stops listening for pairing requests.
+func (s *DeviceService) StopPairingRequestListening() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.pairingRequestActive {
+		return nil
+	}
+
+	if s.pairingRequestCancel != nil {
+		s.pairingRequestCancel()
+		s.pairingRequestCancel = nil
+	}
+
+	s.pairingRequestActive = false
+	s.debugLog("StopPairingRequestListening: stopped")
+	return nil
+}
+
+// IsPairingRequestListening returns true if the device is actively listening for pairing requests.
+func (s *DeviceService) IsPairingRequestListening() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.pairingRequestActive
+}
+
+// runPairingRequestListener runs the pairing request browser in the background.
+func (s *DeviceService) runPairingRequestListener(ctx context.Context) {
+	s.mu.RLock()
+	browser := s.browser
+	discriminator := s.config.Discriminator
+	s.mu.RUnlock()
+
+	if browser == nil {
+		return
+	}
+
+	// BrowsePairingRequests calls the callback for each discovered pairing request
+	// It blocks until the context is cancelled
+	err := browser.BrowsePairingRequests(ctx, func(svc discovery.PairingRequestService) {
+		s.handlePairingRequestDiscovered(svc, discriminator)
+	})
+
+	if err != nil && err != context.Canceled {
+		s.debugLog("runPairingRequestListener: browse error", "error", err)
+	}
+
+	// Mark as inactive when browsing stops
+	s.mu.Lock()
+	s.pairingRequestActive = false
+	s.mu.Unlock()
+}
+
+// handlePairingRequestDiscovered handles a discovered pairing request.
+func (s *DeviceService) handlePairingRequestDiscovered(svc discovery.PairingRequestService, ourDiscriminator uint16) {
+	s.debugLog("handlePairingRequestDiscovered: received pairing request",
+		"theirDiscriminator", svc.Discriminator,
+		"ourDiscriminator", ourDiscriminator,
+		"zoneID", svc.ZoneID)
+
+	// Check discriminator match
+	if svc.Discriminator != ourDiscriminator {
+		s.debugLog("handlePairingRequestDiscovered: discriminator mismatch, ignoring")
+		return
+	}
+
+	s.mu.RLock()
+	// Rate limiting: check if commissioning window is already open
+	commissioningOpen := s.discoveryManager != nil && s.discoveryManager.IsCommissioningMode()
+	// Check if at max zones
+	atMaxZones := len(s.connectedZones) >= s.config.MaxZones
+	s.mu.RUnlock()
+
+	if commissioningOpen {
+		s.debugLog("handlePairingRequestDiscovered: commissioning window already open, ignoring")
+		return
+	}
+
+	if atMaxZones {
+		s.debugLog("handlePairingRequestDiscovered: at max zones, ignoring")
+		return
+	}
+
+	// Open commissioning window
+	s.debugLog("handlePairingRequestDiscovered: opening commissioning window")
+	if err := s.EnterCommissioningMode(); err != nil {
+		s.debugLog("handlePairingRequestDiscovered: failed to enter commissioning mode", "error", err)
+	}
+}
+
+// updatePairingRequestListening updates the listening state based on zone count.
+// Called after zone changes to start/stop listening as needed.
+func (s *DeviceService) updatePairingRequestListening() {
+	if !s.config.ListenForPairingRequests {
+		return
+	}
+
+	s.mu.RLock()
+	zoneCount := len(s.connectedZones)
+	maxZones := s.config.MaxZones
+	active := s.pairingRequestActive
+	ctx := s.ctx
+	s.mu.RUnlock()
+
+	if zoneCount >= maxZones && active {
+		// At max zones - stop listening
+		s.debugLog("updatePairingRequestListening: stopping (at max zones)")
+		_ = s.StopPairingRequestListening()
+	} else if zoneCount < maxZones && !active && ctx != nil {
+		// Below max zones and not listening - start
+		s.debugLog("updatePairingRequestListening: starting (below max zones)")
+		_ = s.StartPairingRequestListening(ctx)
 	}
 }

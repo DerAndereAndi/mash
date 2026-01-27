@@ -206,6 +206,53 @@ func (_c *MockBrowser_BrowseOperational_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+// BrowsePairingRequests provides a mock function with given fields: ctx, callback
+func (_m *MockBrowser) BrowsePairingRequests(ctx context.Context, callback func(discovery.PairingRequestService)) error {
+	ret := _m.Called(ctx, callback)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BrowsePairingRequests")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, func(discovery.PairingRequestService)) error); ok {
+		r0 = rf(ctx, callback)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBrowser_BrowsePairingRequests_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BrowsePairingRequests'
+type MockBrowser_BrowsePairingRequests_Call struct {
+	*mock.Call
+}
+
+// BrowsePairingRequests is a helper method to define mock.On call
+//   - ctx context.Context
+//   - callback func(discovery.PairingRequestService)
+func (_e *MockBrowser_Expecter) BrowsePairingRequests(ctx interface{}, callback interface{}) *MockBrowser_BrowsePairingRequests_Call {
+	return &MockBrowser_BrowsePairingRequests_Call{Call: _e.mock.On("BrowsePairingRequests", ctx, callback)}
+}
+
+func (_c *MockBrowser_BrowsePairingRequests_Call) Run(run func(ctx context.Context, callback func(discovery.PairingRequestService))) *MockBrowser_BrowsePairingRequests_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(func(discovery.PairingRequestService)))
+	})
+	return _c
+}
+
+func (_c *MockBrowser_BrowsePairingRequests_Call) Return(_a0 error) *MockBrowser_BrowsePairingRequests_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBrowser_BrowsePairingRequests_Call) RunAndReturn(run func(context.Context, func(discovery.PairingRequestService)) error) *MockBrowser_BrowsePairingRequests_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FindByDiscriminator provides a mock function with given fields: ctx, discriminator
 func (_m *MockBrowser) FindByDiscriminator(ctx context.Context, discriminator uint16) (*discovery.CommissionableService, error) {
 	ret := _m.Called(ctx, discriminator)

@@ -16,17 +16,19 @@ type MDNSAdvertiser struct {
 	mu sync.Mutex
 
 	// Active services
-	commissionableServer *zeroconf.Server
-	operationalServers   map[string]*zeroconf.Server // keyed by zoneID
-	commissionerServers  map[string]*zeroconf.Server // keyed by zoneID
+	commissionableServer   *zeroconf.Server
+	operationalServers     map[string]*zeroconf.Server // keyed by zoneID
+	commissionerServers    map[string]*zeroconf.Server // keyed by zoneID
+	pairingRequestServers  map[uint16]*zeroconf.Server // keyed by discriminator
 }
 
 // NewMDNSAdvertiser creates a new mDNS advertiser.
 func NewMDNSAdvertiser(config AdvertiserConfig) (*MDNSAdvertiser, error) {
 	return &MDNSAdvertiser{
-		config:              config,
-		operationalServers:  make(map[string]*zeroconf.Server),
-		commissionerServers: make(map[string]*zeroconf.Server),
+		config:                config,
+		operationalServers:    make(map[string]*zeroconf.Server),
+		commissionerServers:   make(map[string]*zeroconf.Server),
+		pairingRequestServers: make(map[uint16]*zeroconf.Server),
 	}, nil
 }
 
@@ -279,6 +281,68 @@ func (a *MDNSAdvertiser) StopCommissioner(zoneID string) error {
 	return nil
 }
 
+// AnnouncePairingRequest starts advertising a pairing request.
+// Controllers use this to signal devices that they want to commission them.
+func (a *MDNSAdvertiser) AnnouncePairingRequest(ctx context.Context, info *PairingRequestInfo) error {
+	if err := info.Validate(); err != nil {
+		return err
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Stop existing pairing request for this discriminator if any
+	if server, exists := a.pairingRequestServers[info.Discriminator]; exists {
+		server.Shutdown()
+		delete(a.pairingRequestServers, info.Discriminator)
+	}
+
+	// Build instance name: "{ZoneID}-{Discriminator}"
+	instanceName := PairingRequestInstanceName(info.ZoneID, info.Discriminator)
+
+	// Build TXT records
+	txtRecords := EncodePairingRequestTXT(info)
+	txtStrings := TXTRecordsToStrings(txtRecords)
+
+	// Port is always 0 for pairing requests (signaling only)
+	port := 0
+
+	// Get interfaces and options
+	ifaces := a.getInterfaces()
+	opts := a.serverOptions()
+
+	server, err := zeroconf.Register(
+		instanceName,
+		ServiceTypePairingRequest,
+		Domain,
+		port,
+		txtStrings,
+		ifaces,
+		opts...,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to register pairing request service: %w", err)
+	}
+
+	a.pairingRequestServers[info.Discriminator] = server
+	return nil
+}
+
+// StopPairingRequest stops advertising a pairing request for a discriminator.
+func (a *MDNSAdvertiser) StopPairingRequest(discriminator uint16) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	server, exists := a.pairingRequestServers[discriminator]
+	if !exists {
+		return ErrNotFound
+	}
+
+	server.Shutdown()
+	delete(a.pairingRequestServers, discriminator)
+	return nil
+}
+
 // StopAll stops all advertisements.
 func (a *MDNSAdvertiser) StopAll() {
 	a.mu.Lock()
@@ -297,6 +361,11 @@ func (a *MDNSAdvertiser) StopAll() {
 	for zoneID, server := range a.commissionerServers {
 		server.Shutdown()
 		delete(a.commissionerServers, zoneID)
+	}
+
+	for discriminator, server := range a.pairingRequestServers {
+		server.Shutdown()
+		delete(a.pairingRequestServers, discriminator)
 	}
 }
 
@@ -539,6 +608,74 @@ func (b *MDNSBrowser) BrowseCommissioners(ctx context.Context) (<-chan *Commissi
 	return out, nil
 }
 
+// BrowsePairingRequests searches for pairing requests from controllers.
+// Devices use this to discover controllers that want to commission them.
+// The callback is invoked for each discovered pairing request.
+// Services are aggregated by instance name - addresses from multiple interfaces
+// are combined into a single entry.
+func (b *MDNSBrowser) BrowsePairingRequests(ctx context.Context, callback func(PairingRequestService)) error {
+	if callback == nil {
+		return nil
+	}
+
+	entries := make(chan *zeroconf.ServiceEntry)
+	removed := make(chan *zeroconf.ServiceEntry)
+
+	// Set up browser options
+	opts := b.browserOptions()
+
+	// Process entries with aggregation
+	go func() {
+		// Track services by instance name, aggregating addresses
+		services := make(map[string]*PairingRequestService)
+
+		for {
+			select {
+			case entry, ok := <-entries:
+				if !ok {
+					return
+				}
+				svc := b.entryToPairingRequest(entry)
+				if svc == nil {
+					// Skip malformed TXT records gracefully
+					continue
+				}
+
+				existing, found := services[svc.InstanceName]
+				if found {
+					// Merge addresses into existing entry
+					existing.Addresses = mergeAddresses(existing.Addresses, svc.Addresses)
+				} else {
+					// New service - store and invoke callback
+					services[svc.InstanceName] = svc
+					callback(*svc)
+				}
+
+			case entry, ok := <-removed:
+				if !ok {
+					continue
+				}
+				if existing, found := services[entry.Instance]; found {
+					existing.Addresses = removeAddresses(existing.Addresses, entry)
+					if len(existing.Addresses) == 0 {
+						delete(services, entry.Instance)
+					}
+				}
+
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Start browsing in background
+	go func() {
+		_ = zeroconf.Browse(ctx, ServiceTypePairingRequest, Domain, entries, removed, opts...)
+	}()
+
+	return nil
+}
+
 // FindByDiscriminator searches for a specific commissionable device.
 func (b *MDNSBrowser) FindByDiscriminator(ctx context.Context, discriminator uint16) (*CommissionableService, error) {
 	// For search, we only care about added devices (ignore removed channel)
@@ -688,6 +825,35 @@ func (b *MDNSBrowser) entryToCommissioner(entry *zeroconf.ServiceEntry) *Commiss
 		VendorProduct:  info.VendorProduct,
 		ControllerName: info.ControllerName,
 		DeviceCount:    info.DeviceCount,
+	}
+}
+
+// entryToPairingRequest converts a zeroconf entry to PairingRequestService.
+// Returns nil if TXT records are malformed (gracefully skip).
+func (b *MDNSBrowser) entryToPairingRequest(entry *zeroconf.ServiceEntry) *PairingRequestService {
+	txt := StringsToTXTRecords(entry.Text)
+	info, err := DecodePairingRequestTXT(txt)
+	if err != nil {
+		return nil
+	}
+
+	// Collect addresses
+	addrs := make([]string, 0, len(entry.AddrIPv4)+len(entry.AddrIPv6))
+	for _, ip := range entry.AddrIPv4 {
+		addrs = append(addrs, ip.String())
+	}
+	for _, ip := range entry.AddrIPv6 {
+		addrs = append(addrs, ip.String())
+	}
+
+	return &PairingRequestService{
+		InstanceName:  entry.Instance,
+		Host:          entry.HostName,
+		Port:          uint16(entry.Port),
+		Addresses:     addrs,
+		Discriminator: info.Discriminator,
+		ZoneID:        info.ZoneID,
+		ZoneName:      info.ZoneName,
 	}
 }
 

@@ -3,7 +3,7 @@
 > PICS codes for transport, commissioning, zones, and connection handling
 
 **Status:** Draft
-**Last Updated:** 2025-01-25
+**Last Updated:** 2025-01-27
 
 ---
 
@@ -80,7 +80,8 @@ This registry defines PICS codes for the pairing and connection layer of MASH. T
 
 | PICS Code | Description | Values | Conformance |
 |-----------|-------------|--------|-------------|
-| MASH.S.COMM.WINDOW_DURATION | Commissioning window (seconds) | 120 | M |
+| MASH.S.COMM.WINDOW_DURATION | Commissioning window - user initiated (seconds) | 120 | M |
+| MASH.S.COMM.WINDOW_DURATION_PAIRING | Commissioning window - pairing request (seconds) | 10800 | O |
 | MASH.S.COMM.SETUP_CODE_BITS | Setup code entropy (bits) | 27 | M |
 | MASH.S.COMM.DISCRIMINATOR_BITS | Discriminator bits | 12 | M |
 
@@ -99,6 +100,12 @@ This registry defines PICS codes for the pairing and connection layer of MASH. T
 | MASH.S.COMM.ATTESTATION | Device attestation support | 0, 1 | O |
 | MASH.S.COMM.ATTESTATION_CERT | Has attestation certificate | 0, 1 | O |
 
+### 3.5 Error Codes
+
+| PICS Code | Description | Values | Conformance |
+|-----------|-------------|--------|-------------|
+| MASH.S.COMM.ERR_ZONE_TYPE_EXISTS | Supports error code 10 (zone type already exists) | 0, 1 | M |
+
 ---
 
 ## 4. Certificate Management (CERT)
@@ -115,7 +122,7 @@ This registry defines PICS codes for the pairing and connection layer of MASH. T
 
 | PICS Code | Description | Values | Conformance |
 |-----------|-------------|--------|-------------|
-| MASH.S.CERT.MAX_ZONES | Maximum zone certificates stored | 5 | M |
+| MASH.S.CERT.MAX_ZONES | Maximum zone certificates stored | 2 | M |
 | MASH.S.CERT.PERSISTENT | Certificates persist across reboot | 0, 1 | M |
 
 ### 4.3 Certificate Lifecycle
@@ -136,8 +143,8 @@ This registry defines PICS codes for the pairing and connection layer of MASH. T
 | PICS Code | Description | Values | Conformance |
 |-----------|-------------|--------|-------------|
 | MASH.S.ZONE | Zone management support | 1 | M |
-| MASH.S.ZONE.MAX_ZONES | Maximum concurrent zones | 5 | M |
-| MASH.S.ZONE.CURRENT_COUNT | Current zone count (runtime) | 0-5 | - |
+| MASH.S.ZONE.MAX_ZONES | Maximum concurrent zones (one per type) | 2 | M |
+| MASH.S.ZONE.CURRENT_COUNT | Current zone count (runtime) | 0-2 | - |
 
 ### 5.2 Zone Types Accepted
 
@@ -298,6 +305,16 @@ This registry defines PICS codes for the pairing and connection layer of MASH. T
 | MASH.S.DISC.QR | QR code support | 0, 1 | O |
 | MASH.S.DISC.QR_FORMAT | QR code format version | 1 | O |
 | MASH.S.DISC.MANUAL_ENTRY | Manual code entry fallback | 1 | M |
+
+### 10.5 Pairing Request Discovery (DEC-042)
+
+| PICS Code | Description | Values | Conformance |
+|-----------|-------------|--------|-------------|
+| MASH.S.DISC.PAIRING_REQUEST | Device supports pairing request listening (_mashp._udp) | 0, 1 | O |
+| MASH.C.DISC.PAIRING_REQUEST | Controller supports pairing request announcing (_mashp._udp) | 0, 1 | O |
+| MASH.S.DISC.TXT_D_PAIRING | Discriminator in pairing request TXT record | 0, 1 | [PAIRING_REQUEST] |
+| MASH.S.DISC.TXT_ZI | Zone ID in pairing request TXT record | 0, 1 | [PAIRING_REQUEST] |
+| MASH.S.DISC.TXT_ZN | Zone name in pairing request TXT record (optional) | 0, 1 | O |
 
 ---
 

@@ -28,17 +28,17 @@ type NotificationDispatcher struct {
 	subscriptionMap map[uint32]uint64 // subscriptionID -> connectionID
 
 	// Background processing
-	ctx        context.Context
-	cancel     context.CancelFunc
-	processWg  sync.WaitGroup
-	running    atomic.Bool
-	interval   time.Duration
+	ctx       context.Context
+	cancel    context.CancelFunc
+	processWg sync.WaitGroup
+	running   atomic.Bool
+	interval  time.Duration
 }
 
 // connectionInfo tracks a connection and its subscriptions.
 type connectionInfo struct {
-	id             uint64
-	sender         ConnectionSender
+	id              uint64
+	sender          ConnectionSender
 	subscriptionIDs []uint32
 }
 

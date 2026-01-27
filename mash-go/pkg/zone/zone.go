@@ -11,12 +11,14 @@ import (
 var (
 	ErrZoneNotFound     = errors.New("zone not found")
 	ErrZoneExists       = errors.New("zone already exists")
+	ErrZoneTypeExists   = errors.New("zone of this type already exists")
 	ErrMaxZonesExceeded = errors.New("maximum zones exceeded")
 	ErrZoneNotConnected = errors.New("zone not connected")
 )
 
 // MaxZones is the maximum number of zones a device can belong to.
-const MaxZones = 5
+// Per DEC-043: one GRID zone + one LOCAL zone = 2 zones maximum.
+const MaxZones = 2
 
 // Zone represents a zone membership for a device.
 type Zone struct {

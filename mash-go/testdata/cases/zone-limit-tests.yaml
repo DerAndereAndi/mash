@@ -620,56 +620,93 @@ tags:
   - persistence
 
 ---
-# TC-ZONE-010: Maximum 5 Zones Enforcement
+# TC-ZONE-010: Maximum 2 Zones Enforcement (One Per Type)
 id: TC-ZONE-010
-name: Maximum 5 Zones Enforcement
+name: Maximum 2 Zones Enforcement (DEC-043)
 description: |
-  Verifies that a device enforces the maximum of 5 zones and
-  rejects additional zone connections.
+  Verifies that a device enforces the maximum of 2 zones (one per zone type)
+  and rejects additional zone connections of the same type.
+
+  Per DEC-043:
+  - Max 1 GRID zone (regulatory/external)
+  - Max 1 LOCAL zone (local energy management)
+  - Total: 2 zones maximum per device
+  - Same zone type commissioning returns ZONE_TYPE_EXISTS (error code 10)
 
 pics_requirements:
   - MASH.S.ZONE
   - MASH.S.ZONE.MAX
+  - MASH.S.ZONE.GRID
+  - MASH.S.ZONE.LOCAL
 
 preconditions:
-  - device_has_4_zones: true   # 4 zones already connected
+  - device_has_grid_zone: true   # Already has GRID zone
 
 steps:
-  - name: Connect 5th zone (should succeed)
-    action: connect_as_zone
-    params:
-      zone_type: LOCAL
-      zone_id: "zone-5"
-    expect:
-      connection_success: true
-
-  - name: Verify 5 zones connected
+  - name: Verify device has GRID zone
     action: read
     params:
       endpoint: 0
       feature: DeviceInfo
-      attribute: connectedZones
+      attribute: zones
     expect:
       read_success: true
-      zone_count: 5
+      zone_count: 1
+      zones:
+        - type: "GRID"
 
-  - name: Attempt to connect 6th zone (should fail)
-    action: connect_as_zone
+  - name: Connect LOCAL zone (should succeed - different type)
+    action: commission
     params:
+      setup_code: "${setup_code}"
       zone_type: LOCAL
-      zone_id: "zone-6"
+      zone_id: "local-zone-1"
     expect:
-      connection_success: false
-      error: MAX_ZONES_EXCEEDED
+      commission_success: true
+
+  - name: Verify 2 zones connected (max capacity)
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zones
+    expect:
+      read_success: true
+      zone_count: 2
+      zones:
+        - type: "GRID"
+        - type: "LOCAL"
+
+  - name: Attempt to connect another GRID zone (should fail - same type)
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+      zone_type: GRID
+      zone_id: "grid-zone-2"
+    expect:
+      commission_success: false
+      error_code: 10              # ZONE_TYPE_EXISTS
+
+  - name: Attempt to connect another LOCAL zone (should fail - same type)
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+      zone_type: LOCAL
+      zone_id: "local-zone-2"
+    expect:
+      commission_success: false
+      error_code: 10              # ZONE_TYPE_EXISTS
 
 postconditions:
   - max_zones_enforced: true
+  - zone_type_constraint_enforced: true
 
-timeout: "15s"
+timeout: "20s"
 tags:
   - zone
   - capacity
   - limit
+  - zone-type
 
 ---
 # TC-ZONE-011: All Zones Clear Limit Returns to Unlimited
