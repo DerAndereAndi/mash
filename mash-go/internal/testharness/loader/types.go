@@ -67,15 +67,59 @@ type TestSuite struct {
 	CommonPICS []string `yaml:"common_pics,omitempty"`
 }
 
+// PICSDevice contains device identification metadata from YAML PICS files.
+type PICSDevice struct {
+	Vendor  string `yaml:"vendor"`
+	Product string `yaml:"product"`
+	Model   string `yaml:"model"`
+	Version string `yaml:"version"`
+}
+
 // PICSFile represents a Protocol Implementation Conformance Statement.
 type PICSFile struct {
 	// Name identifies this PICS configuration.
-	Name string
+	Name string `yaml:"-"`
+
+	// Device contains optional device metadata (YAML format only).
+	Device PICSDevice `yaml:"device"`
 
 	// Items maps PICS identifiers to their values.
 	// Boolean items: D.COMM.SC=true
 	// Numeric items: D.ELEC.MAX_CURRENT=32000
-	Items map[string]interface{}
+	Items map[string]interface{} `yaml:"items"`
+}
+
+// picsYAMLFile is used for YAML unmarshaling to detect format.
+type picsYAMLFile struct {
+	Device PICSDevice             `yaml:"device"`
+	Items  map[string]interface{} `yaml:"items"`
+}
+
+// ValidationLevel indicates the severity of a validation issue.
+type ValidationLevel string
+
+const (
+	// ValidationLevelError indicates a critical issue that must be fixed.
+	ValidationLevelError ValidationLevel = "error"
+	// ValidationLevelWarning indicates an issue that should be reviewed.
+	ValidationLevelWarning ValidationLevel = "warning"
+	// ValidationLevelInfo indicates informational feedback.
+	ValidationLevelInfo ValidationLevel = "info"
+)
+
+// ValidationError represents a PICS validation issue.
+type ValidationError struct {
+	// Field is the PICS item key that has an issue.
+	Field string
+	// Message describes the validation issue.
+	Message string
+	// Level indicates the severity of the issue.
+	Level ValidationLevel
+}
+
+// Error implements the error interface.
+func (e *ValidationError) Error() string {
+	return e.Field + ": " + e.Message
 }
 
 // LoadError provides details about a test case loading error.

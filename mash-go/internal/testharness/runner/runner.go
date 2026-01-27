@@ -23,6 +23,7 @@ type Runner struct {
 	engine    *engine.Engine
 	reporter  reporter.Reporter
 	conn      *Connection
+	resolver  *Resolver
 	messageID uint32 // Atomic counter for message IDs
 }
 
@@ -82,10 +83,14 @@ func New(config *Config) *Runner {
 	}
 
 	r := &Runner{
-		config: config,
-		engine: engine.NewWithConfig(engineConfig),
-		conn:   &Connection{},
+		config:   config,
+		engine:   engine.NewWithConfig(engineConfig),
+		conn:     &Connection{},
+		resolver: NewResolver(),
 	}
+
+	// Register enhanced checkers
+	engine.RegisterEnhancedCheckers(r.engine)
 
 	// Create reporter
 	switch config.OutputFormat {
@@ -253,16 +258,28 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		return nil, fmt.Errorf("not connected")
 	}
 
-	endpoint, _ := step.Params["endpoint"].(float64)
-	feature, _ := step.Params["feature"].(float64)
-	attribute, _ := step.Params["attribute"].(string)
+	// Interpolate parameters
+	params := engine.InterpolateParams(step.Params, state)
+
+	// Resolve endpoint, feature, and attribute names
+	endpointID, err := r.resolver.ResolveEndpoint(params["endpoint"])
+	if err != nil {
+		return nil, fmt.Errorf("resolving endpoint: %w", err)
+	}
+
+	featureID, err := r.resolver.ResolveFeature(params["feature"])
+	if err != nil {
+		return nil, fmt.Errorf("resolving feature: %w", err)
+	}
+
+	attribute, _ := params["attribute"].(string)
 
 	// Create read request
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
 		Operation:  wire.OpRead,
-		EndpointID: uint8(endpoint),
-		FeatureID:  uint8(feature),
+		EndpointID: endpointID,
+		FeatureID:  featureID,
 	}
 
 	// Encode and send
@@ -307,15 +324,27 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 		return nil, fmt.Errorf("not connected")
 	}
 
-	endpoint, _ := step.Params["endpoint"].(float64)
-	feature, _ := step.Params["feature"].(float64)
-	value := step.Params["value"]
+	// Interpolate parameters
+	params := engine.InterpolateParams(step.Params, state)
+
+	// Resolve endpoint and feature names
+	endpointID, err := r.resolver.ResolveEndpoint(params["endpoint"])
+	if err != nil {
+		return nil, fmt.Errorf("resolving endpoint: %w", err)
+	}
+
+	featureID, err := r.resolver.ResolveFeature(params["feature"])
+	if err != nil {
+		return nil, fmt.Errorf("resolving feature: %w", err)
+	}
+
+	value := params["value"]
 
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
 		Operation:  wire.OpWrite,
-		EndpointID: uint8(endpoint),
-		FeatureID:  uint8(feature),
+		EndpointID: endpointID,
+		FeatureID:  featureID,
 		Payload:    value,
 	}
 
@@ -352,14 +381,25 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 		return nil, fmt.Errorf("not connected")
 	}
 
-	endpoint, _ := step.Params["endpoint"].(float64)
-	feature, _ := step.Params["feature"].(float64)
+	// Interpolate parameters
+	params := engine.InterpolateParams(step.Params, state)
+
+	// Resolve endpoint and feature names
+	endpointID, err := r.resolver.ResolveEndpoint(params["endpoint"])
+	if err != nil {
+		return nil, fmt.Errorf("resolving endpoint: %w", err)
+	}
+
+	featureID, err := r.resolver.ResolveFeature(params["feature"])
+	if err != nil {
+		return nil, fmt.Errorf("resolving feature: %w", err)
+	}
 
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
 		Operation:  wire.OpSubscribe,
-		EndpointID: uint8(endpoint),
-		FeatureID:  uint8(feature),
+		EndpointID: endpointID,
+		FeatureID:  featureID,
 	}
 
 	data, err := wire.EncodeRequest(req)
@@ -394,16 +434,28 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 		return nil, fmt.Errorf("not connected")
 	}
 
-	endpoint, _ := step.Params["endpoint"].(float64)
-	feature, _ := step.Params["feature"].(float64)
-	params := step.Params["params"]
+	// Interpolate parameters
+	params := engine.InterpolateParams(step.Params, state)
+
+	// Resolve endpoint and feature names
+	endpointID, err := r.resolver.ResolveEndpoint(params["endpoint"])
+	if err != nil {
+		return nil, fmt.Errorf("resolving endpoint: %w", err)
+	}
+
+	featureID, err := r.resolver.ResolveFeature(params["feature"])
+	if err != nil {
+		return nil, fmt.Errorf("resolving feature: %w", err)
+	}
+
+	invokeParams := params["params"]
 
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
 		Operation:  wire.OpInvoke,
-		EndpointID: uint8(endpoint),
-		FeatureID:  uint8(feature),
-		Payload:    params,
+		EndpointID: endpointID,
+		FeatureID:  featureID,
+		Payload:    invokeParams,
 	}
 
 	data, err := wire.EncodeRequest(req)
