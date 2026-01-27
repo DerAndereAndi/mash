@@ -267,6 +267,70 @@ items:
   D.CTRL.LIMIT: true    # Power limiting
 ```
 
+## Bidirectional Communication
+
+MASH supports bidirectional communication where both sides of a connection can send requests. This enables advanced scenarios like Smart Meter Gateways exposing grid meter data.
+
+### Controller Exposing Features
+
+A controller can expose a device model to connected devices:
+
+```go
+// Create a device model to expose (e.g., grid meter)
+exposedDevice := model.NewDevice("smgw-meter", vendorID, productID)
+meterEndpoint := model.NewEndpoint(1, model.EndpointGridConnection, "Grid Meter")
+measurement := model.NewFeature(model.FeatureMeasurement, 1)
+measurement.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+    ID:      1,
+    Name:    "ACActivePower",
+    Type:    model.DataTypeInt64,
+    Access:  model.AccessRead,
+    Default: int64(0),
+}))
+meterEndpoint.AddFeature(measurement)
+exposedDevice.AddEndpoint(meterEndpoint)
+
+// After commissioning a device, configure the session to expose features
+session := controllerSvc.GetSession(deviceID)
+session.SetExposedDevice(exposedDevice)
+
+// Now the device can read/subscribe to controller's meter data
+```
+
+### Device Querying Controller
+
+From the device side, query the controller's exposed features:
+
+```go
+// Get the zone session for the connected controller
+zoneSession := deviceSvc.GetZoneSession(zoneID)
+
+// Read attributes from controller's exposed features
+attrs, err := zoneSession.Read(ctx, 1, uint8(model.FeatureMeasurement), nil)
+
+// Subscribe to controller attribute changes
+subID, priming, err := zoneSession.Subscribe(ctx, 1, uint8(model.FeatureMeasurement), nil)
+```
+
+### Dual-Service Entity (EMS Pattern)
+
+An EMS can act as both device and controller:
+
+```go
+// EMS as a device (receives limits from SMGW)
+emsDevice := model.NewDevice("ems-001", vendorID, productID)
+emsDeviceSvc, _ := service.NewDeviceService(emsDevice, deviceConfig)
+emsDeviceSvc.Start(ctx)
+
+// EMS as a controller (manages household devices)
+emsControllerSvc, _ := service.NewControllerService(controllerConfig)
+emsControllerSvc.Start(ctx)
+
+// Now EMS can:
+// - Receive limits from SMGW (via DeviceService)
+// - Control EVSE, battery, heat pump (via ControllerService)
+```
+
 ## Dependencies
 
 - [fxamacker/cbor/v2](https://github.com/fxamacker/cbor) - CBOR encoding

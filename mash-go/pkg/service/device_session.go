@@ -8,12 +8,18 @@ import (
 
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
+	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // DeviceSession manages a controller-side session with a connected device.
 // It wraps an interaction.Client to provide Read/Write/Subscribe/Invoke
 // operations to applications.
+//
+// DeviceSession also supports bidirectional communication, allowing devices
+// to send requests to the controller (e.g., to read meter data exposed by
+// the controller). This is enabled by calling SetExposedDevice with a device
+// model that the controller wants to expose.
 type DeviceSession struct {
 	mu sync.RWMutex
 
@@ -23,6 +29,10 @@ type DeviceSession struct {
 	sender   *TransportRequestSender
 	closed   bool
 	logger   *slog.Logger
+
+	// Bidirectional support: handler for incoming requests from the device.
+	// Optional - only set if controller exposes features to devices.
+	handler *ProtocolHandler
 
 	// Renewal handling
 	renewalHandler *ControllerRenewalHandler
@@ -79,6 +89,10 @@ func (s *DeviceSession) OnMessage(data []byte) {
 	}
 
 	switch msgType {
+	case wire.MessageTypeRequest:
+		// Incoming request from device - process through ProtocolHandler
+		s.handleRequest(data)
+
 	case wire.MessageTypeResponse:
 		// Decode and deliver to client
 		resp, err := wire.DecodeResponse(data)
@@ -249,6 +263,131 @@ func (s *DeviceSession) handleRenewalResponse(data []byte, handler *ControllerRe
 // Conn returns the underlying connection (for renewal handler initialization).
 func (s *DeviceSession) Conn() Sendable {
 	return s.conn
+}
+
+// ============================================================================
+// Bidirectional Support: Methods for handling incoming requests from device
+// ============================================================================
+
+// SetExposedDevice configures this session to expose a device model to the
+// connected device. This enables bidirectional communication where the device
+// can query the controller's features (e.g., read meter data from an SMGW).
+//
+// If not called, incoming requests from the device will receive StatusUnsupported.
+func (s *DeviceSession) SetExposedDevice(device *model.Device) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.handler = NewProtocolHandler(device)
+	s.handler.SetPeerID(s.deviceID)
+
+	// Wire up notification sender so NotifyAttributeChange can send to device
+	s.handler.SetSendNotification(s.SendNotification)
+}
+
+// handleRequest processes an incoming request from the device and sends a response.
+func (s *DeviceSession) handleRequest(data []byte) {
+	s.mu.RLock()
+	handler := s.handler
+	logger := s.logger
+	s.mu.RUnlock()
+
+	// Decode request
+	req, err := wire.DecodeRequest(data)
+	if err != nil {
+		// Send error response with messageID 0 (unknown)
+		s.sendErrorResponse(0, wire.StatusInvalidParameter, "failed to decode request")
+		return
+	}
+
+	var resp *wire.Response
+	if handler == nil {
+		// No handler configured - controller doesn't expose features
+		resp = &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusUnsupported,
+			Payload: &wire.ErrorPayload{
+				Message: "controller does not expose features",
+			},
+		}
+	} else {
+		// Process request through handler
+		resp = handler.HandleRequest(req)
+	}
+
+	if logger != nil {
+		logger.Debug("handleRequest: processed request",
+			"deviceID", s.deviceID,
+			"messageID", req.MessageID,
+			"operation", req.Operation,
+			"status", resp.Status)
+	}
+
+	// Send response
+	respData, err := wire.EncodeResponse(resp)
+	if err != nil {
+		// Can't encode response - send error with simpler payload
+		s.sendErrorResponse(req.MessageID, wire.StatusBusy, "failed to encode response")
+		return
+	}
+
+	s.conn.Send(respData)
+}
+
+// sendErrorResponse sends an error response.
+func (s *DeviceSession) sendErrorResponse(messageID uint32, status wire.Status, message string) {
+	resp := &wire.Response{
+		MessageID: messageID,
+		Status:    status,
+		Payload: &wire.ErrorPayload{
+			Message: message,
+		},
+	}
+
+	if respData, err := wire.EncodeResponse(resp); err == nil {
+		s.conn.Send(respData)
+	}
+}
+
+// SendNotification sends a subscription notification to the device.
+// This is used when the controller has features that the device has subscribed to.
+func (s *DeviceSession) SendNotification(notif *wire.Notification) error {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return ErrSessionClosed
+	}
+	logger := s.logger
+	s.mu.RUnlock()
+
+	if logger != nil {
+		logger.Debug("SendNotification: encoding notification",
+			"deviceID", s.deviceID,
+			"subscriptionID", notif.SubscriptionID,
+			"endpointID", notif.EndpointID,
+			"featureID", notif.FeatureID,
+			"changesCount", len(notif.Changes))
+	}
+
+	data, err := wire.EncodeNotification(notif)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("SendNotification: encode failed",
+				"deviceID", s.deviceID,
+				"error", err)
+		}
+		return err
+	}
+
+	return s.conn.Send(data)
+}
+
+// Handler returns the session's ProtocolHandler (for testing and diagnostics).
+// Returns nil if no exposed device is configured.
+func (s *DeviceSession) Handler() *ProtocolHandler {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.handler
 }
 
 // TLSConnectionState returns the TLS connection state for this session.

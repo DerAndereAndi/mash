@@ -253,3 +253,368 @@ func TestDeviceSession_Close(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Phase 4: Bidirectional Support Tests
+// ============================================================================
+
+// mockDeviceSessionConn captures sent messages and supports bidirectional traffic.
+// Named differently from mockBidirectionalConnection in zone_session_test.go.
+type mockDeviceSessionConn struct {
+	mu   sync.Mutex
+	sent [][]byte
+}
+
+func (m *mockDeviceSessionConn) Send(data []byte) error {
+	m.mu.Lock()
+	m.sent = append(m.sent, data)
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *mockDeviceSessionConn) GetSent() [][]byte {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([][]byte, len(m.sent))
+	copy(result, m.sent)
+	return result
+}
+
+func (m *mockDeviceSessionConn) ClearSent() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sent = nil
+}
+
+func TestDeviceSession_HandleIncomingRequest_NoHandler(t *testing.T) {
+	// When DeviceSession has no ProtocolHandler configured,
+	// incoming requests should receive StatusUnsupported
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	// Send a Read request to the session (as if from the device)
+	req := &wire.Request{
+		MessageID:  1,
+		Operation:  wire.OpRead,
+		EndpointID: 0,
+		FeatureID:  uint8(model.FeatureDeviceInfo),
+	}
+	reqData, err := wire.EncodeRequest(req)
+	if err != nil {
+		t.Fatalf("Failed to encode request: %v", err)
+	}
+
+	// Deliver the request
+	session.OnMessage(reqData)
+
+	// Wait for response to be sent
+	time.Sleep(10 * time.Millisecond)
+
+	// Should have sent a response
+	sent := conn.GetSent()
+	if len(sent) == 0 {
+		t.Fatal("Expected a response to be sent")
+	}
+
+	// Decode the response
+	resp, err := wire.DecodeResponse(sent[0])
+	if err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	// Should be StatusUnsupported since no handler is configured
+	if resp.Status != wire.StatusUnsupported {
+		t.Errorf("Expected StatusUnsupported, got %v", resp.Status)
+	}
+	if resp.MessageID != 1 {
+		t.Errorf("Expected MessageID 1, got %d", resp.MessageID)
+	}
+}
+
+func TestDeviceSession_HandleIncomingRequest_WithHandler(t *testing.T) {
+	// When DeviceSession has a ProtocolHandler configured with a device model,
+	// incoming requests should be processed and receive valid responses
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	// Create a device model for the controller to expose
+	controllerDevice := createTestDevice() // Has endpoint 0 with DeviceInfo
+
+	// Configure the session with a ProtocolHandler
+	session.SetExposedDevice(controllerDevice)
+
+	// Send a Read request for DeviceInfo
+	req := &wire.Request{
+		MessageID:  42,
+		Operation:  wire.OpRead,
+		EndpointID: 0,
+		FeatureID:  uint8(model.FeatureDeviceInfo),
+	}
+	reqData, err := wire.EncodeRequest(req)
+	if err != nil {
+		t.Fatalf("Failed to encode request: %v", err)
+	}
+
+	// Deliver the request
+	session.OnMessage(reqData)
+
+	// Wait for response to be sent
+	time.Sleep(10 * time.Millisecond)
+
+	// Should have sent a response
+	sent := conn.GetSent()
+	if len(sent) == 0 {
+		t.Fatal("Expected a response to be sent")
+	}
+
+	// Decode the response
+	resp, err := wire.DecodeResponse(sent[0])
+	if err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	// Should be successful
+	if resp.Status != wire.StatusSuccess {
+		t.Errorf("Expected StatusSuccess, got %v", resp.Status)
+	}
+	if resp.MessageID != 42 {
+		t.Errorf("Expected MessageID 42, got %d", resp.MessageID)
+	}
+
+	// Payload should be a map (ReadResponsePayload is map[uint16]any)
+	// The codec may return it as map[uint16]any or map[interface{}]interface{}
+	if resp.Payload == nil {
+		t.Fatal("Expected payload in response")
+	}
+}
+
+func TestDeviceSession_HandleIncomingRequest_InvalidEndpoint(t *testing.T) {
+	// When request targets an invalid endpoint, should return error
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	// Configure with a device model
+	session.SetExposedDevice(createTestDevice())
+
+	// Request for non-existent endpoint
+	req := &wire.Request{
+		MessageID:  1,
+		Operation:  wire.OpRead,
+		EndpointID: 99, // Does not exist
+		FeatureID:  uint8(model.FeatureDeviceInfo),
+	}
+	reqData, _ := wire.EncodeRequest(req)
+	session.OnMessage(reqData)
+
+	time.Sleep(10 * time.Millisecond)
+
+	sent := conn.GetSent()
+	if len(sent) == 0 {
+		t.Fatal("Expected a response")
+	}
+
+	resp, _ := wire.DecodeResponse(sent[0])
+	if resp.Status == wire.StatusSuccess {
+		t.Error("Expected error status for invalid endpoint")
+	}
+}
+
+func TestDeviceSession_HandleIncomingRequest_Subscribe(t *testing.T) {
+	// Controller can accept subscriptions from devices
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	session.SetExposedDevice(createTestDevice())
+
+	// Subscribe request
+	req := &wire.Request{
+		MessageID:  1,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  uint8(model.FeatureDeviceInfo),
+	}
+	reqData, _ := wire.EncodeRequest(req)
+	session.OnMessage(reqData)
+
+	time.Sleep(10 * time.Millisecond)
+
+	sent := conn.GetSent()
+	if len(sent) == 0 {
+		t.Fatal("Expected a response")
+	}
+
+	resp, _ := wire.DecodeResponse(sent[0])
+	if resp.Status != wire.StatusSuccess {
+		t.Errorf("Expected StatusSuccess, got %v", resp.Status)
+	}
+
+	// Payload should contain subscription ID (CBOR returns raw map)
+	subID := extractSubscriptionID(t, resp.Payload)
+	if subID == 0 {
+		t.Error("Expected non-zero subscription ID")
+	}
+}
+
+// extractSubscriptionID extracts the subscription ID from a subscribe response payload.
+// The CBOR decoder returns map[interface{}]interface{} instead of typed struct.
+func extractSubscriptionID(t *testing.T, payload any) uint32 {
+	t.Helper()
+	if payload == nil {
+		return 0
+	}
+
+	// Try typed struct first (in case codec improves)
+	if subPayload, ok := payload.(*wire.SubscribeResponsePayload); ok {
+		return subPayload.SubscriptionID
+	}
+
+	// Handle raw map from CBOR decoder
+	// Key 1 = subscriptionId (see wire.SubscribeResponsePayload CBOR tags)
+	m, ok := payload.(map[interface{}]interface{})
+	if !ok {
+		t.Fatalf("Unexpected payload type: %T", payload)
+		return 0
+	}
+
+	// Find subscription ID at key 1 (int or uint)
+	for k, v := range m {
+		var keyInt int
+		switch kv := k.(type) {
+		case int:
+			keyInt = kv
+		case int64:
+			keyInt = int(kv)
+		case uint64:
+			keyInt = int(kv)
+		default:
+			continue
+		}
+		if keyInt == 1 { // Key 1 = SubscriptionID
+			switch vv := v.(type) {
+			case uint64:
+				return uint32(vv)
+			case int64:
+				return uint32(vv)
+			case int:
+				return uint32(vv)
+			}
+		}
+	}
+	return 0
+}
+
+func TestDeviceSession_SendNotification(t *testing.T) {
+	// Controller can send notifications to device for subscriptions
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	session.SetExposedDevice(createTestDevice())
+
+	// First, device subscribes
+	req := &wire.Request{
+		MessageID:  1,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  uint8(model.FeatureDeviceInfo),
+	}
+	reqData, _ := wire.EncodeRequest(req)
+	session.OnMessage(reqData)
+	time.Sleep(10 * time.Millisecond)
+
+	// Get the subscription ID from response
+	sent := conn.GetSent()
+	resp, _ := wire.DecodeResponse(sent[0])
+	subID := extractSubscriptionID(t, resp.Payload)
+	if subID == 0 {
+		t.Fatal("Failed to get subscription ID from response")
+	}
+
+	conn.ClearSent()
+
+	// Now send a notification using the session's method
+	err := session.SendNotification(&wire.Notification{
+		SubscriptionID: subID,
+		EndpointID:     0,
+		FeatureID:      uint8(model.FeatureDeviceInfo),
+		Changes: map[uint16]any{
+			1: "updated-value",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendNotification failed: %v", err)
+	}
+
+	// Should have sent a notification
+	sent = conn.GetSent()
+	if len(sent) == 0 {
+		t.Fatal("Expected notification to be sent")
+	}
+
+	// Verify it's a notification message
+	msgType, _ := wire.PeekMessageType(sent[0])
+	if msgType != wire.MessageTypeNotification {
+		t.Errorf("Expected notification message type, got %v", msgType)
+	}
+}
+
+func TestDeviceSession_ExistingResponseHandlingStillWorks(t *testing.T) {
+	// Ensure adding request handling doesn't break existing response handling
+	device := createTestDevice()
+	conn := newMockResponseConnection(device)
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+	conn.SetOnMessage(session.OnMessage)
+
+	// This is the existing test flow - should still work
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	attrs, err := session.Read(ctx, 0, uint8(model.FeatureDeviceInfo), nil)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if attrs == nil {
+		t.Fatal("Expected attributes")
+	}
+}
+
+func TestDeviceSession_ExistingNotificationHandlingStillWorks(t *testing.T) {
+	// Ensure adding request handling doesn't break existing notification handling
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	var received *wire.Notification
+	var mu sync.Mutex
+	session.SetNotificationHandler(func(n *wire.Notification) {
+		mu.Lock()
+		received = n
+		mu.Unlock()
+	})
+
+	// Simulate receiving a notification (from device to controller)
+	notif := &wire.Notification{
+		SubscriptionID: 123,
+		EndpointID:     1,
+		FeatureID:      5,
+		Changes:        map[uint16]any{1: "value"},
+	}
+	notifData, _ := wire.EncodeNotification(notif)
+	session.OnMessage(notifData)
+
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if received == nil {
+		t.Fatal("Expected notification to be received")
+	}
+	if received.SubscriptionID != 123 {
+		t.Errorf("Expected subscription ID 123, got %d", received.SubscriptionID)
+	}
+}
+

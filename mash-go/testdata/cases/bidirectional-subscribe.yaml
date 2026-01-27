@@ -1,0 +1,84 @@
+# Test Case: Bidirectional Subscribe - Device subscribes to Controller
+# Verifies that a device can subscribe to a controller's exposed features
+
+id: TC-BIDIR-002
+name: Device Subscribes to Controller Exposed Features
+description: |
+  Verifies that when a controller exposes features, a device can:
+  1. Subscribe to those features
+  2. Receive a priming report with current values
+  3. Receive delta notifications when values change
+
+pics_requirements:
+  - C.BIDIR.EXPOSE      # Controller supports exposing features
+  - D.BIDIR.SUBSCRIBE   # Device supports subscribing to controller
+
+preconditions:
+  - session_established: true
+  - controller_exposes_features: true
+
+steps:
+  - name: Controller exposes Measurement feature
+    action: configure_exposed_device
+    params:
+      endpoint: 1
+      endpoint_type: GRID_CONNECTION
+      feature: Measurement
+      attributes:
+        - id: 1
+          name: acActivePower
+          value: 5000000  # 5 kW
+
+  - name: Device subscribes to controller's Measurement
+    direction: device_to_controller
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      attributes: []  # all attributes
+    expect:
+      subscribe_success: true
+      status: SUCCESS
+      subscription_id_returned: true
+      priming_report_received: true
+      priming_contains:
+        attribute_id: 1
+        value: 5000000
+
+  - name: Controller updates acActivePower
+    action: update_exposed_attribute
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: 1
+      value: 7500000  # 7.5 kW
+
+  - name: Device receives delta notification
+    direction: controller_to_device
+    action: wait_notification
+    params:
+      timeout_ms: 2000
+    expect:
+      notification_received: true
+      notification_contains:
+        attribute_id: 1
+        value: 7500000
+
+  - name: Device unsubscribes
+    direction: device_to_controller
+    action: unsubscribe
+    params:
+      subscription_id: "$previous_subscription_id"
+    expect:
+      unsubscribe_success: true
+
+postconditions:
+  - session_still_active: true
+  - no_active_subscriptions: true
+
+timeout: "15s"
+tags:
+  - bidirectional
+  - subscribe
+  - notification
+  - controller-exposed

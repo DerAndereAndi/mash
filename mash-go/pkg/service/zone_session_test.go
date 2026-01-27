@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -291,5 +293,533 @@ func TestZoneSession_HandleMultipleRequests(t *testing.T) {
 		if resp.Status != wire.StatusSuccess {
 			t.Errorf("Response %d: expected success, got %v", i, resp.Status)
 		}
+	}
+}
+
+// ============================================================================
+// Bidirectional Support Tests
+// ============================================================================
+
+// mockBidirectionalConnection extends mockSendableConnection with the ability
+// to inject responses when requests are sent.
+type mockBidirectionalConnection struct {
+	mu        sync.Mutex
+	sent      [][]byte
+	sendErr   error
+	onSend    func(data []byte) // Callback when data is sent
+	session   *ZoneSession      // Reference to inject responses
+}
+
+func newMockBidirectionalConnection() *mockBidirectionalConnection {
+	return &mockBidirectionalConnection{}
+}
+
+func (m *mockBidirectionalConnection) Send(data []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+	m.sent = append(m.sent, data)
+
+	if m.onSend != nil {
+		m.onSend(data)
+	}
+	return nil
+}
+
+func (m *mockBidirectionalConnection) SentMessages() [][]byte {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([][]byte, len(m.sent))
+	copy(result, m.sent)
+	return result
+}
+
+func (m *mockBidirectionalConnection) SetSendError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sendErr = err
+}
+
+func (m *mockBidirectionalConnection) SetSession(session *ZoneSession) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.session = session
+}
+
+func (m *mockBidirectionalConnection) SetOnSend(fn func(data []byte)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onSend = fn
+}
+
+func TestZoneSession_OnMessage_HandlesResponse(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockBidirectionalConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	// Simulate that we sent a request with MessageID 42 and are awaiting response
+	// First, we need to trigger the client to wait for a response
+	// We'll use a goroutine to send a request and verify it receives the response
+
+	// Set up connection to auto-respond to requests
+	conn.SetOnSend(func(data []byte) {
+		msgType, err := wire.PeekMessageType(data)
+		if err != nil || msgType != wire.MessageTypeRequest {
+			return
+		}
+		req, err := wire.DecodeRequest(data)
+		if err != nil {
+			return
+		}
+		// Send back a success response
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+			Payload:   map[uint16]any{1: "test-value"},
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		// Simulate async response
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			session.OnMessage(respData)
+		}()
+	})
+	conn.SetSession(session)
+
+	// Now call Read and verify it gets the response
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	result, err := session.Read(ctx, 0, 1, nil)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected result, got nil")
+	}
+	if result[1] != "test-value" {
+		t.Errorf("Expected test-value, got %v", result[1])
+	}
+}
+
+func TestZoneSession_OnMessage_HandlesNotification(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockSendableConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	// Set up notification handler
+	var receivedNotif *wire.Notification
+	var receivedMu sync.Mutex
+	session.SetNotificationHandler(func(notif *wire.Notification) {
+		receivedMu.Lock()
+		defer receivedMu.Unlock()
+		receivedNotif = notif
+	})
+
+	// Create a notification
+	notif := &wire.Notification{
+		SubscriptionID: 42,
+		EndpointID:     1,
+		FeatureID:      2,
+		Changes:        map[uint16]any{1: "changed-value"},
+	}
+	notifData, err := wire.EncodeNotification(notif)
+	if err != nil {
+		t.Fatalf("Failed to encode notification: %v", err)
+	}
+
+	// Send notification to session
+	session.OnMessage(notifData)
+
+	// Give handler time to process
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify notification was received
+	receivedMu.Lock()
+	defer receivedMu.Unlock()
+	if receivedNotif == nil {
+		t.Fatal("Expected notification handler to be called")
+	}
+	if receivedNotif.SubscriptionID != 42 {
+		t.Errorf("Expected subscription ID 42, got %d", receivedNotif.SubscriptionID)
+	}
+	if receivedNotif.Changes[1] != "changed-value" {
+		t.Errorf("Expected changed-value, got %v", receivedNotif.Changes[1])
+	}
+}
+
+func TestZoneSession_Read_SendsRequestAndReceivesResponse(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockBidirectionalConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	// Auto-respond to read requests
+	conn.SetOnSend(func(data []byte) {
+		req, err := wire.DecodeRequest(data)
+		if err != nil {
+			return
+		}
+		if req.Operation != wire.OpRead {
+			return
+		}
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+			Payload:   map[uint16]any{1: "device-id", 2: "vendor-name"},
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		go func() {
+			time.Sleep(5 * time.Millisecond)
+			session.OnMessage(respData)
+		}()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	result, err := session.Read(ctx, 1, 6, []uint16{1, 2})
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("Expected 2 attributes, got %d", len(result))
+	}
+}
+
+func TestZoneSession_Write_SendsRequestAndReceivesResponse(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockBidirectionalConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	var capturedReq *wire.Request
+	conn.SetOnSend(func(data []byte) {
+		req, err := wire.DecodeRequest(data)
+		if err != nil {
+			return
+		}
+		if req.Operation != wire.OpWrite {
+			return
+		}
+		capturedReq = req
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+			Payload:   map[uint16]any{1: "written-value"},
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		go func() {
+			time.Sleep(5 * time.Millisecond)
+			session.OnMessage(respData)
+		}()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	result, err := session.Write(ctx, 1, 6, map[uint16]any{1: "new-value"})
+	if err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	// Verify request was sent
+	if capturedReq == nil {
+		t.Fatal("Expected request to be sent")
+	}
+	if capturedReq.Operation != wire.OpWrite {
+		t.Errorf("Expected Write operation, got %v", capturedReq.Operation)
+	}
+
+	// Verify response was received
+	if result[1] != "written-value" {
+		t.Errorf("Expected written-value, got %v", result[1])
+	}
+}
+
+func TestZoneSession_Subscribe_TracksInSubscriptionManager(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockBidirectionalConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	conn.SetOnSend(func(data []byte) {
+		req, err := wire.DecodeRequest(data)
+		if err != nil {
+			return
+		}
+		if req.Operation != wire.OpSubscribe {
+			return
+		}
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+			Payload: &wire.SubscribeResponsePayload{
+				SubscriptionID: 123,
+				CurrentValues:  map[uint16]any{1: "initial"},
+			},
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		go func() {
+			time.Sleep(5 * time.Millisecond)
+			session.OnMessage(respData)
+		}()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	subID, values, err := session.Subscribe(ctx, 1, 6, nil)
+	if err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+	if subID != 123 {
+		t.Errorf("Expected subscription ID 123, got %d", subID)
+	}
+	if values[1] != "initial" {
+		t.Errorf("Expected initial value, got %v", values[1])
+	}
+}
+
+func TestZoneSession_Invoke_SendsRequestAndReceivesResponse(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockBidirectionalConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	var capturedReq *wire.Request
+	conn.SetOnSend(func(data []byte) {
+		req, err := wire.DecodeRequest(data)
+		if err != nil {
+			return
+		}
+		if req.Operation != wire.OpInvoke {
+			return
+		}
+		capturedReq = req
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+			Payload:   map[string]any{"result": "success"},
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		go func() {
+			time.Sleep(5 * time.Millisecond)
+			session.OnMessage(respData)
+		}()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	result, err := session.Invoke(ctx, 1, 6, 1, map[string]any{"param": "value"})
+	if err != nil {
+		t.Fatalf("Invoke failed: %v", err)
+	}
+
+	// Verify request was sent
+	if capturedReq == nil {
+		t.Fatal("Expected request to be sent")
+	}
+	if capturedReq.Operation != wire.OpInvoke {
+		t.Errorf("Expected Invoke operation, got %v", capturedReq.Operation)
+	}
+
+	// Verify response
+	if result == nil {
+		t.Fatal("Expected result, got nil")
+	}
+}
+
+func TestZoneSession_ConcurrentRequests(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockBidirectionalConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	// Track message IDs to ensure each request gets its own response
+	var messageIDsMu sync.Mutex
+	messageIDs := make(map[uint32]bool)
+
+	conn.SetOnSend(func(data []byte) {
+		req, err := wire.DecodeRequest(data)
+		if err != nil {
+			return
+		}
+		messageIDsMu.Lock()
+		messageIDs[req.MessageID] = true
+		messageIDsMu.Unlock()
+
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+			Payload:   map[uint16]any{1: req.MessageID}, // Echo message ID in payload
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		go func() {
+			time.Sleep(time.Duration(req.MessageID%10) * time.Millisecond) // Vary response time
+			session.OnMessage(respData)
+		}()
+	})
+
+	// Launch concurrent requests
+	const numRequests = 10
+	var wg sync.WaitGroup
+	errors := make(chan error, numRequests)
+	results := make(chan map[uint16]any, numRequests)
+
+	for i := 0; i < numRequests; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			result, err := session.Read(ctx, 0, 1, nil)
+			if err != nil {
+				errors <- err
+				return
+			}
+			results <- result
+		}()
+	}
+
+	wg.Wait()
+	close(errors)
+	close(results)
+
+	// Check for errors
+	for err := range errors {
+		t.Errorf("Concurrent request failed: %v", err)
+	}
+
+	// Verify all requests succeeded
+	resultCount := 0
+	for range results {
+		resultCount++
+	}
+	if resultCount != numRequests {
+		t.Errorf("Expected %d results, got %d", numRequests, resultCount)
+	}
+
+	// Verify unique message IDs were used
+	messageIDsMu.Lock()
+	if len(messageIDs) != numRequests {
+		t.Errorf("Expected %d unique message IDs, got %d", numRequests, len(messageIDs))
+	}
+	messageIDsMu.Unlock()
+}
+
+func TestZoneSession_RequestTimeout(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockBidirectionalConnection()
+	session := NewZoneSession("zone-1", conn, device)
+	session.SetTimeout(50 * time.Millisecond) // Short timeout for test
+
+	// Don't send any response - request should timeout
+	conn.SetOnSend(func(data []byte) {
+		// Intentionally do nothing - simulate no response
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	_, err := session.Read(ctx, 0, 1, nil)
+	if err == nil {
+		t.Fatal("Expected timeout error, got nil")
+	}
+}
+
+func TestZoneSession_NotificationHandlerCalled(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockSendableConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	var callCount int32
+	session.SetNotificationHandler(func(notif *wire.Notification) {
+		atomic.AddInt32(&callCount, 1)
+	})
+
+	// Send multiple notifications
+	for i := 0; i < 5; i++ {
+		notif := &wire.Notification{
+			SubscriptionID: uint32(i),
+			EndpointID:     1,
+			FeatureID:      2,
+			Changes:        map[uint16]any{1: i},
+		}
+		notifData, _ := wire.EncodeNotification(notif)
+		session.OnMessage(notifData)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	count := atomic.LoadInt32(&callCount)
+	if count != 5 {
+		t.Errorf("Expected notification handler called 5 times, got %d", count)
+	}
+}
+
+func TestZoneSession_CloseStopsClient(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockBidirectionalConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	// Start a request in background
+	errCh := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, err := session.Read(ctx, 0, 1, nil)
+		errCh <- err
+	}()
+
+	// Give the request time to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Close the session
+	session.Close()
+
+	// Request should fail with client closed error
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Error("Expected error after close, got nil")
+		}
+	case <-time.After(time.Second):
+		t.Error("Request did not complete after session close")
+	}
+}
+
+func TestZoneSession_IncomingRequestStillWorks(t *testing.T) {
+	// Verify that adding bidirectional support doesn't break existing request handling
+	device := createTestDevice()
+	conn := newMockBidirectionalConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	// Send an incoming read request (from controller)
+	req := &wire.Request{
+		MessageID:  100,
+		Operation:  wire.OpRead,
+		EndpointID: 0,
+		FeatureID:  uint8(model.FeatureDeviceInfo),
+	}
+	reqData, _ := wire.EncodeRequest(req)
+	session.OnMessage(reqData)
+
+	time.Sleep(50 * time.Millisecond)
+
+	sent := conn.SentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("Expected 1 response, got %d", len(sent))
+	}
+
+	resp, err := wire.DecodeResponse(sent[0])
+	if err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+	if resp.MessageID != 100 {
+		t.Errorf("Expected MessageID 100, got %d", resp.MessageID)
+	}
+	if resp.Status != wire.StatusSuccess {
+		t.Errorf("Expected success, got %v", resp.Status)
 	}
 }

@@ -1,11 +1,14 @@
 package service
 
 import (
+	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
+	"github.com/mash-protocol/mash-go/pkg/interaction"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -13,6 +16,10 @@ import (
 // ZoneSession manages a device-side session with a connected controller zone.
 // It handles incoming requests, routes them to the ProtocolHandler,
 // and sends responses back over the connection.
+//
+// ZoneSession also supports bidirectional communication, allowing the device
+// to send requests to the controller (Read/Write/Subscribe/Invoke) and
+// receive responses and notifications.
 type ZoneSession struct {
 	mu sync.RWMutex
 
@@ -21,6 +28,10 @@ type ZoneSession struct {
 	handler *ProtocolHandler
 	closed  bool
 	logger  *slog.Logger
+
+	// Bidirectional support: client for sending requests to controller
+	client *interaction.Client
+	sender *TransportRequestSender
 
 	// Renewal handling
 	renewalHandler *DeviceRenewalHandler
@@ -31,10 +42,16 @@ func NewZoneSession(zoneID string, conn Sendable, device *model.Device) *ZoneSes
 	handler := NewProtocolHandler(device)
 	handler.SetZoneID(zoneID)
 
+	// Create client for bidirectional communication
+	sender := NewTransportRequestSender(conn)
+	client := interaction.NewClient(sender)
+
 	return &ZoneSession{
 		zoneID:  zoneID,
 		conn:    conn,
 		handler: handler,
+		client:  client,
+		sender:  sender,
 	}
 }
 
@@ -52,6 +69,8 @@ func (s *ZoneSession) OnMessage(data []byte) {
 		return
 	}
 	renewalHandler := s.renewalHandler
+	client := s.client
+	logger := s.logger
 	s.mu.RUnlock()
 
 	// Check for renewal messages first (MsgType 30-33 at key 1)
@@ -71,10 +90,14 @@ func (s *ZoneSession) OnMessage(data []byte) {
 
 	switch msgType {
 	case wire.MessageTypeRequest:
+		// Incoming request from controller - process through ProtocolHandler
 		s.handleRequest(data)
+	case wire.MessageTypeResponse:
+		// Response to a request we sent - deliver to client
+		s.handleResponse(data, client, logger)
 	case wire.MessageTypeNotification:
-		// Devices don't typically receive notifications
-		// (they send them), but ignore gracefully
+		// Notification from controller (subscription update) - deliver to client
+		s.handleNotification(data, client, logger)
 	default:
 		// Unknown message type - ignore
 	}
@@ -117,6 +140,42 @@ func (s *ZoneSession) sendErrorResponse(messageID uint32, status wire.Status, me
 	if respData, err := wire.EncodeResponse(resp); err == nil {
 		s.conn.Send(respData)
 	}
+}
+
+// handleResponse processes a response to a request we sent to the controller.
+func (s *ZoneSession) handleResponse(data []byte, client *interaction.Client, logger *slog.Logger) {
+	resp, err := wire.DecodeResponse(data)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("handleResponse: failed to decode response",
+				"zoneID", s.zoneID,
+				"error", err)
+		}
+		return
+	}
+	client.HandleResponse(resp)
+}
+
+// handleNotification processes a notification from the controller (subscription update).
+func (s *ZoneSession) handleNotification(data []byte, client *interaction.Client, logger *slog.Logger) {
+	notif, err := wire.DecodeNotification(data)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("handleNotification: failed to decode notification",
+				"zoneID", s.zoneID,
+				"error", err)
+		}
+		return
+	}
+	if logger != nil {
+		logger.Debug("handleNotification: received notification from controller",
+			"zoneID", s.zoneID,
+			"subscriptionID", notif.SubscriptionID,
+			"endpointID", notif.EndpointID,
+			"featureID", notif.FeatureID,
+			"changesCount", len(notif.Changes))
+	}
+	client.HandleNotification(notif)
 }
 
 // SendNotification sends a subscription notification to the zone.
@@ -183,6 +242,11 @@ func (s *ZoneSession) Close() {
 		return
 	}
 	s.closed = true
+
+	// Close the interaction client (cancels pending requests)
+	if s.client != nil {
+		s.client.Close()
+	}
 
 	// Clear all subscriptions for this zone
 	// Note: In a full implementation, we'd also notify the subscription
@@ -265,4 +329,102 @@ func (s *ZoneSession) RenewalHandler() *DeviceRenewalHandler {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.renewalHandler
+}
+
+// ============================================================================
+// Bidirectional Support: Methods for sending requests to controller
+// ============================================================================
+
+// Read reads attributes from a feature on the controller.
+// If attrIDs is nil or empty, all attributes are read.
+func (s *ZoneSession) Read(ctx context.Context, endpointID uint8, featureID uint8, attrIDs []uint16) (map[uint16]any, error) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return nil, ErrSessionClosed
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	return client.Read(ctx, endpointID, featureID, attrIDs)
+}
+
+// Write writes attributes to a feature on the controller.
+func (s *ZoneSession) Write(ctx context.Context, endpointID uint8, featureID uint8, attrs map[uint16]any) (map[uint16]any, error) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return nil, ErrSessionClosed
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	return client.Write(ctx, endpointID, featureID, attrs)
+}
+
+// Subscribe subscribes to attribute changes on a controller feature.
+// Returns the subscription ID and initial attribute values (priming report).
+func (s *ZoneSession) Subscribe(ctx context.Context, endpointID uint8, featureID uint8, opts *interaction.SubscribeOptions) (uint32, map[uint16]any, error) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return 0, nil, ErrSessionClosed
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	return client.Subscribe(ctx, endpointID, featureID, opts)
+}
+
+// Unsubscribe cancels a subscription to a controller feature.
+func (s *ZoneSession) Unsubscribe(ctx context.Context, subscriptionID uint32) error {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return ErrSessionClosed
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	return client.Unsubscribe(ctx, subscriptionID)
+}
+
+// Invoke executes a command on a controller feature.
+func (s *ZoneSession) Invoke(ctx context.Context, endpointID uint8, featureID uint8, commandID uint8, params map[string]any) (any, error) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return nil, ErrSessionClosed
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	return client.Invoke(ctx, endpointID, featureID, commandID, params)
+}
+
+// SetNotificationHandler sets the handler for incoming notifications from the controller.
+// This is called when the controller sends subscription updates.
+func (s *ZoneSession) SetNotificationHandler(handler func(*wire.Notification)) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	client.SetNotificationHandler(handler)
+}
+
+// SetTimeout sets the timeout for requests sent to the controller.
+func (s *ZoneSession) SetTimeout(timeout time.Duration) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return
+	}
+	client := s.client
+	s.mu.RUnlock()
+
+	client.SetTimeout(timeout)
 }

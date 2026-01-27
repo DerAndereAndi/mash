@@ -1,0 +1,69 @@
+# Test Case: Bidirectional - Controller without Exposed Features
+# Verifies that device receives StatusUnsupported when controller doesn't expose features
+
+id: TC-BIDIR-003
+name: Controller Without Exposed Features Returns Unsupported
+description: |
+  Verifies that when a controller does NOT expose any features,
+  incoming requests from the device receive StatusUnsupported (10).
+  This is the expected behavior for controllers that only control
+  devices without exposing their own features.
+
+pics_requirements:
+  - D.BIDIR.READ   # Device supports reading from controller
+
+preconditions:
+  - session_established: true
+  - controller_exposes_features: false
+
+steps:
+  - name: Verify controller has no exposed features
+    action: verify_controller_state
+    params:
+      has_exposed_device: false
+    expect:
+      verification_success: true
+
+  - name: Device attempts to read from controller
+    direction: device_to_controller
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attributes: []
+    expect:
+      read_success: false
+      status: UNSUPPORTED
+      error_code: 10
+
+  - name: Device attempts to subscribe to controller
+    direction: device_to_controller
+    action: subscribe
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attributes: []
+    expect:
+      subscribe_success: false
+      status: UNSUPPORTED
+      error_code: 10
+
+  - name: Normal controller-to-device operations still work
+    direction: controller_to_device
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attributes: []
+    expect:
+      read_success: true
+      status: SUCCESS
+
+postconditions:
+  - session_still_active: true
+
+timeout: "10s"
+tags:
+  - bidirectional
+  - error-handling
+  - unsupported

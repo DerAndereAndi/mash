@@ -5,20 +5,20 @@ package wire
 type Operation uint8
 
 const (
-	// OpRead gets current attribute values from a device.
-	// Direction: Controller -> Device
+	// OpRead gets current attribute values.
+	// Direction: Bidirectional (either side can send)
 	OpRead Operation = 1
 
-	// OpWrite sets attribute values on a device (full replace).
-	// Direction: Controller -> Device
+	// OpWrite sets attribute values (full replace).
+	// Direction: Bidirectional (either side can send)
 	OpWrite Operation = 2
 
 	// OpSubscribe registers for change notifications.
-	// Direction: Controller -> Device
+	// Direction: Bidirectional (either side can send)
 	OpSubscribe Operation = 3
 
 	// OpInvoke executes a command with parameters.
-	// Direction: Controller -> Device
+	// Direction: Bidirectional (either side can send)
 	OpInvoke Operation = 4
 )
 

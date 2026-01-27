@@ -317,7 +317,7 @@ func TestProtocolHandler_ReadElectrical(t *testing.T) {
 	req := &wire.Request{
 		MessageID:  11,
 		Operation:  wire.OpRead,
-		EndpointID: 1,                      // EVSE endpoint
+		EndpointID: 1, // EVSE endpoint
 		FeatureID:  featureIDElectrical,
 	}
 
@@ -351,5 +351,280 @@ func TestProtocolHandler_ZoneID(t *testing.T) {
 
 	if handler.ZoneID() != "zone-123" {
 		t.Errorf("Expected zone ID 'zone-123', got '%s'", handler.ZoneID())
+	}
+}
+
+func TestProtocolHandler_SetPeerID(t *testing.T) {
+	device := createTestDevice()
+	handler := service.NewProtocolHandler(device)
+
+	// Set peer ID
+	handler.SetPeerID("peer-456")
+
+	if handler.PeerID() != "peer-456" {
+		t.Errorf("Expected peer ID 'peer-456', got '%s'", handler.PeerID())
+	}
+}
+
+func TestProtocolHandler_SubscriptionManagerIntegration(t *testing.T) {
+	device := createTestDevice()
+	handler := service.NewProtocolHandler(device)
+
+	// Create a subscription
+	req := &wire.Request{
+		MessageID:  100,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  featureIDDeviceInfo,
+		Payload: &wire.SubscribePayload{
+			MinInterval: 1000,
+			MaxInterval: 60000,
+		},
+	}
+
+	resp := handler.HandleRequest(req)
+
+	if !resp.IsSuccess() {
+		t.Fatalf("Expected success response, got status %d", resp.Status)
+	}
+
+	payload := resp.Payload.(*wire.SubscribeResponsePayload)
+
+	// Verify the subscription is tracked in the SubscriptionManager
+	subMgr := handler.SubscriptionManager()
+	sub := subMgr.GetInbound(payload.SubscriptionID)
+	if sub == nil {
+		t.Error("Expected subscription to be tracked in SubscriptionManager")
+	}
+	if sub != nil {
+		if sub.EndpointID != 0 {
+			t.Errorf("Expected EndpointID 0, got %d", sub.EndpointID)
+		}
+		if sub.FeatureID != featureIDDeviceInfo {
+			t.Errorf("Expected FeatureID %d, got %d", featureIDDeviceInfo, sub.FeatureID)
+		}
+	}
+}
+
+func TestProtocolHandler_NotifyAttributeChange(t *testing.T) {
+	device := createTestDevice()
+
+	// Track sent notifications
+	var sentNotifications []*wire.Notification
+	sendFunc := func(n *wire.Notification) error {
+		sentNotifications = append(sentNotifications, n)
+		return nil
+	}
+
+	handler := service.NewProtocolHandlerWithSend(device, sendFunc)
+
+	// Create a subscription to all attributes
+	req := &wire.Request{
+		MessageID:  101,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  featureIDDeviceInfo,
+		Payload:    &wire.SubscribePayload{},
+	}
+
+	resp := handler.HandleRequest(req)
+	if !resp.IsSuccess() {
+		t.Fatalf("Failed to create subscription: status %d", resp.Status)
+	}
+
+	subPayload := resp.Payload.(*wire.SubscribeResponsePayload)
+
+	// Notify an attribute change
+	err := handler.NotifyAttributeChange(0, featureIDDeviceInfo, 1, "new-value")
+	if err != nil {
+		t.Fatalf("NotifyAttributeChange failed: %v", err)
+	}
+
+	// Verify notification was sent
+	if len(sentNotifications) != 1 {
+		t.Fatalf("Expected 1 notification, got %d", len(sentNotifications))
+	}
+
+	n := sentNotifications[0]
+	if n.SubscriptionID != subPayload.SubscriptionID {
+		t.Errorf("Expected subscription ID %d, got %d", subPayload.SubscriptionID, n.SubscriptionID)
+	}
+	if n.EndpointID != 0 {
+		t.Errorf("Expected EndpointID 0, got %d", n.EndpointID)
+	}
+	if n.FeatureID != featureIDDeviceInfo {
+		t.Errorf("Expected FeatureID %d, got %d", featureIDDeviceInfo, n.FeatureID)
+	}
+	if n.Changes[1] != "new-value" {
+		t.Errorf("Expected change value 'new-value', got %v", n.Changes[1])
+	}
+}
+
+func TestProtocolHandler_NotifyAttributeChange_WithAttributeFilter(t *testing.T) {
+	device := createTestDevice()
+
+	var sentNotifications []*wire.Notification
+	sendFunc := func(n *wire.Notification) error {
+		sentNotifications = append(sentNotifications, n)
+		return nil
+	}
+
+	handler := service.NewProtocolHandlerWithSend(device, sendFunc)
+
+	// Create a subscription to specific attributes only (attribute 1 and 2)
+	req := &wire.Request{
+		MessageID:  102,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  featureIDDeviceInfo,
+		Payload: &wire.SubscribePayload{
+			AttributeIDs: []uint16{1, 2},
+		},
+	}
+
+	resp := handler.HandleRequest(req)
+	if !resp.IsSuccess() {
+		t.Fatalf("Failed to create subscription: status %d", resp.Status)
+	}
+
+	// Notify an attribute that IS subscribed (attribute 1)
+	err := handler.NotifyAttributeChange(0, featureIDDeviceInfo, 1, "value1")
+	if err != nil {
+		t.Fatalf("NotifyAttributeChange failed: %v", err)
+	}
+
+	if len(sentNotifications) != 1 {
+		t.Errorf("Expected 1 notification for subscribed attribute, got %d", len(sentNotifications))
+	}
+
+	// Notify an attribute that is NOT subscribed (attribute 99)
+	sentNotifications = nil
+	err = handler.NotifyAttributeChange(0, featureIDDeviceInfo, 99, "value99")
+	if err != nil {
+		t.Fatalf("NotifyAttributeChange failed: %v", err)
+	}
+
+	if len(sentNotifications) != 0 {
+		t.Errorf("Expected 0 notifications for unsubscribed attribute, got %d", len(sentNotifications))
+	}
+}
+
+func TestProtocolHandler_NotifyAttributeChange_MultipleSubscriptions(t *testing.T) {
+	device := createTestDevice()
+
+	var sentNotifications []*wire.Notification
+	sendFunc := func(n *wire.Notification) error {
+		sentNotifications = append(sentNotifications, n)
+		return nil
+	}
+
+	handler := service.NewProtocolHandlerWithSend(device, sendFunc)
+
+	// Create two subscriptions to the same feature
+	for i := 0; i < 2; i++ {
+		req := &wire.Request{
+			MessageID:  uint32(103 + i),
+			Operation:  wire.OpSubscribe,
+			EndpointID: 0,
+			FeatureID:  featureIDDeviceInfo,
+			Payload:    &wire.SubscribePayload{},
+		}
+		resp := handler.HandleRequest(req)
+		if !resp.IsSuccess() {
+			t.Fatalf("Failed to create subscription %d: status %d", i, resp.Status)
+		}
+	}
+
+	// Notify an attribute change
+	err := handler.NotifyAttributeChange(0, featureIDDeviceInfo, 1, "multi-value")
+	if err != nil {
+		t.Fatalf("NotifyAttributeChange failed: %v", err)
+	}
+
+	// Both subscriptions should receive notifications
+	if len(sentNotifications) != 2 {
+		t.Errorf("Expected 2 notifications, got %d", len(sentNotifications))
+	}
+}
+
+func TestProtocolHandler_CustomSendFunction(t *testing.T) {
+	device := createTestDevice()
+
+	callCount := 0
+	sendFunc := func(n *wire.Notification) error {
+		callCount++
+		return nil
+	}
+
+	handler := service.NewProtocolHandlerWithSend(device, sendFunc)
+
+	// Verify handler was created with send function
+	if handler == nil {
+		t.Fatal("Expected handler to be created")
+	}
+
+	// Create subscription and trigger notification
+	req := &wire.Request{
+		MessageID:  105,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  featureIDDeviceInfo,
+		Payload:    &wire.SubscribePayload{},
+	}
+	handler.HandleRequest(req)
+
+	handler.NotifyAttributeChange(0, featureIDDeviceInfo, 1, "test")
+
+	if callCount != 1 {
+		t.Errorf("Expected send function to be called 1 time, got %d", callCount)
+	}
+}
+
+func TestProtocolHandler_UnsubscribeRemovesFromManager(t *testing.T) {
+	device := createTestDevice()
+	handler := service.NewProtocolHandler(device)
+
+	// Create a subscription
+	subReq := &wire.Request{
+		MessageID:  106,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  featureIDDeviceInfo,
+		Payload:    &wire.SubscribePayload{},
+	}
+	subResp := handler.HandleRequest(subReq)
+
+	if !subResp.IsSuccess() {
+		t.Fatalf("Failed to create subscription: status %d", subResp.Status)
+	}
+
+	subPayload := subResp.Payload.(*wire.SubscribeResponsePayload)
+	subID := subPayload.SubscriptionID
+
+	// Verify subscription exists in manager
+	subMgr := handler.SubscriptionManager()
+	if subMgr.GetInbound(subID) == nil {
+		t.Error("Expected subscription in manager before unsubscribe")
+	}
+
+	// Unsubscribe
+	unsubReq := &wire.Request{
+		MessageID:  107,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  0,
+		Payload: &wire.UnsubscribePayload{
+			SubscriptionID: subID,
+		},
+	}
+	unsubResp := handler.HandleRequest(unsubReq)
+
+	if !unsubResp.IsSuccess() {
+		t.Fatalf("Failed to unsubscribe: status %d", unsubResp.Status)
+	}
+
+	// Verify subscription is removed from manager
+	if subMgr.GetInbound(subID) != nil {
+		t.Error("Expected subscription to be removed from manager after unsubscribe")
 	}
 }

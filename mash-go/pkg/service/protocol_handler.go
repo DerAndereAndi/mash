@@ -3,41 +3,45 @@ package service
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
-// ProtocolHandler handles MASH protocol messages for a device.
+// NotificationSender is a function that sends a notification to the remote peer.
+type NotificationSender func(notification *wire.Notification) error
+
+// ProtocolHandler handles MASH protocol messages for a device or controller.
 // It routes Read/Write/Subscribe/Invoke requests to the appropriate
-// features and generates responses.
+// features and generates responses. The handler is bidirectional and can be
+// used on both device and controller sides.
 type ProtocolHandler struct {
 	mu sync.RWMutex
 
 	device *model.Device
-	zoneID string
+	peerID string // The remote peer's identifier (generic, works for both device and controller)
 
-	// Subscription management
-	nextSubscriptionID uint32
-	subscriptions      map[uint32]*activeSubscription
-}
+	// Subscription management using SubscriptionManager
+	subscriptions *SubscriptionManager
 
-// activeSubscription tracks an active subscription.
-type activeSubscription struct {
-	ID           uint32
-	EndpointID   uint8
-	FeatureID    uint8
-	AttributeIDs []uint16 // Empty means all
-	MinInterval  uint32   // Milliseconds
-	MaxInterval  uint32   // Milliseconds
+	// Send function for notifications
+	sendNotification NotificationSender
 }
 
 // NewProtocolHandler creates a new protocol handler for a device.
 func NewProtocolHandler(device *model.Device) *ProtocolHandler {
 	return &ProtocolHandler{
 		device:        device,
-		subscriptions: make(map[uint32]*activeSubscription),
+		subscriptions: NewSubscriptionManager(),
+	}
+}
+
+// NewProtocolHandlerWithSend creates a new protocol handler with a custom notification sender.
+func NewProtocolHandlerWithSend(device *model.Device, send NotificationSender) *ProtocolHandler {
+	return &ProtocolHandler{
+		device:           device,
+		subscriptions:    NewSubscriptionManager(),
+		sendNotification: send,
 	}
 }
 
@@ -46,18 +50,42 @@ func (h *ProtocolHandler) Device() *model.Device {
 	return h.device
 }
 
-// ZoneID returns the current zone context.
-func (h *ProtocolHandler) ZoneID() string {
+// SubscriptionManager returns the subscription manager for this handler.
+func (h *ProtocolHandler) SubscriptionManager() *SubscriptionManager {
+	return h.subscriptions
+}
+
+// SetSendNotification sets the notification sender function.
+func (h *ProtocolHandler) SetSendNotification(send NotificationSender) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sendNotification = send
+}
+
+// PeerID returns the remote peer's identifier.
+func (h *ProtocolHandler) PeerID() string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.zoneID
+	return h.peerID
+}
+
+// SetPeerID sets the remote peer's identifier.
+func (h *ProtocolHandler) SetPeerID(peerID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.peerID = peerID
+}
+
+// ZoneID returns the current zone context.
+// Deprecated: Use PeerID instead for generic peer identification.
+func (h *ProtocolHandler) ZoneID() string {
+	return h.PeerID()
 }
 
 // SetZoneID sets the zone context for authorization.
+// Deprecated: Use SetPeerID instead for generic peer identification.
 func (h *ProtocolHandler) SetZoneID(zoneID string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.zoneID = zoneID
+	h.SetPeerID(zoneID)
 }
 
 // HandleRequest processes a protocol request and returns a response.
@@ -279,32 +307,22 @@ func (h *ProtocolHandler) handleSubscribe(req *wire.Request) *wire.Response {
 		}
 	}
 
-	// Generate subscription ID
-	subID := atomic.AddUint32(&h.nextSubscriptionID, 1)
-
-	// Create subscription record
-	sub := &activeSubscription{
-		ID:         subID,
-		EndpointID: req.EndpointID,
-		FeatureID:  req.FeatureID,
-	}
+	// Extract attribute IDs from payload
+	var attributeIDs []uint16
 	if subPayload != nil {
-		sub.AttributeIDs = subPayload.AttributeIDs
-		sub.MinInterval = subPayload.MinInterval
-		sub.MaxInterval = subPayload.MaxInterval
+		attributeIDs = subPayload.AttributeIDs
 	}
 
-	h.mu.Lock()
-	h.subscriptions[subID] = sub
-	h.mu.Unlock()
+	// Add subscription using SubscriptionManager (inbound = from remote peer to our features)
+	subID := h.subscriptions.AddInbound(req.EndpointID, req.FeatureID, attributeIDs)
 
 	// Read current values for priming report
 	var currentValues map[uint16]any
-	if len(sub.AttributeIDs) == 0 {
+	if len(attributeIDs) == 0 {
 		currentValues = feature.ReadAllAttributes()
 	} else {
 		currentValues = make(map[uint16]any)
-		for _, attrID := range sub.AttributeIDs {
+		for _, attrID := range attributeIDs {
 			if value, err := feature.ReadAttribute(attrID); err == nil {
 				currentValues[attrID] = value
 			}
@@ -341,12 +359,8 @@ func (h *ProtocolHandler) handleUnsubscribe(req *wire.Request) *wire.Response {
 		}
 	}
 
-	h.mu.Lock()
-	_, exists := h.subscriptions[unsubPayload.SubscriptionID]
-	if exists {
-		delete(h.subscriptions, unsubPayload.SubscriptionID)
-	}
-	h.mu.Unlock()
+	// Remove subscription using SubscriptionManager
+	exists := h.subscriptions.RemoveInbound(unsubPayload.SubscriptionID)
 
 	if !exists {
 		return &wire.Response{
@@ -440,46 +454,55 @@ func (h *ProtocolHandler) handleInvoke(req *wire.Request) *wire.Response {
 	}
 }
 
-// GetSubscription returns a subscription by ID.
-func (h *ProtocolHandler) GetSubscription(id uint32) (*activeSubscription, bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	sub, exists := h.subscriptions[id]
-	return sub, exists
+// GetSubscription returns an inbound subscription by ID.
+func (h *ProtocolHandler) GetSubscription(id uint32) (*Subscription, bool) {
+	sub := h.subscriptions.GetInbound(id)
+	return sub, sub != nil
 }
 
-// SubscriptionCount returns the number of active subscriptions.
+// SubscriptionCount returns the number of active inbound subscriptions.
 func (h *ProtocolHandler) SubscriptionCount() int {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return len(h.subscriptions)
+	return h.subscriptions.InboundCount()
 }
 
 // GetMatchingSubscriptions returns subscription IDs that match the given endpoint, feature, and attribute.
 // If attrID is 0, it matches subscriptions to any attribute of the feature.
 func (h *ProtocolHandler) GetMatchingSubscriptions(endpointID uint8, featureID uint8, attrID uint16) []uint32 {
+	matches := h.subscriptions.GetMatchingInbound(endpointID, featureID, attrID)
+	result := make([]uint32, len(matches))
+	for i, sub := range matches {
+		result[i] = sub.ID
+	}
+	return result
+}
+
+// NotifyAttributeChange sends notifications to all inbound subscriptions that
+// match the given endpoint, feature, and attribute.
+func (h *ProtocolHandler) NotifyAttributeChange(endpointID, featureID uint8, attributeID uint16, value any) error {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
+	sendFunc := h.sendNotification
+	h.mu.RUnlock()
 
-	var matches []uint32
-	for id, sub := range h.subscriptions {
-		if sub.EndpointID != endpointID || sub.FeatureID != featureID {
-			continue
+	// If no send function is configured, silently succeed
+	if sendFunc == nil {
+		return nil
+	}
+
+	// Find matching subscriptions
+	matches := h.subscriptions.GetMatchingInbound(endpointID, featureID, attributeID)
+
+	// Send notification to each matching subscription
+	for _, sub := range matches {
+		notification := &wire.Notification{
+			SubscriptionID: sub.ID,
+			EndpointID:     endpointID,
+			FeatureID:      featureID,
+			Changes:        map[uint16]any{attributeID: value},
 		}
-
-		// Empty AttributeIDs means subscribed to all attributes
-		if len(sub.AttributeIDs) == 0 {
-			matches = append(matches, id)
-			continue
-		}
-
-		// Check if specific attribute is in the subscription
-		for _, subAttrID := range sub.AttributeIDs {
-			if subAttrID == attrID {
-				matches = append(matches, id)
-				break
-			}
+		if err := sendFunc(notification); err != nil {
+			return err
 		}
 	}
-	return matches
+
+	return nil
 }

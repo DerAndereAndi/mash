@@ -1,0 +1,80 @@
+# Test Case: Bidirectional Read - Device reads from Controller
+# Verifies that a device can read attributes from a controller's exposed features
+
+id: TC-BIDIR-001
+name: Device Reads from Controller Exposed Features
+description: |
+  Verifies that when a controller exposes features (e.g., grid meter),
+  a connected device can successfully read attributes from those features.
+
+pics_requirements:
+  - C.BIDIR.EXPOSE    # Controller supports exposing features
+  - D.BIDIR.READ      # Device supports reading from controller
+
+preconditions:
+  - session_established: true
+  - controller_exposes_features: true
+
+steps:
+  - name: Controller exposes Measurement feature
+    action: configure_exposed_device
+    params:
+      endpoint: 1
+      endpoint_type: GRID_CONNECTION
+      feature: Measurement
+      attributes:
+        - id: 1
+          name: acActivePower
+          value: 5000000  # 5 kW
+        - id: 2
+          name: acVoltage
+          value: 230000   # 230V in millivolts
+    expect:
+      configuration_success: true
+
+  - name: Device reads all attributes from controller
+    direction: device_to_controller
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attributes: []  # empty = read all
+    expect:
+      read_success: true
+      status: SUCCESS
+      attributes_returned: true
+
+  - name: Verify acActivePower value
+    direction: device_to_controller
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attributes: [1]  # acActivePower
+    expect:
+      read_success: true
+      attribute_value:
+        id: 1
+        value: 5000000
+
+  - name: Verify acVoltage value
+    direction: device_to_controller
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attributes: [2]  # acVoltage
+    expect:
+      read_success: true
+      attribute_value:
+        id: 2
+        value: 230000
+
+postconditions:
+  - session_still_active: true
+
+timeout: "10s"
+tags:
+  - bidirectional
+  - read
+  - controller-exposed

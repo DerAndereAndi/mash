@@ -314,6 +314,13 @@ postconditions:
 - Certificate handling
 - Zone isolation
 
+### TC-BIDIR-*: Bidirectional Communication
+- Controller exposing features to devices
+- Device reading from controller
+- Device subscribing to controller
+- Bidirectional notification delivery
+- Controller without exposed features (StatusUnsupported)
+
 ### TC-CONF-*: Conformance
 - PICS validation
 - Feature flag consistency
@@ -433,6 +440,7 @@ For each feature, in order:
 | TC-TLS-CHAIN | 4 | Certificate chain validation |
 | TC-TLS-RESUME | 3 | Session resumption (prohibited) |
 | TC-TLS-ALERT | 4 | TLS alert handling |
+| TC-BIDIR | 4 | Bidirectional communication |
 
 ### Gaps Remaining (from testability-analysis.md)
 

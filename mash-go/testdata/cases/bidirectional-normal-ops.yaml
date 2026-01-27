@@ -1,0 +1,86 @@
+# Test Case: Bidirectional - Normal Operations Still Work
+# Verifies that enabling bidirectional doesn't break normal controller-to-device operations
+
+id: TC-BIDIR-004
+name: Normal Operations Work with Bidirectional Enabled
+description: |
+  Verifies that when a controller has bidirectional support enabled
+  (exposes features to devices), normal controller-to-device operations
+  continue to work correctly. This ensures bidirectional support
+  doesn't introduce regressions.
+
+pics_requirements:
+  - C.BIDIR.EXPOSE    # Controller supports exposing features
+  - D.INFO.BASIC      # Device supports basic info
+
+preconditions:
+  - session_established: true
+  - controller_exposes_features: true
+
+steps:
+  - name: Configure controller to expose features
+    action: configure_exposed_device
+    params:
+      endpoint: 1
+      endpoint_type: GRID_CONNECTION
+      feature: Measurement
+      attributes:
+        - id: 1
+          name: acActivePower
+          value: 5000000
+
+  - name: Controller reads device info (normal direction)
+    direction: controller_to_device
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attributes: []
+    expect:
+      read_success: true
+      status: SUCCESS
+      attributes_returned: true
+
+  - name: Controller subscribes to device (normal direction)
+    direction: controller_to_device
+    action: subscribe
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attributes: []
+    expect:
+      subscribe_success: true
+      status: SUCCESS
+      subscription_id_returned: true
+      priming_report_received: true
+
+  - name: Device reads from controller (reverse direction)
+    direction: device_to_controller
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attributes: [1]
+    expect:
+      read_success: true
+      status: SUCCESS
+      attribute_value:
+        id: 1
+        value: 5000000
+
+  - name: Both directions work simultaneously
+    action: verify_bidirectional_active
+    expect:
+      controller_to_device_active: true
+      device_to_controller_active: true
+      no_interference: true
+
+postconditions:
+  - session_still_active: true
+  - controller_subscription_active: true
+
+timeout: "15s"
+tags:
+  - bidirectional
+  - regression
+  - normal-operations

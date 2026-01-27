@@ -35,10 +35,12 @@ MASH features are organized by concern:
 | 0x0009 | Plan | OUT | Device's intended behavior | [plan.md](plan.md) |
 | 0x0100+ | (vendor) | - | Vendor-specific features | |
 
-**Direction:**
+**Direction (data flow):**
 - **IN** = Data flows TO device (controller sends)
 - **OUT** = Data flows FROM device (device reports)
 - **-** = Bidirectional or static configuration
+
+> **Note:** Direction indicates the typical data flow, not request direction. MASH operations (Read/Write/Subscribe/Invoke) are bidirectional - either side can initiate requests. For example, a device can Read from a controller that exposes features. See [Interaction Model: Bidirectional Communication](../interaction-model.md#12-bidirectional-communication).
 
 ---
 

@@ -23,10 +23,14 @@ MASH has 4 operations (like Matter, not SPINE's 7):
 
 | Operation | Description | Direction |
 |-----------|-------------|-----------|
-| **Read** | Get current attribute values | Controller → Device |
-| **Write** | Set attribute value (full replace) | Controller → Device |
-| **Subscribe** | Register for change notifications | Controller → Device |
-| **Invoke** | Execute command with parameters | Controller → Device |
+| **Read** | Get current attribute values | Bidirectional |
+| **Write** | Set attribute value (full replace) | Bidirectional |
+| **Subscribe** | Register for change notifications | Bidirectional |
+| **Invoke** | Execute command with parameters | Bidirectional |
+
+**Bidirectional Communication:** All operations can be initiated by either side of the connection. A controller can send requests to a device, AND a device can send requests to a controller that exposes features. This enables scenarios like:
+- Smart Meter Gateway (SMGW) exposing grid meter data to EMS devices
+- Dual-service entities that act as both device and controller
 
 ---
 
@@ -553,3 +557,95 @@ Not supported. Each request targets specific endpoint/feature.
 - No partial updates complexity
 - Unified subscription model
 - Binary format for efficiency
+
+---
+
+## 12. Bidirectional Communication
+
+### 12.1 Overview
+
+MASH supports bidirectional communication: both sides of a connection can send requests and handle responses. This enables advanced scenarios where:
+
+- **Controllers expose features** that devices can query (e.g., grid meter data)
+- **Dual-service entities** act as both device and controller simultaneously
+
+### 12.2 Controller-Exposed Features
+
+A controller can optionally expose a device model to connected devices. When configured, devices can:
+
+- **Read** attributes from the controller's exposed features
+- **Subscribe** to controller attribute changes
+- **Write** to controller attributes (if writable)
+- **Invoke** commands on the controller (if supported)
+
+If a controller does not expose features, incoming requests from devices receive `StatusUnsupported`.
+
+### 12.3 Example: Smart Meter Gateway (SMGW)
+
+A Smart Meter Gateway acts as a controller but also exposes meter data:
+
+```
+SMGW (Controller + Exposed Device)
+├── Controls: EV Charger, Heat Pump, Battery
+└── Exposes: Grid Meter (Measurement feature)
+    └── Attributes: acActivePower, acVoltage, acCurrent
+```
+
+**Data flow:**
+1. SMGW connects to EV charger as controller
+2. EV charger can read grid meter data from SMGW
+3. EV charger can subscribe to grid meter changes
+4. Both directions work over the same TLS connection
+
+### 12.4 Example: Dual-Service Entity (EMS)
+
+An Energy Management System (EMS) can be both:
+- A **device** that SMGW controls (receives limits)
+- A **controller** that manages household devices
+
+```
+                SMGW
+                  │
+       ┌─────────┼─────────┐
+       │     EMS │         │
+       │   (Dual-Service)  │
+       │         │         │
+    ┌──┴──┐   ┌──┴──┐   ┌──┴──┐
+    │EVSE │   │Batt │   │Heat │
+    │     │   │     │   │Pump │
+    └─────┘   └─────┘   └─────┘
+```
+
+**EMS as device:** Accepts limits from SMGW, exposes Status/Measurement
+**EMS as controller:** Sets limits on EVSE, Battery, Heat Pump
+
+### 12.5 Subscription Behavior
+
+Bidirectional subscriptions work independently:
+
+| Direction | Description |
+|-----------|-------------|
+| Controller → Device | Controller subscribes to device's features (normal) |
+| Device → Controller | Device subscribes to controller's exposed features |
+
+Both directions use the same subscription mechanism:
+- Priming report on subscription establishment
+- Delta notifications on attribute changes
+- Interval parameters (minInterval, maxInterval)
+
+### 12.6 Implementation Notes
+
+**On the controller side:**
+- Optionally configure exposed device model
+- Handle incoming requests through protocol handler
+- Manage subscriptions from devices
+
+**On the device side:**
+- Can send requests to connected controllers
+- Handle responses and notifications from controllers
+- Track outbound subscriptions separately from inbound
+
+**Connection semantics:**
+- Single TLS connection serves both directions
+- Message IDs are independent per direction
+- Subscription IDs are independent per direction
