@@ -48,10 +48,15 @@ All paired controllers are fully trusted within their zone. Priority only affect
 │  Manufacturer CA (optional)                             │
 │    └── Device Attestation Cert (20yr, pre-installed)    │
 │                                                         │
-│  Zone CA (controller-generated)                         │
-│    └── Operational Cert (1yr, issued during pairing)    │
+│  Zone CA (controller-generated, 10yr)                   │
+│    ├── Controller Operational Cert (1yr)                │
+│    └── Device Operational Certs (1yr each)              │
 └─────────────────────────────────────────────────────────┘
 ```
+
+**Note:** Controller and device operational certificates are **siblings** in the hierarchy.
+Both are signed by the Zone CA. They are independently issued and independently renewed.
+Renewal of one does not affect the validity of the other.
 
 ### 2.1 Device Attestation Certificate
 
@@ -76,6 +81,20 @@ All paired controllers are fully trusted within their zone. Priority only affect
 - **Validity:** 10 years
 - **Stored:** Securely on zone owner
 
+### 2.4 Controller Operational Certificate
+
+- **Purpose:** Proves controller identity to devices during operational TLS
+- **Issuer:** Zone CA (self-issued by controller)
+- **Validity:** 1 year (auto-renewed)
+- **Generated:** Automatically when Zone CA is created
+- **Key Usage:** DigitalSignature, KeyEncipherment
+- **Extended Key Usage:** ClientAuth, ServerAuth
+
+**Why separate from Zone CA?** The Zone CA is a CA certificate used for signing.
+The controller operational certificate is an end-entity certificate used for TLS authentication.
+This follows Matter's design where controllers have their own Node Operational Certificate (NOC)
+separate from their CA signing capability.
+
 ---
 
 ## 3. Certificate Lifecycle
@@ -83,19 +102,32 @@ All paired controllers are fully trusted within their zone. Priority only affect
 | Certificate | Validity | Renewal | Revocation |
 |-------------|----------|---------|------------|
 | Device/Attestation | 20 years | Never | N/A |
-| Operational | 1 year | Auto by controller | RemoveZone command |
+| Device Operational | 1 year | Auto by controller | RemoveZone command |
+| Controller Operational | 1 year | Auto (self-renewal) | Zone CA rotation |
 | Zone CA | 10 years | Manual | Zone dissolution |
 
-### 3.1 Operational Certificate Renewal
+### 3.1 Device Operational Certificate Renewal
 
-1. Controller tracks certificate expiry
+1. Controller tracks certificate expiry for each device
 2. 30 days before expiry, controller initiates renewal
 3. Device generates new key pair and CSR
-4. Controller signs new certificate
-5. Device installs new certificate
-6. Old certificate remains valid until new one is installed
+4. Controller signs new certificate with Zone CA
+5. Device installs new certificate atomically
+6. TLS session continues (uses session keys, not certificates)
 
-### 3.2 Certificate Revocation
+### 3.2 Controller Operational Certificate Renewal
+
+1. Controller monitors its own certificate expiry
+2. 30 days before expiry, controller self-renews
+3. Controller generates new key pair
+4. Controller signs new certificate with Zone CA
+5. New certificate replaces old one
+6. Existing device connections unaffected (use session keys)
+
+**Note:** Controller cert renewal does NOT require device cert renewal.
+Both certificates are independently signed by the Zone CA.
+
+### 3.3 Certificate Revocation
 
 No CRL or OCSP. Revocation is immediate:
 

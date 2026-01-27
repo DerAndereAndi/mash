@@ -174,6 +174,41 @@ func (s *ControllerService) Start(ctx context.Context) error {
 			s.zoneID = zoneCA.ZoneID
 			s.mu.Unlock()
 		}
+
+		// Generate or load Controller Operational Certificate
+		controllerCert, err := certStore.GetControllerCert()
+		if err != nil && err != cert.ErrCertNotFound {
+			s.mu.Lock()
+			s.state = StateIdle
+			s.mu.Unlock()
+			return fmt.Errorf("failed to load controller cert: %w", err)
+		}
+
+		if controllerCert == nil {
+			// Generate new controller operational certificate
+			controllerID := fmt.Sprintf("controller-%s", zoneCA.ZoneID)
+			controllerCert, err = cert.GenerateControllerOperationalCert(zoneCA, controllerID)
+			if err != nil {
+				s.mu.Lock()
+				s.state = StateIdle
+				s.mu.Unlock()
+				return fmt.Errorf("failed to generate controller cert: %w", err)
+			}
+
+			// Save the controller cert
+			if err := certStore.SetControllerCert(controllerCert); err != nil {
+				s.mu.Lock()
+				s.state = StateIdle
+				s.mu.Unlock()
+				return fmt.Errorf("failed to save controller cert: %w", err)
+			}
+			if err := certStore.Save(); err != nil {
+				s.mu.Lock()
+				s.state = StateIdle
+				s.mu.Unlock()
+				return fmt.Errorf("failed to persist controller cert: %w", err)
+			}
+		}
 	}
 
 	// Initialize mDNS browser if not already set (e.g., by tests)
@@ -746,13 +781,10 @@ func (s *ControllerService) attemptReconnection(ctx context.Context, svc *discov
 	addr := fmt.Sprintf("%s:%d", svc.Host, svc.Port)
 
 	// Create TLS config for operational connection
-	// Use the same pattern as commissioning for now
-	// TODO: Implement proper certificate validation with zone CA
-	tlsConfig := &tls.Config{
-		MinVersion:         tls.VersionTLS13,
-		MaxVersion:         tls.VersionTLS13,
-		InsecureSkipVerify: true, // TODO: Validate against known device cert
-		NextProtos:         []string{transport.ALPNProtocol},
+	tlsConfig, err := s.buildOperationalTLSConfig(svc.DeviceID)
+	if err != nil {
+		// Fall back to insecure mode if certificates not available
+		tlsConfig = transport.NewCommissioningTLSConfig()
 	}
 
 	// Attempt connection
@@ -801,6 +833,37 @@ func (s *ControllerService) attemptReconnection(ctx context.Context, svc *discov
 	s.handleDeviceSessionClose(svc.DeviceID)
 }
 
+// buildOperationalTLSConfig creates a TLS config for operational (post-commissioning)
+// connections to devices. Uses the controller's operational certificate for mutual TLS.
+func (s *ControllerService) buildOperationalTLSConfig(deviceID string) (*tls.Config, error) {
+	s.mu.RLock()
+	certStore := s.certStore
+	s.mu.RUnlock()
+
+	if certStore == nil {
+		return nil, fmt.Errorf("no certificate store configured")
+	}
+
+	// Get controller's operational certificate
+	controllerCert, err := certStore.GetControllerCert()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get controller certificate: %w", err)
+	}
+
+	// Get Zone CA for verifying device certificates
+	zoneCA, err := certStore.GetZoneCA()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Zone CA: %w", err)
+	}
+
+	// Build operational TLS config with mutual authentication
+	return transport.NewOperationalClientTLSConfig(&transport.OperationalTLSConfig{
+		ControllerCert: controllerCert.TLSCertificate(),
+		ZoneCAs:        zoneCA.TLSClientCAs(),
+		ServerName:     deviceID,
+	})
+}
+
 // StopOperationalDiscovery stops background operational discovery.
 func (s *ControllerService) StopOperationalDiscovery() {
 	s.mu.Lock()
@@ -825,6 +888,13 @@ func (s *ControllerService) SetCertStore(store cert.ControllerStore) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.certStore = store
+}
+
+// GetCertStore returns the certificate store.
+func (s *ControllerService) GetCertStore() cert.ControllerStore {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.certStore
 }
 
 // SetStateStore sets the state store for persistence.
@@ -951,4 +1021,116 @@ func (s *ControllerService) RenewDevice(ctx context.Context, deviceID string) er
 	_ = newCert // Could update tracking here
 
 	return nil
+}
+
+// RenewalCheckInterval is how often to check for certificate renewal needs.
+const RenewalCheckInterval = 24 * time.Hour
+
+// RenewControllerCert renews the controller's operational certificate.
+// This generates a new certificate signed by the Zone CA and saves it.
+// Existing TLS sessions are not affected (they use session keys).
+func (s *ControllerService) RenewControllerCert() error {
+	s.mu.RLock()
+	certStore := s.certStore
+	s.mu.RUnlock()
+
+	if certStore == nil {
+		return fmt.Errorf("no certificate store configured")
+	}
+
+	// Get Zone CA for signing
+	zoneCA, err := certStore.GetZoneCA()
+	if err != nil {
+		return fmt.Errorf("get Zone CA: %w", err)
+	}
+
+	// Generate new controller operational certificate
+	controllerID := fmt.Sprintf("controller-%s", zoneCA.ZoneID)
+	newCert, err := cert.GenerateControllerOperationalCert(zoneCA, controllerID)
+	if err != nil {
+		return fmt.Errorf("generate controller cert: %w", err)
+	}
+
+	// Save the new certificate
+	if err := certStore.SetControllerCert(newCert); err != nil {
+		return fmt.Errorf("set controller cert: %w", err)
+	}
+	if err := certStore.Save(); err != nil {
+		return fmt.Errorf("save controller cert: %w", err)
+	}
+
+	// Emit event for renewal
+	s.emitEvent(Event{
+		Type: EventControllerCertRenewed,
+	})
+
+	return nil
+}
+
+// ControllerCertNeedsRenewal checks if the controller's certificate needs renewal.
+func (s *ControllerService) ControllerCertNeedsRenewal() bool {
+	s.mu.RLock()
+	certStore := s.certStore
+	s.mu.RUnlock()
+
+	if certStore == nil {
+		return false
+	}
+
+	controllerCert, err := certStore.GetControllerCert()
+	if err != nil {
+		return true // No cert means we need one
+	}
+
+	return controllerCert.NeedsRenewal()
+}
+
+// GetControllerCert returns the controller's operational certificate.
+func (s *ControllerService) GetControllerCert() (*cert.OperationalCert, error) {
+	s.mu.RLock()
+	certStore := s.certStore
+	s.mu.RUnlock()
+
+	if certStore == nil {
+		return nil, fmt.Errorf("no certificate store configured")
+	}
+
+	return certStore.GetControllerCert()
+}
+
+// StartRenewalChecking starts the background renewal checking goroutine.
+// It checks daily if the controller certificate needs renewal.
+func (s *ControllerService) StartRenewalChecking(ctx context.Context) {
+	go s.runRenewalCheckLoop(ctx)
+}
+
+// runRenewalCheckLoop periodically checks if the controller cert needs renewal.
+func (s *ControllerService) runRenewalCheckLoop(ctx context.Context) {
+	// Check immediately on start
+	s.checkAndRenewControllerCert()
+
+	ticker := time.NewTicker(RenewalCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.checkAndRenewControllerCert()
+		}
+	}
+}
+
+// checkAndRenewControllerCert checks if renewal is needed and performs it.
+func (s *ControllerService) checkAndRenewControllerCert() {
+	if s.ControllerCertNeedsRenewal() {
+		if err := s.RenewControllerCert(); err != nil {
+			// Log error but don't crash - will retry on next check
+			s.emitEvent(Event{
+				Type:  EventError,
+				Error: fmt.Errorf("controller cert renewal failed: %w", err),
+			})
+		}
+	}
 }

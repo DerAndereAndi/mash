@@ -352,6 +352,12 @@ const (
 
 	// EventCertificateRenewed - device certificate was renewed.
 	EventCertificateRenewed
+
+	// EventControllerCertRenewed - controller's own certificate was renewed.
+	EventControllerCertRenewed
+
+	// EventError - an error occurred during background operations.
+	EventError
 )
 
 // String returns the event type name.
@@ -389,6 +395,10 @@ func (e EventType) String() string {
 		return "DEVICE_RECONNECTED"
 	case EventCertificateRenewed:
 		return "CERTIFICATE_RENEWED"
+	case EventControllerCertRenewed:
+		return "CONTROLLER_CERT_RENEWED"
+	case EventError:
+		return "ERROR"
 	default:
 		return "UNKNOWN"
 	}
