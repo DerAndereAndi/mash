@@ -281,6 +281,14 @@ func (s *DeviceService) Start(ctx context.Context) error {
 			DeviceName:    s.config.DeviceName,
 			Port:          port,
 		})
+
+		// Register callback for commissioning timeout
+		s.discoveryManager.OnCommissioningTimeout(func() {
+			s.emitEvent(Event{
+				Type:   EventCommissioningClosed,
+				Reason: "timeout",
+			})
+		})
 	}
 
 	s.mu.Lock()
@@ -590,7 +598,7 @@ func (s *DeviceService) ExitCommissioningMode() error {
 		}
 	}
 
-	s.emitEvent(Event{Type: EventCommissioningClosed})
+	s.emitEvent(Event{Type: EventCommissioningClosed, Reason: "commissioned"})
 	return nil
 }
 

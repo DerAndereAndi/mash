@@ -500,7 +500,13 @@ func handleEvent(event service.Event) {
 		log.Println("[EVENT] Commissioning window opened")
 
 	case service.EventCommissioningClosed:
-		log.Println("[EVENT] Commissioning window closed")
+		if event.Reason == "timeout" {
+			log.Println("[EVENT] Commissioning window EXPIRED (120s timeout)")
+		} else if event.Reason == "commissioned" {
+			log.Println("[EVENT] Commissioning window closed (device commissioned)")
+		} else {
+			log.Println("[EVENT] Commissioning window closed")
+		}
 
 	case service.EventFailsafeTriggered:
 		log.Printf("[EVENT] FAILSAFE triggered for zone %s!", event.ZoneID)

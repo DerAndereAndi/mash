@@ -91,6 +91,9 @@ type DiscoveryManager struct {
 
 	// Callback for state changes
 	onStateChange func(old, new DiscoveryState)
+
+	// Callback for commissioning timeout (called when window expires)
+	onCommissioningTimeout func()
 }
 
 // NewDiscoveryManager creates a new discovery manager.
@@ -122,6 +125,14 @@ func (m *DiscoveryManager) OnStateChange(fn func(old, new DiscoveryState)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onStateChange = fn
+}
+
+// OnCommissioningTimeout sets a callback that fires when the commissioning window expires.
+// This is useful for notifying users that commissioning mode has ended due to timeout.
+func (m *DiscoveryManager) OnCommissioningTimeout(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onCommissioningTimeout = fn
 }
 
 // SetCommissionableInfo sets the device's commissionable information.
@@ -178,10 +189,7 @@ func (m *DiscoveryManager) ExitCommissioningMode() error {
 // by the commissioning window timeout (false). This can be used for logging
 // or to notify callbacks with context about why commissioning ended.
 func (m *DiscoveryManager) exitCommissioningModeInternal(userInitiated bool) error {
-	_ = userInitiated // TODO: pass to onStateChange callback or logging
-
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	// Cancel timer if still running
 	if m.commissioningTimer != nil {
@@ -191,6 +199,7 @@ func (m *DiscoveryManager) exitCommissioningModeInternal(userInitiated bool) err
 
 	// Stop advertising
 	if err := m.advertiser.StopCommissionable(); err != nil {
+		m.mu.Unlock()
 		return err
 	}
 
@@ -202,8 +211,21 @@ func (m *DiscoveryManager) exitCommissioningModeInternal(userInitiated bool) err
 		m.state = StateUncommissioned
 	}
 
-	if m.onStateChange != nil && oldState != m.state {
-		m.onStateChange(oldState, m.state)
+	// Capture callbacks before releasing lock
+	stateChangeCb := m.onStateChange
+	timeoutCb := m.onCommissioningTimeout
+	newState := m.state
+
+	m.mu.Unlock()
+
+	// Call callbacks outside lock to avoid deadlocks
+	if stateChangeCb != nil && oldState != newState {
+		stateChangeCb(oldState, newState)
+	}
+
+	// Notify timeout callback if this was an automatic timeout (not user-initiated)
+	if !userInitiated && timeoutCb != nil {
+		timeoutCb()
 	}
 
 	return nil

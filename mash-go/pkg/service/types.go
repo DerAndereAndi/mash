@@ -440,6 +440,9 @@ type Event struct {
 	// DiscoveredService contains the discovered service info (for discovery events).
 	DiscoveredService any
 
+	// Reason provides additional context for certain events (e.g., why commissioning closed).
+	Reason string
+
 	// Error is set if the event is an error.
 	Error error
 }
