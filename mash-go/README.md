@@ -186,9 +186,7 @@ mash-go/
 ├── cmd/                    # Command-line applications
 │   ├── mash-device/        # Device reference implementation
 │   ├── mash-controller/    # Controller reference implementation
-│   ├── mash-test/          # Conformance test runner
-│   ├── evse-example/       # EV charger example
-│   └── cem-example/        # CEM (controller) example
+│   └── mash-test/          # Conformance test runner
 ├── pkg/                    # Public packages
 │   ├── wire/               # CBOR message encoding
 │   ├── transport/          # TLS server/client, framing

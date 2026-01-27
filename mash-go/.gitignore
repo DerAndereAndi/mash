@@ -7,8 +7,6 @@
 
 # Built binaries (without extension)
 # Binaries are typically built to root or have no extension
-/evse-example
-/cem-example
 /mash-*
 
 # Test binary, built with `go test -c`
