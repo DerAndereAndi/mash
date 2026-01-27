@@ -1,0 +1,271 @@
+# Test Suite: Zone Removal Tests
+# Verifies the RemoveZone command for device decommissioning
+#
+# Key concepts:
+# - Self-removal only: A zone can only remove itself, not other zones
+# - Response before disconnect: Device sends success response then closes connection
+# - Last zone removal: Device becomes uncommissioned when last zone is removed
+
+---
+# TC-ZONE-REMOVE-001: Self Removal Success
+id: TC-ZONE-REMOVE-001
+name: Self Removal Success
+description: |
+  Controller sends RemoveZone command to device to remove itself
+  from the device's zone list. Device acknowledges and closes connection.
+
+pics_requirements:
+  - MASH.S.INFO              # DeviceInfo feature
+  - MASH.S.INFO.C10.Rsp      # RemoveZone command
+
+preconditions:
+  - session_established: true
+  - zone_count: 1
+
+steps:
+  - name: Send RemoveZone command
+    action: invoke
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      command: RemoveZone
+      args:
+        zoneId: "${current_zone_id}"
+    expect:
+      invoke_success: true
+      response:
+        removed: true
+
+  - name: Verify connection closed
+    action: wait_disconnect
+    params:
+      timeout: "1s"
+    expect:
+      disconnected: true
+
+postconditions:
+  - zone_removed: true
+
+timeout: "5s"
+tags:
+  - zone
+  - removal
+  - self-removal
+
+---
+# TC-ZONE-REMOVE-002: Last Zone Removal
+id: TC-ZONE-REMOVE-002
+name: Last Zone Removal Returns Device to Uncommissioned
+description: |
+  When the last zone is removed from a device, the device
+  should return to uncommissioned state, ready for new
+  commissioning.
+
+pics_requirements:
+  - MASH.S.INFO
+  - MASH.S.INFO.C10.Rsp
+
+preconditions:
+  - session_established: true
+  - zone_count: 1             # Only one zone connected
+
+steps:
+  - name: Remove the only zone
+    action: invoke
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      command: RemoveZone
+      args:
+        zoneId: "${current_zone_id}"
+    expect:
+      invoke_success: true
+      response:
+        removed: true
+
+  - name: Verify device can be recommissioned
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+    expect:
+      commission_success: true
+
+postconditions:
+  - device_recommissioned: true
+
+timeout: "15s"
+tags:
+  - zone
+  - removal
+  - last-zone
+  - recommissioning
+
+---
+# TC-ZONE-REMOVE-003: Partial Removal - Other Zones Unaffected
+id: TC-ZONE-REMOVE-003
+name: Partial Removal Does Not Affect Other Zones
+description: |
+  When a device has multiple zones and one zone removes itself,
+  the other zones should remain connected and functional.
+
+pics_requirements:
+  - MASH.S.INFO
+  - MASH.S.INFO.C10.Rsp
+  - MASH.S.ZONE.MULTI        # Supports multiple zones
+
+preconditions:
+  - session_established: true
+  - zone_count_at_least: 2
+
+steps:
+  - name: Record initial zone count
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zoneCount
+    store_as: initial_zone_count
+    expect:
+      read_success: true
+      value_at_least: 2
+
+  - name: Remove current zone
+    action: invoke
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      command: RemoveZone
+      args:
+        zoneId: "${current_zone_id}"
+    expect:
+      invoke_success: true
+      response:
+        removed: true
+
+  - name: Wait for disconnect
+    action: wait_disconnect
+    params:
+      timeout: "1s"
+    expect:
+      disconnected: true
+
+  - name: Verify other zone still active
+    description: Connect from the other zone's perspective
+    action: verify_other_zone
+    params:
+      zone_id: "${other_zone_id}"
+    expect:
+      other_zone_active: true
+      zone_count: "${initial_zone_count} - 1"
+
+postconditions:
+  - other_zones_unaffected: true
+
+timeout: "10s"
+tags:
+  - zone
+  - removal
+  - multi-zone
+  - partial
+
+---
+# TC-ZONE-REMOVE-004: Cross-Zone Removal Rejected
+id: TC-ZONE-REMOVE-004
+name: Cross-Zone Removal Is Rejected
+description: |
+  A zone cannot remove another zone from the device.
+  Only self-removal is allowed. The device must reject
+  requests to remove a different zone.
+
+pics_requirements:
+  - MASH.S.INFO
+  - MASH.S.INFO.C10.Rsp
+  - MASH.S.ZONE.MULTI
+
+preconditions:
+  - session_established: true
+  - zone_count_at_least: 2
+
+steps:
+  - name: Attempt to remove different zone
+    action: invoke
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      command: RemoveZone
+      args:
+        zoneId: "${other_zone_id}"   # Not the caller's zone
+    expect:
+      invoke_success: false
+      status: CONSTRAINT_ERROR        # Permission denied
+
+  - name: Verify both zones still exist
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: zoneCount
+    expect:
+      read_success: true
+      value_at_least: 2
+
+postconditions:
+  - cross_removal_rejected: true
+  - all_zones_intact: true
+
+timeout: "5s"
+tags:
+  - zone
+  - removal
+  - security
+  - cross-zone
+
+---
+# TC-ZONE-REMOVE-005: RemoveZone with Invalid Parameters
+id: TC-ZONE-REMOVE-005
+name: RemoveZone Rejects Invalid Parameters
+description: |
+  The RemoveZone command must reject requests with missing
+  or invalid zoneId parameter.
+
+pics_requirements:
+  - MASH.S.INFO
+  - MASH.S.INFO.C10.Rsp
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send RemoveZone with missing zoneId
+    action: invoke
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      command: RemoveZone
+      args: {}                       # Empty args - missing zoneId
+    expect:
+      invoke_success: false
+      status: INVALID_PARAMETER
+
+  - name: Send RemoveZone with wrong type
+    action: invoke
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      command: RemoveZone
+      args:
+        zoneId: 12345                # Number instead of string
+    expect:
+      invoke_success: false
+      status: INVALID_PARAMETER
+
+postconditions:
+  - session_still_active: true
+  - zone_count_unchanged: true
+
+timeout: "5s"
+tags:
+  - zone
+  - removal
+  - validation
+  - error-handling

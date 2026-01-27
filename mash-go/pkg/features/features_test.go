@@ -97,6 +97,20 @@ func TestDeviceInfo(t *testing.T) {
 			t.Fatalf("SetEndpoints failed: %v", err)
 		}
 	})
+
+	t.Run("RemoveZoneCommandConstants", func(t *testing.T) {
+		// Verify command ID is as specified in the protocol
+		if DeviceInfoCmdRemoveZone != 0x10 {
+			t.Errorf("expected RemoveZone command ID 0x10, got 0x%02x", DeviceInfoCmdRemoveZone)
+		}
+		// Verify parameter and response keys
+		if RemoveZoneParamZoneID != "zoneId" {
+			t.Errorf("expected parameter key 'zoneId', got '%s'", RemoveZoneParamZoneID)
+		}
+		if RemoveZoneRespRemoved != "removed" {
+			t.Errorf("expected response key 'removed', got '%s'", RemoveZoneRespRemoved)
+		}
+	})
 }
 
 func TestElectrical(t *testing.T) {

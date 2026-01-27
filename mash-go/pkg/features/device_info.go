@@ -27,6 +27,23 @@ const (
 	DeviceInfoAttrLabel    uint16 = 31
 )
 
+// DeviceInfo command IDs.
+const (
+	// DeviceInfoCmdRemoveZone removes a zone from this device.
+	// Only the zone being removed may invoke this command (self-removal).
+	// Parameters: {1: zoneId (string)}
+	// Response: {1: removed (bool)}
+	DeviceInfoCmdRemoveZone uint8 = 0x10
+)
+
+// RemoveZone parameter and response keys (CBOR integer keys).
+const (
+	// RemoveZoneParamZoneID is the zone ID to remove (string).
+	RemoveZoneParamZoneID = "zoneId"
+	// RemoveZoneRespRemoved indicates if the zone was removed (bool).
+	RemoveZoneRespRemoved = "removed"
+)
+
 // DeviceInfoFeatureRevision is the current revision of the DeviceInfo feature.
 const DeviceInfoFeatureRevision uint16 = 1
 

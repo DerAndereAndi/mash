@@ -404,15 +404,43 @@ func (h *ProtocolHandler) handleInvoke(req *wire.Request) *wire.Response {
 		}
 	}
 
-	// Parse invoke payload
-	var invokePayload *wire.InvokePayload
-	if req.Payload != nil {
-		if ip, ok := req.Payload.(*wire.InvokePayload); ok {
-			invokePayload = ip
-		}
-	}
+	// Parse invoke payload - CBOR may decode as different types
+	var commandID uint8
+	var params map[string]any
 
-	if invokePayload == nil {
+	switch p := req.Payload.(type) {
+	case *wire.InvokePayload:
+		commandID = p.CommandID
+		if p.Parameters != nil {
+			switch pm := p.Parameters.(type) {
+			case map[string]any:
+				params = pm
+			case map[any]any:
+				params = convertMapAnyAnyToStringAny(pm)
+			}
+		}
+	case wire.InvokePayload:
+		commandID = p.CommandID
+		if p.Parameters != nil {
+			switch pm := p.Parameters.(type) {
+			case map[string]any:
+				params = pm
+			case map[any]any:
+				params = convertMapAnyAnyToStringAny(pm)
+			}
+		}
+	case map[any]any:
+		// CBOR decoded payload as generic map with integer keys
+		// InvokePayload: {1: commandId, 2: parameters}
+		if v, ok := p[uint64(1)].(uint64); ok {
+			commandID = uint8(v)
+		}
+		if v, ok := p[uint64(2)].(map[any]any); ok {
+			params = convertMapAnyAnyToStringAny(v)
+		} else if v, ok := p[uint64(2)].(map[string]any); ok {
+			params = v
+		}
+	default:
 		return &wire.Response{
 			MessageID: req.MessageID,
 			Status:    wire.StatusInvalidParameter,
@@ -422,17 +450,12 @@ func (h *ProtocolHandler) handleInvoke(req *wire.Request) *wire.Response {
 		}
 	}
 
-	// Convert parameters
-	var params map[string]any
-	if invokePayload.Parameters != nil {
-		if p, ok := invokePayload.Parameters.(map[string]any); ok {
-			params = p
-		}
-	}
-
-	// Invoke the command
+	// Invoke the command with caller zone ID in context
 	ctx := context.Background()
-	result, err := feature.InvokeCommand(ctx, invokePayload.CommandID, params)
+	if h.peerID != "" {
+		ctx = ContextWithCallerZoneID(ctx, h.peerID)
+	}
+	result, err := feature.InvokeCommand(ctx, commandID, params)
 	if err != nil {
 		status := wire.StatusInvalidCommand
 		if err == model.ErrCommandNotFound {
@@ -505,4 +528,17 @@ func (h *ProtocolHandler) NotifyAttributeChange(endpointID, featureID uint8, att
 	}
 
 	return nil
+}
+
+// convertMapAnyAnyToStringAny converts a map[any]any to map[string]any,
+// keeping only entries with string keys. CBOR decoding sometimes produces
+// map[any]any instead of map[string]any.
+func convertMapAnyAnyToStringAny(m map[any]any) map[string]any {
+	result := make(map[string]any)
+	for k, v := range m {
+		if key, ok := k.(string); ok {
+			result[key] = v
+		}
+	}
+	return result
 }

@@ -112,6 +112,9 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 	subConfig := subscription.DefaultConfig()
 	svc.subscriptionManager = subscription.NewManagerWithConfig(subConfig)
 
+	// Register service-level commands on DeviceInfo feature
+	svc.registerDeviceCommands()
+
 	return svc, nil
 }
 

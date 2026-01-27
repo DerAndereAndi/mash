@@ -1222,3 +1222,155 @@ func TestE2E_RenewalOverTLS(t *testing.T) {
 		t.Error("Session should be preserved during renewal, not replaced")
 	}
 }
+
+// TestE2E_RemoveDevice tests the full device removal flow:
+// 1. Device is commissioned to controller
+// 2. Controller sends RemoveDevice
+// 3. Device receives RemoveZone command and removes zone
+// 4. Both sides clean up properly
+func TestE2E_RemoveDevice(t *testing.T) {
+	// === Setup Device ===
+	device := model.NewDevice("evse-remove-001", 0x1234, 0x5678)
+
+	// Add DeviceInfo feature - required for RemoveZone command
+	endpoint, _ := device.GetEndpoint(0)
+	deviceInfo := model.NewFeature(model.FeatureDeviceInfo, 1)
+	endpoint.AddFeature(deviceInfo)
+
+	deviceConfig := validDeviceConfig()
+	deviceConfig.ListenAddress = "localhost:0"
+	deviceConfig.SetupCode = "12345678"
+	deviceConfig.Discriminator = 3210 // Max is 4095
+
+	deviceSvc, err := NewDeviceService(device, deviceConfig)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	deviceAdvertiser := newMockAdvertiser()
+	deviceSvc.SetAdvertiser(deviceAdvertiser)
+
+	// Track device zone removal event
+	deviceZoneRemovedCh := make(chan string, 1)
+	deviceSvc.OnEvent(func(e Event) {
+		if e.Type == EventZoneRemoved {
+			deviceZoneRemovedCh <- e.ZoneID
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Start device
+	if err := deviceSvc.Start(ctx); err != nil {
+		t.Fatalf("Device Start failed: %v", err)
+	}
+	defer func() { _ = deviceSvc.Stop() }()
+
+	if err := deviceSvc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	addr := deviceSvc.TLSAddr()
+	port := parseTestPort(addr.String())
+	t.Logf("Device listening on port %d", port)
+
+	// === Setup Controller ===
+	controllerConfig := validControllerConfig()
+	controllerConfig.ZoneName = "Home Energy Manager"
+
+	controllerSvc, err := NewControllerService(controllerConfig)
+	if err != nil {
+		t.Fatalf("NewControllerService failed: %v", err)
+	}
+
+	controllerSvc.SetBrowser(newMockBrowser())
+
+	// Track controller device removal event
+	controllerDeviceRemovedCh := make(chan string, 1)
+	controllerSvc.OnEvent(func(e Event) {
+		if e.Type == EventDeviceRemoved {
+			controllerDeviceRemovedCh <- e.DeviceID
+		}
+	})
+
+	if err := controllerSvc.Start(ctx); err != nil {
+		t.Fatalf("Controller Start failed: %v", err)
+	}
+	defer func() { _ = controllerSvc.Stop() }()
+
+	// === Commission Device ===
+	discoveryService := &discovery.CommissionableService{
+		InstanceName:  "MASH-3210",
+		Host:          "localhost",
+		Port:          port,
+		Addresses:     []string{"127.0.0.1"},
+		Discriminator: 3210,
+		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
+	}
+
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	if err != nil {
+		t.Fatalf("Commission failed: %v", err)
+	}
+
+	deviceID := connectedDevice.ID
+	t.Logf("Commissioned device: %s", deviceID)
+
+	// Wait for commissioning to stabilize
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify both sides show device connected
+	if deviceSvc.ZoneCount() != 1 {
+		t.Fatalf("Device should have 1 zone after commissioning, got %d", deviceSvc.ZoneCount())
+	}
+	if controllerSvc.DeviceCount() != 1 {
+		t.Fatalf("Controller should have 1 device after commissioning, got %d", controllerSvc.DeviceCount())
+	}
+
+	// === Remove Device ===
+	t.Log("Removing device from zone...")
+
+	err = controllerSvc.RemoveDevice(ctx, deviceID)
+	if err != nil {
+		t.Fatalf("RemoveDevice failed: %v", err)
+	}
+
+	// === Verify Results ===
+	// Wait for controller event
+	select {
+	case removedDeviceID := <-controllerDeviceRemovedCh:
+		if removedDeviceID != deviceID {
+			t.Errorf("Expected device ID %s, got %s", deviceID, removedDeviceID)
+		}
+		t.Log("Controller received EventDeviceRemoved")
+	case <-time.After(2 * time.Second):
+		t.Error("Controller should have received EventDeviceRemoved")
+	}
+
+	// Wait for device zone removal
+	select {
+	case <-deviceZoneRemovedCh:
+		t.Log("Device received EventZoneRemoved")
+	case <-time.After(2 * time.Second):
+		t.Error("Device should have received EventZoneRemoved")
+	}
+
+	// Verify device state - zone should be removed
+	time.Sleep(100 * time.Millisecond) // Allow async cleanup
+	if deviceSvc.ZoneCount() != 0 {
+		t.Errorf("Device should have 0 zones after removal, got %d", deviceSvc.ZoneCount())
+	}
+
+	// Verify controller state - device should be removed
+	if controllerSvc.DeviceCount() != 0 {
+		t.Errorf("Controller should have 0 devices after removal, got %d", controllerSvc.DeviceCount())
+	}
+
+	storedDevice := controllerSvc.GetDevice(deviceID)
+	if storedDevice != nil {
+		t.Error("Device should not exist in controller after removal")
+	}
+
+	t.Log("Device successfully removed from zone")
+}
