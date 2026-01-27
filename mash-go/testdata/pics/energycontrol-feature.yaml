@@ -1,0 +1,236 @@
+# PICS (Protocol Implementation Conformance Statement)
+# EnergyControl Feature Capabilities
+#
+# This file describes the EnergyControl feature capabilities for test filtering.
+# The EnergyControl feature defines "what the device SHOULD do" - limits,
+# setpoints, and process control.
+
+# Device Identification
+device:
+  vendor: "Reference"
+  product: "EnergyControl Feature PICS"
+  model: "N/A"
+  version: "1.0.0"
+
+# PICS Items
+items:
+  # ==========================================================================
+  # Feature Presence
+  # ==========================================================================
+
+  MASH.S.CTRL: true               # EnergyControl feature present
+
+  # ==========================================================================
+  # Feature Flags (FeatureMap bits)
+  # ==========================================================================
+
+  MASH.S.CTRL.F00: true           # CORE - Always required
+  MASH.S.CTRL.F01: false          # FLEX - Flexibility (not implemented)
+  MASH.S.CTRL.F02: false          # BATTERY - Battery-specific (via device type)
+  MASH.S.CTRL.F03: false          # EMOB - Electric mobility (requires CHRG)
+  MASH.S.CTRL.F04: false          # SIGNALS - Time-slotted signals (not implemented)
+  MASH.S.CTRL.F05: false          # TARIFF - Price structures (not implemented)
+  MASH.S.CTRL.F06: false          # PLAN - Device scheduling (not implemented)
+  MASH.S.CTRL.F07: false          # PROCESS - Process management
+  MASH.S.CTRL.F08: false          # FORECAST - Forecast data (not implemented)
+  MASH.S.CTRL.F09: false          # ASYMMETRIC - Per-phase control
+  MASH.S.CTRL.F0A: false          # V2X - Vehicle-to-everything
+
+  # ==========================================================================
+  # Device Type & State Attributes (Mandatory)
+  # ==========================================================================
+
+  MASH.S.CTRL.A01: true           # deviceType (DeviceType enum)
+  MASH.S.CTRL.A02: true           # controlState (ControlState enum)
+  MASH.S.CTRL.A03: true           # optOutState (OptOutState enum)
+
+  # ==========================================================================
+  # Control Capabilities (Mandatory, Boolean)
+  # ==========================================================================
+
+  MASH.S.CTRL.A0A: true           # acceptsLimits
+  MASH.S.CTRL.A0B: true           # acceptsCurrentLimits
+  MASH.S.CTRL.A0C: true           # acceptsSetpoints
+  MASH.S.CTRL.A0D: false          # acceptsCurrentSetpoints (requires V2X)
+  MASH.S.CTRL.A0E: true           # isPausable
+  MASH.S.CTRL.A0F: false          # isShiftable (requires FLEX)
+  MASH.S.CTRL.A10: false          # isStoppable (requires PROCESS)
+
+  # ==========================================================================
+  # Power Limit Attributes (Nullable, mW)
+  # ==========================================================================
+
+  MASH.S.CTRL.A14: true           # effectiveConsumptionLimit (multi-zone resolved)
+  MASH.S.CTRL.A15: true           # myConsumptionLimit (this zone's limit)
+  MASH.S.CTRL.A16: false          # effectiveProductionLimit (requires BIDIRECTIONAL)
+  MASH.S.CTRL.A17: false          # myProductionLimit (requires BIDIRECTIONAL)
+
+  # ==========================================================================
+  # Per-Phase Current Limit Attributes (Nullable, mA, requires ASYMMETRIC)
+  # ==========================================================================
+
+  MASH.S.CTRL.A1E: false          # effectiveCurrentLimitsConsumption
+  MASH.S.CTRL.A1F: false          # myCurrentLimitsConsumption
+  MASH.S.CTRL.A20: false          # effectiveCurrentLimitsProduction
+  MASH.S.CTRL.A21: false          # myCurrentLimitsProduction
+
+  # ==========================================================================
+  # Power Setpoint Attributes (Nullable, mW)
+  # ==========================================================================
+
+  MASH.S.CTRL.A28: true           # effectiveConsumptionSetpoint
+  MASH.S.CTRL.A29: true           # myConsumptionSetpoint
+  MASH.S.CTRL.A2A: false          # effectiveProductionSetpoint (requires BIDIRECTIONAL)
+  MASH.S.CTRL.A2B: false          # myProductionSetpoint (requires BIDIRECTIONAL)
+
+  # ==========================================================================
+  # Per-Phase Current Setpoint Attributes (Nullable, mA, requires V2X)
+  # ==========================================================================
+
+  MASH.S.CTRL.A32: false          # effectiveCurrentSetpointsConsumption
+  MASH.S.CTRL.A33: false          # myCurrentSetpointsConsumption
+  MASH.S.CTRL.A34: false          # effectiveCurrentSetpointsProduction
+  MASH.S.CTRL.A35: false          # myCurrentSetpointsProduction
+
+  # ==========================================================================
+  # Flexibility Attributes (requires FLEX)
+  # ==========================================================================
+
+  MASH.S.CTRL.A3C: false          # flexibility
+
+  # ==========================================================================
+  # Forecast Attributes (requires FORECAST)
+  # ==========================================================================
+
+  MASH.S.CTRL.A3D: false          # forecast
+
+  # ==========================================================================
+  # Failsafe Attributes (Mandatory)
+  # ==========================================================================
+
+  MASH.S.CTRL.A46: true           # failsafeConsumptionLimit (mW)
+  MASH.S.CTRL.A47: false          # failsafeProductionLimit (requires BIDIRECTIONAL)
+  MASH.S.CTRL.A48: true           # failsafeDuration (seconds, default 7200)
+
+  # ==========================================================================
+  # Process Attributes (requires PROCESS)
+  # ==========================================================================
+
+  MASH.S.CTRL.A50: false          # processState
+  MASH.S.CTRL.A51: false          # optionalProcess
+
+  # ==========================================================================
+  # Commands
+  # ==========================================================================
+
+  # Power Limits
+  MASH.S.CTRL.C01.Rsp: true       # SetLimit
+  MASH.S.CTRL.C02.Rsp: true       # ClearLimit
+
+  # Power Setpoints
+  MASH.S.CTRL.C03.Rsp: true       # SetSetpoint
+  MASH.S.CTRL.C04.Rsp: true       # ClearSetpoint
+
+  # Current Limits
+  MASH.S.CTRL.C05.Rsp: true       # SetCurrentLimits
+  MASH.S.CTRL.C06.Rsp: true       # ClearCurrentLimits
+
+  # Current Setpoints (requires V2X)
+  MASH.S.CTRL.C07.Rsp: false      # SetCurrentSetpoints
+  MASH.S.CTRL.C08.Rsp: false      # ClearCurrentSetpoints
+
+  # Process Control
+  MASH.S.CTRL.C09.Rsp: true       # Pause
+  MASH.S.CTRL.C0A.Rsp: true       # Resume
+  MASH.S.CTRL.C0B.Rsp: false      # Stop (requires PROCESS)
+  MASH.S.CTRL.C0C.Rsp: false      # ScheduleProcess (requires PROCESS)
+  MASH.S.CTRL.C0D.Rsp: false      # CancelProcess (requires PROCESS)
+  MASH.S.CTRL.C0E.Rsp: false      # AdjustStartTime (requires isShiftable)
+
+  # ==========================================================================
+  # Behavioral Capabilities
+  # ==========================================================================
+
+  # Multi-zone resolution: most restrictive wins for limits
+  MASH.S.CTRL.B_MULTIZONE: true   # Multi-zone value resolution
+
+  # Duration parameter causes value expiry
+  MASH.S.CTRL.B_DURATION: true    # Duration-based expiry
+
+  # Effective vs own value separation
+  MASH.S.CTRL.B_EFFECTIVE: true   # Effective/own value split
+
+  # OptOut states filter commands
+  MASH.S.CTRL.B_OPTOUT: true      # OptOut state filtering
+
+# =============================================================================
+# ControlState Enum Values
+# =============================================================================
+# AUTONOMOUS (0x00)   - Not under external control
+# CONTROLLED (0x01)   - Under zone control, no active limit
+# LIMITED (0x02)      - Active power limit being applied
+# FAILSAFE (0x03)     - Connection lost, using failsafe limits
+# OVERRIDE (0x04)     - Device overriding limits (safety/legal)
+
+# =============================================================================
+# ProcessState Enum Values
+# =============================================================================
+# NONE (0x00)         - No process
+# AVAILABLE (0x01)    - Process ready to start
+# SCHEDULED (0x02)    - Process scheduled
+# RUNNING (0x03)      - Process running
+# PAUSED (0x04)       - Process paused
+# COMPLETED (0x05)    - Process completed
+# ABORTED (0x06)      - Process aborted
+
+# =============================================================================
+# DeviceType Enum Values
+# =============================================================================
+# EVSE (0x00), HEAT_PUMP (0x01), WATER_HEATER (0x02), BATTERY (0x03),
+# INVERTER (0x04), FLEXIBLE_LOAD (0x05), OTHER (0xFF)
+
+# =============================================================================
+# Test Case to PICS Mapping
+# =============================================================================
+#
+# TC-CTRL-001 (SetLimit command accepted):
+#   - MASH.S.CTRL.C01.Rsp: true
+#   - MASH.S.CTRL.A0A: true
+#
+# TC-CTRL-002 (ClearLimit removes limit):
+#   - MASH.S.CTRL.C02.Rsp: true
+#
+# TC-CTRL-003 (SetSetpoint command accepted):
+#   - MASH.S.CTRL.C03.Rsp: true
+#   - MASH.S.CTRL.A0C: true
+#
+# TC-CTRL-004 (Pause command transitions state):
+#   - MASH.S.CTRL.C09.Rsp: true
+#   - MASH.S.CTRL.A0E: true
+#
+# TC-CTRL-005 (Resume from paused state):
+#   - MASH.S.CTRL.C0A.Rsp: true
+#
+# TC-CTRL-006 (Stop aborts process):
+#   - MASH.S.CTRL.C0B.Rsp: true
+#   - MASH.S.CTRL.A10: true
+#
+# TC-CTRL-007 (Effective vs own limit values):
+#   - MASH.S.CTRL.B_EFFECTIVE: true
+#
+# TC-CTRL-008 (OptOut states respected):
+#   - MASH.S.CTRL.B_OPTOUT: true
+#
+# TC-CTRL-009 (Failsafe limits applied):
+#   - MASH.S.CTRL.A46: true
+#   - MASH.S.CTRL.A48: true
+#
+# TC-CTRL-010 (Command to unsupported capability fails):
+#   - MASH.S.CTRL: true
+#
+# TC-CTRL-011 (Duration parameter expires limit):
+#   - MASH.S.CTRL.B_DURATION: true
+#
+# TC-CTRL-012 (Per-phase current limits):
+#   - MASH.S.CTRL.F09: true
+#   - MASH.S.CTRL.C05.Rsp: true

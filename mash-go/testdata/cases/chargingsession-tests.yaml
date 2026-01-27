@@ -1,0 +1,551 @@
+# Test Suite: ChargingSession Feature Tests
+# Verifies EV charging session management and V2G capabilities
+#
+# Key concepts:
+# - Session lifecycle: NOT_PLUGGED_IN -> CHARGING -> SESSION_COMPLETE
+# - V2G (Vehicle-to-Grid): Bidirectional charging, CanDischarge logic
+# - Charging modes: PV_SURPLUS, PRICE_OPTIMIZED, SCHEDULED
+
+---
+# TC-CHRG-001: Session Lifecycle NOT_PLUGGED_IN to CHARGING
+id: TC-CHRG-001
+name: Session Lifecycle NOT_PLUGGED_IN to CHARGING
+description: |
+  Verifies the normal charging session lifecycle from no connection
+  through to active charging.
+
+pics_requirements:
+  - MASH.S.CHRG
+  - MASH.S.CHRG.A01          # state
+  - MASH.S.CHRG.B_LIFECYCLE
+
+preconditions:
+  - session_established: true
+  - device_type: EVSE
+
+steps:
+  - name: Verify initial state NOT_PLUGGED_IN
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: state
+    expect:
+      read_success: true
+      value: 0x00              # NOT_PLUGGED_IN
+
+  - name: Simulate cable plug-in
+    action: device_local_action
+    params:
+      action: plug_in_cable
+
+  - name: Verify state is PLUGGED_IN_NO_DEMAND or PLUGGED_IN_DEMAND
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: state
+    expect:
+      read_success: true
+      value_in: [0x01, 0x02]   # PLUGGED_IN_NO_DEMAND or PLUGGED_IN_DEMAND
+
+  - name: Simulate EV demands charging
+    action: device_local_action
+    params:
+      action: ev_requests_charge
+
+  - name: Verify state is PLUGGED_IN_CHARGING
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: state
+    expect:
+      read_success: true
+      value: 0x03              # PLUGGED_IN_CHARGING
+
+postconditions:
+  - session_active: true
+
+timeout: "15s"
+tags:
+  - chargingsession
+  - lifecycle
+  - basic
+
+---
+# TC-CHRG-002: StartSession Sets ID and Time
+id: TC-CHRG-002
+name: StartSession Sets ID and Time
+description: |
+  Verifies that starting a session sets the session ID and
+  start time correctly.
+
+pics_requirements:
+  - MASH.S.CHRG
+  - MASH.S.CHRG.A02          # sessionId
+  - MASH.S.CHRG.A03          # sessionStartTime
+  - MASH.S.CHRG.B_LIFECYCLE
+
+preconditions:
+  - session_established: true
+  - device_type: EVSE
+  - charging_state: PLUGGED_IN_CHARGING
+
+steps:
+  - name: Read session ID
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: sessionId
+    expect:
+      read_success: true
+      value_greater_than: 0    # Session ID assigned
+
+  - name: Read session start time
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: sessionStartTime
+    expect:
+      read_success: true
+      value_is_recent: true    # Within last minute
+
+postconditions:
+  - session_metadata_set: true
+
+timeout: "10s"
+tags:
+  - chargingsession
+  - session
+  - metadata
+
+---
+# TC-CHRG-003: EndSession Returns to NOT_PLUGGED_IN
+id: TC-CHRG-003
+name: EndSession Returns to NOT_PLUGGED_IN
+description: |
+  Verifies that ending a session (unplugging) returns state
+  to NOT_PLUGGED_IN and sets end time.
+
+pics_requirements:
+  - MASH.S.CHRG
+  - MASH.S.CHRG.A01
+  - MASH.S.CHRG.A04          # sessionEndTime
+  - MASH.S.CHRG.B_LIFECYCLE
+
+preconditions:
+  - session_established: true
+  - charging_state: PLUGGED_IN_CHARGING
+
+steps:
+  - name: Simulate cable unplug
+    action: device_local_action
+    params:
+      action: unplug_cable
+
+  - name: Verify state is NOT_PLUGGED_IN
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: state
+    expect:
+      read_success: true
+      value: 0x00              # NOT_PLUGGED_IN
+
+  - name: Verify session end time was set
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: sessionEndTime
+    expect:
+      read_success: true
+      value_is_recent: true
+
+postconditions:
+  - session_ended: true
+
+timeout: "10s"
+tags:
+  - chargingsession
+  - lifecycle
+  - end
+
+---
+# TC-CHRG-004: EV Demand Modes
+id: TC-CHRG-004
+name: EV Demand Modes
+description: |
+  Verifies that EV demand mode attribute reflects the EV's
+  charging request type.
+
+pics_requirements:
+  - MASH.S.CHRG
+  - MASH.S.CHRG.A28          # evDemandMode
+
+preconditions:
+  - session_established: true
+  - ev_connected: true
+
+steps:
+  - name: Read EV demand mode
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evDemandMode
+    expect:
+      read_success: true
+      value_in: [0x00, 0x01, 0x02, 0x03, 0x04]  # NONE through DYNAMIC_BIDIRECTIONAL
+
+  - name: If DYNAMIC mode, verify energy requests present
+    action: conditional_read
+    params:
+      condition: evDemandMode >= 0x03
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evMinEnergyRequest
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+postconditions:
+  - demand_mode_readable: true
+
+timeout: "10s"
+tags:
+  - chargingsession
+  - demand
+  - mode
+
+---
+# TC-CHRG-005: CanDischarge Logic - All Conditions
+id: TC-CHRG-005
+name: CanDischarge Logic All Conditions
+description: |
+  Verifies the CanDischarge() logic that requires all conditions:
+  - evMinDischargingRequest < 0
+  - evDischargeBelowTargetPermitted OR SoC > target
+  - evDemandMode == DYNAMIC_BIDIRECTIONAL
+
+pics_requirements:
+  - MASH.S.CHRG
+  - MASH.S.CHRG.B_DISCHARGE
+  - MASH.S.CHRG.A_V2G
+
+preconditions:
+  - session_established: true
+  - device_supports_v2g: true
+  - ev_supports_v2g: true
+
+steps:
+  - name: Read EV demand mode
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evDemandMode
+    expect:
+      read_success: true
+      value: 0x04              # DYNAMIC_BIDIRECTIONAL
+
+  - name: Read minimum discharging request
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evMinDischargingRequest
+    expect:
+      read_success: true
+      value_less_than: 0       # Must be negative
+
+  - name: Read discharge below target permitted
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evDischargeBelowTargetPermitted
+    expect:
+      read_success: true
+      value: true              # Discharging allowed
+
+  - name: Verify CanDischarge would return true
+    action: evaluate
+    params:
+      expression: >
+        evDemandMode == 0x04 &&
+        evMinDischargingRequest < 0 &&
+        evDischargeBelowTargetPermitted == true
+    expect:
+      result: true
+
+postconditions:
+  - can_discharge_verified: true
+
+timeout: "10s"
+tags:
+  - chargingsession
+  - v2g
+  - discharge
+
+---
+# TC-CHRG-006: CanDischarge False When Min >= 0
+id: TC-CHRG-006
+name: CanDischarge False When Min >= 0
+description: |
+  Verifies that CanDischarge returns false when
+  evMinDischargingRequest is >= 0 (EV doesn't allow discharge).
+
+pics_requirements:
+  - MASH.S.CHRG
+  - MASH.S.CHRG.B_DISCHARGE
+
+preconditions:
+  - session_established: true
+  - ev_does_not_allow_discharge: true
+
+steps:
+  - name: Read minimum discharging request
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evMinDischargingRequest
+    expect:
+      read_success: true
+      value_greater_or_equal: 0  # EV says no discharge
+
+  - name: Verify CanDischarge would return false
+    action: evaluate
+    params:
+      expression: "evMinDischargingRequest >= 0"
+    expect:
+      result: true             # This means CanDischarge = false
+
+postconditions:
+  - discharge_prevented: true
+
+timeout: "10s"
+tags:
+  - chargingsession
+  - v2g
+  - negative
+
+---
+# TC-CHRG-007: Charging Mode Validation
+id: TC-CHRG-007
+name: Charging Mode Validation
+description: |
+  Verifies that charging mode can be set and validates against
+  supported modes.
+
+pics_requirements:
+  - MASH.S.CHRG
+  - MASH.S.CHRG.A46          # chargingMode
+  - MASH.S.CHRG.A47          # supportedChargingModes
+  - MASH.S.CHRG.B_MODE
+  - MASH.S.CHRG.C01.Rsp      # SetChargingMode
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read supported charging modes
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: supportedChargingModes
+    expect:
+      read_success: true
+      save_as: supported_modes
+
+  - name: Set a supported charging mode
+    action: invoke
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      command: SetChargingMode
+      args:
+        mode: 0x01             # PV_SURPLUS_ONLY (if supported)
+    expect:
+      invoke_success: true
+
+  - name: Verify mode was set
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: chargingMode
+    expect:
+      read_success: true
+      value: 0x01              # PV_SURPLUS_ONLY
+
+postconditions:
+  - charging_mode_set: true
+
+timeout: "10s"
+tags:
+  - chargingsession
+  - mode
+  - command
+
+---
+# TC-CHRG-008: Start/Stop Delays
+id: TC-CHRG-008
+name: Start/Stop Delays
+description: |
+  Verifies that start and stop delay attributes are readable
+  and within valid ranges.
+
+pics_requirements:
+  - MASH.S.CHRG
+  - MASH.S.CHRG.A50          # startDelay
+  - MASH.S.CHRG.A51          # stopDelay
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read start delay
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: startDelay
+    expect:
+      read_success: true
+      value_non_negative: true
+
+  - name: Read stop delay
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: stopDelay
+    expect:
+      read_success: true
+      value_non_negative: true
+
+postconditions:
+  - delays_readable: true
+
+timeout: "5s"
+tags:
+  - chargingsession
+  - delay
+  - timing
+
+---
+# TC-CHRG-009: EV Identification Storage
+id: TC-CHRG-009
+name: EV Identification Storage
+description: |
+  Verifies that EV identification information is stored and
+  retrievable (VIN, contract ID, etc.).
+
+pics_requirements:
+  - MASH.S.CHRG
+  - MASH.S.CHRG.A14          # evIdentifications
+
+preconditions:
+  - session_established: true
+  - ev_connected: true
+  - ev_provides_identification: true
+
+steps:
+  - name: Read EV identifications
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evIdentifications
+    expect:
+      read_success: true
+      value_is_array: true
+      array_not_empty: true
+
+  - name: Verify identification structure
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evIdentifications
+    expect:
+      read_success: true
+      each_item_has:
+        - type                 # EVIDType enum
+        - value                # string identifier
+
+postconditions:
+  - ev_id_stored: true
+
+timeout: "10s"
+tags:
+  - chargingsession
+  - identification
+  - ev
+
+---
+# TC-CHRG-010: Session Energy Tracking
+id: TC-CHRG-010
+name: Session Energy Tracking
+description: |
+  Verifies that session energy charged is tracked cumulatively
+  during a charging session.
+
+pics_requirements:
+  - MASH.S.CHRG
+  - MASH.S.CHRG.A0A          # sessionEnergyCharged
+
+preconditions:
+  - session_established: true
+  - charging_state: PLUGGED_IN_CHARGING
+
+steps:
+  - name: Read initial session energy
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: sessionEnergyCharged
+    expect:
+      read_success: true
+      save_as: initial_energy
+
+  - name: Wait for some charging
+    action: wait
+    params:
+      duration: "10s"
+
+  - name: Read session energy again
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: sessionEnergyCharged
+    expect:
+      read_success: true
+      save_as: later_energy
+
+  - name: Verify energy increased
+    action: compare
+    params:
+      left: later_energy
+      operator: ">="
+      right: initial_energy
+    expect:
+      comparison_true: true
+
+postconditions:
+  - energy_tracked: true
+
+timeout: "20s"
+tags:
+  - chargingsession
+  - energy
+  - tracking

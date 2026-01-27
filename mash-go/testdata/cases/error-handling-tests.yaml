@@ -1,0 +1,237 @@
+# Test Suite: Error Handling Tests
+# Verifies proper error responses for invalid operations
+#
+# Key concepts:
+# - Invalid addressing (endpoint, feature, attribute)
+# - Access control (read-only writes)
+# - Constraint violations
+
+---
+# TC-ERR-001: Invalid Endpoint Returns Error
+id: TC-ERR-001
+name: Invalid Endpoint Returns Error
+description: |
+  Verifies that accessing a non-existent endpoint returns
+  an appropriate error response.
+
+pics_requirements:
+  - MASH.S
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read endpoint list to find valid range
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: endpointList
+    expect:
+      read_success: true
+      save_as: valid_endpoints
+
+  - name: Attempt read from invalid endpoint
+    action: read
+    params:
+      endpoint: 255            # Likely invalid
+      feature: DeviceInfo
+      attribute: vendorId
+    expect:
+      read_success: false
+      error_code: INVALID_ENDPOINT
+
+postconditions:
+  - invalid_endpoint_rejected: true
+
+timeout: "10s"
+tags:
+  - error
+  - endpoint
+  - addressing
+
+---
+# TC-ERR-002: Invalid Feature Returns Error
+id: TC-ERR-002
+name: Invalid Feature Returns Error
+description: |
+  Verifies that accessing a non-existent feature on a valid
+  endpoint returns an appropriate error.
+
+pics_requirements:
+  - MASH.S
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Attempt read from invalid feature ID
+    action: read
+    params:
+      endpoint: 1
+      feature: 0xFF            # Invalid feature ID
+      attribute: 1
+    expect:
+      read_success: false
+      error_code: INVALID_FEATURE
+
+postconditions:
+  - invalid_feature_rejected: true
+
+timeout: "10s"
+tags:
+  - error
+  - feature
+  - addressing
+
+---
+# TC-ERR-003: Invalid Attribute Returns Error
+id: TC-ERR-003
+name: Invalid Attribute Returns Error
+description: |
+  Verifies that reading a non-existent attribute on a valid
+  feature returns an appropriate error.
+
+pics_requirements:
+  - MASH.S
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Attempt read of invalid attribute
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: 0xFF          # Invalid attribute ID
+    expect:
+      read_success: false
+      error_code: INVALID_ATTRIBUTE
+
+postconditions:
+  - invalid_attribute_rejected: true
+
+timeout: "10s"
+tags:
+  - error
+  - attribute
+  - addressing
+
+---
+# TC-ERR-004: Write to Read-Only Fails
+id: TC-ERR-004
+name: Write to Read-Only Attribute Fails
+description: |
+  Verifies that attempting to write to a read-only attribute
+  returns an appropriate error.
+
+pics_requirements:
+  - MASH.S.MEAS
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Attempt write to read-only acActivePower
+    action: write
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower  # Read-only attribute
+      value: 1000000
+    expect:
+      write_success: false
+      error_code: READ_ONLY
+
+postconditions:
+  - read_only_protected: true
+
+timeout: "10s"
+tags:
+  - error
+  - write
+  - read-only
+
+---
+# TC-ERR-005: Invalid Command Parameter
+id: TC-ERR-005
+name: Invalid Command Parameter
+description: |
+  Verifies that invoking a command with invalid parameters
+  returns an appropriate error.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Invoke SetLimit with negative consumption limit
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: -1000000  # Invalid: consumption should be positive
+    expect:
+      invoke_success: false
+      error_code: INVALID_PARAMETER
+
+postconditions:
+  - invalid_parameter_rejected: true
+
+timeout: "10s"
+tags:
+  - error
+  - command
+  - parameter
+
+---
+# TC-ERR-006: Constraint Violation
+id: TC-ERR-006
+name: Constraint Violation Error
+description: |
+  Verifies that values outside defined constraints are rejected
+  with appropriate error.
+
+pics_requirements:
+  - MASH.S.CTRL
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read maximum power rating
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxConsumption
+    expect:
+      read_success: true
+      save_as: max_power
+
+  - name: Attempt to set limit above maximum
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 999999999999  # Way above any device capacity
+    expect:
+      invoke_success: false
+      error_code: CONSTRAINT_VIOLATION
+
+postconditions:
+  - constraint_enforced: true
+
+timeout: "10s"
+tags:
+  - error
+  - constraint
+  - validation

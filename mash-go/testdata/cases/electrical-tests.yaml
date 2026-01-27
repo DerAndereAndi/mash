@@ -1,0 +1,414 @@
+# Test Suite: Electrical Feature Tests
+# Verifies reading electrical characteristics and capabilities
+#
+# The Electrical feature defines "what the device CAN do" - static
+# electrical configuration, phase setup, and power ratings.
+
+---
+# TC-ELEC-001: Read Phase Configuration
+id: TC-ELEC-001
+name: Read Phase Configuration
+description: |
+  Verifies that phase configuration attributes can be read
+  successfully, including phase count and mapping.
+
+pics_requirements:
+  - MASH.S.ELEC
+  - MASH.S.ELEC.A01          # phaseCount
+  - MASH.S.ELEC.A02          # phaseMapping
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read phase count
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: phaseCount
+    expect:
+      read_success: true
+      value_in_range: [1, 3]   # 1, 2, or 3 phases
+
+  - name: Read phase mapping
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: phaseMapping
+    expect:
+      read_success: true
+      value_is_map: true
+      keys_valid_phases: true  # A, B, C
+      values_valid_grid_phases: true  # L1, L2, L3
+
+postconditions:
+  - phase_config_readable: true
+
+timeout: "5s"
+tags:
+  - electrical
+  - read
+  - basic
+
+---
+# TC-ELEC-002: IsBidirectional Returns Correct Value
+id: TC-ELEC-002
+name: IsBidirectional Returns Correct Value
+description: |
+  Verifies that the supportedDirections attribute correctly
+  indicates bidirectional capability.
+
+pics_requirements:
+  - MASH.S.ELEC
+  - MASH.S.ELEC.A05          # supportedDirections
+  - MASH.S.ELEC.B_BIDIR
+
+preconditions:
+  - session_established: true
+  - device_is_bidirectional: true
+
+steps:
+  - name: Read supported directions
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: supportedDirections
+    expect:
+      read_success: true
+      value: 0x02              # BIDIRECTIONAL
+
+  - name: Verify production limit attribute exists
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxProduction
+    expect:
+      read_success: true
+      value_greater_than: 0    # Should have production capacity
+
+postconditions:
+  - bidirectional_correctly_indicated: true
+
+timeout: "5s"
+tags:
+  - electrical
+  - bidirectional
+  - capability
+
+---
+# TC-ELEC-003: CanConsume for Consumption-Only Device
+id: TC-ELEC-003
+name: CanConsume for Consumption-Only Device
+description: |
+  Verifies that a consumption-only device reports CONSUMPTION
+  direction and has no production capability.
+
+pics_requirements:
+  - MASH.S.ELEC
+  - MASH.S.ELEC.A05
+  - MASH.S.ELEC.B_DIRECTION
+
+preconditions:
+  - session_established: true
+  - device_is_consumption_only: true
+
+steps:
+  - name: Read supported directions
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: supportedDirections
+    expect:
+      read_success: true
+      value: 0x00              # CONSUMPTION
+
+  - name: Verify consumption capacity exists
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxConsumption
+    expect:
+      read_success: true
+      value_greater_than: 0
+
+  - name: Verify no production capacity
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxProduction
+    expect:
+      read_success: true
+      value: 0                 # No production
+
+postconditions:
+  - consumption_only_verified: true
+
+timeout: "5s"
+tags:
+  - electrical
+  - consumption
+  - direction
+
+---
+# TC-ELEC-004: CanProduce for Production-Only Device
+id: TC-ELEC-004
+name: CanProduce for Production-Only Device
+description: |
+  Verifies that a production-only device (e.g., PV inverter) reports
+  PRODUCTION direction and has no consumption capability.
+
+pics_requirements:
+  - MASH.S.ELEC
+  - MASH.S.ELEC.A05
+  - MASH.S.ELEC.B_DIRECTION
+
+preconditions:
+  - session_established: true
+  - device_is_production_only: true
+
+steps:
+  - name: Read supported directions
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: supportedDirections
+    expect:
+      read_success: true
+      value: 0x01              # PRODUCTION
+
+  - name: Verify production capacity exists
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxProduction
+    expect:
+      read_success: true
+      value_greater_than: 0
+
+  - name: Verify no consumption capacity
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxConsumption
+    expect:
+      read_success: true
+      value: 0                 # No consumption
+
+postconditions:
+  - production_only_verified: true
+
+timeout: "5s"
+tags:
+  - electrical
+  - production
+  - direction
+
+---
+# TC-ELEC-005: Phase Mapping Consistency
+id: TC-ELEC-005
+name: Phase Mapping Consistency
+description: |
+  Verifies that phase mapping is consistent with phase count
+  and contains valid grid phase assignments.
+
+pics_requirements:
+  - MASH.S.ELEC
+  - MASH.S.ELEC.A01
+  - MASH.S.ELEC.A02
+  - MASH.S.ELEC.B_PHASE_MAP
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read phase count
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: phaseCount
+    expect:
+      read_success: true
+      save_as: phase_count
+
+  - name: Read phase mapping
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: phaseMapping
+    expect:
+      read_success: true
+      map_size_equals: phase_count
+      all_values_unique: true  # No duplicate grid phases
+
+postconditions:
+  - phase_mapping_consistent: true
+
+timeout: "5s"
+tags:
+  - electrical
+  - phases
+  - validation
+
+---
+# TC-ELEC-006: Power Ratings Validation
+id: TC-ELEC-006
+name: Power Ratings Validation
+description: |
+  Verifies that power rating attributes are present and have
+  valid values (min <= max, reasonable ranges).
+
+pics_requirements:
+  - MASH.S.ELEC
+  - MASH.S.ELEC.A0A          # nominalMaxConsumption
+  - MASH.S.ELEC.A0B          # nominalMaxProduction
+  - MASH.S.ELEC.A0C          # nominalMinPower
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read maximum consumption power
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxConsumption
+    expect:
+      read_success: true
+      value_non_negative: true
+      save_as: max_consumption
+
+  - name: Read minimum power (if supported)
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMinPower
+    expect:
+      read_success: true
+      value_non_negative: true
+      save_as: min_power
+
+  - name: Verify min <= max
+    action: compare
+    params:
+      left: min_power
+      operator: "<="
+      right: max_consumption
+    expect:
+      comparison_true: true
+
+postconditions:
+  - power_ratings_valid: true
+
+timeout: "5s"
+tags:
+  - electrical
+  - power
+  - validation
+
+---
+# TC-ELEC-007: Asymmetric Support Levels
+id: TC-ELEC-007
+name: Asymmetric Support Levels
+description: |
+  Verifies that asymmetric support attribute correctly indicates
+  per-phase control capability.
+
+pics_requirements:
+  - MASH.S.ELEC
+  - MASH.S.ELEC.A0F          # supportsAsymmetric
+
+preconditions:
+  - session_established: true
+  - device_is_multiphase: true
+
+steps:
+  - name: Read asymmetric support
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: supportsAsymmetric
+    expect:
+      read_success: true
+      value_in: [0x00, 0x01, 0x02, 0x03]  # NONE, CONSUMPTION, PRODUCTION, BIDIRECTIONAL
+
+  - name: If asymmetric consumption, verify current limits available
+    action: conditional_read
+    params:
+      condition: supportsAsymmetric >= 0x01
+      endpoint: 1
+      feature: EnergyControl
+      attribute: acceptsCurrentLimits
+    expect:
+      read_success: true
+      value: true
+
+postconditions:
+  - asymmetric_support_consistent: true
+
+timeout: "5s"
+tags:
+  - electrical
+  - asymmetric
+  - per-phase
+
+---
+# TC-ELEC-008: Energy Capacity for Storage
+id: TC-ELEC-008
+name: Energy Capacity for Storage Device
+description: |
+  Verifies that battery/storage devices report energy capacity
+  attribute with valid values.
+
+pics_requirements:
+  - MASH.S.ELEC
+  - MASH.S.ELEC.A14          # energyCapacity
+
+preconditions:
+  - session_established: true
+  - device_type: BATTERY
+
+steps:
+  - name: Read energy capacity
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: energyCapacity
+    expect:
+      read_success: true
+      value_greater_than: 0    # Battery must have capacity
+
+  - name: Verify reasonable capacity (1 kWh - 1 MWh)
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: energyCapacity
+    expect:
+      read_success: true
+      value_in_range: [1000000, 1000000000000]  # 1 kWh to 1 MWh in mWh
+
+postconditions:
+  - storage_capacity_valid: true
+
+timeout: "5s"
+tags:
+  - electrical
+  - battery
+  - storage
+  - capacity

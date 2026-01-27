@@ -1,0 +1,133 @@
+# PICS (Protocol Implementation Conformance Statement)
+# Measurement Feature Capabilities
+#
+# This file describes the Measurement feature capabilities for test filtering.
+# The Measurement feature defines "what the device IS doing" - real-time
+# telemetry for power, current, voltage, and energy.
+
+# Device Identification
+device:
+  vendor: "Reference"
+  product: "Measurement Feature PICS"
+  model: "N/A"
+  version: "1.0.0"
+
+# PICS Items
+items:
+  # ==========================================================================
+  # Feature Presence
+  # ==========================================================================
+
+  MASH.S.MEAS: true               # Measurement feature present
+
+  # ==========================================================================
+  # AC Power Attributes (Nullable)
+  # ==========================================================================
+
+  MASH.S.MEAS.A01: true           # acActivePower (int64, mW, +consumption/-production)
+  MASH.S.MEAS.A02: true           # acReactivePower (int64, mVAR)
+  MASH.S.MEAS.A03: true           # acApparentPower (uint64, mVA, always positive)
+  MASH.S.MEAS.A0A: true           # acActivePowerPerPhase (map[Phase]int64, mW)
+  MASH.S.MEAS.A0B: true           # acReactivePowerPerPhase (map[Phase]int64, mVAR)
+  MASH.S.MEAS.A0C: true           # acApparentPowerPerPhase (map[Phase]uint64, mVA)
+
+  # ==========================================================================
+  # AC Current & Voltage Attributes (Nullable)
+  # ==========================================================================
+
+  MASH.S.MEAS.A14: true           # acCurrentPerPhase (map[Phase]int64, mA, signed)
+  MASH.S.MEAS.A15: true           # acVoltagePerPhase (map[Phase]uint32, mV)
+  MASH.S.MEAS.A16: true           # acVoltagePhaseToPhasePair (map[PhasePair]uint32, mV)
+  MASH.S.MEAS.A17: true           # acFrequency (uint32, mHz, e.g., 50000=50.000Hz)
+  MASH.S.MEAS.A18: true           # powerFactor (int16, 0.001 units, -1000 to +1000)
+
+  # ==========================================================================
+  # AC Energy Attributes (Nullable)
+  # ==========================================================================
+
+  MASH.S.MEAS.A1E: true           # acEnergyConsumed (uint64, mWh, monotonic)
+  MASH.S.MEAS.A1F: true           # acEnergyProduced (uint64, mWh, monotonic)
+
+  # ==========================================================================
+  # DC Measurement Attributes (Nullable)
+  # ==========================================================================
+
+  MASH.S.MEAS.A28: true           # dcPower (int64, mW, +into device/-out)
+  MASH.S.MEAS.A29: true           # dcCurrent (int64, mA, +into/-out)
+  MASH.S.MEAS.A2A: true           # dcVoltage (uint32, mV)
+  MASH.S.MEAS.A2B: true           # dcEnergyIn (uint64, mWh)
+  MASH.S.MEAS.A2C: true           # dcEnergyOut (uint64, mWh)
+
+  # ==========================================================================
+  # Battery State Attributes (Nullable)
+  # ==========================================================================
+
+  MASH.S.MEAS.A32: true           # stateOfCharge (uint8, 0-100%)
+  MASH.S.MEAS.A33: true           # stateOfHealth (uint8, 0-100%)
+  MASH.S.MEAS.A34: true           # stateOfEnergy (uint64, mWh)
+  MASH.S.MEAS.A35: true           # useableCapacity (uint64, mWh)
+  MASH.S.MEAS.A36: true           # cycleCount (uint32)
+  MASH.S.MEAS.A3C: true           # temperature (int16, centi-degrees, e.g., 2500=25.00C)
+
+  # ==========================================================================
+  # Behavioral Capabilities
+  # ==========================================================================
+
+  # Sign convention: +consumption, -production (passive/load convention)
+  MASH.S.MEAS.B_SIGN: true        # Sign convention behavior
+
+  # IsConsuming()/IsProducing() helpers
+  MASH.S.MEAS.B_DIRECTION: true   # Direction helper methods
+
+  # Nullable attribute handling
+  MASH.S.MEAS.B_NULLABLE: true    # Nullable attributes return false when unset
+
+  # Cumulative energy must never decrease
+  MASH.S.MEAS.B_CUMULATIVE: true  # Cumulative energy monotonic behavior
+
+# =============================================================================
+# Sign Convention
+# =============================================================================
+# Power values use passive/load convention:
+#   - Positive (+) = consumption/charging (power flowing INTO device)
+#   - Negative (-) = production/discharging (power flowing OUT OF device)
+#
+# Current sign follows the same convention.
+
+# =============================================================================
+# Test Case to PICS Mapping
+# =============================================================================
+#
+# TC-MEAS-001 (Read AC power positive = consumption):
+#   - MASH.S.MEAS.A01: true
+#   - MASH.S.MEAS.B_SIGN: true
+#
+# TC-MEAS-002 (Read AC power negative = production):
+#   - MASH.S.MEAS.A01: true
+#   - MASH.S.MEAS.B_SIGN: true
+#
+# TC-MEAS-003 (Per-phase current values):
+#   - MASH.S.MEAS.A14: true
+#
+# TC-MEAS-004 (Nullable attribute returns false when unset):
+#   - MASH.S.MEAS.B_NULLABLE: true
+#
+# TC-MEAS-005 (IsConsuming helper method):
+#   - MASH.S.MEAS.B_DIRECTION: true
+#
+# TC-MEAS-006 (IsProducing helper method):
+#   - MASH.S.MEAS.B_DIRECTION: true
+#
+# TC-MEAS-007 (Cumulative energy never decreases):
+#   - MASH.S.MEAS.A1E: true
+#   - MASH.S.MEAS.B_CUMULATIVE: true
+#
+# TC-MEAS-008 (Battery SoC range 0-100):
+#   - MASH.S.MEAS.A32: true
+#
+# TC-MEAS-009 (Power factor bounds):
+#   - MASH.S.MEAS.A18: true
+#
+# TC-MEAS-010 (Subscribe to measurement changes):
+#   - MASH.S.MEAS: true
+#   - MASH.S.SUB: true

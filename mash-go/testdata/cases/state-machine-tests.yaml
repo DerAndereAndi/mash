@@ -1,0 +1,968 @@
+# Test Suite: State Machine Tests
+# Verifies ControlState and ProcessState transitions
+#
+# ControlState: AUTONOMOUS -> CONTROLLED -> LIMITED -> FAILSAFE -> OVERRIDE
+# ProcessState: NONE -> AVAILABLE -> SCHEDULED -> RUNNING -> PAUSED -> COMPLETED/ABORTED
+# These state machines are ORTHOGONAL - process continues during FAILSAFE
+
+---
+# TC-STATE-001: ControlState AUTONOMOUS to CONTROLLED
+id: TC-STATE-001
+name: ControlState AUTONOMOUS to CONTROLLED
+description: |
+  Verifies that a device transitions from AUTONOMOUS to CONTROLLED
+  when it receives the first command from a zone controller.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A02          # controlState attribute
+
+preconditions:
+  - session_established: true
+  - initial_control_state: AUTONOMOUS
+
+steps:
+  - name: Read initial control state
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x00              # AUTONOMOUS
+
+  - name: Send SetLimit command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000  # 5 kW
+    expect:
+      invoke_success: true
+
+  - name: Verify transition to CONTROLLED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x01              # CONTROLLED
+
+postconditions:
+  - control_state: CONTROLLED
+
+timeout: "10s"
+tags:
+  - state-machine
+  - control-state
+  - transition
+
+---
+# TC-STATE-002: ControlState CONTROLLED to LIMITED
+id: TC-STATE-002
+name: ControlState CONTROLLED to LIMITED
+description: |
+  Verifies that a device transitions from CONTROLLED to LIMITED
+  when an active limit is constraining device operation.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A02
+  - MASH.S.CTRL.C01.Rsp      # SetLimit command
+
+preconditions:
+  - session_established: true
+  - control_state: CONTROLLED
+
+steps:
+  - name: Set a restrictive limit below current consumption
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 1000000  # 1 kW (restrictive)
+    expect:
+      invoke_success: true
+
+  - name: Wait for device to apply limit
+    action: wait
+    params:
+      duration: "1s"
+
+  - name: Verify transition to LIMITED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x02              # LIMITED
+
+postconditions:
+  - control_state: LIMITED
+
+timeout: "10s"
+tags:
+  - state-machine
+  - control-state
+  - transition
+
+---
+# TC-STATE-003: ControlState to FAILSAFE
+id: TC-STATE-003
+name: ControlState to FAILSAFE on Connection Loss
+description: |
+  Verifies that a device transitions to FAILSAFE state when it loses
+  connection to all zone controllers.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A02
+  - MASH.S.CTRL.A46          # failsafeConsumptionLimit
+  - MASH.S.CTRL.A48          # failsafeDuration
+
+preconditions:
+  - session_established: true
+  - control_state: CONTROLLED
+
+steps:
+  - name: Verify not in FAILSAFE initially
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value_not: 0x03          # Not FAILSAFE
+
+  - name: Disconnect controller (simulate connection loss)
+    action: disconnect
+    params:
+      graceful: false          # Abrupt disconnect
+
+  - name: Wait for failsafe timeout detection
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Reconnect and verify FAILSAFE state
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
+
+  - name: Read control state
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x03              # FAILSAFE
+
+postconditions:
+  - control_state: FAILSAFE
+
+timeout: "30s"
+tags:
+  - state-machine
+  - control-state
+  - failsafe
+
+---
+# TC-STATE-004: FAILSAFE to AUTONOMOUS after Duration
+id: TC-STATE-004
+name: FAILSAFE to AUTONOMOUS after Duration
+description: |
+  Verifies that a device returns to AUTONOMOUS state after the
+  failsafe duration expires (if no controller reconnects).
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A02
+  - MASH.S.CTRL.A48          # failsafeDuration
+
+preconditions:
+  - control_state: FAILSAFE
+  - failsafe_duration_short: true  # Test with reduced duration
+
+steps:
+  - name: Configure short failsafe duration
+    action: configure_device
+    params:
+      failsafe_duration: 5     # 5 seconds for testing
+    expect:
+      configuration_success: true
+
+  - name: Verify device is in FAILSAFE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x03              # FAILSAFE
+
+  - name: Wait for failsafe duration to expire
+    action: wait
+    params:
+      duration: "6s"
+
+  - name: Verify transition to AUTONOMOUS
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x00              # AUTONOMOUS
+
+postconditions:
+  - control_state: AUTONOMOUS
+
+timeout: "30s"
+tags:
+  - state-machine
+  - control-state
+  - failsafe
+  - duration
+
+---
+# TC-STATE-005: Any to OVERRIDE
+id: TC-STATE-005
+name: Any State to OVERRIDE on User/Local Action
+description: |
+  Verifies that a device can transition to OVERRIDE state when
+  the user or device takes local action that overrides controller commands.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A02
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Put device in CONTROLLED state
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+    expect:
+      invoke_success: true
+
+  - name: Trigger local override (device-specific)
+    action: device_local_action
+    params:
+      action: user_override
+    expect:
+      action_triggered: true
+
+  - name: Verify transition to OVERRIDE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x04              # OVERRIDE
+
+postconditions:
+  - control_state: OVERRIDE
+
+timeout: "10s"
+tags:
+  - state-machine
+  - control-state
+  - override
+
+---
+# TC-STATE-006: ProcessState NONE to AVAILABLE
+id: TC-STATE-006
+name: ProcessState NONE to AVAILABLE
+description: |
+  Verifies that a device transitions from NONE to AVAILABLE
+  when a process becomes available for execution.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.F07          # PROCESS feature flag
+  - MASH.S.CTRL.A50          # processState attribute
+
+preconditions:
+  - session_established: true
+  - process_capable: true
+
+steps:
+  - name: Read initial process state
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x00              # NONE
+
+  - name: Make process available (device-specific trigger)
+    action: device_local_action
+    params:
+      action: make_process_available
+    expect:
+      action_triggered: true
+
+  - name: Verify transition to AVAILABLE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x01              # AVAILABLE
+
+postconditions:
+  - process_state: AVAILABLE
+
+timeout: "10s"
+tags:
+  - state-machine
+  - process-state
+  - transition
+
+---
+# TC-STATE-007: ProcessState SCHEDULED to RUNNING
+id: TC-STATE-007
+name: ProcessState SCHEDULED to RUNNING at Scheduled Time
+description: |
+  Verifies that a scheduled process transitions to RUNNING
+  when the scheduled start time is reached.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.F07          # PROCESS feature flag
+  - MASH.S.CTRL.A50
+  - MASH.S.CTRL.C0C.Rsp      # ScheduleProcess command
+
+preconditions:
+  - session_established: true
+  - process_state: AVAILABLE
+
+steps:
+  - name: Schedule process for near future
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: ScheduleProcess
+      args:
+        startTime: "+2s"       # 2 seconds from now
+    expect:
+      invoke_success: true
+
+  - name: Verify transition to SCHEDULED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x02              # SCHEDULED
+
+  - name: Wait for scheduled start time
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Verify transition to RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03              # RUNNING
+
+postconditions:
+  - process_state: RUNNING
+
+timeout: "15s"
+tags:
+  - state-machine
+  - process-state
+  - schedule
+
+---
+# TC-STATE-008: ProcessState RUNNING to PAUSED
+id: TC-STATE-008
+name: ProcessState RUNNING to PAUSED on Pause Command
+description: |
+  Verifies that a running process transitions to PAUSED
+  when the Pause command is received.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A50
+  - MASH.S.CTRL.A0E          # isPausable
+  - MASH.S.CTRL.C09.Rsp      # Pause command
+
+preconditions:
+  - session_established: true
+  - process_state: RUNNING
+  - device_is_pausable: true
+
+steps:
+  - name: Verify process is RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03              # RUNNING
+
+  - name: Send Pause command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Pause
+    expect:
+      invoke_success: true
+
+  - name: Verify transition to PAUSED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x04              # PAUSED
+
+postconditions:
+  - process_state: PAUSED
+
+timeout: "10s"
+tags:
+  - state-machine
+  - process-state
+  - pause
+
+---
+# TC-STATE-009: ProcessState PAUSED to RUNNING
+id: TC-STATE-009
+name: ProcessState PAUSED to RUNNING on Resume Command
+description: |
+  Verifies that a paused process transitions back to RUNNING
+  when the Resume command is received.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A50
+  - MASH.S.CTRL.C0A.Rsp      # Resume command
+
+preconditions:
+  - session_established: true
+  - process_state: PAUSED
+
+steps:
+  - name: Verify process is PAUSED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x04              # PAUSED
+
+  - name: Send Resume command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Resume
+    expect:
+      invoke_success: true
+
+  - name: Verify transition to RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03              # RUNNING
+
+postconditions:
+  - process_state: RUNNING
+
+timeout: "10s"
+tags:
+  - state-machine
+  - process-state
+  - resume
+
+---
+# TC-STATE-010: ProcessState to COMPLETED
+id: TC-STATE-010
+name: ProcessState to COMPLETED on Successful Completion
+description: |
+  Verifies that a running process transitions to COMPLETED
+  when it finishes successfully.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.F07
+  - MASH.S.CTRL.A50
+
+preconditions:
+  - session_established: true
+  - process_state: RUNNING
+
+steps:
+  - name: Wait for process to complete naturally
+    action: wait_for_state
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+      target_value: 0x05       # COMPLETED
+      timeout: "30s"
+    expect:
+      state_reached: true
+
+  - name: Verify COMPLETED state
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x05              # COMPLETED
+
+postconditions:
+  - process_state: COMPLETED
+
+timeout: "60s"
+tags:
+  - state-machine
+  - process-state
+  - completion
+
+---
+# TC-STATE-011: ProcessState to ABORTED
+id: TC-STATE-011
+name: ProcessState to ABORTED on Stop Command
+description: |
+  Verifies that a running process transitions to ABORTED
+  when the Stop command is received.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A50
+  - MASH.S.CTRL.A10          # isStoppable
+  - MASH.S.CTRL.C0B.Rsp      # Stop command
+
+preconditions:
+  - session_established: true
+  - process_state: RUNNING
+  - device_is_stoppable: true
+
+steps:
+  - name: Verify process is RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03              # RUNNING
+
+  - name: Send Stop command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Stop
+    expect:
+      invoke_success: true
+
+  - name: Verify transition to ABORTED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x06              # ABORTED
+
+postconditions:
+  - process_state: ABORTED
+
+timeout: "10s"
+tags:
+  - state-machine
+  - process-state
+  - abort
+
+---
+# TC-STATE-012: State Orthogonality - Process Continues in FAILSAFE
+id: TC-STATE-012
+name: State Orthogonality - Process Continues in FAILSAFE
+description: |
+  Verifies that ControlState and ProcessState are orthogonal:
+  a running process should continue even when device enters FAILSAFE.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A02
+  - MASH.S.CTRL.A50
+  - MASH.S.CTRL.F07
+
+preconditions:
+  - session_established: true
+  - process_state: RUNNING
+  - control_state: CONTROLLED
+
+steps:
+  - name: Verify process is RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03              # RUNNING
+
+  - name: Disconnect to trigger FAILSAFE
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait for failsafe detection
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Reconnect to check states
+    action: connect
+    params:
+      insecure: true
+
+  - name: Verify controlState is FAILSAFE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x03              # FAILSAFE
+
+  - name: Verify processState is still RUNNING (not aborted)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03              # RUNNING (process continues!)
+
+postconditions:
+  - control_state: FAILSAFE
+  - process_state: RUNNING
+
+timeout: "30s"
+tags:
+  - state-machine
+  - orthogonality
+  - failsafe
+  - critical
+
+---
+# TC-STATE-013: Scheduled Process Starts Despite FAILSAFE
+id: TC-STATE-013
+name: Scheduled Process Starts Despite FAILSAFE
+description: |
+  Verifies that a scheduled process will start at its scheduled time
+  even if the device is in FAILSAFE state.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A02
+  - MASH.S.CTRL.A50
+  - MASH.S.CTRL.F07
+  - MASH.S.CTRL.C0C.Rsp
+
+preconditions:
+  - session_established: true
+  - process_state: SCHEDULED
+  - control_state: CONTROLLED
+
+steps:
+  - name: Schedule process for future
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: ScheduleProcess
+      args:
+        startTime: "+10s"
+    expect:
+      invoke_success: true
+
+  - name: Verify SCHEDULED state
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x02              # SCHEDULED
+
+  - name: Disconnect to trigger FAILSAFE before scheduled time
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait past the scheduled start time
+    action: wait
+    params:
+      duration: "12s"
+
+  - name: Reconnect
+    action: connect
+    params:
+      insecure: true
+
+  - name: Verify process started despite FAILSAFE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03              # RUNNING (started as scheduled)
+
+postconditions:
+  - process_state: RUNNING
+  - control_state: FAILSAFE
+
+timeout: "30s"
+tags:
+  - state-machine
+  - orthogonality
+  - schedule
+  - failsafe
+  - critical
+
+---
+# TC-STATE-014: OVERRIDE Does Not Affect ProcessState
+id: TC-STATE-014
+name: OVERRIDE Does Not Affect ProcessState
+description: |
+  Verifies that entering OVERRIDE state does not affect the
+  ProcessState - the process continues as normal.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A02
+  - MASH.S.CTRL.A50
+  - MASH.S.CTRL.F07
+
+preconditions:
+  - session_established: true
+  - process_state: RUNNING
+  - control_state: CONTROLLED
+
+steps:
+  - name: Verify process is RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03              # RUNNING
+
+  - name: Trigger local override
+    action: device_local_action
+    params:
+      action: user_override
+
+  - name: Verify controlState is OVERRIDE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x04              # OVERRIDE
+
+  - name: Verify processState unchanged (still RUNNING)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03              # RUNNING
+
+postconditions:
+  - control_state: OVERRIDE
+  - process_state: RUNNING
+
+timeout: "10s"
+tags:
+  - state-machine
+  - orthogonality
+  - override
+
+---
+# TC-STATE-015: Multiple State Transitions in Sequence
+id: TC-STATE-015
+name: Multiple State Transitions in Sequence
+description: |
+  Verifies a complete sequence of ControlState transitions:
+  AUTONOMOUS -> CONTROLLED -> LIMITED -> FAILSAFE -> AUTONOMOUS
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A02
+  - MASH.S.CTRL.C01.Rsp
+  - MASH.S.CTRL.C02.Rsp
+
+preconditions:
+  - device_reset: true
+
+steps:
+  - name: Verify initial AUTONOMOUS state
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x00              # AUTONOMOUS
+
+  - name: Send command to enter CONTROLLED
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 10000000  # 10 kW (not limiting)
+    expect:
+      invoke_success: true
+
+  - name: Verify CONTROLLED state
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x01              # CONTROLLED
+
+  - name: Set restrictive limit to enter LIMITED
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 100000   # 100 W (very restrictive)
+    expect:
+      invoke_success: true
+
+  - name: Wait and verify LIMITED state
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x02              # LIMITED
+
+  - name: Clear limit and disconnect to enter FAILSAFE
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: ClearLimit
+      args:
+        direction: consumption
+    expect:
+      invoke_success: true
+
+  - name: Disconnect to trigger FAILSAFE
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait and reconnect
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Reconnect
+    action: connect
+    params:
+      insecure: true
+
+  - name: Verify FAILSAFE state
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x03              # FAILSAFE
+
+postconditions:
+  - control_state: FAILSAFE
+
+timeout: "60s"
+tags:
+  - state-machine
+  - control-state
+  - sequence
+  - comprehensive

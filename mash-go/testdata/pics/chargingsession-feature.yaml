@@ -1,0 +1,196 @@
+# PICS (Protocol Implementation Conformance Statement)
+# ChargingSession Feature Capabilities
+#
+# This file describes the ChargingSession feature capabilities for test filtering.
+# The ChargingSession feature manages EV charging sessions, including V2G/V2H
+# bidirectional charging capabilities.
+
+# Device Identification
+device:
+  vendor: "Reference"
+  product: "ChargingSession Feature PICS"
+  model: "N/A"
+  version: "1.0.0"
+
+# PICS Items
+items:
+  # ==========================================================================
+  # Feature Presence
+  # ==========================================================================
+
+  MASH.S.CHRG: true               # ChargingSession feature present
+
+  # ==========================================================================
+  # Session State Attributes (Mandatory)
+  # ==========================================================================
+
+  MASH.S.CHRG.A01: true           # state (ChargingState enum)
+  MASH.S.CHRG.A02: true           # sessionId (uint32)
+  MASH.S.CHRG.A03: true           # sessionStartTime (uint64, nullable)
+  MASH.S.CHRG.A04: true           # sessionEndTime (uint64, nullable)
+
+  # ==========================================================================
+  # Session Energy Attributes
+  # ==========================================================================
+
+  MASH.S.CHRG.A0A: true           # sessionEnergyCharged (uint64, mWh)
+  MASH.S.CHRG.A0B: false          # sessionEnergyDischarged (uint64, mWh, requires V2X)
+
+  # ==========================================================================
+  # EV Identification Attributes (Optional, Nullable)
+  # ==========================================================================
+
+  MASH.S.CHRG.A14: true           # evIdentifications (array of {type, value})
+
+  # ==========================================================================
+  # EV Battery State Attributes (Optional, Nullable)
+  # ==========================================================================
+
+  MASH.S.CHRG.A1E: true           # evStateOfCharge (uint8, 0-100%)
+  MASH.S.CHRG.A1F: true           # evBatteryCapacity (uint64, mWh)
+
+  # ==========================================================================
+  # EV Energy Demand Attributes (Nullable)
+  # ==========================================================================
+
+  MASH.S.CHRG.A28: true           # evDemandMode (EVDemandMode enum)
+  MASH.S.CHRG.A29: true           # evMinEnergyRequest (int64, mWh, negative=can discharge)
+  MASH.S.CHRG.A2A: true           # evMaxEnergyRequest (int64, mWh)
+  MASH.S.CHRG.A2B: true           # evTargetEnergyRequest (int64, mWh)
+  MASH.S.CHRG.A2C: true           # evDepartureTime (uint64, timestamp)
+
+  # ==========================================================================
+  # V2G Discharge Constraint Attributes (Requires V2X + DYNAMIC_BIDIRECTIONAL)
+  # ==========================================================================
+
+  MASH.S.CHRG.A32: false          # evMinDischargingRequest (int64, mWh, must be < 0)
+  MASH.S.CHRG.A33: false          # evMaxDischargingRequest (int64, mWh, must be >= 0)
+  MASH.S.CHRG.A34: false          # evDischargeBelowTargetPermitted (bool)
+
+  # ==========================================================================
+  # Estimated Time Attributes (Read-Only, Nullable, seconds)
+  # ==========================================================================
+
+  MASH.S.CHRG.A3C: true           # estimatedTimeToMinSoC
+  MASH.S.CHRG.A3D: true           # estimatedTimeToTargetSoC
+  MASH.S.CHRG.A3E: true           # estimatedTimeToFullSoC
+
+  # ==========================================================================
+  # Charging Mode Attributes
+  # ==========================================================================
+
+  MASH.S.CHRG.A46: true           # chargingMode (ChargingMode enum)
+  MASH.S.CHRG.A47: true           # supportedChargingModes (array)
+  MASH.S.CHRG.A48: true           # surplusThreshold (int64, mW, nullable)
+
+  # ==========================================================================
+  # Start/Stop Delay Attributes (seconds)
+  # ==========================================================================
+
+  MASH.S.CHRG.A50: true           # startDelay (uint32, default 0)
+  MASH.S.CHRG.A51: true           # stopDelay (uint32, default 0)
+
+  # ==========================================================================
+  # Commands
+  # ==========================================================================
+
+  MASH.S.CHRG.C01.Rsp: true       # SetChargingMode
+
+  # ==========================================================================
+  # V2G Capability Flag
+  # ==========================================================================
+
+  MASH.S.CHRG.A_V2G: false        # V2G attributes present (requires V2X flag)
+
+  # ==========================================================================
+  # Behavioral Capabilities
+  # ==========================================================================
+
+  # CanDischarge() logic: All conditions must be true:
+  # - evMinDischargingRequest < 0
+  # - evDischargeBelowTargetPermitted OR current SoC > target
+  # - evDemandMode == DYNAMIC_BIDIRECTIONAL
+  MASH.S.CHRG.B_DISCHARGE: true   # CanDischarge capability check
+
+  # Session lifecycle management
+  MASH.S.CHRG.B_LIFECYCLE: true   # StartSession/EndSession methods
+
+  # Charging mode validation
+  MASH.S.CHRG.B_MODE: true        # SupportsMode validation
+
+  # Helper methods (IsPluggedIn, IsCharging, IsDischarging)
+  MASH.S.CHRG.B_HELPERS: true     # State helper methods
+
+# =============================================================================
+# ChargingState Enum Values
+# =============================================================================
+# NOT_PLUGGED_IN (0x00)       - No cable connected
+# PLUGGED_IN_NO_DEMAND (0x01) - Cable connected, EV not demanding
+# PLUGGED_IN_DEMAND (0x02)    - Cable connected, EV ready to charge
+# PLUGGED_IN_CHARGING (0x03)  - Actively charging
+# PLUGGED_IN_DISCHARGING (0x04) - Actively discharging (V2G)
+# SESSION_COMPLETE (0x05)     - Session finished
+# FAULT (0x06)                - Error condition
+
+# =============================================================================
+# EVDemandMode Enum Values
+# =============================================================================
+# NONE (0x00)                  - No demand information
+# SINGLE_DEMAND (0x01)         - Static energy request
+# SCHEDULED (0x02)             - Time-based charging schedule
+# DYNAMIC (0x03)               - Dynamic optimization
+# DYNAMIC_BIDIRECTIONAL (0x04) - V2G bidirectional
+
+# =============================================================================
+# ChargingMode Enum Values
+# =============================================================================
+# OFF (0x00)                  - Not charging
+# PV_SURPLUS_ONLY (0x01)      - Only charge from PV surplus
+# PV_SURPLUS_THRESHOLD (0x02) - PV surplus above threshold
+# PRICE_OPTIMIZED (0x03)      - Charge at lowest prices
+# SCHEDULED (0x04)            - Time-based schedule
+
+# =============================================================================
+# EVIDType Enum Values
+# =============================================================================
+# PCID, MAC_EUI48, MAC_EUI64, RFID, VIN, CONTRACT_ID, EVCC_ID, OTHER
+
+# =============================================================================
+# Test Case to PICS Mapping
+# =============================================================================
+#
+# TC-CHRG-001 (Session lifecycle NOT_PLUGGED_IN to CHARGING):
+#   - MASH.S.CHRG.A01: true
+#   - MASH.S.CHRG.B_LIFECYCLE: true
+#
+# TC-CHRG-002 (StartSession sets ID and time):
+#   - MASH.S.CHRG.A02: true
+#   - MASH.S.CHRG.A03: true
+#   - MASH.S.CHRG.B_LIFECYCLE: true
+#
+# TC-CHRG-003 (EndSession returns to NOT_PLUGGED_IN):
+#   - MASH.S.CHRG.B_LIFECYCLE: true
+#
+# TC-CHRG-004 (EV demand modes):
+#   - MASH.S.CHRG.A28: true
+#
+# TC-CHRG-005 (CanDischarge logic - all conditions):
+#   - MASH.S.CHRG.B_DISCHARGE: true
+#   - MASH.S.CHRG.A_V2G: true
+#
+# TC-CHRG-006 (CanDischarge false when min >= 0):
+#   - MASH.S.CHRG.B_DISCHARGE: true
+#
+# TC-CHRG-007 (Charging mode validation):
+#   - MASH.S.CHRG.B_MODE: true
+#   - MASH.S.CHRG.A47: true
+#
+# TC-CHRG-008 (Start/stop delays):
+#   - MASH.S.CHRG.A50: true
+#   - MASH.S.CHRG.A51: true
+#
+# TC-CHRG-009 (EV identification storage):
+#   - MASH.S.CHRG.A14: true
+#
+# TC-CHRG-010 (Session energy tracking):
+#   - MASH.S.CHRG.A0A: true

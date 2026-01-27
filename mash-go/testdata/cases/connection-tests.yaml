@@ -1,0 +1,243 @@
+# Test Suite: Connection Tests
+# Verifies TLS connection, keep-alive, reconnection behavior
+#
+# Key concepts:
+# - TLS 1.3 handshake
+# - Keep-alive ping/pong
+# - Reconnection with exponential backoff
+# - Graceful close
+
+---
+# TC-CONN-001: TLS Handshake Success
+id: TC-CONN-001
+name: TLS Handshake Success
+description: |
+  Verifies that a TLS 1.3 connection can be established
+  successfully with proper certificate validation.
+
+pics_requirements:
+  - D.COMM.TLS13
+  - D.COMM.SC
+
+preconditions:
+  - device_available: true
+  - certificates_valid: true
+
+steps:
+  - name: Initiate TLS connection
+    action: connect
+    params:
+      host: localhost
+      port: 8443
+      tls_version: "1.3"
+    expect:
+      connection_established: true
+      tls_version: "1.3"
+
+  - name: Verify certificate chain
+    action: verify_certificate
+    params:
+      verify_chain: true
+    expect:
+      chain_valid: true
+      not_expired: true
+
+  - name: Send ping to verify connection
+    action: ping
+    expect:
+      pong_received: true
+
+postconditions:
+  - connection_secure: true
+
+timeout: "10s"
+tags:
+  - connection
+  - tls
+  - basic
+
+---
+# TC-CONN-002: Keep-Alive Ping/Pong
+id: TC-CONN-002
+name: Keep-Alive Ping/Pong
+description: |
+  Verifies that keep-alive ping messages are answered with
+  pong responses within timeout.
+
+pics_requirements:
+  - D.COMM.SC
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send ping message
+    action: ping
+    expect:
+      pong_received: true
+      latency_under: "1000ms"
+
+  - name: Send multiple pings
+    action: ping_multiple
+    params:
+      count: 5
+      interval_ms: 500
+    expect:
+      all_pongs_received: true
+      average_latency_under: "500ms"
+
+postconditions:
+  - keepalive_working: true
+
+timeout: "10s"
+tags:
+  - connection
+  - keepalive
+  - ping
+
+---
+# TC-CONN-003: Reconnect with Backoff
+id: TC-CONN-003
+name: Reconnect with Exponential Backoff
+description: |
+  Verifies that after disconnection, reconnection attempts
+  follow exponential backoff pattern.
+
+pics_requirements:
+  - D.COMM.SC
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Record initial connection time
+    action: record_time
+    params:
+      name: initial_connect
+
+  - name: Force disconnect
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait and attempt reconnect 1 (should be quick)
+    action: connect_with_timing
+    params:
+      record_time: true
+    expect:
+      connection_established: true
+      save_delay_as: delay_1
+
+  - name: Force disconnect again
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait and attempt reconnect 2 (should be longer)
+    action: connect_with_timing
+    params:
+      record_time: true
+    expect:
+      connection_established: true
+      save_delay_as: delay_2
+
+  - name: Verify backoff pattern
+    action: compare
+    params:
+      left: delay_2
+      operator: ">="
+      right: delay_1
+    expect:
+      comparison_true: true
+
+postconditions:
+  - backoff_applied: true
+
+timeout: "60s"
+tags:
+  - connection
+  - reconnect
+  - backoff
+
+---
+# TC-CONN-004: Graceful Close
+id: TC-CONN-004
+name: Graceful Connection Close
+description: |
+  Verifies that a graceful close properly terminates the
+  connection with proper TLS shutdown.
+
+pics_requirements:
+  - D.COMM.SC
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Verify connection is active
+    action: ping
+    expect:
+      pong_received: true
+
+  - name: Send graceful close
+    action: disconnect
+    params:
+      graceful: true
+    expect:
+      close_acknowledged: true
+
+  - name: Verify connection is closed
+    action: ping
+    expect:
+      pong_received: false
+      error: CONNECTION_CLOSED
+
+postconditions:
+  - connection_closed_cleanly: true
+
+timeout: "10s"
+tags:
+  - connection
+  - close
+  - graceful
+
+---
+# TC-CONN-005: Connection Timeout
+id: TC-CONN-005
+name: Connection Timeout Handling
+description: |
+  Verifies that connection attempts timeout appropriately
+  when device is unreachable.
+
+pics_requirements:
+  - D.COMM.SC
+
+preconditions:
+  - device_unreachable: true
+
+steps:
+  - name: Attempt connection to unreachable device
+    action: connect
+    params:
+      host: 192.0.2.1          # TEST-NET, should be unreachable
+      port: 8443
+      timeout: "5s"
+    expect:
+      connection_established: false
+      error: TIMEOUT
+
+  - name: Verify timeout occurred within expected time
+    action: verify_timing
+    params:
+      max_duration: "6s"
+    expect:
+      within_limit: true
+
+postconditions:
+  - timeout_handled: true
+
+timeout: "15s"
+tags:
+  - connection
+  - timeout
+  - error

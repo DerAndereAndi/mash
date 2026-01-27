@@ -301,6 +301,111 @@ MASH.S.CTRL.C09.Rsp=1   # Pause
 | MASH.S.SUB.B_HEARTBEAT_CONTENT | Heartbeat notification content | "empty", "full" |
 | MASH.S.SUB.B_COALESCE | Coalescing strategy | "last_value", "all_changes" |
 
+### 4.7 Measurement Feature (MEAS)
+
+| PICS Code | Description | Conformance |
+|-----------|-------------|-------------|
+| MASH.S.MEAS | Measurement feature present | O |
+| MASH.S.MEAS.A01 | acActivePower (mW, +consumption/-production) | M if AC |
+| MASH.S.MEAS.A02 | acReactivePower (mVAR) | O |
+| MASH.S.MEAS.A03 | acApparentPower (mVA) | O |
+| MASH.S.MEAS.A0A | acActivePowerPerPhase | O |
+| MASH.S.MEAS.A0B | acReactivePowerPerPhase | O |
+| MASH.S.MEAS.A0C | acApparentPowerPerPhase | O |
+| MASH.S.MEAS.A14 | acCurrentPerPhase (mA) | O |
+| MASH.S.MEAS.A15 | acVoltagePerPhase (mV) | O |
+| MASH.S.MEAS.A16 | acVoltagePhaseToPhasePair (mV) | O |
+| MASH.S.MEAS.A17 | acFrequency (mHz) | O |
+| MASH.S.MEAS.A18 | powerFactor (0.001 units) | O |
+| MASH.S.MEAS.A1E | acEnergyConsumed (mWh) | M if CONSUMPTION |
+| MASH.S.MEAS.A1F | acEnergyProduced (mWh) | M if PRODUCTION |
+| MASH.S.MEAS.A28 | dcPower (mW) | M if DC |
+| MASH.S.MEAS.A29 | dcCurrent (mA) | O |
+| MASH.S.MEAS.A2A | dcVoltage (mV) | O |
+| MASH.S.MEAS.A2B | dcEnergyIn (mWh) | O |
+| MASH.S.MEAS.A2C | dcEnergyOut (mWh) | O |
+| MASH.S.MEAS.A32 | stateOfCharge (0-100%) | M if BATTERY |
+| MASH.S.MEAS.A33 | stateOfHealth (0-100%) | O |
+| MASH.S.MEAS.A34 | stateOfEnergy (mWh) | O |
+| MASH.S.MEAS.A35 | useableCapacity (mWh) | O |
+| MASH.S.MEAS.A36 | cycleCount | O |
+| MASH.S.MEAS.A3C | temperature (centi-degrees) | O |
+| MASH.S.MEAS.B_SIGN | Sign convention (+consumption/-production) | M |
+| MASH.S.MEAS.B_DIRECTION | IsConsuming/IsProducing helpers | M |
+| MASH.S.MEAS.B_NULLABLE | Nullable attributes return false when unset | M |
+| MASH.S.MEAS.B_CUMULATIVE | Cumulative energy never decreases | M |
+
+### 4.8 Status Feature (STAT)
+
+| PICS Code | Description | Conformance |
+|-----------|-------------|-------------|
+| MASH.S.STAT | Status feature present | O |
+| MASH.S.STAT.A01 | operatingState (OperatingState enum) | M |
+| MASH.S.STAT.A02 | stateDetail (vendor-specific code) | O |
+| MASH.S.STAT.A03 | faultCode | M if FAULT state |
+| MASH.S.STAT.A04 | faultMessage | O |
+| MASH.S.STAT.C01 | SetFault (internal) | M |
+| MASH.S.STAT.C02 | ClearFault (internal) | M |
+| MASH.S.STAT.B_TRANSITIONS | State transition validation | M |
+| MASH.S.STAT.B_HELPERS | IsFaulted/IsRunning/IsReady helpers | M |
+| MASH.S.STAT.B_FAULT_CODE | FAULT state requires fault code | M |
+
+#### OperatingState Enum Values
+
+| Value | Name | Description |
+|-------|------|-------------|
+| 0x00 | UNKNOWN | State not determined |
+| 0x01 | OFFLINE | Not connected/available |
+| 0x02 | STANDBY | Ready but not active |
+| 0x03 | STARTING | Powering up/initializing |
+| 0x04 | RUNNING | Actively operating |
+| 0x05 | PAUSED | Temporarily paused |
+| 0x06 | SHUTTING_DOWN | Powering down |
+| 0x07 | FAULT | Error condition |
+| 0x08 | MAINTENANCE | Under maintenance |
+
+### 4.9 Zone Management (ZONE)
+
+| PICS Code | Description | Conformance |
+|-----------|-------------|-------------|
+| MASH.S.ZONE | Multi-zone support | M |
+| MASH.S.ZONE.MAX | Maximum zones per device (default 5) | M |
+| MASH.S.ZONE.GRID_OP | GRID_OPERATOR zone (priority 1) | M |
+| MASH.S.ZONE.BLDG_MGR | BUILDING_MANAGER zone (priority 2) | O |
+| MASH.S.ZONE.HOME_MGR | HOME_MANAGER zone (priority 3) | O |
+| MASH.S.ZONE.USER_APP | USER_APP zone (priority 4) | O |
+| MASH.S.ZONE.ADD | AddZone operation | M |
+| MASH.S.ZONE.REMOVE | RemoveZone operation | M |
+| MASH.S.ZONE.FORCE_REMOVE | ForceRemoveZone operation | M |
+| MASH.S.ZONE.CONNECT | Connection state tracking | M |
+| MASH.S.ZONE.LAST_SEEN | LastSeen timestamp | M |
+| MASH.S.ZONE.B_PRIORITY | Highest priority zone wins (setpoints) | M |
+| MASH.S.ZONE.B_RESTRICT | Most restrictive wins (limits) | M |
+| MASH.S.ZONE.B_FORCE_REMOVE | Priority enforcement on force remove | M |
+| MASH.S.ZONE.B_SESSION | Per-zone session management | M |
+| MASH.S.ZONE.FAILSAFE | Per-zone failsafe tracking | M |
+| MASH.S.ZONE.FAILSAFE_DUR | Configurable failsafe duration | M |
+
+#### Zone Priority Hierarchy
+
+| Priority | Zone Type | Description |
+|----------|-----------|-------------|
+| 1 (highest) | GRID_OPERATOR | Grid emergency/regulatory |
+| 2 | BUILDING_MANAGER | Building-level EMS |
+| 3 | HOME_MANAGER | Home energy management |
+| 4 (lowest) | USER_APP | User applications |
+
+#### Multi-Zone Resolution Rules
+
+**Limits (most restrictive wins):**
+- Consumption: smaller value is more restrictive
+- Production: closer to zero is more restrictive
+- Mixed signs: positive (consumption) takes precedence for safety
+
+**Setpoints (highest priority wins):**
+- Zone with lowest priority number wins
+- GRID_OPERATOR (1) > BUILDING_MANAGER (2) > HOME_MANAGER (3) > USER_APP (4)
+
 ---
 
 ## 5. Example PICS Files

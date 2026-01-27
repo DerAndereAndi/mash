@@ -1,0 +1,491 @@
+# Test Suite: Measurement Feature Tests
+# Verifies power/energy telemetry and sign convention
+#
+# Key behaviors:
+# - Sign convention: +consumption, -production (passive/load convention)
+# - Nullable attributes: return false when unset
+# - Cumulative energy: never decreases (monotonic)
+
+---
+# TC-MEAS-001: Read AC Power Positive Equals Consumption
+id: TC-MEAS-001
+name: Read AC Power Positive Equals Consumption
+description: |
+  Verifies that positive acActivePower values indicate consumption
+  (power flowing into the device).
+
+pics_requirements:
+  - MASH.S.MEAS
+  - MASH.S.MEAS.A01          # acActivePower
+  - MASH.S.MEAS.B_SIGN
+
+preconditions:
+  - session_established: true
+  - device_is_consuming: true
+
+steps:
+  - name: Read AC active power while consuming
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+    expect:
+      read_success: true
+      value_greater_than: 0    # Positive = consumption
+
+  - name: Verify IsConsuming would return true
+    action: evaluate
+    params:
+      expression: "acActivePower > 0"
+    expect:
+      result: true
+
+postconditions:
+  - consumption_sign_correct: true
+
+timeout: "5s"
+tags:
+  - measurement
+  - sign-convention
+  - consumption
+
+---
+# TC-MEAS-002: Read AC Power Negative Equals Production
+id: TC-MEAS-002
+name: Read AC Power Negative Equals Production
+description: |
+  Verifies that negative acActivePower values indicate production
+  (power flowing out of the device).
+
+pics_requirements:
+  - MASH.S.MEAS
+  - MASH.S.MEAS.A01
+  - MASH.S.MEAS.B_SIGN
+  - MASH.S.ELEC.B_BIDIR      # Device can produce
+
+preconditions:
+  - session_established: true
+  - device_is_producing: true
+
+steps:
+  - name: Read AC active power while producing
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+    expect:
+      read_success: true
+      value_less_than: 0       # Negative = production
+
+  - name: Verify IsProducing would return true
+    action: evaluate
+    params:
+      expression: "acActivePower < 0"
+    expect:
+      result: true
+
+postconditions:
+  - production_sign_correct: true
+
+timeout: "5s"
+tags:
+  - measurement
+  - sign-convention
+  - production
+
+---
+# TC-MEAS-003: Per-Phase Current Values
+id: TC-MEAS-003
+name: Per-Phase Current Values
+description: |
+  Verifies that per-phase current measurements are correctly
+  reported with proper phase mapping.
+
+pics_requirements:
+  - MASH.S.MEAS
+  - MASH.S.MEAS.A14          # acCurrentPerPhase
+  - MASH.S.ELEC.A01          # phaseCount
+
+preconditions:
+  - session_established: true
+  - device_is_multiphase: true
+
+steps:
+  - name: Read phase count
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: phaseCount
+    expect:
+      read_success: true
+      save_as: phase_count
+
+  - name: Read per-phase current
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acCurrentPerPhase
+    expect:
+      read_success: true
+      value_is_map: true
+      map_size_equals: phase_count
+      keys_are_phases: true    # A, B, C
+
+postconditions:
+  - per_phase_current_readable: true
+
+timeout: "5s"
+tags:
+  - measurement
+  - per-phase
+  - current
+
+---
+# TC-MEAS-004: Nullable Attribute Returns False When Unset
+id: TC-MEAS-004
+name: Nullable Attribute Returns False When Unset
+description: |
+  Verifies that nullable measurement attributes return a proper
+  null/absent indication when the value is not available.
+
+pics_requirements:
+  - MASH.S.MEAS
+  - MASH.S.MEAS.B_NULLABLE
+
+preconditions:
+  - session_established: true
+  - device_has_no_dc: true     # DC measurement not available
+
+steps:
+  - name: Read DC power (should be null on AC-only device)
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: dcPower
+    expect:
+      read_success: true
+      value_is_null: true      # Attribute exists but has no value
+
+  - name: Read DC voltage (should also be null)
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: dcVoltage
+    expect:
+      read_success: true
+      value_is_null: true
+
+postconditions:
+  - nullable_handling_correct: true
+
+timeout: "5s"
+tags:
+  - measurement
+  - nullable
+  - absent
+
+---
+# TC-MEAS-005: IsConsuming Helper Method
+id: TC-MEAS-005
+name: IsConsuming Helper Method Behavior
+description: |
+  Verifies that IsConsuming() returns true when acActivePower > 0
+  and false otherwise.
+
+pics_requirements:
+  - MASH.S.MEAS
+  - MASH.S.MEAS.B_DIRECTION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Set device to consuming state
+    action: device_set_value
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+      value: 5000000           # 5 kW consumption
+
+  - name: Read and verify IsConsuming logic
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+    expect:
+      read_success: true
+      value_greater_than: 0    # IsConsuming() would be true
+
+  - name: Set device to idle (zero power)
+    action: device_set_value
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+      value: 0
+
+  - name: Verify IsConsuming would be false at zero
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+    expect:
+      read_success: true
+      value: 0                 # IsConsuming() would be false
+
+postconditions:
+  - is_consuming_logic_correct: true
+
+timeout: "10s"
+tags:
+  - measurement
+  - helper
+  - consuming
+
+---
+# TC-MEAS-006: IsProducing Helper Method
+id: TC-MEAS-006
+name: IsProducing Helper Method Behavior
+description: |
+  Verifies that IsProducing() returns true when acActivePower < 0
+  and false otherwise.
+
+pics_requirements:
+  - MASH.S.MEAS
+  - MASH.S.MEAS.B_DIRECTION
+  - MASH.S.ELEC.B_BIDIR
+
+preconditions:
+  - session_established: true
+  - device_can_produce: true
+
+steps:
+  - name: Set device to producing state
+    action: device_set_value
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+      value: -3000000          # -3 kW production
+
+  - name: Read and verify IsProducing logic
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+    expect:
+      read_success: true
+      value_less_than: 0       # IsProducing() would be true
+
+postconditions:
+  - is_producing_logic_correct: true
+
+timeout: "5s"
+tags:
+  - measurement
+  - helper
+  - producing
+
+---
+# TC-MEAS-007: Cumulative Energy Never Decreases
+id: TC-MEAS-007
+name: Cumulative Energy Never Decreases
+description: |
+  Verifies that cumulative energy counters are monotonically
+  increasing (never decrease).
+
+pics_requirements:
+  - MASH.S.MEAS
+  - MASH.S.MEAS.A1E          # acEnergyConsumed
+  - MASH.S.MEAS.B_CUMULATIVE
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read initial energy consumed
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acEnergyConsumed
+    expect:
+      read_success: true
+      save_as: initial_energy
+
+  - name: Wait for some consumption
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Read energy consumed again
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acEnergyConsumed
+    expect:
+      read_success: true
+      save_as: later_energy
+
+  - name: Verify energy did not decrease
+    action: compare
+    params:
+      left: later_energy
+      operator: ">="
+      right: initial_energy
+    expect:
+      comparison_true: true
+
+postconditions:
+  - energy_monotonic: true
+
+timeout: "15s"
+tags:
+  - measurement
+  - energy
+  - monotonic
+
+---
+# TC-MEAS-008: Battery SoC Range 0-100
+id: TC-MEAS-008
+name: Battery State of Charge Range Validation
+description: |
+  Verifies that battery State of Charge is within valid range
+  of 0-100 percent.
+
+pics_requirements:
+  - MASH.S.MEAS
+  - MASH.S.MEAS.A32          # stateOfCharge
+
+preconditions:
+  - session_established: true
+  - device_has_battery: true
+
+steps:
+  - name: Read state of charge
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: stateOfCharge
+    expect:
+      read_success: true
+      value_in_range: [0, 100]
+
+postconditions:
+  - soc_range_valid: true
+
+timeout: "5s"
+tags:
+  - measurement
+  - battery
+  - soc
+  - validation
+
+---
+# TC-MEAS-009: Power Factor Bounds
+id: TC-MEAS-009
+name: Power Factor Bounds Validation
+description: |
+  Verifies that power factor is within valid range of -1.000 to +1.000
+  (represented as -1000 to +1000 in 0.001 units).
+
+pics_requirements:
+  - MASH.S.MEAS
+  - MASH.S.MEAS.A18          # powerFactor
+
+preconditions:
+  - session_established: true
+  - device_measures_power_factor: true
+
+steps:
+  - name: Read power factor
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: powerFactor
+    expect:
+      read_success: true
+      value_in_range: [-1000, 1000]  # -1.000 to +1.000
+
+postconditions:
+  - power_factor_valid: true
+
+timeout: "5s"
+tags:
+  - measurement
+  - power-factor
+  - validation
+
+---
+# TC-MEAS-010: Subscribe to Measurement Changes
+id: TC-MEAS-010
+name: Subscribe to Measurement Changes
+description: |
+  Verifies that subscription to Measurement feature provides
+  real-time telemetry updates.
+
+pics_requirements:
+  - MASH.S.MEAS
+  - MASH.S.SUB
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to Measurement feature
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 0
+      maxInterval: 30
+    expect:
+      subscribe_success: true
+
+  - name: Receive priming report
+    action: receive_notification
+    params:
+      timeout: "3s"
+    expect:
+      notification_received: true
+      contains:
+        - acActivePower
+
+  - name: Trigger power change
+    action: device_set_value
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+      value: 2500000           # 2.5 kW
+
+  - name: Receive delta notification
+    action: receive_notification
+    params:
+      timeout: "5s"
+    expect:
+      notification_received: true
+      value:
+        acActivePower: 2500000
+
+postconditions:
+  - measurement_subscription_works: true
+
+timeout: "15s"
+tags:
+  - measurement
+  - subscription
+  - telemetry

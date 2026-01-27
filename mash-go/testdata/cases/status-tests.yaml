@@ -1,0 +1,362 @@
+# Test Suite: Status Feature Tests
+# Verifies operating state and fault management
+#
+# Key concepts:
+# - OperatingState: UNKNOWN -> OFFLINE -> STANDBY -> RUNNING -> FAULT
+# - Fault management: SetFault/ClearFault atomic operations
+# - Helper methods: IsFaulted, IsRunning, IsReady, IsOffline
+
+---
+# TC-STAT-001: Operating State Transitions
+id: TC-STAT-001
+name: Operating State Transitions
+description: |
+  Verifies that operating state transitions correctly through
+  the normal startup sequence.
+
+pics_requirements:
+  - MASH.S.STAT
+  - MASH.S.STAT.A01          # operatingState
+  - MASH.S.STAT.B_TRANSITIONS
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read current operating state
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: operatingState
+    expect:
+      read_success: true
+      value_in: [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+
+  - name: If device is STANDBY, trigger start
+    action: device_local_action
+    params:
+      action: start_operation
+    expect:
+      action_triggered: true
+
+  - name: Verify transition to STARTING or RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: operatingState
+    expect:
+      read_success: true
+      value_in: [0x03, 0x04]   # STARTING or RUNNING
+
+postconditions:
+  - state_transition_valid: true
+
+timeout: "15s"
+tags:
+  - status
+  - state
+  - transition
+
+---
+# TC-STAT-002: SetFault Sets State Code and Message
+id: TC-STAT-002
+name: SetFault Sets State Code and Message
+description: |
+  Verifies that SetFault atomically sets the FAULT state,
+  fault code, and fault message.
+
+pics_requirements:
+  - MASH.S.STAT
+  - MASH.S.STAT.A01
+  - MASH.S.STAT.A03          # faultCode
+  - MASH.S.STAT.A04          # faultMessage
+  - MASH.S.STAT.C01          # SetFault
+
+preconditions:
+  - session_established: true
+  - operating_state_not_fault: true
+
+steps:
+  - name: Trigger a fault condition
+    action: device_local_action
+    params:
+      action: trigger_fault
+      fault_code: 42
+      fault_message: "Test fault condition"
+    expect:
+      action_triggered: true
+
+  - name: Verify operating state is FAULT
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: operatingState
+    expect:
+      read_success: true
+      value: 0x07              # FAULT
+
+  - name: Verify fault code is set
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: faultCode
+    expect:
+      read_success: true
+      value: 42
+
+  - name: Verify fault message is set
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: faultMessage
+    expect:
+      read_success: true
+      value: "Test fault condition"
+
+postconditions:
+  - fault_fully_set: true
+
+timeout: "10s"
+tags:
+  - status
+  - fault
+  - setfault
+
+---
+# TC-STAT-003: ClearFault Clears All Fault Fields
+id: TC-STAT-003
+name: ClearFault Clears All Fault Fields
+description: |
+  Verifies that ClearFault clears the fault state, code, and
+  message, returning to a non-fault state.
+
+pics_requirements:
+  - MASH.S.STAT
+  - MASH.S.STAT.A01
+  - MASH.S.STAT.A03
+  - MASH.S.STAT.A04
+  - MASH.S.STAT.C02          # ClearFault
+
+preconditions:
+  - session_established: true
+  - operating_state: FAULT
+
+steps:
+  - name: Verify device is in FAULT state
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: operatingState
+    expect:
+      read_success: true
+      value: 0x07              # FAULT
+
+  - name: Clear the fault
+    action: device_local_action
+    params:
+      action: clear_fault
+    expect:
+      action_triggered: true
+
+  - name: Verify operating state is not FAULT
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: operatingState
+    expect:
+      read_success: true
+      value_not: 0x07          # Not FAULT
+
+  - name: Verify fault code is cleared (null)
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: faultCode
+    expect:
+      read_success: true
+      value_is_null: true
+
+  - name: Verify fault message is cleared (null)
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: faultMessage
+    expect:
+      read_success: true
+      value_is_null: true
+
+postconditions:
+  - fault_cleared: true
+
+timeout: "10s"
+tags:
+  - status
+  - fault
+  - clearfault
+
+---
+# TC-STAT-004: IsFaulted Helper Method
+id: TC-STAT-004
+name: IsFaulted Helper Method
+description: |
+  Verifies that IsFaulted() returns true when operatingState == FAULT
+  and false otherwise.
+
+pics_requirements:
+  - MASH.S.STAT
+  - MASH.S.STAT.A01
+  - MASH.S.STAT.B_HELPERS
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read operating state when not faulted
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: operatingState
+    expect:
+      read_success: true
+      value_not: 0x07          # Not FAULT
+
+  - name: Verify IsFaulted would return false
+    action: evaluate
+    params:
+      expression: "operatingState != 0x07"
+    expect:
+      result: true
+
+  - name: Trigger fault
+    action: device_local_action
+    params:
+      action: trigger_fault
+      fault_code: 1
+
+  - name: Read operating state when faulted
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: operatingState
+    expect:
+      read_success: true
+      value: 0x07              # FAULT
+
+  - name: Verify IsFaulted would return true
+    action: evaluate
+    params:
+      expression: "operatingState == 0x07"
+    expect:
+      result: true
+
+postconditions:
+  - is_faulted_correct: true
+
+timeout: "15s"
+tags:
+  - status
+  - helper
+  - faulted
+
+---
+# TC-STAT-005: IsRunning Helper Method
+id: TC-STAT-005
+name: IsRunning Helper Method
+description: |
+  Verifies that IsRunning() returns true when operatingState == RUNNING
+  and false otherwise.
+
+pics_requirements:
+  - MASH.S.STAT
+  - MASH.S.STAT.A01
+  - MASH.S.STAT.B_HELPERS
+
+preconditions:
+  - session_established: true
+  - device_is_running: true
+
+steps:
+  - name: Read operating state
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: operatingState
+    expect:
+      read_success: true
+      value: 0x04              # RUNNING
+
+  - name: Verify IsRunning would return true
+    action: evaluate
+    params:
+      expression: "operatingState == 0x04"
+    expect:
+      result: true
+
+postconditions:
+  - is_running_correct: true
+
+timeout: "10s"
+tags:
+  - status
+  - helper
+  - running
+
+---
+# TC-STAT-006: FAULT State Requires Fault Code
+id: TC-STAT-006
+name: FAULT State Requires Fault Code
+description: |
+  Verifies that when in FAULT state, the faultCode attribute
+  must have a valid (non-null) value.
+
+pics_requirements:
+  - MASH.S.STAT
+  - MASH.S.STAT.A01
+  - MASH.S.STAT.A03
+  - MASH.S.STAT.B_FAULT_CODE
+
+preconditions:
+  - session_established: true
+  - operating_state: FAULT
+
+steps:
+  - name: Verify operating state is FAULT
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: operatingState
+    expect:
+      read_success: true
+      value: 0x07              # FAULT
+
+  - name: Verify fault code is not null
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: faultCode
+    expect:
+      read_success: true
+      value_is_not_null: true  # Must have code in FAULT state
+
+postconditions:
+  - fault_code_present: true
+
+timeout: "10s"
+tags:
+  - status
+  - fault
+  - validation

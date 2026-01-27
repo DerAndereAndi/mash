@@ -1,0 +1,761 @@
+# Test Suite: Subscription Tests
+# Verifies subscription priming, delta notifications, heartbeats, and coalescing
+#
+# Key behaviors:
+# - Priming report: Initial values sent immediately on subscribe
+# - Delta notifications: Only changed values sent
+# - Heartbeat: Full state at maxInterval
+# - Coalescing: Rate limiting within minInterval
+
+---
+# TC-SUB-001: Priming Report Contains All Attributes
+id: TC-SUB-001
+name: Priming Report Contains All Attributes
+description: |
+  Verifies that when subscribing to a feature, an initial priming
+  report is sent containing all current attribute values.
+
+pics_requirements:
+  - MASH.S.SUB
+  - MASH.S.MEAS
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to Measurement feature
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 1
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      subscription_id_returned: true
+
+  - name: Wait for priming report
+    action: receive_notification
+    params:
+      timeout: "5s"
+    expect:
+      notification_received: true
+      is_priming_report: true
+      contains_all_attributes: true
+      contains:
+        - acActivePower
+        - acReactivePower
+
+postconditions:
+  - subscription_active: true
+
+timeout: "10s"
+tags:
+  - subscription
+  - priming
+  - basic
+
+---
+# TC-SUB-002: Delta Notification on Change
+id: TC-SUB-002
+name: Delta Notification Contains Only Changed Values
+description: |
+  Verifies that after the priming report, subsequent notifications
+  contain only the attributes that have changed.
+
+pics_requirements:
+  - MASH.S.SUB
+  - MASH.S.MEAS
+
+preconditions:
+  - session_established: true
+  - subscription_active: true
+
+steps:
+  - name: Subscribe to Measurement feature
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 0
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+
+  - name: Wait for priming report
+    action: receive_notification
+    params:
+      timeout: "5s"
+    expect:
+      is_priming_report: true
+
+  - name: Trigger change to acActivePower only
+    action: device_set_value
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+      value: 1000000           # 1 kW
+
+  - name: Receive delta notification
+    action: receive_notification
+    params:
+      timeout: "5s"
+    expect:
+      notification_received: true
+      is_delta: true
+      contains_only:
+        - acActivePower
+      value:
+        acActivePower: 1000000
+
+postconditions:
+  - delta_notification_correct: true
+
+timeout: "15s"
+tags:
+  - subscription
+  - delta
+  - notification
+
+---
+# TC-SUB-003: No Notification if Unchanged
+id: TC-SUB-003
+name: No Notification if Values Unchanged
+description: |
+  Verifies that no notification is sent if attribute values
+  have not changed since the last notification.
+
+pics_requirements:
+  - MASH.S.SUB
+  - MASH.S.MEAS
+
+preconditions:
+  - session_established: true
+  - subscription_active: true
+
+steps:
+  - name: Subscribe with short maxInterval
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 0
+      maxInterval: 5           # 5 seconds
+    expect:
+      subscribe_success: true
+
+  - name: Receive priming report
+    action: receive_notification
+    params:
+      timeout: "2s"
+    expect:
+      notification_received: true
+
+  - name: Wait for potential notification (should not come)
+    action: receive_notification
+    params:
+      timeout: "3s"
+    expect:
+      notification_received: false  # No change, no notification
+
+postconditions:
+  - no_spurious_notifications: true
+
+timeout: "10s"
+tags:
+  - subscription
+  - suppression
+  - no-change
+
+---
+# TC-SUB-004: Heartbeat at maxInterval
+id: TC-SUB-004
+name: Heartbeat Notification at maxInterval
+description: |
+  Verifies that a heartbeat notification with full state is sent
+  at the maxInterval even if no values have changed.
+
+pics_requirements:
+  - MASH.S.SUB
+  - MASH.S.SUB.B_HEARTBEAT_CONTENT
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe with 3 second maxInterval
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 0
+      maxInterval: 3           # 3 seconds
+    expect:
+      subscribe_success: true
+
+  - name: Receive priming report
+    action: receive_notification
+    params:
+      timeout: "2s"
+    expect:
+      notification_received: true
+      is_priming_report: true
+
+  - name: Wait for heartbeat notification
+    action: receive_notification
+    params:
+      timeout: "5s"
+    expect:
+      notification_received: true
+      is_heartbeat: true
+      contains_full_state: true
+
+postconditions:
+  - heartbeat_received: true
+
+timeout: "15s"
+tags:
+  - subscription
+  - heartbeat
+  - maxInterval
+
+---
+# TC-SUB-005: Coalescing Within minInterval
+id: TC-SUB-005
+name: Coalescing Within minInterval
+description: |
+  Verifies that multiple rapid changes are coalesced into a single
+  notification when they occur within minInterval.
+
+pics_requirements:
+  - MASH.S.SUB
+  - MASH.S.SUB.B_COALESCE
+  - MASH.S.MEAS
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe with 2 second minInterval
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 2           # 2 seconds
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+
+  - name: Receive priming report
+    action: receive_notification
+    params:
+      timeout: "2s"
+    expect:
+      notification_received: true
+
+  - name: Trigger multiple rapid changes
+    action: device_set_values_rapid
+    params:
+      endpoint: 1
+      feature: Measurement
+      changes:
+        - attribute: acActivePower
+          value: 1000000
+        - attribute: acActivePower
+          value: 2000000
+        - attribute: acActivePower
+          value: 3000000
+      interval_ms: 100         # 100ms between changes
+
+  - name: Wait past minInterval and receive coalesced notification
+    action: receive_notification
+    params:
+      timeout: "5s"
+    expect:
+      notification_received: true
+      notification_count: 1    # Single coalesced notification
+      value:
+        acActivePower: 3000000 # Final value
+
+postconditions:
+  - coalescing_applied: true
+
+timeout: "15s"
+tags:
+  - subscription
+  - coalescing
+  - minInterval
+
+---
+# TC-SUB-006: Multiple Subscriptions Same Feature
+id: TC-SUB-006
+name: Multiple Subscriptions Same Feature
+description: |
+  Verifies that multiple subscriptions to the same feature are
+  independent and receive separate notifications.
+
+pics_requirements:
+  - MASH.S.SUB
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Create first subscription
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 0
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      subscription_id: sub1
+
+  - name: Create second subscription with different interval
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 1
+      maxInterval: 30
+    expect:
+      subscribe_success: true
+      subscription_id: sub2
+      subscription_id_different_from: sub1
+
+  - name: Receive priming report for sub1
+    action: receive_notification
+    params:
+      subscription_id: sub1
+      timeout: "2s"
+    expect:
+      notification_received: true
+
+  - name: Receive priming report for sub2
+    action: receive_notification
+    params:
+      subscription_id: sub2
+      timeout: "2s"
+    expect:
+      notification_received: true
+
+  - name: Trigger change
+    action: device_set_value
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+      value: 5000000
+
+  - name: Verify both subscriptions receive notification
+    action: receive_notifications
+    params:
+      count: 2
+      timeout: "5s"
+    expect:
+      received_count: 2
+      subscription_ids: [sub1, sub2]
+
+postconditions:
+  - multiple_subscriptions_independent: true
+
+timeout: "15s"
+tags:
+  - subscription
+  - multiple
+  - independence
+
+---
+# TC-SUB-007: Unsubscribe Stops Notifications
+id: TC-SUB-007
+name: Unsubscribe Stops Notifications
+description: |
+  Verifies that after unsubscribing, no more notifications are
+  received for that subscription.
+
+pics_requirements:
+  - MASH.S.SUB
+
+preconditions:
+  - session_established: true
+  - subscription_active: true
+
+steps:
+  - name: Create subscription
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 0
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      subscription_id_saved: true
+
+  - name: Receive priming report
+    action: receive_notification
+    params:
+      timeout: "2s"
+    expect:
+      notification_received: true
+
+  - name: Unsubscribe
+    action: unsubscribe
+    params:
+      subscription_id: saved_subscription_id
+    expect:
+      unsubscribe_success: true
+
+  - name: Trigger change
+    action: device_set_value
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+      value: 7000000
+
+  - name: Verify no notification received
+    action: receive_notification
+    params:
+      timeout: "3s"
+    expect:
+      notification_received: false
+
+postconditions:
+  - subscription_terminated: true
+
+timeout: "15s"
+tags:
+  - subscription
+  - unsubscribe
+  - cleanup
+
+---
+# TC-SUB-008: Subscription Survives Zone Changes
+id: TC-SUB-008
+name: Subscription Survives Zone Changes
+description: |
+  Verifies that subscriptions remain active when other zones
+  connect or disconnect from the device.
+
+pics_requirements:
+  - MASH.S.SUB
+  - MASH.S.ZONE
+
+preconditions:
+  - session_established: true
+  - zone_type: HOME_MANAGER
+
+steps:
+  - name: Create subscription
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 0
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+
+  - name: Receive priming report
+    action: receive_notification
+    params:
+      timeout: "2s"
+    expect:
+      notification_received: true
+
+  - name: Connect another zone
+    action: connect_as_zone
+    params:
+      zone_type: GRID_OPERATOR
+      zone_id: "grid-op-1"
+    expect:
+      connection_success: true
+
+  - name: Trigger change
+    action: device_set_value
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+      value: 4000000
+
+  - name: Verify subscription still receives notifications
+    action: receive_notification
+    params:
+      timeout: "3s"
+    expect:
+      notification_received: true
+      value:
+        acActivePower: 4000000
+
+postconditions:
+  - subscription_persisted: true
+
+timeout: "15s"
+tags:
+  - subscription
+  - zone
+  - persistence
+
+---
+# TC-SUB-009: Subscription Lost on Disconnect
+id: TC-SUB-009
+name: Subscription Lost on Session Disconnect
+description: |
+  Verifies that subscriptions are terminated when the TLS session
+  is disconnected.
+
+pics_requirements:
+  - MASH.S.SUB
+
+preconditions:
+  - session_established: true
+  - subscription_active: true
+
+steps:
+  - name: Create subscription
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 0
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      subscription_id_saved: true
+
+  - name: Disconnect session
+    action: disconnect
+    params:
+      graceful: true
+
+  - name: Reconnect
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
+
+  - name: Trigger change
+    action: device_set_value
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+      value: 9000000
+
+  - name: Verify no notification (subscription was lost)
+    action: receive_notification
+    params:
+      timeout: "3s"
+    expect:
+      notification_received: false
+
+postconditions:
+  - subscription_terminated_on_disconnect: true
+
+timeout: "15s"
+tags:
+  - subscription
+  - disconnect
+  - session
+
+---
+# TC-SUB-010: Re-subscribe After Reconnect
+id: TC-SUB-010
+name: Re-subscribe After Reconnect
+description: |
+  Verifies that after reconnecting, a new subscription can be
+  created and receives proper priming report.
+
+pics_requirements:
+  - MASH.S.SUB
+
+preconditions:
+  - session_previously_connected: true
+
+steps:
+  - name: Reconnect to device
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
+
+  - name: Create new subscription
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 0
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+
+  - name: Receive priming report
+    action: receive_notification
+    params:
+      timeout: "3s"
+    expect:
+      notification_received: true
+      is_priming_report: true
+      contains_all_attributes: true
+
+postconditions:
+  - re_subscription_successful: true
+
+timeout: "10s"
+tags:
+  - subscription
+  - reconnect
+  - recovery
+
+---
+# TC-SUB-011: Subscribe to Multiple Features
+id: TC-SUB-011
+name: Subscribe to Multiple Features
+description: |
+  Verifies that subscriptions to different features are independent
+  and each receives correct notifications.
+
+pics_requirements:
+  - MASH.S.SUB
+  - MASH.S.MEAS
+  - MASH.S.STAT
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to Measurement feature
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+      minInterval: 0
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      subscription_id: sub_meas
+
+  - name: Subscribe to Status feature
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Status
+      minInterval: 0
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      subscription_id: sub_stat
+
+  - name: Receive priming for Measurement
+    action: receive_notification
+    params:
+      subscription_id: sub_meas
+      timeout: "2s"
+    expect:
+      notification_received: true
+      feature: Measurement
+
+  - name: Receive priming for Status
+    action: receive_notification
+    params:
+      subscription_id: sub_stat
+      timeout: "2s"
+    expect:
+      notification_received: true
+      feature: Status
+
+  - name: Change Measurement attribute
+    action: device_set_value
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+      value: 2000000
+
+  - name: Verify only Measurement subscription notified
+    action: receive_notification
+    params:
+      timeout: "3s"
+    expect:
+      notification_received: true
+      subscription_id: sub_meas
+      feature: Measurement
+
+postconditions:
+  - multi_feature_subscriptions_work: true
+
+timeout: "15s"
+tags:
+  - subscription
+  - multi-feature
+  - independence
+
+---
+# TC-SUB-012: Subscription ID Uniqueness
+id: TC-SUB-012
+name: Subscription ID Uniqueness
+description: |
+  Verifies that each subscription receives a unique ID that can
+  be used for correlation of notifications.
+
+pics_requirements:
+  - MASH.S.SUB
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Create 5 subscriptions
+    action: subscribe_multiple
+    params:
+      subscriptions:
+        - endpoint: 1
+          feature: Measurement
+          minInterval: 0
+          maxInterval: 60
+        - endpoint: 1
+          feature: Status
+          minInterval: 0
+          maxInterval: 60
+        - endpoint: 1
+          feature: EnergyControl
+          minInterval: 0
+          maxInterval: 60
+        - endpoint: 1
+          feature: Electrical
+          minInterval: 0
+          maxInterval: 60
+        - endpoint: 0
+          feature: DeviceInfo
+          minInterval: 0
+          maxInterval: 60
+    expect:
+      all_succeed: true
+      subscription_ids_unique: true
+      subscription_count: 5
+
+  - name: Verify notifications have correct subscription IDs
+    action: receive_notifications
+    params:
+      count: 5
+      timeout: "5s"
+    expect:
+      received_count: 5
+      all_ids_unique: true
+      all_ids_match_subscriptions: true
+
+postconditions:
+  - subscription_id_correlation_works: true
+
+timeout: "15s"
+tags:
+  - subscription
+  - id
+  - uniqueness
+  - correlation

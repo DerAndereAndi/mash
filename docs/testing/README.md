@@ -391,6 +391,13 @@ For each feature, in order:
 | `behavior/zone-lifecycle.md` | Zone creation, device add/remove, cert renewal, revocation | Complete |
 | `behavior/connection-establishment.md` | mDNS records, TLS handshake, PASE→operational transition, cert validation | Complete |
 | `behavior/tls-profile.md` | TLS 1.3 cipher suites, extensions, key exchange, alerts, session handling | Complete |
+| `behavior/zone-management.md` | Zone operations, priority, connection tracking, capacity enforcement | Complete |
+| `behavior/electrical-feature.md` | Direction capability, phase config, power ratings, asymmetric support | Complete |
+| `behavior/measurement-feature.md` | Sign convention, nullable attrs, helper methods, cumulative energy | Complete |
+| `behavior/energycontrol-feature.md` | Command handlers, effective vs own values, OptOut states | Complete |
+| `behavior/chargingsession-feature.md` | Session lifecycle, EV demand modes, V2G constraints, CanDischarge | Complete |
+| `behavior/status-feature.md` | Operating state transitions, fault management, helper methods | Complete |
+| `behavior/protocol-behaviors.md` | Request/response correlation, subscription priming, notifications | Complete |
 
 ### Completed Test Cases
 
@@ -441,6 +448,16 @@ For each feature, in order:
 | TC-TLS-RESUME | 3 | Session resumption (prohibited) |
 | TC-TLS-ALERT | 4 | TLS alert handling |
 | TC-BIDIR | 4 | Bidirectional communication |
+| TC-STATE | 15 | ControlState/ProcessState transitions |
+| TC-ZONE-LIMIT | 13 | Multi-zone limit resolution |
+| TC-SUB | 12 | Subscription priming, deltas, heartbeats |
+| TC-ELEC | 8 | Electrical feature capabilities |
+| TC-MEAS | 10 | Measurement feature and sign convention |
+| TC-CTRL | 12 | EnergyControl commands and behaviors |
+| TC-CHRG | 10 | ChargingSession lifecycle and V2G |
+| TC-STAT | 6 | Status feature and fault management |
+| TC-CONN | 5 | Connection establishment |
+| TC-ERR | 6 | Error handling |
 
 ### Gaps Remaining (from testability-analysis.md)
 
@@ -449,18 +466,29 @@ For each feature, in order:
 | State Machines | 4 | 4 | 0 |
 | Multi-Zone Resolution | 6 | 6 | 0 |
 | Timing/Ordering | 8 | 8 | 0 |
-| Feature Dependencies | 3 | 0 | 3 |
+| Feature Dependencies | 3 | 3 | 0 |
 | Protocol Encoding | 5 | 5 | 0 |
 | Security | 4 | 4 | 0 |
-| Feature Interaction | 5 | 0 | 5 |
+| Feature Interaction | 5 | 5 | 0 |
 | Error Handling | 3 | 3 | 0 |
 | Discovery | 3 | 3 | 0 |
+
+**Note:** Feature dependencies and interactions are now covered by the feature-specific behavior specs (electrical, measurement, energycontrol, chargingsession, status) and `feature-interactions.md`.
 
 ---
 
 ## Next Steps
 
-1. **Define PICS format precisely** - Create `pics/pics-format.md`
-2. **Address remaining gaps** - Timing, encoding, security, error handling
-3. **Build basic tooling** - PICS parser as first tool
-4. **Create conformance XML** - For EnergyControl feature
+1. **Implement test harness** - Execute YAML test cases against devices
+2. **Build PICS tooling** - Parser and validator for PICS files
+3. **Create conformance XML** - Formal attribute/command conformance rules
+4. **Implement remaining features** - Tariff, Signals, Plan (code implementation)
+
+### Summary Statistics
+
+| Category | Count |
+|----------|-------|
+| Behavior specifications | 16 documents |
+| Runnable test cases | 110+ tests |
+| PICS feature files | 6 files |
+| Test case YAML files | 23 files |

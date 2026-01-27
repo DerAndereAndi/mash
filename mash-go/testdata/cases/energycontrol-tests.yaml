@@ -1,0 +1,674 @@
+# Test Suite: EnergyControl Feature Tests
+# Verifies limit/setpoint commands and control behaviors
+#
+# Key concepts:
+# - Limits: Maximum allowed power (most restrictive wins)
+# - Setpoints: Target power (highest priority wins)
+# - ControlState: AUTONOMOUS -> CONTROLLED -> LIMITED -> FAILSAFE -> OVERRIDE
+
+---
+# TC-CTRL-001: SetLimit Command Accepted
+id: TC-CTRL-001
+name: SetLimit Command Accepted
+description: |
+  Verifies that the SetLimit command is accepted and the
+  effective limit is updated.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A0A          # acceptsLimits
+  - MASH.S.CTRL.C01.Rsp      # SetLimit
+
+preconditions:
+  - session_established: true
+  - device_accepts_limits: true
+
+steps:
+  - name: Send SetLimit command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 7000000  # 7 kW
+    expect:
+      invoke_success: true
+      response_contains: effectiveConsumptionLimit
+
+  - name: Verify effective limit updated
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 7000000
+
+postconditions:
+  - limit_set_successfully: true
+
+timeout: "10s"
+tags:
+  - energycontrol
+  - setlimit
+  - command
+
+---
+# TC-CTRL-002: ClearLimit Removes Limit
+id: TC-CTRL-002
+name: ClearLimit Removes Limit
+description: |
+  Verifies that the ClearLimit command removes the previously
+  set limit, returning to unlimited.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.C02.Rsp      # ClearLimit
+
+preconditions:
+  - session_established: true
+  - limit_is_set: true
+
+steps:
+  - name: Verify limit is set
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: myConsumptionLimit
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+  - name: Send ClearLimit command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: ClearLimit
+      args:
+        direction: consumption
+    expect:
+      invoke_success: true
+
+  - name: Verify limit is cleared
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: myConsumptionLimit
+    expect:
+      read_success: true
+      value_is_null: true      # Unlimited
+
+postconditions:
+  - limit_cleared: true
+
+timeout: "10s"
+tags:
+  - energycontrol
+  - clearlimit
+  - command
+
+---
+# TC-CTRL-003: SetSetpoint Command Accepted
+id: TC-CTRL-003
+name: SetSetpoint Command Accepted
+description: |
+  Verifies that the SetSetpoint command is accepted for devices
+  that accept setpoints.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A0C          # acceptsSetpoints
+  - MASH.S.CTRL.C03.Rsp      # SetSetpoint
+
+preconditions:
+  - session_established: true
+  - device_accepts_setpoints: true
+
+steps:
+  - name: Send SetSetpoint command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetSetpoint
+      args:
+        consumptionSetpoint: 5000000  # 5 kW target
+    expect:
+      invoke_success: true
+
+  - name: Verify effective setpoint updated
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionSetpoint
+    expect:
+      read_success: true
+      value: 5000000
+
+postconditions:
+  - setpoint_set_successfully: true
+
+timeout: "10s"
+tags:
+  - energycontrol
+  - setpoint
+  - command
+
+---
+# TC-CTRL-004: Pause Command Transitions State
+id: TC-CTRL-004
+name: Pause Command Transitions ProcessState
+description: |
+  Verifies that the Pause command transitions processState
+  from RUNNING to PAUSED.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A0E          # isPausable
+  - MASH.S.CTRL.C09.Rsp      # Pause
+
+preconditions:
+  - session_established: true
+  - device_is_pausable: true
+  - process_state: RUNNING
+
+steps:
+  - name: Verify device is pausable
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: isPausable
+    expect:
+      read_success: true
+      value: true
+
+  - name: Send Pause command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Pause
+    expect:
+      invoke_success: true
+
+  - name: Verify process state is PAUSED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x04              # PAUSED
+
+postconditions:
+  - process_paused: true
+
+timeout: "10s"
+tags:
+  - energycontrol
+  - pause
+  - process
+
+---
+# TC-CTRL-005: Resume from Paused State
+id: TC-CTRL-005
+name: Resume from Paused State
+description: |
+  Verifies that the Resume command transitions processState
+  from PAUSED back to RUNNING.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.C0A.Rsp      # Resume
+
+preconditions:
+  - session_established: true
+  - process_state: PAUSED
+
+steps:
+  - name: Send Resume command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Resume
+    expect:
+      invoke_success: true
+
+  - name: Verify process state is RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03              # RUNNING
+
+postconditions:
+  - process_resumed: true
+
+timeout: "10s"
+tags:
+  - energycontrol
+  - resume
+  - process
+
+---
+# TC-CTRL-006: Stop Aborts Process
+id: TC-CTRL-006
+name: Stop Command Aborts Process
+description: |
+  Verifies that the Stop command transitions processState to ABORTED.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A10          # isStoppable
+  - MASH.S.CTRL.C0B.Rsp      # Stop
+
+preconditions:
+  - session_established: true
+  - device_is_stoppable: true
+  - process_state: RUNNING
+
+steps:
+  - name: Verify device is stoppable
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: isStoppable
+    expect:
+      read_success: true
+      value: true
+
+  - name: Send Stop command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Stop
+    expect:
+      invoke_success: true
+
+  - name: Verify process state is ABORTED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x06              # ABORTED
+
+postconditions:
+  - process_aborted: true
+
+timeout: "10s"
+tags:
+  - energycontrol
+  - stop
+  - process
+
+---
+# TC-CTRL-007: Effective vs Own Limit Values
+id: TC-CTRL-007
+name: Effective vs Own Limit Values
+description: |
+  Verifies that effective limits differ from own limits when
+  multiple zones set different values.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_EFFECTIVE
+  - MASH.S.ZONE
+
+preconditions:
+  - session_established: true
+  - two_zones_connected: true
+
+steps:
+  - name: This zone sets 8 kW limit
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 8000000
+    expect:
+      invoke_success: true
+
+  - name: Other zone sets 5 kW limit
+    action: invoke_as_zone
+    params:
+      zone: GRID_OPERATOR
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+    expect:
+      invoke_success: true
+
+  - name: Read my limit (should be 8 kW)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: myConsumptionLimit
+    expect:
+      read_success: true
+      value: 8000000
+
+  - name: Read effective limit (should be 5 kW)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 5000000           # Lower = more restrictive
+
+postconditions:
+  - effective_own_differ: true
+
+timeout: "10s"
+tags:
+  - energycontrol
+  - effective
+  - multi-zone
+
+---
+# TC-CTRL-008: OptOut States Respected
+id: TC-CTRL-008
+name: OptOut States Respected
+description: |
+  Verifies that commands are rejected when device is in
+  an OptOut state.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A03          # optOutState
+  - MASH.S.CTRL.B_OPTOUT
+
+preconditions:
+  - session_established: true
+  - device_supports_optout: true
+
+steps:
+  - name: Set device to OptOut state
+    action: write
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: optOutState
+      value: 0x01              # Some OptOut state
+    expect:
+      write_success: true
+
+  - name: Attempt to set limit (should be rejected/ignored)
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 1000000
+    expect:
+      invoke_success: false
+      error_code: OPT_OUT_ACTIVE
+
+postconditions:
+  - optout_respected: true
+
+timeout: "10s"
+tags:
+  - energycontrol
+  - optout
+  - filtering
+
+---
+# TC-CTRL-009: Failsafe Limits Applied
+id: TC-CTRL-009
+name: Failsafe Limits Applied on Connection Loss
+description: |
+  Verifies that failsafe limits are applied when connection
+  to all controllers is lost.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A46          # failsafeConsumptionLimit
+  - MASH.S.CTRL.A48          # failsafeDuration
+
+preconditions:
+  - session_established: true
+  - failsafe_configured: true
+
+steps:
+  - name: Read configured failsafe limit
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: failsafeConsumptionLimit
+    expect:
+      read_success: true
+      save_as: failsafe_limit
+
+  - name: Set a normal limit
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 10000000  # 10 kW
+    expect:
+      invoke_success: true
+
+  - name: Disconnect to trigger failsafe
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait for failsafe detection
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Reconnect and verify failsafe limit active
+    action: connect
+    params:
+      insecure: true
+
+  - name: Verify effective limit is failsafe limit
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_equals: failsafe_limit
+
+postconditions:
+  - failsafe_limits_active: true
+
+timeout: "30s"
+tags:
+  - energycontrol
+  - failsafe
+  - safety
+
+---
+# TC-CTRL-010: Command to Unsupported Capability Fails
+id: TC-CTRL-010
+name: Command to Unsupported Capability Fails
+description: |
+  Verifies that commands for unsupported capabilities return
+  appropriate error.
+
+pics_requirements:
+  - MASH.S.CTRL
+
+preconditions:
+  - session_established: true
+  - device_not_pausable: true
+
+steps:
+  - name: Verify device is not pausable
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: isPausable
+    expect:
+      read_success: true
+      value: false
+
+  - name: Attempt Pause command (should fail)
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Pause
+    expect:
+      invoke_success: false
+      error_code: UNSUPPORTED_COMMAND
+
+postconditions:
+  - unsupported_rejected: true
+
+timeout: "10s"
+tags:
+  - energycontrol
+  - capability
+  - negative
+
+---
+# TC-CTRL-011: Duration Parameter Expires Limit
+id: TC-CTRL-011
+name: Duration Parameter Expires Limit
+description: |
+  Verifies that limits set with a duration parameter automatically
+  expire after the specified time.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DURATION
+  - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Set limit with 3 second duration
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 2000000
+        duration: 3            # 3 seconds
+    expect:
+      invoke_success: true
+
+  - name: Verify limit is active
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 2000000
+
+  - name: Wait for duration to expire
+    action: wait
+    params:
+      duration: "4s"
+
+  - name: Verify limit has expired
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_is_null: true      # Expired = unlimited
+
+postconditions:
+  - limit_expired: true
+
+timeout: "15s"
+tags:
+  - energycontrol
+  - duration
+  - expiry
+
+---
+# TC-CTRL-012: Per-Phase Current Limits
+id: TC-CTRL-012
+name: Per-Phase Current Limits
+description: |
+  Verifies that per-phase current limits can be set and read
+  for asymmetric-capable devices.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.F09          # ASYMMETRIC
+  - MASH.S.CTRL.C05.Rsp      # SetCurrentLimits
+
+preconditions:
+  - session_established: true
+  - device_supports_asymmetric: true
+
+steps:
+  - name: Set per-phase current limits
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetCurrentLimits
+      args:
+        phases:
+          A: 16000             # 16A
+          B: 12000             # 12A
+          C: 8000              # 8A
+        direction: consumption
+    expect:
+      invoke_success: true
+
+  - name: Read effective per-phase limits
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveCurrentLimitsConsumption
+    expect:
+      read_success: true
+      value:
+        A: 16000
+        B: 12000
+        C: 8000
+
+postconditions:
+  - per_phase_limits_set: true
+
+timeout: "10s"
+tags:
+  - energycontrol
+  - asymmetric
+  - per-phase
