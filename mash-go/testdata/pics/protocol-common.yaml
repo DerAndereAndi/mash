@@ -22,6 +22,8 @@ items:
   # Certificate Management (Device-Side)
   # ==========================================================================
 
+  MASH.S.CERT.EXCHANGE: true          # Device supports cert exchange after PASE
+  MASH.S.CERT.DEVICE_ID_FROM_CN: true # Device extracts device ID from cert CommonName
   MASH.S.CERT.RENEWAL: true           # Device supports certificate renewal
   MASH.S.CERT.IN_SESSION_RENEWAL: true # Renewal without TLS reconnection
   MASH.S.CERT.EXPIRY_HANDLING: true   # Proper handling of expired certificates
@@ -94,4 +96,21 @@ items:
 #
 # TC-PAIR-005 (Commissioned Device Ignores Pairing Requests):
 #   - MASH.S.DISC.PAIRING_REQUEST: true
+#   - MASH.S.ZONE.MAX: 2
+#
+# =============================================================================
+# Commissioning Certificate Exchange Tests
+# =============================================================================
+#
+# TC-COMM-002 (Certificate Exchange After PASE):
+#   - MASH.S.CERT.EXCHANGE: true
+#   - MASH.S.CERT.DEVICE_ID_FROM_CN: true
+#   - MASH.C.CERT.ZONE_CA: true
+#
+# TC-COMM-003 (Device ID Consistency):
+#   - MASH.S.CERT.DEVICE_ID_FROM_CN: true
+#   - MASH.S.DISC.OP: true
+#
+# TC-COMM-004 (Multi-Zone Different Device IDs):
+#   - MASH.S.CERT.EXCHANGE: true
 #   - MASH.S.ZONE.MAX: 2

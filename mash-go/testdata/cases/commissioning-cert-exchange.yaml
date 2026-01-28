@@ -1,0 +1,196 @@
+# Test Cases: Commissioning Certificate Exchange
+# Verifies certificate exchange flow after PASE handshake completes
+
+---
+id: TC-COMM-002
+name: Certificate Exchange After PASE
+description: |
+  Verifies that after successful PASE handshake, the controller and device
+  perform certificate exchange:
+
+  1. Controller sends CertRenewalRequest with Zone CA certificate
+  2. Device generates new key pair and sends CSR
+  3. Controller signs CSR, assigns device ID, embeds in cert CommonName
+  4. Device receives operational cert, extracts device ID from CommonName
+  5. Device stores operational cert and Zone CA for future verification
+
+  This follows the Matter pattern where the commissioner assigns the Node ID
+  and embeds it in the certificate subject during signing.
+
+pics_requirements:
+  - D.COMM.SC          # Device supports secure connection
+  - D.COMM.PASE        # Device supports PASE commissioning
+  - D.CERT.EXCHANGE    # Device supports certificate exchange
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - tls_connection_established: true
+
+steps:
+  - name: Perform PASE commissioning
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      session_established: true
+
+  - name: Verify device received operational certificate
+    action: verify_device_cert
+    expect:
+      has_operational_cert: true
+      cert_signed_by_zone_ca: true
+      cert_validity_days: 365
+
+  - name: Verify device ID is in certificate CommonName
+    action: verify_cert_subject
+    expect:
+      common_name_is_device_id: true
+      device_id_length: 16
+      device_id_hex_valid: true
+
+  - name: Verify device extracted device ID from certificate
+    action: verify_device_state
+    expect:
+      device_has_device_id: true
+      device_id_matches_cert_cn: true
+
+  - name: Verify Zone CA is stored
+    action: verify_device_cert_store
+    expect:
+      zone_ca_stored: true
+      operational_cert_stored: true
+
+postconditions:
+  - device_commissioned: true
+  - operational_cert_active: true
+  - device_id_assigned: true
+
+timeout: "15s"
+tags:
+  - commissioning
+  - certificate
+  - device-id
+  - security
+
+---
+id: TC-COMM-003
+name: Device ID Consistency After Commissioning
+description: |
+  Verifies that the device ID is consistent across:
+  - Certificate CommonName (source of truth)
+  - Device service state
+  - mDNS operational advertisement (DI TXT record)
+
+  The controller assigns the device ID during cert signing by computing
+  SHA-256(CSR public key)[0:8] and embedding it in the certificate's
+  CommonName. The device extracts this value rather than re-deriving it.
+
+pics_requirements:
+  - D.COMM.SC          # Device supports secure connection
+  - D.DISC.OP          # Device supports operational discovery
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Get device ID from certificate CommonName
+    action: extract_cert_device_id
+    store_result: cert_device_id
+
+  - name: Get device ID from device state
+    action: query_device_state
+    expect:
+      device_id_present: true
+    store_result: state_device_id
+
+  - name: Get device ID from mDNS advertisement
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: true
+    store_result: mdns_device_id
+
+  - name: Verify all device IDs match
+    action: compare_values
+    params:
+      values:
+        - "${cert_device_id}"
+        - "${state_device_id}"
+        - "${mdns_device_id}"
+    expect:
+      all_equal: true
+      description: "Device ID must be consistent across cert, state, and mDNS"
+
+postconditions:
+  - device_id_consistent: true
+
+timeout: "10s"
+tags:
+  - commissioning
+  - device-id
+  - discovery
+  - consistency
+
+---
+id: TC-COMM-004
+name: Multi-Zone Different Device IDs
+description: |
+  Verifies that when a device is commissioned to multiple zones,
+  it has a different device ID in each zone (because each zone
+  issues a different operational certificate with a different key pair).
+
+pics_requirements:
+  - D.COMM.SC          # Device supports secure connection
+  - D.ZONE.MULTI       # Device supports multiple zones (max 2)
+
+preconditions:
+  - device_uncommissioned: true
+
+steps:
+  - name: Commission to first zone (LOCAL)
+    action: commission
+    params:
+      setup_code: "12345678"
+      zone_type: "LOCAL"
+    store_result: zone1_result
+
+  - name: Get device ID for zone 1
+    action: extract_cert_device_id
+    params:
+      zone_id: "${zone1_result.zone_id}"
+    store_result: device_id_zone1
+
+  - name: Commission to second zone (GRID)
+    action: commission
+    params:
+      setup_code: "12345678"
+      zone_type: "GRID"
+    store_result: zone2_result
+
+  - name: Get device ID for zone 2
+    action: extract_cert_device_id
+    params:
+      zone_id: "${zone2_result.zone_id}"
+    store_result: device_id_zone2
+
+  - name: Verify device IDs are different
+    action: compare_values
+    params:
+      values:
+        - "${device_id_zone1}"
+        - "${device_id_zone2}"
+    expect:
+      all_different: true
+      description: "Same device should have different IDs in different zones"
+
+postconditions:
+  - device_in_two_zones: true
+  - different_device_ids_per_zone: true
+
+timeout: "30s"
+tags:
+  - commissioning
+  - device-id
+  - multi-zone
+  - security

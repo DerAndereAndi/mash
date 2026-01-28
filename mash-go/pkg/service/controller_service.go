@@ -393,24 +393,48 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 		return nil, ErrCommissionFailed
 	}
 
-	// Derive device ID from the device's TLS certificate
-	// This must match what the device advertises in operational mDNS
-	tlsState := conn.ConnectionState()
-	if len(tlsState.PeerCertificates) == 0 {
-		conn.Close()
-		return nil, fmt.Errorf("%w: no device certificate", ErrCommissionFailed)
-	}
-	deviceID, err := discovery.DeviceIDFromPublicKey(tlsState.PeerCertificates[0])
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("%w: failed to derive device ID: %v", ErrCommissionFailed, err)
-	}
-
 	// Zone ID is derived from shared secret (both sides compute the same value)
 	zoneID := deriveZoneID(sharedSecret)
 
-	// Create framed connection wrapper for operational messaging
+	// Create framed connection FIRST - needed for cert exchange messages
 	framedConn := newFramedConnection(conn)
+
+	// Perform certificate exchange with device
+	// This issues an operational certificate signed by our Zone CA
+	s.mu.RLock()
+	certStore := s.certStore
+	s.mu.RUnlock()
+
+	if certStore == nil {
+		conn.Close()
+		return nil, fmt.Errorf("%w: no certificate store configured", ErrCommissionFailed)
+	}
+
+	zoneCA, err := certStore.GetZoneCA()
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("%w: failed to get Zone CA: %v", ErrCommissionFailed, err)
+	}
+
+	// Create renewal handler and perform initial cert exchange
+	// Use IssueInitialCertSync because we don't have a message loop yet
+	renewalHandler := NewControllerRenewalHandler(zoneCA, framedConn)
+	operationalCert, err := renewalHandler.IssueInitialCertSync(ctx, framedConn)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("%w: certificate exchange failed: %v", ErrCommissionFailed, err)
+	}
+
+	// Extract device ID from the operational certificate (Matter-style: embedded in CommonName)
+	// The device ID was assigned by the controller during certificate signing
+	deviceID, err := cert.ExtractDeviceID(operationalCert)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("%w: failed to extract device ID: %v", ErrCommissionFailed, err)
+	}
+
+	// framedConn was already created above for cert exchange
+	// Now use it for operational messaging
 
 	// Create device session for operational messaging
 	deviceSession := NewDeviceSession(deviceID, framedConn)
@@ -685,11 +709,25 @@ func (s *ControllerService) Decommission(deviceID string) error {
 	return nil
 }
 
-// DeviceCount returns the number of connected devices.
+// DeviceCount returns the number of paired (commissioned) devices.
+// Note: This includes both online and offline devices.
 func (s *ControllerService) DeviceCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.connectedDevices)
+}
+
+// ConnectedCount returns the number of currently connected devices.
+func (s *ControllerService) ConnectedCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, d := range s.connectedDevices {
+		if d.Connected {
+			count++
+		}
+	}
+	return count
 }
 
 // GetDevice returns information about a connected device.
@@ -988,6 +1026,11 @@ func (s *ControllerService) attemptReconnection(ctx context.Context, svc *discov
 	conn, err := tls.Dial("tcp", addr, tlsConfig)
 	if err != nil {
 		// Connection failed - device might not be ready yet
+		s.emitEvent(Event{
+			Type:     EventReconnectionFailed,
+			DeviceID: svc.DeviceID,
+			Error:    err,
+		})
 		return
 	}
 

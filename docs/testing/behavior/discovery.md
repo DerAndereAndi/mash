@@ -68,9 +68,9 @@ Port:          8443 (TCP/TLS WebSocket)
 
 Where:
 - `zone-id`: First 16 hex chars (64 bits) of SHA-256(Zone CA certificate DER)
-- `device-id`: First 16 hex chars (64 bits) of SHA-256(device operational cert public key DER)
+- `device-id`: Extracted from operational cert's CommonName (assigned by controller during commissioning)
 
-Both IDs are **fingerprint-derived** - no assignment or vendor registration needed.
+**Device ID derivation (by controller):** Controller computes `hex(SHA-256(CSR public key DER)[0:8])` and embeds it in the certificate's CommonName during signing. Device extracts this value from the received certificate.
 
 **Note:** Device ID is zone-specific. Same physical device in two zones has different device IDs (different operational certs per zone). This is intentional - the device has a distinct identity in each zone.
 

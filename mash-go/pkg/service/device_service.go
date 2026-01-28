@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -14,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
@@ -197,28 +197,42 @@ func (s *DeviceService) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Get or generate the device identity certificate
-	// This certificate is used for TLS and defines the device ID
+	// Get cert store for loading zone memberships
 	s.mu.RLock()
 	certStore := s.certStore
 	s.mu.RUnlock()
 
-	var deviceCert *x509.Certificate
-	var deviceKey *ecdsa.PrivateKey
-
+	// Check if we have any zone memberships (i.e., we're commissioned)
+	var zones []string
 	if certStore != nil {
-		// Try to load existing certificate
-		deviceCert, deviceKey, err = certStore.GetDeviceIdentity()
-		if err != nil && err != cert.ErrCertNotFound {
+		zones = certStore.ListZones()
+	}
+
+	if len(zones) > 0 {
+		// COMMISSIONED: Load operational certs from zones
+		// Use the first zone's operational cert for the device ID
+		firstZone := zones[0]
+		opCert, err := certStore.GetOperationalCert(firstZone)
+		if err != nil {
 			s.mu.Lock()
 			s.state = StateIdle
 			s.mu.Unlock()
-			return fmt.Errorf("failed to load device certificate: %w", err)
+			return fmt.Errorf("failed to load operational certificate for zone %s: %w", firstZone, err)
 		}
-	}
 
-	if deviceCert == nil || deviceKey == nil {
-		// Generate new self-signed certificate
+		// Use operational cert for TLS
+		s.tlsCert = opCert.TLSCertificate()
+
+		// Device ID is extracted from operational cert (Matter-style: embedded in CommonName)
+		s.deviceID, _ = cert.ExtractDeviceID(opCert.Certificate)
+
+		// TODO: In Phase 4, implement per-zone TLS config for multi-zone support
+		// For now, use the first zone's cert for all connections
+	} else {
+		// UNCOMMISSIONED: Generate throwaway commissioning cert (not persisted)
+		// This cert is only used for TLS during PASE commissioning.
+		// The device ID will be assigned during cert exchange after PASE.
+		var err error
 		s.tlsCert, err = generateSelfSignedCert()
 		if err != nil {
 			s.mu.Lock()
@@ -227,30 +241,8 @@ func (s *DeviceService) Start(ctx context.Context) error {
 			return err
 		}
 
-		// Save to cert store if available
-		if certStore != nil && len(s.tlsCert.Certificate) > 0 {
-			parsedCert, parseErr := x509.ParseCertificate(s.tlsCert.Certificate[0])
-			if parseErr == nil {
-				if key, ok := s.tlsCert.PrivateKey.(*ecdsa.PrivateKey); ok {
-					_ = certStore.SetDeviceIdentity(parsedCert, key)
-					_ = certStore.Save()
-				}
-			}
-		}
-	} else {
-		// Use loaded certificate
-		s.tlsCert = tls.Certificate{
-			Certificate: [][]byte{deviceCert.Raw},
-			PrivateKey:  deviceKey,
-		}
-	}
-
-	// Derive device ID from the certificate's public key
-	if len(s.tlsCert.Certificate) > 0 {
-		parsedCert, err := x509.ParseCertificate(s.tlsCert.Certificate[0])
-		if err == nil {
-			s.deviceID, _ = discovery.DeviceIDFromPublicKey(parsedCert)
-		}
+		// No device ID until commissioned - will be derived from operational cert
+		s.deviceID = ""
 	}
 
 	// Create TLS config for commissioning (no client cert required)
@@ -450,6 +442,8 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 }
 
 // handleCommissioningConnection handles PASE commissioning over TLS.
+// After PASE succeeds, it performs the certificate exchange to receive an
+// operational certificate from the controller's Zone CA.
 func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// Create PASE server session
 	paseSession, err := commissioning.NewPASEServerSession(s.verifier, s.serverID)
@@ -469,8 +463,48 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// Derive zone ID from shared secret
 	zoneID := deriveZoneID(sharedSecret)
 
+	s.debugLog("handleCommissioningConnection: PASE succeeded, starting cert exchange", "zoneID", zoneID)
+
+	// Create framed connection FIRST - needed for cert exchange messages
+	framedConn := newFramedConnection(conn)
+
+	// Perform certificate exchange with controller
+	// This is the critical step that gives us an operational cert from the Zone CA
+	operationalCert, zoneCA, err := s.performCertExchange(framedConn, zoneID)
+	if err != nil {
+		s.debugLog("handleCommissioningConnection: cert exchange failed", "error", err)
+		conn.Close()
+		return
+	}
+
+	// Extract device ID from operational certificate (Matter-style: embedded in CommonName)
+	deviceID, err := cert.ExtractDeviceID(operationalCert.Certificate)
+	if err != nil {
+		s.debugLog("handleCommissioningConnection: failed to extract device ID", "error", err)
+		conn.Close()
+		return
+	}
+
+	s.debugLog("handleCommissioningConnection: cert exchange complete",
+		"deviceID", deviceID,
+		"zoneID", zoneID,
+		"certExpires", operationalCert.Certificate.NotAfter)
+
+	// Update service device ID (use first zone's ID as primary)
+	s.mu.Lock()
+	if s.deviceID == "" {
+		s.deviceID = deviceID
+		// Update TLS cert to use operational cert for future connections
+		s.tlsCert = operationalCert.TLSCertificate()
+		s.tlsConfig.Certificates = []tls.Certificate{s.tlsCert}
+	}
+	s.mu.Unlock()
+
+	// Store Zone CA for future verification of controller connections
+	_ = zoneCA // Zone CA already stored in performCertExchange
+
 	// Register the zone connection
-	// For now, assume Local type since we don't have certificate-based zone typing yet
+	// Zone type derived from certificate (defaults to Local for now)
 	s.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Persist state immediately after commissioning
@@ -481,9 +515,6 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	if err := s.ExitCommissioningMode(); err != nil {
 		s.debugLog("handleCommissioningConnection: failed to exit commissioning mode", "error", err)
 	}
-
-	// Create framed connection wrapper for operational messaging
-	framedConn := newFramedConnection(conn)
 
 	// Create zone session for this connection
 	zoneSession := NewZoneSession(zoneID, framedConn, s.device)
@@ -508,6 +539,164 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 
 	// Clean up on disconnect
 	s.handleZoneSessionClose(zoneID)
+}
+
+// performCertExchange handles the certificate exchange protocol with the controller.
+// It receives the Zone CA, generates a new key pair, sends a CSR, and installs
+// the signed operational certificate.
+//
+// Protocol flow:
+// 1. Receive CertRenewalRequest with ZoneCA from controller
+// 2. Generate NEW key pair (not reusing commissioning key)
+// 3. Send CertRenewalCSR with device's CSR
+// 4. Receive CertRenewalInstall with signed operational cert
+// 5. Verify and store operational cert + Zone CA
+// 6. Send CertRenewalAck
+func (s *DeviceService) performCertExchange(conn *framedConnection, zoneID string) (*cert.OperationalCert, *x509.Certificate, error) {
+	// Step 1: Wait for CertRenewalRequest from controller
+	data, err := conn.ReadFrame()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read cert renewal request: %w", err)
+	}
+
+	msg, err := commissioning.DecodeRenewalMessage(data)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decode cert renewal request: %w", err)
+	}
+
+	certReq, ok := msg.(*commissioning.CertRenewalRequest)
+	if !ok {
+		return nil, nil, fmt.Errorf("expected CertRenewalRequest, got %T", msg)
+	}
+
+	// Verify we received the Zone CA
+	if len(certReq.ZoneCA) == 0 {
+		return nil, nil, fmt.Errorf("CertRenewalRequest missing Zone CA")
+	}
+
+	// Parse the Zone CA certificate
+	zoneCA, err := x509.ParseCertificate(certReq.ZoneCA)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse Zone CA: %w", err)
+	}
+
+	s.debugLog("performCertExchange: received Zone CA",
+		"issuer", zoneCA.Issuer.String(),
+		"notAfter", zoneCA.NotAfter)
+
+	// Step 2: Generate NEW key pair for this zone
+	// Important: We generate a fresh key pair, NOT reusing the commissioning key
+	keyPair, err := cert.GenerateKeyPair()
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate key pair: %w", err)
+	}
+
+	// Step 3: Create and send CSR
+	csrInfo := &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{
+			DeviceID:  "", // Will be derived from cert
+			VendorID:  s.device.VendorID(),
+			ProductID: s.device.ProductID(),
+		},
+	}
+
+	csrDER, err := cert.CreateCSR(keyPair, csrInfo)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create CSR: %w", err)
+	}
+
+	csrResp := &commissioning.CertRenewalCSR{
+		MsgType: commissioning.MsgCertRenewalCSR,
+		CSR:     csrDER,
+	}
+
+	csrData, err := cbor.Marshal(csrResp)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode CSR: %w", err)
+	}
+
+	if err := conn.Send(csrData); err != nil {
+		return nil, nil, fmt.Errorf("send CSR: %w", err)
+	}
+
+	// Step 4: Wait for signed certificate
+	data, err = conn.ReadFrame()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read cert install: %w", err)
+	}
+
+	msg, err = commissioning.DecodeRenewalMessage(data)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decode cert install: %w", err)
+	}
+
+	certInstall, ok := msg.(*commissioning.CertRenewalInstall)
+	if !ok {
+		return nil, nil, fmt.Errorf("expected CertRenewalInstall, got %T", msg)
+	}
+
+	// Parse the new operational certificate
+	newCert, err := x509.ParseCertificate(certInstall.NewCert)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse operational cert: %w", err)
+	}
+
+	// Verify the certificate is signed by the Zone CA
+	roots := x509.NewCertPool()
+	roots.AddCert(zoneCA)
+	if _, err := newCert.Verify(x509.VerifyOptions{Roots: roots}); err != nil {
+		return nil, nil, fmt.Errorf("verify operational cert: %w", err)
+	}
+
+	// Step 5: Store operational cert and Zone CA
+	operationalCert := &cert.OperationalCert{
+		Certificate: newCert,
+		PrivateKey:  keyPair.PrivateKey,
+		ZoneID:      zoneID,
+	}
+
+	s.mu.RLock()
+	certStore := s.certStore
+	s.mu.RUnlock()
+
+	if certStore != nil {
+		// Store operational cert for this zone
+		if err := certStore.SetOperationalCert(operationalCert); err != nil {
+			return nil, nil, fmt.Errorf("store operational cert: %w", err)
+		}
+
+		// Store Zone CA for this zone
+		if err := certStore.SetZoneCACert(zoneID, zoneCA); err != nil {
+			return nil, nil, fmt.Errorf("store Zone CA: %w", err)
+		}
+
+		// Persist to disk
+		if err := certStore.Save(); err != nil {
+			return nil, nil, fmt.Errorf("save cert store: %w", err)
+		}
+	}
+
+	// Step 6: Send acknowledgment
+	ack := &commissioning.CertRenewalAck{
+		MsgType:        commissioning.MsgCertRenewalAck,
+		Status:         commissioning.RenewalStatusSuccess,
+		ActiveSequence: certInstall.Sequence,
+	}
+
+	ackData, err := cbor.Marshal(ack)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode ack: %w", err)
+	}
+
+	if err := conn.Send(ackData); err != nil {
+		return nil, nil, fmt.Errorf("send ack: %w", err)
+	}
+
+	s.debugLog("performCertExchange: complete",
+		"zoneID", zoneID,
+		"certExpires", newCert.NotAfter)
+
+	return operationalCert, zoneCA, nil
 }
 
 // runZoneMessageLoop reads messages from the connection and dispatches to the session.
@@ -646,11 +835,25 @@ func (s *DeviceService) ExitCommissioningMode() error {
 	return nil
 }
 
-// ZoneCount returns the number of connected zones.
+// ZoneCount returns the number of paired (commissioned) zones.
+// Note: This includes both online and offline zones.
 func (s *DeviceService) ZoneCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.connectedZones)
+}
+
+// ConnectedZoneCount returns the number of currently connected zones.
+func (s *DeviceService) ConnectedZoneCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, z := range s.connectedZones {
+		if z.Connected {
+			count++
+		}
+	}
+	return count
 }
 
 // GetZone returns information about a connected zone.
@@ -699,6 +902,22 @@ func (s *DeviceService) HandleZoneConnect(zoneID string, zoneType cert.ZoneType)
 		s.nextZoneIndex++
 	}
 
+	// Extract device ID for this zone from operational cert
+	// Device ID is zone-specific - embedded in the certificate's CommonName by controller
+	deviceID := s.deviceID // Fallback to service device ID
+	if s.certStore != nil {
+		if opCert, err := s.certStore.GetOperationalCert(zoneID); err == nil {
+			extractedID, _ := cert.ExtractDeviceID(opCert.Certificate)
+			if extractedID != "" {
+				deviceID = extractedID
+				// Update service device ID if not set (first zone)
+				if s.deviceID == "" {
+					s.deviceID = extractedID
+				}
+			}
+		}
+	}
+
 	// Start operational mDNS advertising for this zone
 	// This allows controllers to discover the device for reconnection
 	if s.discoveryManager != nil {
@@ -709,7 +928,7 @@ func (s *DeviceService) HandleZoneConnect(zoneID string, zoneType cert.ZoneType)
 
 		opInfo := &discovery.OperationalInfo{
 			ZoneID:        zoneID,
-			DeviceID:      s.deviceID,
+			DeviceID:      deviceID,
 			VendorProduct: fmt.Sprintf("%04x:%04x", s.device.VendorID(), s.device.ProductID()),
 			EndpointCount: uint8(s.device.EndpointCount()),
 			Port:          port,

@@ -105,15 +105,17 @@ func VerifyZoneMembership(cert *x509.Certificate, zoneCACert *x509.Certificate) 
 	return nil
 }
 
-// ExtractDeviceID extracts the device ID from a certificate's Subject Key Identifier.
+// ExtractDeviceID extracts the device ID from a certificate's CommonName.
+// This follows the Matter pattern where the commissioner assigns the device ID
+// and embeds it in the certificate subject during signing.
 func ExtractDeviceID(cert *x509.Certificate) (string, error) {
 	if cert == nil {
 		return "", ErrInvalidCert
 	}
-	if len(cert.SubjectKeyId) == 0 {
-		return "", fmt.Errorf("certificate has no Subject Key Identifier")
+	if cert.Subject.CommonName == "" {
+		return "", fmt.Errorf("certificate has no CommonName")
 	}
-	return SKIToDeviceID(cert.SubjectKeyId), nil
+	return cert.Subject.CommonName, nil
 }
 
 // CertificateInfo extracts human-readable information from a certificate.
@@ -135,7 +137,7 @@ func GetCertificateInfo(cert *x509.Certificate) *CertificateInfo {
 	}
 
 	return &CertificateInfo{
-		DeviceID:   SKIToDeviceID(cert.SubjectKeyId),
+		DeviceID:   cert.Subject.CommonName, // Matter-style: device ID is in CommonName
 		CommonName: cert.Subject.CommonName,
 		Issuer:     cert.Issuer.CommonName,
 		NotBefore:  cert.NotBefore,

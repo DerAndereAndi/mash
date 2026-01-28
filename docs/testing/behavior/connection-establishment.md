@@ -265,7 +265,7 @@ Controller                                    Device
 5. Close TCP connection
 6. Update mDNS:
    - Deregister `_mashc._udp` service instance
-   - Compute device ID: `hex(SHA-256(op cert public key DER)[0:8])` (16 hex chars)
+   - Extract device ID from operational cert CommonName (assigned by controller)
    - Register `_mash._tcp` service instance with `<zone-id>-<device-id>` name
    - Update TXT records for operational mode (ZI, DI)
 7. Listen for new connection
