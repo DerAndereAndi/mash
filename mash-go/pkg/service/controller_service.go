@@ -447,13 +447,14 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 
 	// Create device record
 	device := &ConnectedDevice{
-		ID:        deviceID,
-		ZoneID:    zoneID,
-		Host:      service.Host,
-		Port:      service.Port,
-		Addresses: service.Addresses,
-		Connected: true,
-		LastSeen:  time.Now(),
+		ID:              deviceID,
+		ZoneID:          zoneID,
+		Host:            service.Host,
+		Port:            service.Port,
+		Addresses:       service.Addresses,
+		Connected:       true,
+		LastSeen:        time.Now(),
+		OperationalCert: operationalCert, // Store the operational cert for display
 	}
 
 	// Store device and session

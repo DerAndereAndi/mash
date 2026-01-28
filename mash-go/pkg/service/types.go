@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"log/slog"
 	"time"
@@ -319,6 +320,10 @@ type ConnectedDevice struct {
 
 	// LastSeen is when the device was last seen.
 	LastSeen time.Time
+
+	// OperationalCert is the device's operational certificate received during commissioning.
+	// This is the certificate signed by the Zone CA, with device ID in CommonName.
+	OperationalCert *x509.Certificate
 }
 
 // ConnectedZone represents a zone connected to a device.

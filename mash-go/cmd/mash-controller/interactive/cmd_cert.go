@@ -65,7 +65,7 @@ func (c *Controller) showControllerCerts() {
 	fmt.Fprintln(c.rl.Stdout())
 }
 
-// showDeviceCert displays a device's certificate from the active TLS session.
+// showDeviceCert displays a device's operational certificate.
 func (c *Controller) showDeviceCert(partialID string) {
 	// Resolve device ID
 	deviceID := c.resolveDeviceID(partialID)
@@ -81,36 +81,24 @@ func (c *Controller) showDeviceCert(partialID string) {
 		return
 	}
 
-	// Check if device is connected
-	if !device.Connected {
-		fmt.Fprintf(c.rl.Stdout(), "Device not connected - certificate not available\n")
-		fmt.Fprintf(c.rl.Stdout(), "(Certificate inspection requires an active TLS session)\n")
-		return
+	// Use stored operational certificate (preferred)
+	var deviceCert *x509.Certificate
+	if device.OperationalCert != nil {
+		deviceCert = device.OperationalCert
+	} else if device.Connected {
+		// Fallback to TLS peer cert if operational cert not stored
+		session := c.svc.GetSession(deviceID)
+		if session != nil {
+			if tlsState := session.TLSConnectionState(); tlsState != nil && len(tlsState.PeerCertificates) > 0 {
+				deviceCert = tlsState.PeerCertificates[0]
+			}
+		}
 	}
 
-	// Get session to access TLS state
-	session := c.svc.GetSession(deviceID)
-	if session == nil {
-		fmt.Fprintf(c.rl.Stdout(), "No active session for device %s\n", deviceID)
+	if deviceCert == nil {
+		fmt.Fprintf(c.rl.Stdout(), "No certificate available for device %s\n", partialID)
 		return
 	}
-
-	// Get TLS connection state
-	tlsState := session.TLSConnectionState()
-	if tlsState == nil {
-		fmt.Fprintln(c.rl.Stdout(), "TLS connection state not available")
-		return
-	}
-
-	// Check for peer certificates
-	if len(tlsState.PeerCertificates) == 0 {
-		fmt.Fprintln(c.rl.Stdout(), "No peer certificate available")
-		fmt.Fprintln(c.rl.Stdout(), "(Device may have been commissioned without mutual TLS)")
-		return
-	}
-
-	// Show device certificate (first in chain)
-	deviceCert := tlsState.PeerCertificates[0]
 
 	fmt.Fprintf(c.rl.Stdout(), "\nDevice Certificate: %s\n", shortID(deviceID))
 	fmt.Fprintln(c.rl.Stdout(), "-------------------------------------------")
@@ -149,29 +137,32 @@ func (c *Controller) showAllCerts() {
 		c.printCertRow("Controller", controllerCert.Certificate)
 	}
 
-	// Device Certificates from active sessions
+	// Device Certificates - use stored operational cert (not TLS peer cert)
 	devices := c.svc.GetAllDevices()
 	for _, device := range devices {
-		if !device.Connected {
+		if device.OperationalCert != nil {
+			// Use the stored operational certificate (received during commissioning)
+			c.printCertRow("Device", device.OperationalCert)
+		} else if !device.Connected {
 			// Show disconnected devices with no cert info
 			fmt.Fprintf(c.rl.Stdout(), "%-12s %-24s %-20s %-10s %s\n",
 				"Device", shortID(device.ID), "-", "-", "disconnected")
-			continue
-		}
+		} else {
+			// Fallback to TLS peer cert if operational cert not available
+			session := c.svc.GetSession(device.ID)
+			if session == nil {
+				continue
+			}
 
-		session := c.svc.GetSession(device.ID)
-		if session == nil {
-			continue
-		}
+			tlsState := session.TLSConnectionState()
+			if tlsState == nil || len(tlsState.PeerCertificates) == 0 {
+				fmt.Fprintf(c.rl.Stdout(), "%-12s %-24s %-20s %-10s %s\n",
+					"Device", shortID(device.ID), "-", "-", "no cert")
+				continue
+			}
 
-		tlsState := session.TLSConnectionState()
-		if tlsState == nil || len(tlsState.PeerCertificates) == 0 {
-			fmt.Fprintf(c.rl.Stdout(), "%-12s %-24s %-20s %-10s %s\n",
-				"Device", shortID(device.ID), "-", "-", "no cert")
-			continue
+			c.printCertRow("Device", tlsState.PeerCertificates[0])
 		}
-
-		c.printCertRow("Device", tlsState.PeerCertificates[0])
 	}
 
 	fmt.Fprintln(c.rl.Stdout(), "--------------------------------------------------------------------------------")
