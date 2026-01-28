@@ -67,7 +67,9 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/examples"
+	"github.com/mash-protocol/mash-go/pkg/features"
 	mashlog "github.com/mash-protocol/mash-go/pkg/log"
+	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/persistence"
 	"github.com/mash-protocol/mash-go/pkg/service"
 	"github.com/mash-protocol/mash-go/pkg/wire"
@@ -376,8 +378,8 @@ func setupDeviceMonitoring(deviceID string) {
 		cem.HandleNotification(deviceID, notif.EndpointID, notif.FeatureID, notif.Changes)
 
 		// Log power updates in real-time
-		if notif.FeatureID == 2 { // FeatureMeasurement
-			if rawPower, exists := notif.Changes[1]; exists { // MeasurementAttrACActivePower
+		if notif.FeatureID == uint8(model.FeatureMeasurement) {
+			if rawPower, exists := notif.Changes[features.MeasurementAttrACActivePower]; exists {
 				if power, ok := wire.ToInt64(rawPower); ok {
 					powerKW := float64(power) / 1_000_000.0
 					log.Printf("[NOTIFY] Device %s power: %.1f kW", deviceID[:8], powerKW)
