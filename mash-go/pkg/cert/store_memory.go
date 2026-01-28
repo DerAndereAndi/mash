@@ -112,6 +112,12 @@ func (s *MemoryStore) SetZoneCACert(zoneID string, cert *x509.Certificate) error
 	defer s.mu.Unlock()
 
 	s.zoneCACerts[zoneID] = cert
+
+	// Also update the operational cert's ZoneCACert field if it exists
+	if opCert, exists := s.operationalCerts[zoneID]; exists {
+		opCert.ZoneCACert = cert
+	}
+
 	return nil
 }
 

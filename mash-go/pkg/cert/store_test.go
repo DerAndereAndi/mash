@@ -233,3 +233,110 @@ func TestStoreInterfaceImplementation(t *testing.T) {
 	var _ Store = (*MemoryStore)(nil)
 	var _ ControllerStore = (*MemoryControllerStore)(nil)
 }
+
+func TestZoneCAPersistence(t *testing.T) {
+	// This test verifies that Zone CA certs set separately from operational certs
+	// are correctly persisted. This mirrors the actual commissioning flow:
+	// 1. SetOperationalCert is called with the device's new operational cert
+	// 2. SetZoneCACert is called with the Zone CA cert
+	// 3. Save persists both to disk
+
+	t.Run("MemoryStore_SetZoneCASeparately", func(t *testing.T) {
+		store := NewMemoryStore()
+
+		// Create Zone CA and device cert
+		ca, _ := GenerateZoneCA("zone-1", ZoneTypeLocal)
+		deviceKP, _ := GenerateKeyPair()
+		csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
+			Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1, ProductID: 1},
+			ZoneID:   "zone-1",
+		})
+		cert, _ := SignCSR(ca, csrDER)
+
+		// Step 1: Set operational cert WITHOUT ZoneCACert
+		opCert := &OperationalCert{
+			Certificate: cert,
+			PrivateKey:  deviceKP.PrivateKey,
+			ZoneID:      "zone-1",
+			ZoneType:    ZoneTypeLocal,
+			ZoneCACert:  nil, // Not set initially
+		}
+		if err := store.SetOperationalCert(opCert); err != nil {
+			t.Fatalf("SetOperationalCert() error = %v", err)
+		}
+
+		// Step 2: Set Zone CA separately (as happens during cert exchange)
+		if err := store.SetZoneCACert("zone-1", ca.Certificate); err != nil {
+			t.Fatalf("SetZoneCACert() error = %v", err)
+		}
+
+		// Verify Zone CA is retrievable
+		gotCA, err := store.GetZoneCACert("zone-1")
+		if err != nil {
+			t.Errorf("GetZoneCACert() error = %v", err)
+		}
+		if gotCA == nil {
+			t.Error("GetZoneCACert() returned nil")
+		}
+
+		// Verify operational cert's ZoneCACert field was updated
+		gotOp, err := store.GetOperationalCert("zone-1")
+		if err != nil {
+			t.Fatalf("GetOperationalCert() error = %v", err)
+		}
+		if gotOp.ZoneCACert == nil {
+			t.Error("OperationalCert.ZoneCACert should be set after SetZoneCACert()")
+		}
+	})
+
+	t.Run("FileStore_ZoneCAPersisted", func(t *testing.T) {
+		dir := t.TempDir()
+		store := NewFileStore(dir)
+
+		// Create Zone CA and device cert
+		ca, _ := GenerateZoneCA("zone-1", ZoneTypeLocal)
+		deviceKP, _ := GenerateKeyPair()
+		csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
+			Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1, ProductID: 1},
+			ZoneID:   "zone-1",
+		})
+		cert, _ := SignCSR(ca, csrDER)
+
+		// Step 1: Set operational cert WITHOUT ZoneCACert
+		opCert := &OperationalCert{
+			Certificate: cert,
+			PrivateKey:  deviceKP.PrivateKey,
+			ZoneID:      "zone-1",
+			ZoneType:    ZoneTypeLocal,
+			ZoneCACert:  nil, // Not set initially
+		}
+		if err := store.SetOperationalCert(opCert); err != nil {
+			t.Fatalf("SetOperationalCert() error = %v", err)
+		}
+
+		// Step 2: Set Zone CA separately
+		if err := store.SetZoneCACert("zone-1", ca.Certificate); err != nil {
+			t.Fatalf("SetZoneCACert() error = %v", err)
+		}
+
+		// Step 3: Save to disk
+		if err := store.Save(); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+
+		// Step 4: Load into a fresh store
+		store2 := NewFileStore(dir)
+		if err := store2.Load(); err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		// Verify Zone CA was loaded
+		gotCA, err := store2.GetZoneCACert("zone-1")
+		if err != nil {
+			t.Errorf("GetZoneCACert() after Load() error = %v", err)
+		}
+		if gotCA == nil {
+			t.Error("Zone CA should be persisted and loaded")
+		}
+	})
+}
