@@ -793,6 +793,70 @@ func TestFeatureMapBitString(t *testing.T) {
 	}
 }
 
+func TestAttributeListSorted(t *testing.T) {
+	feature := NewFeature(FeatureMeasurement, 1)
+
+	// Add attributes in non-sequential order to ensure sorting is tested
+	// The order of addition: 50, 10, 30, 1, 20, 40
+	// Expected sorted order: 1, 10, 20, 30, 40, 50, plus global attrs at end
+	for _, id := range []uint16{50, 10, 30, 1, 20, 40} {
+		attr := NewAttribute(&AttributeMetadata{
+			ID:     id,
+			Name:   "attr",
+			Type:   DataTypeInt32,
+			Access: AccessReadOnly,
+		})
+		feature.AddAttribute(attr)
+	}
+
+	// Call AttributeList multiple times to detect non-deterministic ordering
+	for i := 0; i < 10; i++ {
+		ids := feature.AttributeList()
+
+		// Verify the list is sorted
+		for j := 1; j < len(ids); j++ {
+			if ids[j-1] >= ids[j] {
+				t.Errorf("iteration %d: AttributeList not sorted at index %d: %d >= %d",
+					i, j, ids[j-1], ids[j])
+				t.Logf("full list: %v", ids)
+				break
+			}
+		}
+	}
+}
+
+func TestCommandListSorted(t *testing.T) {
+	feature := NewFeature(FeatureMeasurement, 1)
+
+	// Add commands in non-sequential order
+	// The order of addition: 5, 1, 3, 2, 4
+	// Expected sorted order: 1, 2, 3, 4, 5
+	for _, id := range []uint8{5, 1, 3, 2, 4} {
+		cmd := NewCommand(&CommandMetadata{
+			ID:   id,
+			Name: "cmd",
+		}, func(_ context.Context, _ map[string]any) (map[string]any, error) {
+			return nil, nil
+		})
+		feature.AddCommand(cmd)
+	}
+
+	// Call CommandList multiple times to detect non-deterministic ordering
+	for i := 0; i < 10; i++ {
+		ids := feature.CommandList()
+
+		// Verify the list is sorted
+		for j := 1; j < len(ids); j++ {
+			if ids[j-1] >= ids[j] {
+				t.Errorf("iteration %d: CommandList not sorted at index %d: %d >= %d",
+					i, j, ids[j-1], ids[j])
+				t.Logf("full list: %v", ids)
+				break
+			}
+		}
+	}
+}
+
 func TestFindEndpointsWithFeature(t *testing.T) {
 	device := NewDevice("test", 1, 1)
 

@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 )
 
@@ -248,6 +249,7 @@ func (f *Feature) attributeListUnlocked() []uint16 {
 			ids = append(ids, id)
 		}
 	}
+	slices.Sort(ids)
 	return ids
 }
 
@@ -291,6 +293,7 @@ func (f *Feature) commandListUnlocked() []uint8 {
 	for id := range f.commands {
 		ids = append(ids, id)
 	}
+	slices.Sort(ids)
 	return ids
 }
 
