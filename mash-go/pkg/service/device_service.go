@@ -426,6 +426,9 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 	// Set callback to persist certificate after renewal
 	zoneSession.SetOnCertRenewalSuccess(s.handleCertRenewalSuccess)
 
+	// Set callback to emit events when attributes are written
+	zoneSession.SetOnWrite(s.makeWriteCallback(targetZoneID))
+
 	// Store the session
 	s.mu.Lock()
 	s.zoneSessions[targetZoneID] = zoneSession
@@ -534,6 +537,9 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 
 	// Set callback to persist certificate after renewal
 	zoneSession.SetOnCertRenewalSuccess(s.handleCertRenewalSuccess)
+
+	// Set callback to emit events when attributes are written
+	zoneSession.SetOnWrite(s.makeWriteCallback(zoneID))
 
 	// Store the session
 	s.mu.Lock()
@@ -786,6 +792,23 @@ func (s *DeviceService) handleCertRenewalSuccess(zoneID string, handler *DeviceR
 		"zoneID", zoneID,
 		"subject", newCert.Subject.CommonName,
 		"notAfter", newCert.NotAfter)
+}
+
+// makeWriteCallback creates a write callback that emits events for attribute changes.
+func (s *DeviceService) makeWriteCallback(zoneID string) WriteCallback {
+	return func(endpointID uint8, featureID uint8, attrs map[uint16]any) {
+		// Emit an event for each written attribute
+		for attrID, value := range attrs {
+			s.emitEvent(Event{
+				Type:        EventValueChanged,
+				ZoneID:      zoneID,
+				EndpointID:  endpointID,
+				FeatureID:   uint16(featureID),
+				AttributeID: attrID,
+				Value:       value,
+			})
+		}
+	}
 }
 
 // GetZoneSession returns the session for a connected zone.

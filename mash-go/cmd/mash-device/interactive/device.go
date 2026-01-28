@@ -13,6 +13,7 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/inspect"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/service"
@@ -60,13 +61,18 @@ func New(svc *service.DeviceService, cfg DeviceConfig) (*Device, error) {
 		return nil, fmt.Errorf("failed to create readline: %w", err)
 	}
 
-	return &Device{
+	d := &Device{
 		svc:       svc,
 		config:    cfg,
 		inspector: inspect.NewInspector(svc.Device()),
 		formatter: inspect.NewFormatter(),
 		rl:        rl,
-	}, nil
+	}
+
+	// Register event handler for displaying write events
+	svc.OnEvent(d.handleEvent)
+
+	return d, nil
 }
 
 // Stdout returns a writer that properly coordinates with the readline input.
@@ -751,4 +757,87 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// handleEvent handles service events and displays relevant ones to the user.
+func (d *Device) handleEvent(event service.Event) {
+	switch event.Type {
+	case service.EventValueChanged:
+		// Only show EnergyControl attribute changes (limits, setpoints)
+		if event.FeatureID == uint16(model.FeatureEnergyControl) {
+			d.displayLimitChange(event)
+		}
+	}
+}
+
+// displayLimitChange displays a limit or setpoint change event.
+func (d *Device) displayLimitChange(event service.Event) {
+	// Get attribute name
+	attrName := d.getEnergyControlAttrName(event.AttributeID)
+	if attrName == "" {
+		return // Not a limit/setpoint attribute we care about
+	}
+
+	// Format the zone ID (truncate for display)
+	zoneID := event.ZoneID
+	if len(zoneID) > 8 {
+		zoneID = zoneID[:8]
+	}
+
+	// Format the value
+	var valueStr string
+	if event.Value == nil {
+		valueStr = "cleared"
+	} else {
+		// Value is in milliwatts, convert to kW
+		switch v := event.Value.(type) {
+		case int64:
+			valueStr = fmt.Sprintf("%.1f kW", float64(v)/1_000_000)
+		case float64:
+			valueStr = fmt.Sprintf("%.1f kW", v/1_000_000)
+		default:
+			valueStr = fmt.Sprintf("%v", event.Value)
+		}
+	}
+
+	// Print the event
+	fmt.Fprintf(d.rl.Stdout(), "\n[%s] Zone %s: %s = %s\n",
+		time.Now().Format("15:04:05"),
+		zoneID,
+		attrName,
+		valueStr)
+	d.rl.Refresh()
+}
+
+// getEnergyControlAttrName returns a human-readable name for limit/setpoint attributes.
+func (d *Device) getEnergyControlAttrName(attrID uint16) string {
+	switch attrID {
+	// Consumption/production limits
+	case features.EnergyControlAttrMyConsumptionLimit:
+		return "consumptionLimit"
+	case features.EnergyControlAttrMyProductionLimit:
+		return "productionLimit"
+	// Current limits
+	case features.EnergyControlAttrMyCurrentLimitsConsumption:
+		return "currentLimitsConsumption"
+	case features.EnergyControlAttrMyCurrentLimitsProduction:
+		return "currentLimitsProduction"
+	// Setpoints
+	case features.EnergyControlAttrMyConsumptionSetpoint:
+		return "consumptionSetpoint"
+	case features.EnergyControlAttrMyProductionSetpoint:
+		return "productionSetpoint"
+	// Current setpoints
+	case features.EnergyControlAttrMyCurrentSetpointsConsumption:
+		return "currentSetpointsConsumption"
+	case features.EnergyControlAttrMyCurrentSetpointsProduction:
+		return "currentSetpointsProduction"
+	// Failsafe limits
+	case features.EnergyControlAttrFailsafeConsumptionLimit:
+		return "failsafeConsumptionLimit"
+	case features.EnergyControlAttrFailsafeProductionLimit:
+		return "failsafeProductionLimit"
+	default:
+		return ""
+	}
 }

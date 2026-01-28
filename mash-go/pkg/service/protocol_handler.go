@@ -13,6 +13,10 @@ import (
 // NotificationSender is a function that sends a notification to the remote peer.
 type NotificationSender func(notification *wire.Notification) error
 
+// WriteCallback is called after a successful write operation.
+// It receives the endpoint ID, feature ID, and the map of attribute IDs to values that were written.
+type WriteCallback func(endpointID uint8, featureID uint8, attrs map[uint16]any)
+
 // ProtocolHandler handles MASH protocol messages for a device or controller.
 // It routes Read/Write/Subscribe/Invoke requests to the appropriate
 // features and generates responses. The handler is bidirectional and can be
@@ -28,6 +32,9 @@ type ProtocolHandler struct {
 
 	// Send function for notifications
 	sendNotification NotificationSender
+
+	// Write callback (optional) - called after successful writes
+	onWrite WriteCallback
 
 	// Protocol logging (optional)
 	logger log.Logger
@@ -66,6 +73,13 @@ func (h *ProtocolHandler) SetSendNotification(send NotificationSender) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.sendNotification = send
+}
+
+// SetOnWrite sets the callback for write operations.
+func (h *ProtocolHandler) SetOnWrite(cb WriteCallback) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onWrite = cb
 }
 
 // PeerID returns the remote peer's identifier.
@@ -347,6 +361,16 @@ func (h *ProtocolHandler) handleWrite(req *wire.Request) *wire.Response {
 			Payload: &wire.ErrorPayload{
 				Message: firstError.Error(),
 			},
+		}
+	}
+
+	// Call write callback if set and we have successful writes
+	if len(result) > 0 {
+		h.mu.RLock()
+		onWrite := h.onWrite
+		h.mu.RUnlock()
+		if onWrite != nil {
+			onWrite(req.EndpointID, req.FeatureID, result)
 		}
 	}
 

@@ -306,6 +306,12 @@ func (s *ZoneSession) SubscriptionCount() int {
 	return s.handler.SubscriptionCount()
 }
 
+// SetOnWrite sets the callback for write operations.
+// The callback receives the endpoint ID, feature ID, and written attributes.
+func (s *ZoneSession) SetOnWrite(cb WriteCallback) {
+	s.handler.SetOnWrite(cb)
+}
+
 // Close closes the session and cleans up resources.
 func (s *ZoneSession) Close() {
 	s.mu.Lock()
