@@ -165,7 +165,7 @@ MASH Device Commands:
     write <path> <val> - Write an attribute value
 
   Zone Management:
-    zones              - List connected zones
+    zones              - List paired zones
     kick <zone-id>     - Remove a zone from this device
     commission         - Enter commissioning mode (open for pairing)
 
@@ -312,11 +312,11 @@ func (d *Device) cmdWrite(args []string) {
 func (d *Device) cmdZones(_ []string) {
 	zones := d.svc.GetAllZones()
 	if len(zones) == 0 {
-		fmt.Fprintln(d.rl.Stdout(),"No zones connected")
+		fmt.Fprintln(d.rl.Stdout(),"No paired zones")
 		return
 	}
 
-	fmt.Fprintf(d.rl.Stdout(),"\nConnected Zones (%d):\n", len(zones))
+	fmt.Fprintf(d.rl.Stdout(),"\nPaired Zones (%d):\n", len(zones))
 	fmt.Fprintln(d.rl.Stdout(),"-------------------------------------------")
 	for _, z := range zones {
 		status := "connected"
@@ -426,7 +426,32 @@ func (d *Device) cmdStatus() {
 	fmt.Fprintf(d.rl.Stdout(),"  Device ID:      %s\n", d.svc.Device().DeviceID())
 	fmt.Fprintf(d.rl.Stdout(),"  Device Type:    %s\n", d.config.DeviceType())
 	fmt.Fprintf(d.rl.Stdout(),"  Service State:  %s\n", d.svc.State())
-	fmt.Fprintf(d.rl.Stdout(),"  Connected Zones: %d\n", d.svc.ZoneCount())
+
+	// Show paired zones with IDs
+	zones := d.svc.GetAllZones()
+	pairedIDs := make([]string, 0, len(zones))
+	connectedIDs := make([]string, 0, len(zones))
+	for _, z := range zones {
+		shortID := z.ID
+		if len(shortID) > 8 {
+			shortID = shortID[:8]
+		}
+		pairedIDs = append(pairedIDs, shortID)
+		if z.Connected {
+			connectedIDs = append(connectedIDs, shortID)
+		}
+	}
+
+	if len(pairedIDs) > 0 {
+		fmt.Fprintf(d.rl.Stdout(),"  Paired Zones:   %d (%s)\n", len(pairedIDs), strings.Join(pairedIDs, ", "))
+	} else {
+		fmt.Fprintf(d.rl.Stdout(),"  Paired Zones:   0\n")
+	}
+	if len(connectedIDs) > 0 {
+		fmt.Fprintf(d.rl.Stdout(),"  Connected:      %d (%s)\n", len(connectedIDs), strings.Join(connectedIDs, ", "))
+	} else {
+		fmt.Fprintf(d.rl.Stdout(),"  Connected:      0\n")
+	}
 
 	simStatus := "stopped"
 	if d.simRunning {

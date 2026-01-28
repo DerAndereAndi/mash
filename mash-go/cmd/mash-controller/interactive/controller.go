@@ -227,11 +227,11 @@ func (c *Controller) cmdDiscover(ctx context.Context) {
 func (c *Controller) cmdDevices() {
 	devices := c.svc.GetAllDevices()
 	if len(devices) == 0 {
-		fmt.Fprintln(c.rl.Stdout(),"No devices connected")
+		fmt.Fprintln(c.rl.Stdout(),"No paired devices")
 		return
 	}
 
-	fmt.Fprintf(c.rl.Stdout(),"\nConnected Devices (%d):\n", len(devices))
+	fmt.Fprintf(c.rl.Stdout(),"\nPaired Devices (%d):\n", len(devices))
 	fmt.Fprintln(c.rl.Stdout(),"-------------------------------------------")
 	for _, d := range devices {
 		status := "connected"
@@ -640,7 +640,8 @@ func (c *Controller) cmdStatus() {
 	fmt.Fprintf(c.rl.Stdout(),"  Zone Type:         %s\n", c.config.ZoneType())
 	fmt.Fprintf(c.rl.Stdout(),"  Service State:     %s\n", c.svc.State())
 	fmt.Fprintf(c.rl.Stdout(),"  Zone ID:           %s\n", c.svc.ZoneID())
-	fmt.Fprintf(c.rl.Stdout(),"  Connected Devices: %d\n", c.svc.DeviceCount())
+	fmt.Fprintf(c.rl.Stdout(),"  Paired Devices:    %d\n", c.svc.DeviceCount())
+	fmt.Fprintf(c.rl.Stdout(),"  Connected:         %d\n", c.svc.ConnectedCount())
 	fmt.Fprintf(c.rl.Stdout(),"  Total Power:       %.1f kW\n", float64(c.cem.GetTotalPower())/1000000)
 	fmt.Fprintln(c.rl.Stdout(),)
 }

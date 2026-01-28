@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
@@ -57,6 +58,8 @@ func TestDeviceServiceStartsTLSServer(t *testing.T) {
 }
 
 // TestDeviceServicePASEHandshake verifies successful PASE handshake with correct setup code.
+// Note: PASE alone does NOT result in EventConnected - that requires the full cert exchange.
+// This test verifies the PASE handshake completes and both sides derive the same shared secret.
 func TestDeviceServicePASEHandshake(t *testing.T) {
 	device := model.NewDevice("test-device-002", 0x1234, 0x5678)
 	config := validDeviceConfig()
@@ -74,17 +77,6 @@ func TestDeviceServicePASEHandshake(t *testing.T) {
 	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
 	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
-
-	// Track events
-	var connectedEvent bool
-	var eventMu sync.Mutex
-	svc.OnEvent(func(e Event) {
-		eventMu.Lock()
-		defer eventMu.Unlock()
-		if e.Type == EventConnected {
-			connectedEvent = true
-		}
-	})
 
 	ctx := context.Background()
 	if err := svc.Start(ctx); err != nil {
@@ -133,16 +125,9 @@ func TestDeviceServicePASEHandshake(t *testing.T) {
 		t.Error("Shared secret should not be empty")
 	}
 
-	// Wait for event to be processed
-	time.Sleep(100 * time.Millisecond)
-
-	eventMu.Lock()
-	connected := connectedEvent
-	eventMu.Unlock()
-
-	if !connected {
-		t.Error("Expected EventConnected to be emitted")
-	}
+	// Note: EventConnected is NOT emitted after PASE alone.
+	// The full commissioning flow requires cert exchange (CertRenewalRequest/CSR/Install/Ack)
+	// after PASE completes. See TestControllerServiceCommission for the full flow test.
 }
 
 // TestDeviceServicePASEWrongSetupCode verifies PASE fails with wrong setup code.
@@ -227,7 +212,7 @@ func TestDeviceServicePASEWrongSetupCode(t *testing.T) {
 	}
 }
 
-// TestControllerServiceCommission verifies successful commissioning flow.
+// TestControllerServiceCommission verifies successful commissioning flow including cert exchange.
 func TestControllerServiceCommission(t *testing.T) {
 	// Set up a device service to commission against
 	device := model.NewDevice("test-device-004", 0x1234, 0x5678)
@@ -239,6 +224,10 @@ func TestControllerServiceCommission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
+
+	// Device needs a cert store to save the operational cert it receives
+	deviceCertStore := cert.NewMemoryStore()
+	deviceSvc.SetCertStore(deviceCertStore)
 
 	deviceAdvertiser := mocks.NewMockAdvertiser(t)
 	deviceAdvertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -263,12 +252,16 @@ func TestControllerServiceCommission(t *testing.T) {
 		t.Fatal("Device TLS address is nil")
 	}
 
-	// Set up controller service
+	// Set up controller service with cert store (required for cert exchange)
 	controllerConfig := validControllerConfig()
 	controllerSvc, err := NewControllerService(controllerConfig)
 	if err != nil {
 		t.Fatalf("NewControllerService failed: %v", err)
 	}
+
+	// Controller needs a cert store with Zone CA to issue operational certificates
+	controllerCertStore := createControllerCertStore(t, controllerConfig.ZoneName)
+	controllerSvc.SetCertStore(controllerCertStore)
 
 	browser := mocks.NewMockBrowser(t)
 	browser.EXPECT().Stop().Return().Maybe()
@@ -301,7 +294,7 @@ func TestControllerServiceCommission(t *testing.T) {
 		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
 	}
 
-	// Commission with correct setup code
+	// Commission with correct setup code (includes cert exchange)
 	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
@@ -329,6 +322,12 @@ func TestControllerServiceCommission(t *testing.T) {
 	// Verify device is stored
 	if controllerSvc.DeviceCount() != 1 {
 		t.Errorf("Expected 1 device, got %d", controllerSvc.DeviceCount())
+	}
+
+	// Verify device received operational cert (stored in device cert store)
+	zones := deviceCertStore.ListZones()
+	if len(zones) == 0 {
+		t.Error("Device should have received operational cert for at least one zone")
 	}
 }
 

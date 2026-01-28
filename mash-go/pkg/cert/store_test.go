@@ -16,37 +16,6 @@ func TestMemoryStore(t *testing.T) {
 		}
 	})
 
-	t.Run("DeviceIdentity", func(t *testing.T) {
-		// Initially no identity cert
-		_, _, err := store.GetDeviceIdentity()
-		if err != ErrCertNotFound {
-			t.Errorf("GetDeviceIdentity() error = %v, want ErrCertNotFound", err)
-		}
-
-		// Generate and store (use Zone CA to generate a test cert)
-		ca, _ := GenerateZoneCA("test-zone", ZoneTypeLocal)
-		kp, _ := GenerateKeyPair()
-		csrDER, _ := CreateCSR(kp, &CSRInfo{
-			Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1234, ProductID: 5678},
-			ZoneID:   "test-zone",
-		})
-		cert, _ := SignCSR(ca, csrDER)
-
-		err = store.SetDeviceIdentity(cert, kp.PrivateKey)
-		if err != nil {
-			t.Fatalf("SetDeviceIdentity() error = %v", err)
-		}
-
-		// Retrieve
-		gotCert, gotKey, err := store.GetDeviceIdentity()
-		if err != nil {
-			t.Errorf("GetDeviceIdentity() error = %v", err)
-		}
-		if gotCert == nil || gotKey == nil {
-			t.Error("GetDeviceIdentity() returned nil")
-		}
-	})
-
 	t.Run("OperationalCerts", func(t *testing.T) {
 		// Create Zone CA
 		ca, _ := GenerateZoneCA("zone-1", ZoneTypeLocal)

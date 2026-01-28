@@ -6,6 +6,13 @@ type Sendable interface {
 	Send(data []byte) error
 }
 
+// SyncConnection extends Sendable with synchronous read capability.
+// Used during commissioning cert exchange before the async message loop starts.
+type SyncConnection interface {
+	Sendable
+	ReadFrame() ([]byte, error)
+}
+
 // TransportRequestSender adapts a transport connection to the
 // interaction.RequestSender interface.
 //

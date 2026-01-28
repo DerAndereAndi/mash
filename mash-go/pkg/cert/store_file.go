@@ -1,7 +1,6 @@
 package cert
 
 import (
-	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/json"
 	"os"
@@ -11,12 +10,9 @@ import (
 
 // File name constants for certificate storage.
 const (
-	identityDir      = "identity"
-	identityCertFile = "identity.pem"
-	identityKeyFile  = "identity.key"
-	zoneCACertFile   = "zone-ca.pem"
-	zoneCAKeyFile    = "zone-ca.key"
-	zoneCAMetaFile   = "zone-ca.json"
+	zoneCACertFile = "zone-ca.pem"
+	zoneCAKeyFile  = "zone-ca.key"
+	zoneCAMetaFile = "zone-ca.json"
 )
 
 // FileStore is a file-based implementation of the Store interface.
@@ -26,8 +22,6 @@ type FileStore struct {
 	baseDir string
 
 	// In-memory state (same as MemoryStore)
-	identityCert  *x509.Certificate
-	identityKey   *ecdsa.PrivateKey
 	operationalCerts map[string]*OperationalCert
 	zoneCACerts      map[string]*x509.Certificate
 
@@ -44,31 +38,6 @@ func NewFileStore(baseDir string) *FileStore {
 		zoneCACerts:      make(map[string]*x509.Certificate),
 		removedZones:     make(map[string]bool),
 	}
-}
-
-// GetDeviceIdentity returns the device identity certificate and key.
-func (s *FileStore) GetDeviceIdentity() (*x509.Certificate, *ecdsa.PrivateKey, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.identityCert == nil {
-		return nil, nil, ErrCertNotFound
-	}
-	return s.identityCert, s.identityKey, nil
-}
-
-// SetDeviceIdentity stores the device identity certificate and key.
-func (s *FileStore) SetDeviceIdentity(cert *x509.Certificate, key *ecdsa.PrivateKey) error {
-	if cert == nil {
-		return ErrInvalidCert
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.identityCert = cert
-	s.identityKey = key
-	return nil
 }
 
 // GetOperationalCert returns the operational certificate for a zone.
@@ -185,13 +154,6 @@ func (s *FileStore) Save() error {
 		return err
 	}
 
-	// Save identity cert
-	if s.identityCert != nil {
-		if err := s.saveIdentity(); err != nil {
-			return err
-		}
-	}
-
 	// Save operational certs
 	for zoneID, opCert := range s.operationalCerts {
 		if err := s.saveOperationalCert(zoneID, opCert); err != nil {
@@ -218,9 +180,11 @@ func (s *FileStore) Load() error {
 		return nil // Empty store
 	}
 
-	// Load identity cert
-	if err := s.loadIdentity(); err != nil && !os.IsNotExist(err) {
-		return err
+	// Migration: Remove old identity directory if it exists
+	// (commissioning certs are no longer persisted)
+	oldIdentityDir := filepath.Join(s.baseDir, "identity")
+	if _, err := os.Stat(oldIdentityDir); err == nil {
+		_ = os.RemoveAll(oldIdentityDir)
 	}
 
 	// Load operational certs
@@ -244,47 +208,6 @@ func (s *FileStore) Load() error {
 			s.zoneCACerts[zoneID] = opCert.ZoneCACert
 		}
 	}
-
-	return nil
-}
-
-func (s *FileStore) saveIdentity() error {
-	dir := filepath.Join(s.baseDir, identityDir)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	certPath := filepath.Join(dir, identityCertFile)
-	if err := WriteCertFile(certPath, s.identityCert); err != nil {
-		return err
-	}
-
-	if s.identityKey != nil {
-		keyPath := filepath.Join(dir, identityKeyFile)
-		if err := WriteKeyFile(keyPath, s.identityKey); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (s *FileStore) loadIdentity() error {
-	dir := filepath.Join(s.baseDir, identityDir)
-	certPath := filepath.Join(dir, identityCertFile)
-	keyPath := filepath.Join(dir, identityKeyFile)
-
-	cert, err := ReadCertFile(certPath)
-	if err != nil {
-		return err
-	}
-	s.identityCert = cert
-
-	key, err := ReadKeyFile(keyPath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	s.identityKey = key
 
 	return nil
 }

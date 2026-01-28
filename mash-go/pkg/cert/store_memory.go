@@ -1,7 +1,6 @@
 package cert
 
 import (
-	"crypto/ecdsa"
 	"crypto/x509"
 	"sync"
 )
@@ -10,10 +9,6 @@ import (
 // This is primarily useful for testing and devices that don't need persistence.
 type MemoryStore struct {
 	mu sync.RWMutex
-
-	// Device identity certificate
-	identityCert *x509.Certificate
-	identityKey  *ecdsa.PrivateKey
 
 	// Operational certificates by zone ID
 	operationalCerts map[string]*OperationalCert
@@ -28,31 +23,6 @@ func NewMemoryStore() *MemoryStore {
 		operationalCerts: make(map[string]*OperationalCert),
 		zoneCACerts:      make(map[string]*x509.Certificate),
 	}
-}
-
-// GetDeviceIdentity returns the device identity certificate and key.
-func (s *MemoryStore) GetDeviceIdentity() (*x509.Certificate, *ecdsa.PrivateKey, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.identityCert == nil {
-		return nil, nil, ErrCertNotFound
-	}
-	return s.identityCert, s.identityKey, nil
-}
-
-// SetDeviceIdentity stores the device identity certificate and key.
-func (s *MemoryStore) SetDeviceIdentity(cert *x509.Certificate, key *ecdsa.PrivateKey) error {
-	if cert == nil {
-		return ErrInvalidCert
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.identityCert = cert
-	s.identityKey = key
-	return nil
 }
 
 // GetOperationalCert returns the operational certificate for a zone.

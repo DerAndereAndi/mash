@@ -112,6 +112,11 @@ func TestDevice_PairingRequestListening_OneZoneOpensWindow(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
+	// Set up cert store with operational cert (simulates commissioned device)
+	zoneID := "zone-001"
+	certStore := createCertStoreWithOperationalCert(t, zoneID)
+	svc.SetCertStore(certStore)
+
 	// Set up mock advertiser
 	advertiser := mocks.NewMockAdvertiser(t)
 	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Once()
@@ -161,7 +166,7 @@ func TestDevice_PairingRequestListening_OneZoneOpensWindow(t *testing.T) {
 	defer func() { _ = svc.Stop() }()
 
 	// Connect one zone (below max of 2)
-	svc.HandleZoneConnect("zone-001", cert.ZoneTypeLocal)
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Wait for EventCommissioningOpened
 	select {
@@ -191,6 +196,28 @@ func TestDevice_PairingRequestListening_MaxZonesIgnores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
+
+	// Set up cert store with operational certs for both zones (simulates commissioned device)
+	zone1 := "zone-001"
+	zone2 := "zone-002"
+	certStore := createCertStoreWithOperationalCert(t, zone1)
+	// Add second zone's operational cert
+	ca2, _ := cert.GenerateZoneCA(zone2, cert.ZoneTypeGrid)
+	kp2, _ := cert.GenerateKeyPair()
+	csr2, _ := cert.CreateCSR(kp2, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "test-device", VendorID: 1, ProductID: 1},
+		ZoneID:   zone2,
+	})
+	cert2, _ := cert.SignCSR(ca2, csr2)
+	opCert2 := &cert.OperationalCert{
+		Certificate: cert2,
+		PrivateKey:  kp2.PrivateKey,
+		ZoneID:      zone2,
+		ZoneType:    cert.ZoneTypeGrid,
+		ZoneCACert:  ca2.Certificate,
+	}
+	_ = certStore.SetOperationalCert(opCert2)
+	svc.SetCertStore(certStore)
 
 	// Set up mock advertiser - should NOT call AdvertiseCommissionable
 	advertiser := mocks.NewMockAdvertiser(t)
@@ -237,8 +264,8 @@ func TestDevice_PairingRequestListening_MaxZonesIgnores(t *testing.T) {
 	defer func() { _ = svc.Stop() }()
 
 	// Connect max zones (2) - this should stop the pairing request listening
-	svc.HandleZoneConnect("zone-001", cert.ZoneTypeLocal)
-	svc.HandleZoneConnect("zone-002", cert.ZoneTypeGrid)
+	svc.HandleZoneConnect(zone1, cert.ZoneTypeLocal)
+	svc.HandleZoneConnect(zone2, cert.ZoneTypeGrid)
 
 	// Wait for the pairing request to be sent and (hopefully) ignored
 	time.Sleep(250 * time.Millisecond)
@@ -392,6 +419,27 @@ func TestDevice_PairingRequestListening_StopOnMaxZones(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
+	// Set up cert store with operational certs for both zones
+	zone1 := "zone-001"
+	zone2 := "zone-002"
+	certStore := createCertStoreWithOperationalCert(t, zone1)
+	ca2, _ := cert.GenerateZoneCA(zone2, cert.ZoneTypeGrid)
+	kp2, _ := cert.GenerateKeyPair()
+	csr2, _ := cert.CreateCSR(kp2, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "test-device", VendorID: 1, ProductID: 1},
+		ZoneID:   zone2,
+	})
+	cert2, _ := cert.SignCSR(ca2, csr2)
+	opCert2 := &cert.OperationalCert{
+		Certificate: cert2,
+		PrivateKey:  kp2.PrivateKey,
+		ZoneID:      zone2,
+		ZoneType:    cert.ZoneTypeGrid,
+		ZoneCACert:  ca2.Certificate,
+	}
+	_ = certStore.SetOperationalCert(opCert2)
+	svc.SetCertStore(certStore)
+
 	// Track if browser.Stop was called
 	browserStopCalled := make(chan struct{}, 1)
 
@@ -428,8 +476,8 @@ func TestDevice_PairingRequestListening_StopOnMaxZones(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Connect zones to reach max
-	svc.HandleZoneConnect("zone-001", cert.ZoneTypeLocal)
-	svc.HandleZoneConnect("zone-002", cert.ZoneTypeGrid)
+	svc.HandleZoneConnect(zone1, cert.ZoneTypeLocal)
+	svc.HandleZoneConnect(zone2, cert.ZoneTypeGrid)
 
 	// Check that pairing request listening was stopped
 	if svc.IsPairingRequestListening() {
@@ -489,6 +537,27 @@ func TestDevice_PairingRequestListening_ResumeAfterZoneRemoved(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
+	// Set up cert store with operational certs for both zones
+	zone1 := "zone-001"
+	zone2 := "zone-002"
+	certStore := createCertStoreWithOperationalCert(t, zone1)
+	ca2, _ := cert.GenerateZoneCA(zone2, cert.ZoneTypeGrid)
+	kp2, _ := cert.GenerateKeyPair()
+	csr2, _ := cert.CreateCSR(kp2, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "test-device", VendorID: 1, ProductID: 1},
+		ZoneID:   zone2,
+	})
+	cert2, _ := cert.SignCSR(ca2, csr2)
+	opCert2 := &cert.OperationalCert{
+		Certificate: cert2,
+		PrivateKey:  kp2.PrivateKey,
+		ZoneID:      zone2,
+		ZoneType:    cert.ZoneTypeGrid,
+		ZoneCACert:  ca2.Certificate,
+	}
+	_ = certStore.SetOperationalCert(opCert2)
+	svc.SetCertStore(certStore)
+
 	// Set up mock advertiser
 	advertiser := mocks.NewMockAdvertiser(t)
 	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Times(2)
@@ -520,8 +589,8 @@ func TestDevice_PairingRequestListening_ResumeAfterZoneRemoved(t *testing.T) {
 	defer func() { _ = svc.Stop() }()
 
 	// Connect zones to reach max
-	svc.HandleZoneConnect("zone-001", cert.ZoneTypeLocal)
-	svc.HandleZoneConnect("zone-002", cert.ZoneTypeGrid)
+	svc.HandleZoneConnect(zone1, cert.ZoneTypeLocal)
+	svc.HandleZoneConnect(zone2, cert.ZoneTypeGrid)
 
 	// Wait for listening to stop
 	time.Sleep(50 * time.Millisecond)
@@ -532,7 +601,7 @@ func TestDevice_PairingRequestListening_ResumeAfterZoneRemoved(t *testing.T) {
 	}
 
 	// Remove a zone
-	if err := svc.RemoveZone("zone-001"); err != nil {
+	if err := svc.RemoveZone(zone1); err != nil {
 		t.Fatalf("RemoveZone failed: %v", err)
 	}
 

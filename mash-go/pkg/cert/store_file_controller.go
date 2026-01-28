@@ -8,6 +8,14 @@ import (
 	"path/filepath"
 )
 
+// Controller-specific file name constants.
+// These are used for storing the Zone CA and controller operational certificate.
+const (
+	controllerDir      = "controller"
+	controllerCertFile = "controller.pem"
+	controllerKeyFile  = "controller.key"
+)
+
 // Controller store errors.
 var (
 	ErrDeviceNotFound = errors.New("device not found")
@@ -231,7 +239,7 @@ type zoneCAMetadata struct {
 }
 
 func (s *FileControllerStore) saveZoneCA() error {
-	dir := filepath.Join(s.baseDir, identityDir)
+	dir := filepath.Join(s.baseDir, controllerDir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -266,7 +274,7 @@ func (s *FileControllerStore) saveZoneCA() error {
 }
 
 func (s *FileControllerStore) loadZoneCA() error {
-	dir := filepath.Join(s.baseDir, identityDir)
+	dir := filepath.Join(s.baseDir, controllerDir)
 
 	// Load certificate
 	certPath := filepath.Join(dir, zoneCACertFile)
@@ -304,19 +312,19 @@ func (s *FileControllerStore) loadZoneCA() error {
 }
 
 func (s *FileControllerStore) saveControllerCert() error {
-	dir := filepath.Join(s.baseDir, identityDir)
+	dir := filepath.Join(s.baseDir, controllerDir)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
 	// Save certificate
-	certPath := filepath.Join(dir, identityCertFile)
+	certPath := filepath.Join(dir, controllerCertFile)
 	if err := WriteCertFile(certPath, s.controllerCert.Certificate); err != nil {
 		return err
 	}
 
 	// Save private key
-	keyPath := filepath.Join(dir, identityKeyFile)
+	keyPath := filepath.Join(dir, controllerKeyFile)
 	if err := WriteKeyFile(keyPath, s.controllerCert.PrivateKey); err != nil {
 		return err
 	}
@@ -325,17 +333,17 @@ func (s *FileControllerStore) saveControllerCert() error {
 }
 
 func (s *FileControllerStore) loadControllerCert() error {
-	dir := filepath.Join(s.baseDir, identityDir)
+	dir := filepath.Join(s.baseDir, controllerDir)
 
 	// Load certificate
-	certPath := filepath.Join(dir, identityCertFile)
+	certPath := filepath.Join(dir, controllerCertFile)
 	cert, err := ReadCertFile(certPath)
 	if err != nil {
 		return err
 	}
 
 	// Load private key
-	keyPath := filepath.Join(dir, identityKeyFile)
+	keyPath := filepath.Join(dir, controllerKeyFile)
 	key, err := ReadKeyFile(keyPath)
 	if err != nil {
 		return err

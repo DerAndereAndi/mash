@@ -31,10 +31,16 @@ const (
 
 // CertRenewalRequest initiates certificate renewal.
 // Sent by controller to device to start renewal process.
-// CBOR: { 1: msgType, 2: nonce }
+//
+// For initial commissioning (post-PASE), ZoneCA must be provided so the device
+// can verify future controller connections. For normal renewal, ZoneCA is optional
+// (only needed if the Zone CA is being rotated).
+//
+// CBOR: { 1: msgType, 2: nonce, 3?: zoneCA }
 type CertRenewalRequest struct {
 	MsgType uint8  `cbor:"1,keyasint"`
-	Nonce   []byte `cbor:"2,keyasint"` // 32-byte anti-replay nonce
+	Nonce   []byte `cbor:"2,keyasint"`           // 32-byte anti-replay nonce
+	ZoneCA  []byte `cbor:"3,keyasint,omitempty"` // X.509 DER-encoded Zone CA cert (required for initial exchange)
 }
 
 // CertRenewalCSR contains the device's new CSR.

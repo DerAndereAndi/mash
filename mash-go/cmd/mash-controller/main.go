@@ -348,6 +348,9 @@ func handleEvent(event service.Event) {
 	case service.EventDeviceRediscovered:
 		log.Printf("[EVENT] Known device rediscovered: %s (attempting reconnection...)", event.DeviceID)
 
+	case service.EventReconnectionFailed:
+		log.Printf("[EVENT] Reconnection failed for %s: %v", event.DeviceID, event.Error)
+
 	case service.EventDeviceReconnected:
 		log.Printf("[EVENT] Device reconnected: %s", event.DeviceID)
 		// Re-setup device monitoring after reconnection

@@ -1,7 +1,6 @@
 package cert
 
 import (
-	"crypto/ecdsa"
 	"crypto/x509"
 	"errors"
 )
@@ -16,17 +15,12 @@ var (
 
 // Store defines the interface for certificate storage.
 // Implementations must be safe for concurrent access.
+//
+// Note: Devices do NOT persist identity/commissioning certificates.
+// The commissioning certificate is generated in-memory at startup and is
+// temporary (24h validity). The device ID is derived from the operational
+// certificate after commissioning completes.
 type Store interface {
-	// Device identity certificate (persistent TLS identity for commissioning)
-
-	// GetDeviceIdentity returns the device's persistent identity certificate and key.
-	// This certificate is self-signed and used for TLS during commissioning.
-	// Returns ErrCertNotFound if no identity certificate is stored.
-	GetDeviceIdentity() (*x509.Certificate, *ecdsa.PrivateKey, error)
-
-	// SetDeviceIdentity stores the device's identity certificate and key.
-	SetDeviceIdentity(cert *x509.Certificate, key *ecdsa.PrivateKey) error
-
 	// Operational certificates (one per zone, max 5 zones)
 
 	// GetOperationalCert returns the operational certificate for a zone.

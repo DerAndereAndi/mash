@@ -394,6 +394,9 @@ const (
 	// EventDeviceReconnected - reconnected to a known device.
 	EventDeviceReconnected
 
+	// EventReconnectionFailed - reconnection attempt failed.
+	EventReconnectionFailed
+
 	// EventDeviceRemoved - device was removed from the zone (controller initiated).
 	EventDeviceRemoved
 
@@ -442,6 +445,8 @@ func (e EventType) String() string {
 		return "DEVICE_REDISCOVERED"
 	case EventDeviceReconnected:
 		return "DEVICE_RECONNECTED"
+	case EventReconnectionFailed:
+		return "RECONNECTION_FAILED"
 	case EventDeviceRemoved:
 		return "DEVICE_REMOVED"
 	case EventCertificateRenewed:

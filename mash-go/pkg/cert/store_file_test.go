@@ -49,53 +49,6 @@ func TestFileStore(t *testing.T) {
 		}
 	})
 
-	t.Run("DeviceIdentityRoundTrip", func(t *testing.T) {
-		dir := t.TempDir()
-		store := NewFileStore(dir)
-
-		// Generate and store identity cert
-		ca, _ := GenerateZoneCA("test-zone", ZoneTypeLocal)
-		kp, _ := GenerateKeyPair()
-		csrDER, _ := CreateCSR(kp, &CSRInfo{
-			Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1234, ProductID: 5678},
-			ZoneID:   "test-zone",
-		})
-		cert, _ := SignCSR(ca, csrDER)
-
-		if err := store.SetDeviceIdentity(cert, kp.PrivateKey); err != nil {
-			t.Fatalf("SetDeviceIdentity() error = %v", err)
-		}
-
-		if err := store.Save(); err != nil {
-			t.Fatalf("Save() error = %v", err)
-		}
-
-		// Verify files exist
-		if _, err := os.Stat(filepath.Join(dir, "identity", "identity.pem")); err != nil {
-			t.Errorf("identity.pem not found: %v", err)
-		}
-		if _, err := os.Stat(filepath.Join(dir, "identity", "identity.key")); err != nil {
-			t.Errorf("identity.key not found: %v", err)
-		}
-
-		// Load into new store
-		store2 := NewFileStore(dir)
-		if err := store2.Load(); err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-
-		gotCert, gotKey, err := store2.GetDeviceIdentity()
-		if err != nil {
-			t.Fatalf("GetDeviceIdentity() error = %v", err)
-		}
-		if gotCert == nil || gotKey == nil {
-			t.Error("GetDeviceIdentity() returned nil")
-		}
-		if gotCert.Subject.CommonName != cert.Subject.CommonName {
-			t.Errorf("Subject = %q, want %q", gotCert.Subject.CommonName, cert.Subject.CommonName)
-		}
-	})
-
 	t.Run("OperationalCertRoundTrip", func(t *testing.T) {
 		dir := t.TempDir()
 		store := NewFileStore(dir)
@@ -278,7 +231,7 @@ func TestFileControllerStore(t *testing.T) {
 		}
 
 		// Verify files
-		ctrlDir := filepath.Join(dir, "identity")
+		ctrlDir := filepath.Join(dir, "controller")
 		if _, err := os.Stat(filepath.Join(ctrlDir, "zone-ca.pem")); err != nil {
 			t.Errorf("zone-ca.pem not found: %v", err)
 		}
@@ -389,7 +342,7 @@ func TestFileControllerStore(t *testing.T) {
 		_ = store.Save()
 
 		// Verify file removed
-		devDir := filepath.Join(dir, "identity", "devices", "dev-remove")
+		devDir := filepath.Join(dir, "controller", "devices", "dev-remove")
 		if _, err := os.Stat(devDir); !os.IsNotExist(err) {
 			t.Errorf("device directory should be removed")
 		}
@@ -434,12 +387,12 @@ func TestFileControllerStore(t *testing.T) {
 		}
 
 		// Verify files exist
-		ctrlDir := filepath.Join(dir, "identity")
-		if _, err := os.Stat(filepath.Join(ctrlDir, "identity.pem")); err != nil {
-			t.Errorf("identity.pem not found: %v", err)
+		ctrlDir := filepath.Join(dir, "controller")
+		if _, err := os.Stat(filepath.Join(ctrlDir, "controller.pem")); err != nil {
+			t.Errorf("controller.pem not found: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(ctrlDir, "identity.key")); err != nil {
-			t.Errorf("identity.key not found: %v", err)
+		if _, err := os.Stat(filepath.Join(ctrlDir, "controller.key")); err != nil {
+			t.Errorf("controller.key not found: %v", err)
 		}
 
 		// TC-IMPL-CERT-STORE-002: Load Controller Operational Cert
@@ -498,6 +451,83 @@ func TestFileControllerStore(t *testing.T) {
 			t.Errorf("SetControllerCert(empty) error = %v, want ErrInvalidCert", err)
 		}
 	})
+}
+
+// TC-IMPL-CERT-STORE: Verify identity files are NOT created
+// (commissioning certs are never persisted)
+func TestCertStore_NoIdentityFiles(t *testing.T) {
+	dir := t.TempDir()
+	store := NewFileStore(dir)
+
+	// Add an operational cert (this should be the only thing persisted)
+	ca, _ := GenerateZoneCA("zone-1", ZoneTypeLocal)
+	deviceKP, _ := GenerateKeyPair()
+	csrDER, _ := CreateCSR(deviceKP, &CSRInfo{
+		Identity: DeviceIdentity{DeviceID: "device-001", VendorID: 1, ProductID: 1},
+		ZoneID:   "zone-1",
+	})
+	cert, _ := SignCSR(ca, csrDER)
+
+	opCert := &OperationalCert{
+		Certificate: cert,
+		PrivateKey:  deviceKP.PrivateKey,
+		ZoneID:      "zone-1",
+		ZoneType:    ZoneTypeLocal,
+		ZoneCACert:  ca.Certificate,
+	}
+
+	if err := store.SetOperationalCert(opCert); err != nil {
+		t.Fatalf("SetOperationalCert() error = %v", err)
+	}
+	if err := store.Save(); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// Verify identity directory does NOT exist
+	identityDir := filepath.Join(dir, "identity")
+	if _, err := os.Stat(identityDir); !os.IsNotExist(err) {
+		t.Errorf("identity directory should NOT exist, got err = %v", err)
+	}
+
+	// Verify identity.pem does NOT exist at top level
+	if _, err := os.Stat(filepath.Join(dir, "identity.pem")); !os.IsNotExist(err) {
+		t.Errorf("identity.pem should NOT exist at top level")
+	}
+
+	// Verify operational cert files DO exist
+	zoneDir := filepath.Join(dir, "zones", "zone-1")
+	if _, err := os.Stat(filepath.Join(zoneDir, "operational.pem")); err != nil {
+		t.Errorf("operational.pem should exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(zoneDir, "operational.key")); err != nil {
+		t.Errorf("operational.key should exist: %v", err)
+	}
+}
+
+// TC-IMPL-CERT-STORE: Verify old identity directory is cleaned up on Load
+func TestFileStore_MigrationRemovesIdentityDir(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create old-style identity directory (simulating pre-migration state)
+	oldIdentityDir := filepath.Join(dir, "identity")
+	if err := os.MkdirAll(oldIdentityDir, 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	// Create dummy files
+	if err := os.WriteFile(filepath.Join(oldIdentityDir, "identity.pem"), []byte("test"), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	// Load store (should trigger migration/cleanup)
+	store := NewFileStore(dir)
+	if err := store.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Verify identity directory is removed
+	if _, err := os.Stat(oldIdentityDir); !os.IsNotExist(err) {
+		t.Errorf("old identity directory should be removed during migration")
+	}
 }
 
 func TestFileStoreInterfaceImplementation(t *testing.T) {

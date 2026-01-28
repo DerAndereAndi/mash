@@ -16,6 +16,90 @@ import (
 
 // Test helpers
 
+// createCertStoreWithOperationalCert creates a cert store with an operational cert for the given zone.
+// This simulates a commissioned device that has received its operational cert.
+func createCertStoreWithOperationalCert(t *testing.T, zoneID string) cert.Store {
+	t.Helper()
+
+	store := cert.NewMemoryStore()
+
+	// Generate a Zone CA
+	ca, err := cert.GenerateZoneCA(zoneID, cert.ZoneTypeLocal)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA() error = %v", err)
+	}
+
+	// Generate device key pair and CSR
+	deviceKP, err := cert.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair() error = %v", err)
+	}
+
+	csrDER, err := cert.CreateCSR(deviceKP, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "test-device", VendorID: 1, ProductID: 1},
+		ZoneID:   zoneID,
+	})
+	if err != nil {
+		t.Fatalf("CreateCSR() error = %v", err)
+	}
+
+	// Sign CSR with Zone CA
+	deviceCert, err := cert.SignCSR(ca, csrDER)
+	if err != nil {
+		t.Fatalf("SignCSR() error = %v", err)
+	}
+
+	// Create operational cert
+	opCert := &cert.OperationalCert{
+		Certificate: deviceCert,
+		PrivateKey:  deviceKP.PrivateKey,
+		ZoneID:      zoneID,
+		ZoneType:    cert.ZoneTypeLocal,
+		ZoneCACert:  ca.Certificate,
+	}
+
+	if err := store.SetOperationalCert(opCert); err != nil {
+		t.Fatalf("SetOperationalCert() error = %v", err)
+	}
+
+	if err := store.SetZoneCACert(zoneID, ca.Certificate); err != nil {
+		t.Fatalf("SetZoneCACert() error = %v", err)
+	}
+
+	return store
+}
+
+// createControllerCertStore creates a controller cert store with Zone CA.
+// This is needed for the controller to issue operational certificates to devices.
+func createControllerCertStore(t *testing.T, zoneName string) cert.ControllerStore {
+	t.Helper()
+
+	store := cert.NewMemoryControllerStore()
+
+	// Generate a Zone CA
+	ca, err := cert.GenerateZoneCA(zoneName, cert.ZoneTypeLocal)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA() error = %v", err)
+	}
+
+	if err := store.SetZoneCA(ca); err != nil {
+		t.Fatalf("SetZoneCA() error = %v", err)
+	}
+
+	// Generate controller operational cert
+	controllerID := "controller-" + zoneName
+	controllerCert, err := cert.GenerateControllerOperationalCert(ca, controllerID)
+	if err != nil {
+		t.Fatalf("GenerateControllerOperationalCert() error = %v", err)
+	}
+
+	if err := store.SetControllerCert(controllerCert); err != nil {
+		t.Fatalf("SetControllerCert() error = %v", err)
+	}
+
+	return store
+}
+
 // makeCommissionableChannel creates a channel that emits the given services then closes.
 func makeCommissionableChannel(services ...*discovery.CommissionableService) <-chan *discovery.CommissionableService {
 	ch := make(chan *discovery.CommissionableService)
@@ -644,6 +728,11 @@ func TestDeviceServiceOperationalAdvertisingOnZoneConnect(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
+	// Set up cert store with operational cert (simulates commissioned device)
+	zoneID := "a1b2c3d4e5f6a7b8"
+	certStore := createCertStoreWithOperationalCert(t, zoneID)
+	svc.SetCertStore(certStore)
+
 	// Set up mock advertiser - capture the operational info for verification
 	var capturedOpInfo *discovery.OperationalInfo
 	advertiser := mocks.NewMockAdvertiser(t)
@@ -662,7 +751,6 @@ func TestDeviceServiceOperationalAdvertisingOnZoneConnect(t *testing.T) {
 	defer func() { _ = svc.Stop() }()
 
 	// Simulate zone connect (as happens after commissioning)
-	zoneID := "a1b2c3d4e5f6a7b8"
 	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Verify operational advertising was called with correct zone ID
@@ -689,6 +777,11 @@ func TestDeviceServiceOperationalAdvertisingPersistsOnDisconnect(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
+	// Set up cert store with operational cert (simulates commissioned device)
+	zoneID := "a1b2c3d4e5f6a7b8"
+	certStore := createCertStoreWithOperationalCert(t, zoneID)
+	svc.SetCertStore(certStore)
+
 	// Set up mock advertiser - we expect AdvertiseOperational but NOT StopOperational
 	advertiser := mocks.NewMockAdvertiser(t)
 	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Once()
@@ -704,7 +797,6 @@ func TestDeviceServiceOperationalAdvertisingPersistsOnDisconnect(t *testing.T) {
 	defer func() { _ = svc.Stop() }()
 
 	// Simulate zone connect
-	zoneID := "a1b2c3d4e5f6a7b8"
 	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Simulate disconnect - operational advertising should PERSIST
@@ -722,6 +814,30 @@ func TestDeviceServiceMultipleZonesOperationalAdvertising(t *testing.T) {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
 
+	// Connect multiple zones
+	zone1 := "zone1111111111111"
+	zone2 := "zone2222222222222"
+
+	// Set up cert store with operational certs for both zones (simulates commissioned device)
+	certStore := createCertStoreWithOperationalCert(t, zone1)
+	// Add second zone's operational cert
+	ca2, _ := cert.GenerateZoneCA(zone2, cert.ZoneTypeGrid)
+	kp2, _ := cert.GenerateKeyPair()
+	csr2, _ := cert.CreateCSR(kp2, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "test-device", VendorID: 1, ProductID: 1},
+		ZoneID:   zone2,
+	})
+	cert2, _ := cert.SignCSR(ca2, csr2)
+	opCert2 := &cert.OperationalCert{
+		Certificate: cert2,
+		PrivateKey:  kp2.PrivateKey,
+		ZoneID:      zone2,
+		ZoneType:    cert.ZoneTypeGrid,
+		ZoneCACert:  ca2.Certificate,
+	}
+	_ = certStore.SetOperationalCert(opCert2)
+	svc.SetCertStore(certStore)
+
 	// Set up mock advertiser - expect two AdvertiseOperational calls
 	advertiser := mocks.NewMockAdvertiser(t)
 	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Times(2)
@@ -734,10 +850,6 @@ func TestDeviceServiceMultipleZonesOperationalAdvertising(t *testing.T) {
 		t.Fatalf("Start failed: %v", err)
 	}
 	defer func() { _ = svc.Stop() }()
-
-	// Connect multiple zones
-	zone1 := "zone1111111111111"
-	zone2 := "zone2222222222222"
 
 	svc.HandleZoneConnect(zone1, cert.ZoneTypeLocal)
 	svc.HandleZoneConnect(zone2, cert.ZoneTypeGrid)
@@ -755,6 +867,11 @@ func TestDeviceServiceOperationalAdvertisingInfo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDeviceService failed: %v", err)
 	}
+
+	// Set up cert store with operational cert (simulates commissioned device)
+	zoneID := "a1b2c3d4e5f6a7b8"
+	certStore := createCertStoreWithOperationalCert(t, zoneID)
+	svc.SetCertStore(certStore)
 
 	// Set up mock advertiser - capture the operational info for verification
 	var capturedOpInfo *discovery.OperationalInfo
@@ -774,7 +891,6 @@ func TestDeviceServiceOperationalAdvertisingInfo(t *testing.T) {
 	defer func() { _ = svc.Stop() }()
 
 	// Simulate zone connect
-	zoneID := "a1b2c3d4e5f6a7b8"
 	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
 
 	// Verify operational info contains expected fields
@@ -1202,6 +1318,7 @@ func TestEventTypeString(t *testing.T) {
 		{EventZoneRestored, "ZONE_RESTORED"},
 		{EventDeviceRediscovered, "DEVICE_REDISCOVERED"},
 		{EventDeviceReconnected, "DEVICE_RECONNECTED"},
+		{EventReconnectionFailed, "RECONNECTION_FAILED"},
 		{EventType(99), "UNKNOWN"},
 	}
 
