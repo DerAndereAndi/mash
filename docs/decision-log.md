@@ -2501,6 +2501,177 @@ When a device receives a commissioning request:
 
 ---
 
+### DEC-044: Message Correlation and Request Timeouts
+
+**Date:** 2026-01-28
+**Status:** Accepted
+
+**Context:** The protocol needs clear rules for message correlation (matching responses to requests) and handling unresponsive connections.
+
+**Questions Addressed:**
+1. How does a client correlate responses to requests?
+2. What happens when MessageID wraps around (uint32 overflow)?
+3. How long should a client wait for a response?
+
+**Decisions:**
+
+**1. Message Correlation via MessageID**
+
+Every request includes a `messageId` (uint32). The response echoes this value:
+- Request: `{1: 12345, 2: 1, 3: 1, 4: 2, 5: [...]}` (messageId=12345)
+- Response: `{1: 12345, 2: 0, 3: {...}}` (same messageId)
+
+This is an implicit ACK/NACK system:
+- Response with Status=0 → ACK (success)
+- Response with Status≠0 → NACK (error with reason code)
+- No separate ACK message type needed
+
+**2. MessageID Space**
+
+| Property | Value |
+|----------|-------|
+| Range | 1 to 4,294,967,295 |
+| Reserved | 0 (indicates notification) |
+| Scope | Per-connection, per-direction |
+| Overflow behavior | Wrap to 1 (skip 0) |
+
+**Why 32-bit instead of 64-bit:**
+- Target hardware is 32-bit MCUs (DEC-003)
+- CBOR: 32-bit = 5 bytes, 64-bit = 9 bytes per message
+- Matter uses 32-bit counters
+- With 10s timeout, even 10,000 req/s only has ~100K in-flight (vs 4.3B available)
+
+**3. Request Timeout**
+
+| Parameter | Value |
+|-----------|-------|
+| Default timeout | 10 seconds |
+
+Timeout behavior:
+1. No response within 10s → connection is broken
+2. Client SHOULD close and reconnect
+3. Client MUST re-send pending requests after reconnection
+
+**Rationale:**
+- Devices MUST respond to every request (the protocol has no "fire and forget")
+- A missing response means the connection failed, not that the device is slow
+- 10 seconds allows for slow operations while maintaining responsiveness
+
+**Comparison:**
+
+| Protocol | Correlation | Timeout |
+|----------|------------|---------|
+| MASH | MessageID (uint32) | 10 seconds |
+| Matter | Transaction ID (uint32) | Configurable per interaction |
+| EEBUS SHIP | Complex listHeader + headerFields | Heartbeat-based |
+
+**Related:** DEC-003 (Target Hardware), DEC-008 (Interaction Model)
+
+---
+
+### DEC-045: Transport-Layer Heartbeat Sufficient for Failsafe
+
+**Date:** 2026-01-28
+**Status:** Accepted
+
+**Context:** EEBUS LPC and LPP use application-layer heartbeats (DeviceDiagnosis) with 60-second intervals, bidirectionally between Energy Guard and Controllable System. MASH has transport-layer ping/pong (30s interval, 95s max detection). Question: Does MASH need additional application-layer heartbeats for failsafe triggering?
+
+**EEBUS LPC/LPP Heartbeat Model:**
+
+| Parameter | Value |
+|-----------|-------|
+| Heartbeat interval | ≤60 seconds |
+| Failsafe trigger | 120 seconds without heartbeat |
+| Direction | Bidirectional (EG↔CS) |
+| Purpose | Liveness + gates command processing |
+
+EEBUS requires heartbeat before evaluating commands: "only after a Heartbeat from the Energy Guard, a following received write command within 60 seconds on the Active Power Limit SHALL be evaluated."
+
+**EEBUS Protocol Stack:**
+```
+┌─────────────────────────────────┐
+│ Application: LPC/LPP Heartbeat  │  ← 60s, bidirectional
+├─────────────────────────────────┤
+│ SHIP layer                      │
+├─────────────────────────────────┤
+│ WebSocket: ping/pong            │  ← transport heartbeat EXISTS
+├─────────────────────────────────┤
+│ TLS                             │
+└─────────────────────────────────┘
+```
+
+Note: EEBUS already has transport-layer liveness via WebSocket ping/pong, yet still requires application-layer heartbeats.
+
+**Matter Approach:**
+
+Matter uses subscription liveness (MaxInterval + RTT) for application health, with MRP (Message Reliability Protocol) at transport layer. No feature-specific heartbeats. ICD Check-In exists only for battery-powered devices that sleep for extended periods.
+
+**Options Evaluated:**
+
+1. **EEBUS model**: Add bidirectional application-layer heartbeats, gate commands on heartbeat receipt
+2. **Feature-specific heartbeats**: Different heartbeats for different features (as EEBUS does with LPC, LPP, emobility)
+3. **Transport-only**: Rely on transport ping/pong for liveness, no application heartbeats
+4. **Subscription MaxInterval**: Use existing subscription mechanism as implicit application heartbeat
+
+**Decision:** Transport-layer heartbeat is sufficient. No application-layer heartbeats needed.
+
+**MASH Liveness Mechanisms:**
+
+| Layer | Mechanism | What it proves |
+|-------|-----------|----------------|
+| Transport | Ping/pong (30s, 95s max) | TLS connection alive |
+| Application | Subscription MaxInterval | Device app processing subscriptions |
+| Application | Request/Response (10s timeout) | End-to-end command processing |
+
+**Rationale:**
+
+1. **Command arrival IS proof of liveness.** If a controller can send a Write command, it was alive to send it. Requiring a separate heartbeat before the command adds no information.
+
+2. **Transport heartbeat detects connection failure.** The 95s maximum detection time is acceptable for failsafe purposes. Connection loss triggers FAILSAFE state (DEC-034).
+
+3. **Subscription MaxInterval already serves as device-side heartbeat.** Periodic reports prove the device application is processing. Controllers can set MaxInterval to get regular updates.
+
+4. **Feature-specific heartbeats are redundant.** If the stack can send an LPC heartbeat, it can send an LPC command. Different heartbeats for different features (EEBUS pattern) multiply complexity without adding safety.
+
+5. **EEBUS redundancy is a design flaw, not a feature.** EEBUS has WebSocket ping/pong at transport layer AND application heartbeats. This exists because LPC/LPP were designed by different working groups without clean layering.
+
+6. **Zombie controller edge case is acceptable.** If controller app hangs but TCP stays open, device continues applying last commanded limit. This is safe because:
+   - Commanded limits represent explicit controller intent
+   - failsafeDuration (2-24h) provides eventual recovery
+   - In practice, app crashes usually terminate TCP too
+
+**Edge Case Documentation:**
+
+> If a controller application hangs while the TCP connection remains open, the device will continue applying the last commanded limit until TCP timeout occurs or failsafeDuration expires. This is acceptable because commanded limits represent explicit controller intent, and failsafeDuration provides guaranteed recovery.
+
+**Comparison:**
+
+| Aspect | EEBUS LPC/LPP | MASH |
+|--------|---------------|------|
+| Transport heartbeat | WebSocket ping/pong | TLS ping/pong (30s) |
+| Application heartbeat | DeviceDiagnosis (60s, bidirectional) | None required |
+| Failsafe trigger | 120s without app heartbeat | Connection loss (95s max) |
+| Command gating | Requires heartbeat first | Commands evaluated immediately |
+| State reporting | Inferred from heartbeats | Explicit ControlStateEnum |
+
+**Why EEBUS Requires Both Layers:**
+
+EEBUS uses heartbeats for **semantic gating**, not just liveness: commands are only evaluated after receiving a heartbeat. This pattern was designed to detect "zombie controllers" (app crashed, connection alive). However:
+
+- The gating doesn't prove the controller computed the right limit
+- If the controller can send a heartbeat, it can send a command
+- MASH's explicit state reporting (DEC-034) eliminates heartbeat-based state inference
+
+**Declined Alternatives:**
+
+- **EEBUS bidirectional heartbeats**: Redundant with transport layer, adds protocol complexity
+- **Feature-specific heartbeats**: Multiplies heartbeat traffic without adding safety
+- **Heartbeat-gated commands**: If controller can send heartbeat, it can send command - no benefit
+
+**Related:** DEC-034 (ControlStateEnum), DEC-039 (State Machine Rules), DEC-044 (Request Timeouts)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -2617,3 +2788,5 @@ Key learnings:
 | 2025-01-25 | Added DEC-037: Two-level capability discovery. FeatureMap is 32-bit bitmap (aligned with Matter) for high-level category checks. Detailed capabilities in feature attributes (supportsAsymmetric, supportedDirections, supportedChargingModes). Pattern: featureMap for quick check, attributes for specifics. |
 | 2025-01-25 | Added DEC-038: Command parameters vs stored attributes. Duration, cause are transient command parameters (like Matter), not stored attributes (unlike EEBUS). No "remaining duration" attribute. |
 | 2025-01-25 | Added DEC-039: State machine interaction rules. Process continues during FAILSAFE, scheduled processes start as planned, PAUSED behavior is device-specific (PICS). Connection loss detection max 95s, failsafe timer accuracy +/- 1%. |
+| 2026-01-28 | Added DEC-044: Message correlation via MessageID, 32-bit ID rationale, 10-second request timeout. Documents implicit ACK/NACK model (response status = ack) and MessageID wraparound behavior. |
+| 2026-01-28 | Added DEC-045: Transport-layer heartbeat sufficient for failsafe. No application-layer heartbeats needed. Analyzes EEBUS LPC/LPP redundant heartbeat design, Matter's approach, and why command arrival itself proves controller liveness. |

@@ -185,6 +185,21 @@ To "change" a parameter like duration, re-send the entire command with new value
 }
 ```
 
+### 3.4 MessageID Management
+
+**MessageID Space:**
+- Range: 1 to 4,294,967,295 (0 reserved for notifications)
+- Scope: Per-connection, per-direction (each side has independent counters)
+- Size: 32-bit (aligned with Matter, optimal for constrained MCUs per DEC-003)
+
+**Allocation Rules:**
+1. Start at 1 for new connections
+2. Increment monotonically for each request
+3. On overflow (reaching 2³²-1), wrap to 1 (skipping 0)
+
+**Reuse Safety:**
+With a 10-second request timeout (see Section 8.3), at most 10 seconds worth of MessageIDs can be in-flight simultaneously. Even at 10,000 requests/second (far beyond typical smart home traffic), only ~100,000 MessageIDs would be pending—negligible compared to the 4.3 billion available.
+
 ---
 
 ## 4. Read Operation
@@ -480,6 +495,24 @@ If no changes occur within maxInterval, device sends a heartbeat notification co
   }
 }
 ```
+
+### 8.3 Request Timeout
+
+Clients MUST implement request timeouts:
+
+| Parameter | Value |
+|-----------|-------|
+| Default timeout | 10 seconds |
+
+**Timeout Behavior:**
+1. If no response received within timeout, client SHOULD close the connection
+2. Client MAY immediately attempt reconnection
+3. Client MUST re-send any pending requests after reconnection
+
+**Rationale:**
+A missing response indicates connection failure (since devices MUST respond to every request). The 10-second timeout balances responsiveness with allowing time for slow operations like command execution.
+
+Devices SHOULD respond within 5 seconds for typical operations.
 
 ---
 

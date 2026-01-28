@@ -470,6 +470,47 @@ func TestClientBasics(t *testing.T) {
 	}
 }
 
+func TestMessageIDWraparound(t *testing.T) {
+	// Test that MessageID wraps from max to 1, skipping 0 (reserved for notifications)
+	sender := &mockSender{}
+	client := NewClient(sender)
+	defer client.Close()
+
+	// Set nextMsgID close to max uint32 to test wraparound
+	client.nextMsgID = 0xFFFFFFFF - 2 // Will produce: max-1, max, 1 (skip 0)
+
+	id1 := client.nextMessageID()
+	id2 := client.nextMessageID()
+	id3 := client.nextMessageID() // Should wrap and skip 0
+
+	if id1 != 0xFFFFFFFF-1 {
+		t.Errorf("expected id1 = %d, got %d", 0xFFFFFFFF-1, id1)
+	}
+	if id2 != 0xFFFFFFFF {
+		t.Errorf("expected id2 = %d, got %d", uint32(0xFFFFFFFF), id2)
+	}
+	if id3 == 0 {
+		t.Error("MessageID 0 should be skipped (reserved for notifications)")
+	}
+	if id3 != 1 {
+		t.Errorf("expected id3 = 1 after wraparound, got %d", id3)
+	}
+}
+
+func TestDefaultTimeout(t *testing.T) {
+	// Verify default timeout matches DEC-044 spec (10 seconds)
+	sender := &mockSender{}
+	client := NewClient(sender)
+	defer client.Close()
+
+	if client.timeout != DefaultRequestTimeout {
+		t.Errorf("expected default timeout %v, got %v", DefaultRequestTimeout, client.timeout)
+	}
+	if DefaultRequestTimeout != 10*time.Second {
+		t.Errorf("DefaultRequestTimeout should be 10s per DEC-044, got %v", DefaultRequestTimeout)
+	}
+}
+
 func TestStatusError(t *testing.T) {
 	err := &StatusError{
 		Status:  wire.StatusInvalidParameter,

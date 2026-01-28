@@ -1,0 +1,230 @@
+# Test Suite: Message Correlation Tests
+# Verifies MessageID handling per DEC-044
+#
+# Key concepts:
+# - Response MessageID matches request MessageID
+# - MessageID=0 is reserved for notifications
+# - Request timeout behavior (10s default)
+
+---
+# TC-MSG-001: Response MessageID Matches Request
+id: TC-MSG-001
+name: Response MessageID Matches Request
+description: |
+  Verifies that the response MessageID field matches the request MessageID,
+  enabling proper request-response correlation.
+
+pics_requirements:
+  - MASH.S
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send read request with specific MessageID
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorName
+      message_id: 12345        # Explicit MessageID for verification
+    expect:
+      read_success: true
+      response_message_id: 12345  # Must match request
+
+  - name: Send another request with different MessageID
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: productName
+      message_id: 67890
+    expect:
+      read_success: true
+      response_message_id: 67890
+
+postconditions:
+  - message_correlation_working: true
+
+timeout: "10s"
+tags:
+  - correlation
+  - message-id
+  - basic
+
+---
+# TC-MSG-002: MessageID Zero Rejected for Requests
+id: TC-MSG-002
+name: MessageID Zero Rejected for Requests
+description: |
+  Verifies that requests with MessageID=0 are rejected, as 0 is
+  reserved for notification messages per DEC-044.
+
+pics_requirements:
+  - MASH.S
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send request with MessageID=0 (invalid)
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorName
+      message_id: 0            # Invalid: reserved for notifications
+    expect:
+      connection_error: true   # Device should reject malformed message
+      # Note: May close connection or return protocol error
+
+postconditions:
+  - reserved_message_id_rejected: true
+
+timeout: "10s"
+tags:
+  - correlation
+  - message-id
+  - validation
+  - negative
+
+---
+# TC-MSG-003: Request Timeout Behavior
+id: TC-MSG-003
+name: Request Timeout After 10 Seconds
+description: |
+  Verifies that clients timeout requests after 10 seconds if no
+  response is received, per DEC-044 specification.
+
+pics_requirements:
+  - MASH.C                    # Client behavior test
+
+preconditions:
+  - session_established: true
+  - device_configured_to_delay_response: true  # Test fixture setup
+
+steps:
+  - name: Send request to slow/unresponsive endpoint
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorName
+      simulate_no_response: true
+    expect:
+      timeout_after: "10s"
+      error: REQUEST_TIMEOUT
+
+  - name: Verify timeout occurred within bounds
+    action: verify_timing
+    params:
+      min_duration: "9s"       # Should wait nearly 10s
+      max_duration: "11s"      # But not much longer
+    expect:
+      within_bounds: true
+
+postconditions:
+  - timeout_enforced: true
+
+timeout: "15s"                 # Test timeout > request timeout
+tags:
+  - correlation
+  - timeout
+  - client-behavior
+
+---
+# TC-MSG-004: Multiple Concurrent Requests
+id: TC-MSG-004
+name: Multiple Concurrent Requests Correlation
+description: |
+  Verifies that multiple in-flight requests are correctly correlated
+  with their respective responses, even when responses arrive out of
+  order (at the application layer).
+
+pics_requirements:
+  - MASH.S
+  - MASH.C
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send three concurrent requests
+    action: read_concurrent
+    params:
+      requests:
+        - endpoint: 0
+          feature: DeviceInfo
+          attribute: vendorName
+          message_id: 1001
+        - endpoint: 0
+          feature: DeviceInfo
+          attribute: productName
+          message_id: 1002
+        - endpoint: 0
+          feature: DeviceInfo
+          attribute: serialNumber
+          message_id: 1003
+    expect:
+      all_responses_received: true
+      all_correlations_correct: true
+
+  - name: Verify each response matched its request
+    action: verify_correlation
+    params:
+      expected_pairs:
+        - request_id: 1001
+          attribute: vendorName
+        - request_id: 1002
+          attribute: productName
+        - request_id: 1003
+          attribute: serialNumber
+    expect:
+      all_pairs_matched: true
+
+postconditions:
+  - concurrent_correlation_working: true
+
+timeout: "15s"
+tags:
+  - correlation
+  - message-id
+  - concurrent
+  - advanced
+
+---
+# TC-MSG-005: Error Response Preserves MessageID
+id: TC-MSG-005
+name: Error Response Preserves MessageID
+description: |
+  Verifies that even error responses include the correct MessageID
+  from the original request, enabling correlation of failures.
+
+pics_requirements:
+  - MASH.S
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send request that will fail (invalid endpoint)
+    action: read
+    params:
+      endpoint: 255            # Invalid endpoint
+      feature: DeviceInfo
+      attribute: vendorName
+      message_id: 99999
+    expect:
+      read_success: false
+      error_code: INVALID_ENDPOINT
+      response_message_id: 99999  # Must still match request
+
+postconditions:
+  - error_correlation_working: true
+
+timeout: "10s"
+tags:
+  - correlation
+  - message-id
+  - error
+  - ack-nack

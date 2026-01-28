@@ -43,11 +43,14 @@ type Client struct {
 	closed bool
 }
 
+// DefaultRequestTimeout is the default timeout for requests (per DEC-044).
+const DefaultRequestTimeout = 10 * time.Second
+
 // NewClient creates a new interaction client.
 func NewClient(sender RequestSender) *Client {
 	return &Client{
 		sender:    sender,
-		timeout:   30 * time.Second,
+		timeout:   DefaultRequestTimeout,
 		nextMsgID: 1,
 		pending:   make(map[uint32]chan *wire.Response),
 	}
@@ -86,8 +89,15 @@ func (c *Client) Close() error {
 }
 
 // nextMessageID generates the next unique message ID.
+// MessageID 0 is reserved for notifications, so we skip it on wraparound (per DEC-044).
 func (c *Client) nextMessageID() uint32 {
-	return atomic.AddUint32(&c.nextMsgID, 1)
+	for {
+		id := atomic.AddUint32(&c.nextMsgID, 1)
+		if id != wire.NotificationMessageID {
+			return id
+		}
+		// Wrapped to 0, try again to get 1
+	}
 }
 
 // sendRequest sends a request and waits for the response.
