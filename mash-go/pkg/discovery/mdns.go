@@ -502,8 +502,18 @@ func (b *MDNSBrowser) BrowseOperational(ctx context.Context, zoneID string) (<-c
 
 				existing, found := services[svc.InstanceName]
 				if found {
+					// Check if this is a reconnection (had no addresses before)
+					hadNoAddresses := len(existing.Addresses) == 0
 					// Merge addresses into existing entry
 					existing.Addresses = mergeAddresses(existing.Addresses, svc.Addresses)
+					// Re-emit if this is a reconnection
+					if hadNoAddresses && len(existing.Addresses) > 0 {
+						select {
+						case out <- existing:
+						case <-ctx.Done():
+							return
+						}
+					}
 				} else {
 					// New service - store and emit
 					services[svc.InstanceName] = svc
@@ -571,8 +581,18 @@ func (b *MDNSBrowser) BrowseCommissioners(ctx context.Context) (<-chan *Commissi
 
 				existing, found := services[svc.InstanceName]
 				if found {
+					// Check if this is a reconnection (had no addresses before)
+					hadNoAddresses := len(existing.Addresses) == 0
 					// Merge addresses into existing entry
 					existing.Addresses = mergeAddresses(existing.Addresses, svc.Addresses)
+					// Re-emit if this is a reconnection
+					if hadNoAddresses && len(existing.Addresses) > 0 {
+						select {
+						case out <- existing:
+						case <-ctx.Done():
+							return
+						}
+					}
 				} else {
 					// New service - store and emit
 					services[svc.InstanceName] = svc

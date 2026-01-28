@@ -56,6 +56,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -155,6 +156,13 @@ func main() {
 	svcConfig := service.DefaultControllerConfig()
 	svcConfig.ZoneName = config.ZoneNameValue
 	svcConfig.ZoneType = zoneType
+
+	// Set up service logger based on log level
+	if config.LogLevel == "debug" {
+		svcConfig.Logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}))
+	}
 
 	// Set up protocol logging if requested
 	var protocolLogger *mashlog.FileLogger
@@ -339,6 +347,15 @@ func handleEvent(event service.Event) {
 		log.Printf("[EVENT] Device commissioned: %s", event.DeviceID)
 		// Wire up device to CEM for monitoring
 		go setupDeviceMonitoring(event.DeviceID)
+		// Start operational discovery if not already running (for reconnection support)
+		if !svc.IsOperationalDiscovering() {
+			log.Printf("Starting operational discovery for reconnection support")
+			go func() {
+				if err := svc.StartOperationalDiscovery(context.Background()); err != nil {
+					log.Printf("Warning: Failed to start operational discovery: %v", err)
+				}
+			}()
+		}
 	case service.EventDecommissioned:
 		log.Printf("[EVENT] Device decommissioned: %s", event.DeviceID)
 		_ = cem.DisconnectDevice(event.DeviceID)

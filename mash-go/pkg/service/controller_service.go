@@ -957,8 +957,15 @@ func (s *ControllerService) StartOperationalDiscovery(ctx context.Context) error
 
 // runOperationalDiscoveryLoop runs operational discovery and handles reconnection.
 func (s *ControllerService) runOperationalDiscoveryLoop(ctx context.Context, zoneID string) {
+	if s.config.Logger != nil {
+		s.config.Logger.Debug("runOperationalDiscoveryLoop: starting", "zoneID", zoneID)
+	}
+
 	results, err := s.browser.BrowseOperational(ctx, zoneID)
 	if err != nil {
+		if s.config.Logger != nil {
+			s.config.Logger.Debug("runOperationalDiscoveryLoop: BrowseOperational failed", "error", err)
+		}
 		s.mu.Lock()
 		s.operationalDiscoveryActive = false
 		s.operationalDiscoveryCancel = nil
@@ -969,6 +976,9 @@ func (s *ControllerService) runOperationalDiscoveryLoop(ctx context.Context, zon
 	for {
 		select {
 		case <-ctx.Done():
+			if s.config.Logger != nil {
+				s.config.Logger.Debug("runOperationalDiscoveryLoop: context cancelled")
+			}
 			s.mu.Lock()
 			s.operationalDiscoveryActive = false
 			s.operationalDiscoveryCancel = nil
@@ -977,6 +987,9 @@ func (s *ControllerService) runOperationalDiscoveryLoop(ctx context.Context, zon
 
 		case svc, ok := <-results:
 			if !ok {
+				if s.config.Logger != nil {
+					s.config.Logger.Debug("runOperationalDiscoveryLoop: results channel closed")
+				}
 				s.mu.Lock()
 				s.operationalDiscoveryActive = false
 				s.operationalDiscoveryCancel = nil
@@ -1074,10 +1087,8 @@ func (s *ControllerService) attemptReconnection(ctx context.Context, svc *discov
 	})
 
 	// Start message loop - blocks until connection closes
+	// Note: runDeviceMessageLoop calls handleDeviceSessionClose on exit
 	s.runDeviceMessageLoop(svc.DeviceID, framedConn, session)
-
-	// Clean up on disconnect
-	s.handleDeviceSessionClose(svc.DeviceID)
 }
 
 // buildOperationalTLSConfig creates a TLS config for operational (post-commissioning)

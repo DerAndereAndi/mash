@@ -152,6 +152,9 @@ func (c *Controller) Run(ctx context.Context, cancel context.CancelFunc) {
 		case "cert", "certs":
 			c.cmdCert(args)
 
+		case "reconnect":
+			c.cmdReconnect(ctx)
+
 		case "quit", "exit", "q":
 			fmt.Fprintln(c.rl.Stdout(), "Exiting...")
 			cancel()
@@ -194,6 +197,7 @@ MASH Controller Commands:
 
   General:
     status                            - Show controller status
+    reconnect                         - Restart operational discovery
     help                              - Show this help
     quit                              - Exit controller
 
@@ -642,8 +646,46 @@ func (c *Controller) cmdStatus() {
 	fmt.Fprintf(c.rl.Stdout(),"  Zone ID:           %s\n", c.svc.ZoneID())
 	fmt.Fprintf(c.rl.Stdout(),"  Paired Devices:    %d\n", c.svc.DeviceCount())
 	fmt.Fprintf(c.rl.Stdout(),"  Connected:         %d\n", c.svc.ConnectedCount())
+
+	// Show operational discovery status
+	opDiscoveryStatus := "inactive"
+	if c.svc.IsOperationalDiscovering() {
+		opDiscoveryStatus = "active"
+	}
+	fmt.Fprintf(c.rl.Stdout(),"  Op. Discovery:     %s\n", opDiscoveryStatus)
+
 	fmt.Fprintf(c.rl.Stdout(),"  Total Power:       %.1f kW\n", float64(c.cem.GetTotalPower())/1000000)
 	fmt.Fprintln(c.rl.Stdout(),)
+}
+
+// cmdReconnect restarts operational discovery to find disconnected devices.
+func (c *Controller) cmdReconnect(ctx context.Context) {
+	// Stop any existing operational discovery
+	c.svc.StopOperationalDiscovery()
+
+	// Check if there are disconnected devices to reconnect
+	devices := c.svc.GetAllDevices()
+	disconnectedCount := 0
+	for _, d := range devices {
+		if !d.Connected {
+			disconnectedCount++
+		}
+	}
+
+	if disconnectedCount == 0 {
+		fmt.Fprintln(c.rl.Stdout(), "All devices are connected")
+		return
+	}
+
+	fmt.Fprintf(c.rl.Stdout(), "Searching for %d disconnected device(s)...\n", disconnectedCount)
+
+	// Restart operational discovery
+	if err := c.svc.StartOperationalDiscovery(ctx); err != nil {
+		fmt.Fprintf(c.rl.Stdout(), "Failed to start operational discovery: %v\n", err)
+		return
+	}
+
+	fmt.Fprintln(c.rl.Stdout(), "Operational discovery started - waiting for devices to appear")
 }
 
 // resolveDeviceID resolves a partial device ID to a full device ID.

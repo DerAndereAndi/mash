@@ -1504,6 +1504,7 @@ func (s *DeviceService) StartOperationalAdvertising() error {
 	defer s.mu.RUnlock()
 
 	if s.discoveryManager == nil {
+		s.debugLog("StartOperationalAdvertising: no discovery manager, skipping")
 		return nil // No discovery manager, skip
 	}
 
@@ -1511,6 +1512,11 @@ func (s *DeviceService) StartOperationalAdvertising() error {
 	if s.tlsListener != nil {
 		port = parsePort(s.tlsListener.Addr().String())
 	}
+
+	s.debugLog("StartOperationalAdvertising: advertising zones",
+		"deviceID", s.deviceID,
+		"zoneCount", len(s.connectedZones),
+		"port", port)
 
 	for zoneID := range s.connectedZones {
 		opInfo := &discovery.OperationalInfo{
@@ -1520,6 +1526,10 @@ func (s *DeviceService) StartOperationalAdvertising() error {
 			EndpointCount: uint8(s.device.EndpointCount()),
 			Port:          port,
 		}
+
+		s.debugLog("StartOperationalAdvertising: advertising zone",
+			"zoneID", zoneID,
+			"deviceID", s.deviceID)
 
 		if err := s.discoveryManager.AddZone(s.ctx, opInfo); err != nil {
 			s.debugLog("StartOperationalAdvertising: failed to start advertising",

@@ -209,6 +209,17 @@ func SignCSRWithDeviceID(ca *ZoneCA, csrDER []byte, deviceID string) (*x509.Cert
 	}
 
 	now := time.Now()
+
+	// Build DNS SANs - include device ID to satisfy Go's TLS verification
+	// which requires SANs instead of relying on CommonName alone
+	var dnsNames []string
+	if deviceID != "" {
+		dnsNames = append(dnsNames, deviceID)
+	}
+	if subject.CommonName != "" && subject.CommonName != deviceID {
+		dnsNames = append(dnsNames, subject.CommonName)
+	}
+
 	template := &x509.Certificate{
 		SerialNumber:          serialNumber,
 		Subject:               subject,
@@ -220,6 +231,7 @@ func SignCSRWithDeviceID(ca *ZoneCA, csrDER []byte, deviceID string) (*x509.Cert
 		IsCA:                  false,
 		SubjectKeyId:          ski,
 		AuthorityKeyId:        ca.Certificate.SubjectKeyId,
+		DNSNames:              dnsNames,
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, ca.Certificate, csr.PublicKey, ca.PrivateKey)
@@ -282,6 +294,7 @@ func GenerateControllerOperationalCert(ca *ZoneCA, controllerID string) (*Operat
 		IsCA:                  false,
 		SubjectKeyId:          ski,
 		AuthorityKeyId:        ca.Certificate.SubjectKeyId,
+		DNSNames:              []string{controllerID}, // Required for Go TLS verification
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, ca.Certificate, keyPair.PublicKey, ca.PrivateKey)

@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"time"
 )
 
 // TLS constants for MASH protocol.
@@ -209,6 +210,9 @@ type OperationalTLSConfig struct {
 // NewOperationalClientTLSConfig creates a TLS configuration for a controller
 // connecting to a device for operational (post-commissioning) communication.
 // Both sides present operational certificates signed by the same Zone CA.
+//
+// Unlike typical TLS, MASH uses device IDs (not DNS names) for identification.
+// Certificate verification focuses on the chain (Zone CA) rather than hostname.
 func NewOperationalClientTLSConfig(cfg *OperationalTLSConfig) (*tls.Config, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("OperationalTLSConfig is required")
@@ -220,10 +224,74 @@ func NewOperationalClientTLSConfig(cfg *OperationalTLSConfig) (*tls.Config, erro
 		return nil, fmt.Errorf("zone CA pool is required for peer verification")
 	}
 
-	// Use NewClientTLSConfig with the operational certificates
+	// Capture the Zone CAs for use in the verification callback
+	zoneCAs := cfg.ZoneCAs
+	expectedDeviceID := cfg.ServerName
+
+	// Create custom verification that:
+	// 1. Verifies certificate chain via Zone CA (manually, since we skip hostname verification)
+	// 2. Verifies device ID in certificate matches expected
+	verifyPeer := func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		if len(rawCerts) == 0 {
+			return fmt.Errorf("no certificates presented")
+		}
+
+		// Parse the peer certificate
+		cert, err := x509.ParseCertificate(rawCerts[0])
+		if err != nil {
+			return fmt.Errorf("failed to parse certificate: %w", err)
+		}
+
+		// Build intermediate pool from remaining certs
+		intermediates := x509.NewCertPool()
+		for _, rawCert := range rawCerts[1:] {
+			intermediateCert, err := x509.ParseCertificate(rawCert)
+			if err != nil {
+				continue
+			}
+			intermediates.AddCert(intermediateCert)
+		}
+
+		// Verify the certificate chain against Zone CA
+		opts := x509.VerifyOptions{
+			Roots:         zoneCAs,
+			Intermediates: intermediates,
+			CurrentTime:   time.Now(),
+			KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		}
+		if _, err := cert.Verify(opts); err != nil {
+			return fmt.Errorf("certificate chain verification failed: %w", err)
+		}
+
+		// Verify device ID matches if expected
+		if expectedDeviceID != "" {
+			if cert.Subject.CommonName != expectedDeviceID {
+				// Also check DNS SANs for newer certificates
+				found := false
+				for _, dns := range cert.DNSNames {
+					if dns == expectedDeviceID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("device ID mismatch: expected %s, got %s",
+						expectedDeviceID, cert.Subject.CommonName)
+				}
+			}
+		}
+
+		return nil
+	}
+
+	// Build TLS config with custom verification
+	// InsecureSkipVerify skips Go's built-in hostname verification
+	// Our verifyPeer callback handles chain and device ID verification
 	return NewClientTLSConfig(&TLSConfig{
-		Certificate: cfg.ControllerCert,
-		RootCAs:     cfg.ZoneCAs,
-		ServerName:  cfg.ServerName,
+		Certificate:           cfg.ControllerCert,
+		RootCAs:               cfg.ZoneCAs,
+		ServerName:            cfg.ServerName, // Used for SNI only
+		VerifyPeerCertificate: verifyPeer,
+		InsecureSkipVerify:    true, // We handle verification in verifyPeer
 	})
 }

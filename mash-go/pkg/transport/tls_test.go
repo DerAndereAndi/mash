@@ -366,9 +366,17 @@ func TestOperationalClientTLSConfigProperties(t *testing.T) {
 		t.Errorf("NextProtos = %v, want [%s]", tlsConfig.NextProtos, ALPNProtocol)
 	}
 
-	// Should NOT have InsecureSkipVerify for operational connections
-	if tlsConfig.InsecureSkipVerify {
-		t.Error("Operational TLS should not have InsecureSkipVerify=true")
+	// Operational connections use InsecureSkipVerify=true because we handle
+	// verification manually via VerifyPeerCertificate callback. This is needed
+	// because MASH uses device IDs (not DNS names) for identification, so Go's
+	// built-in hostname verification doesn't apply.
+	if !tlsConfig.InsecureSkipVerify {
+		t.Error("Operational TLS should have InsecureSkipVerify=true (uses custom verification)")
+	}
+
+	// VerifyPeerCertificate should be set to handle chain and device ID verification
+	if tlsConfig.VerifyPeerCertificate == nil {
+		t.Error("Operational TLS should have VerifyPeerCertificate callback set")
 	}
 
 	// ServerName should be set
