@@ -4,6 +4,7 @@ package interactive
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/chzyer/readline"
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/inspect"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/service"
@@ -127,6 +129,9 @@ func (d *Device) Run(ctx context.Context, cancel context.CancelFunc) {
 		case "zones", "z":
 			d.cmdZones(args)
 
+		case "cert":
+			d.cmdCert(args)
+
 		case "kick":
 			d.cmdKick(args)
 
@@ -166,6 +171,7 @@ MASH Device Commands:
 
   Zone Management:
     zones              - List paired zones
+    cert [zone-id]     - Show certificates (or --all for summary)
     kick <zone-id>     - Remove a zone from this device
     commission         - Enter commissioning mode (open for pairing)
 
@@ -332,6 +338,166 @@ func (d *Device) cmdZones(_ []string) {
 		fmt.Fprintf(d.rl.Stdout(),"      Last seen: %s\n", z.LastSeen.Format("15:04:05"))
 		fmt.Fprintln(d.rl.Stdout(),)
 	}
+}
+
+// cmdCert handles the cert command.
+// Usage:
+//   - cert             - Show certificates for all zones
+//   - cert <zone-id>   - Show certificate details for a specific zone
+//   - cert --all       - Show summary table of all certificates
+func (d *Device) cmdCert(args []string) {
+	certStore := d.svc.GetCertStore()
+	if certStore == nil {
+		fmt.Fprintln(d.rl.Stdout(), "No certificate store configured")
+		return
+	}
+
+	// Check for --all flag
+	if len(args) > 0 && args[0] == "--all" {
+		d.showAllCerts(certStore)
+		return
+	}
+
+	// If zone ID provided, show that zone's certs
+	if len(args) > 0 {
+		d.showZoneCert(certStore, args[0])
+		return
+	}
+
+	// Default: show all zones' certificates
+	d.showAllCerts(certStore)
+}
+
+// showAllCerts displays a summary table of all certificates.
+func (d *Device) showAllCerts(certStore cert.Store) {
+	zones := certStore.ListZones()
+	if len(zones) == 0 {
+		fmt.Fprintln(d.rl.Stdout(), "No operational certificates (device not commissioned)")
+		return
+	}
+
+	fmt.Fprintln(d.rl.Stdout(), "\nCertificate Summary:")
+	fmt.Fprintln(d.rl.Stdout(), "--------------------------------------------------------------------------------")
+	fmt.Fprintf(d.rl.Stdout(), "%-12s %-24s %-20s %-10s %s\n",
+		"Type", "Subject", "Issuer", "Expiry", "Status")
+	fmt.Fprintln(d.rl.Stdout(), "--------------------------------------------------------------------------------")
+
+	for _, zoneID := range zones {
+		// Operational cert
+		opCert, err := certStore.GetOperationalCert(zoneID)
+		if err == nil && opCert != nil {
+			d.printCertRow("Operational", opCert.Certificate)
+		}
+
+		// Zone CA
+		zoneCACert, err := certStore.GetZoneCACert(zoneID)
+		if err == nil && zoneCACert != nil {
+			d.printCertRow("Zone CA", zoneCACert)
+		}
+	}
+
+	fmt.Fprintln(d.rl.Stdout(), "--------------------------------------------------------------------------------")
+	fmt.Fprintln(d.rl.Stdout())
+}
+
+// showZoneCert displays detailed certificate information for a specific zone.
+func (d *Device) showZoneCert(certStore cert.Store, partialZoneID string) {
+	// Find matching zone
+	var zoneID string
+	for _, z := range certStore.ListZones() {
+		if z == partialZoneID || strings.Contains(z, partialZoneID) {
+			zoneID = z
+			break
+		}
+	}
+
+	if zoneID == "" {
+		fmt.Fprintf(d.rl.Stdout(), "Zone not found: %s\n", partialZoneID)
+		fmt.Fprintln(d.rl.Stdout(), "Use 'zones' to list zone IDs")
+		return
+	}
+
+	fmt.Fprintf(d.rl.Stdout(), "\nCertificates for Zone: %s\n", zoneID)
+
+	// Operational cert
+	fmt.Fprintln(d.rl.Stdout(), "\nOperational Certificate:")
+	fmt.Fprintln(d.rl.Stdout(), "-------------------------------------------")
+	opCert, err := certStore.GetOperationalCert(zoneID)
+	if err != nil {
+		fmt.Fprintf(d.rl.Stdout(), "  Error: %v\n", err)
+	} else {
+		d.printCertInfo(opCert.Certificate, "  ")
+	}
+
+	// Zone CA
+	fmt.Fprintln(d.rl.Stdout(), "\nZone CA Certificate:")
+	fmt.Fprintln(d.rl.Stdout(), "-------------------------------------------")
+	zoneCACert, err := certStore.GetZoneCACert(zoneID)
+	if err != nil {
+		fmt.Fprintf(d.rl.Stdout(), "  Error: %v\n", err)
+	} else {
+		d.printCertInfo(zoneCACert, "  ")
+	}
+
+	fmt.Fprintln(d.rl.Stdout())
+}
+
+// printCertInfo prints detailed certificate information.
+func (d *Device) printCertInfo(c *x509.Certificate, prefix string) {
+	if c == nil {
+		fmt.Fprintf(d.rl.Stdout(), "%sNo certificate\n", prefix)
+		return
+	}
+
+	fmt.Fprintf(d.rl.Stdout(), "%sSubject:     %s\n", prefix, c.Subject.CommonName)
+	if len(c.Subject.Organization) > 0 {
+		fmt.Fprintf(d.rl.Stdout(), "%sOrganization: %s\n", prefix, strings.Join(c.Subject.Organization, ", "))
+	}
+	fmt.Fprintf(d.rl.Stdout(), "%sIssuer:      %s\n", prefix, c.Issuer.CommonName)
+	fmt.Fprintf(d.rl.Stdout(), "%sValid From:  %s\n", prefix, c.NotBefore.Format("2006-01-02"))
+	fmt.Fprintf(d.rl.Stdout(), "%sValid Until: %s\n", prefix, c.NotAfter.Format("2006-01-02"))
+
+	daysUntil := int(time.Until(c.NotAfter).Hours() / 24)
+	status := d.certStatus(daysUntil)
+	fmt.Fprintf(d.rl.Stdout(), "%sExpires In:  %d days [%s]\n", prefix, daysUntil, status)
+
+	if c.IsCA {
+		fmt.Fprintf(d.rl.Stdout(), "%sIs CA:       true\n", prefix)
+	}
+}
+
+// printCertRow prints a single row in the certificate summary table.
+func (d *Device) printCertRow(certType string, c *x509.Certificate) {
+	subject := c.Subject.CommonName
+	if len(subject) > 24 {
+		subject = subject[:21] + "..."
+	}
+
+	issuer := c.Issuer.CommonName
+	if len(issuer) > 20 {
+		issuer = issuer[:17] + "..."
+	}
+
+	daysUntil := int(time.Until(c.NotAfter).Hours() / 24)
+	expiry := fmt.Sprintf("%d days", daysUntil)
+	status := d.certStatus(daysUntil)
+
+	fmt.Fprintf(d.rl.Stdout(), "%-12s %-24s %-20s %-10s %s\n",
+		certType, subject, issuer, expiry, status)
+}
+
+// certStatus returns a status string based on days until expiry.
+func (d *Device) certStatus(daysUntil int) string {
+	if daysUntil <= 0 {
+		return "EXPIRED"
+	}
+	if daysUntil <= 7 {
+		return "CRITICAL"
+	}
+	if daysUntil <= 30 {
+		return "RENEW"
+	}
+	return "OK"
 }
 
 // cmdKick handles the kick command (removes a zone).

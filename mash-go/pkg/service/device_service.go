@@ -1259,6 +1259,13 @@ func (s *DeviceService) SetCertStore(store cert.Store) {
 	s.certStore = store
 }
 
+// GetCertStore returns the certificate store.
+func (s *DeviceService) GetCertStore() cert.Store {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.certStore
+}
+
 // SetStateStore sets the state store for persistence.
 func (s *DeviceService) SetStateStore(store *persistence.DeviceStateStore) {
 	s.mu.Lock()
