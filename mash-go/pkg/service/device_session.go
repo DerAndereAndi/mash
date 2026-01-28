@@ -5,9 +5,11 @@ import (
 	"crypto/tls"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -29,6 +31,10 @@ type DeviceSession struct {
 	sender   *TransportRequestSender
 	closed   bool
 	logger   *slog.Logger
+
+	// Protocol logging (optional)
+	protocolLogger log.Logger
+	connID         string
 
 	// Bidirectional support: handler for incoming requests from the device.
 	// Optional - only set if controller exposes features to devices.
@@ -66,6 +72,8 @@ func (s *DeviceSession) OnMessage(data []byte) {
 	}
 	client := s.client
 	logger := s.logger
+	protocolLogger := s.protocolLogger
+	connID := s.connID
 	renewalHandler := s.renewalHandler
 	s.mu.RUnlock()
 
@@ -104,6 +112,8 @@ func (s *DeviceSession) OnMessage(data []byte) {
 			}
 			return
 		}
+		// Log the incoming response
+		s.logResponse(protocolLogger, connID, resp)
 		client.HandleResponse(resp)
 
 	case wire.MessageTypeNotification:
@@ -117,6 +127,8 @@ func (s *DeviceSession) OnMessage(data []byte) {
 			}
 			return
 		}
+		// Log the incoming notification
+		s.logNotification(protocolLogger, connID, notif)
 		if logger != nil {
 			logger.Debug("OnMessage: received notification",
 				"deviceID", s.deviceID,
@@ -135,11 +147,69 @@ func (s *DeviceSession) OnMessage(data []byte) {
 	}
 }
 
+// logResponse logs an incoming response event.
+func (s *DeviceSession) logResponse(logger log.Logger, connectionID string, resp *wire.Response) {
+	if logger == nil {
+		return
+	}
+
+	status := resp.Status
+
+	logger.Log(log.Event{
+		Timestamp:    time.Now(),
+		ConnectionID: connectionID,
+		Direction:    log.DirectionIn,
+		Layer:        log.LayerWire,
+		Category:     log.CategoryMessage,
+		Message: &log.MessageEvent{
+			Type:      log.MessageTypeResponse,
+			MessageID: resp.MessageID,
+			Status:    &status,
+			Payload:   resp.Payload,
+		},
+	})
+}
+
+// logNotification logs an incoming notification event.
+func (s *DeviceSession) logNotification(logger log.Logger, connectionID string, notif *wire.Notification) {
+	if logger == nil {
+		return
+	}
+
+	subscriptionID := notif.SubscriptionID
+	endpointID := notif.EndpointID
+	featureID := notif.FeatureID
+
+	logger.Log(log.Event{
+		Timestamp:    time.Now(),
+		ConnectionID: connectionID,
+		Direction:    log.DirectionIn,
+		Layer:        log.LayerWire,
+		Category:     log.CategoryMessage,
+		Message: &log.MessageEvent{
+			Type:           log.MessageTypeNotification,
+			SubscriptionID: &subscriptionID,
+			EndpointID:     &endpointID,
+			FeatureID:      &featureID,
+			Payload:        notif.Changes,
+		},
+	})
+}
+
 // SetLogger sets the logger for this session.
 func (s *DeviceSession) SetLogger(logger *slog.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.logger = logger
+}
+
+// SetProtocolLogger sets the protocol logger and connection ID.
+// Events logged will include the connectionID for correlation.
+func (s *DeviceSession) SetProtocolLogger(logger log.Logger, connectionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.protocolLogger = logger
+	s.connID = connectionID
 }
 
 // Read reads attributes from a feature on the device.

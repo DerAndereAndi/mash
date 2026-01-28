@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/subscription"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -33,6 +34,10 @@ type NotificationDispatcher struct {
 	processWg sync.WaitGroup
 	running   atomic.Bool
 	interval  time.Duration
+
+	// Protocol logging (optional)
+	logger log.Logger
+	connID string
 }
 
 // connectionInfo tracks a connection and its subscriptions.
@@ -62,6 +67,15 @@ func NewNotificationDispatcher(handler *ProtocolHandler) *NotificationDispatcher
 // Must be called before Start().
 func (d *NotificationDispatcher) SetProcessingInterval(interval time.Duration) {
 	d.interval = interval
+}
+
+// SetLogger sets the protocol logger and connection ID.
+// Events logged will include the connectionID for correlation.
+func (d *NotificationDispatcher) SetLogger(logger log.Logger, connectionID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.logger = logger
+	d.connID = connectionID
 }
 
 // Start begins background notification processing.
@@ -328,19 +342,21 @@ func (d *NotificationDispatcher) SubscriptionCount() int {
 // handleNotification is called by the subscription manager when a notification is ready.
 func (d *NotificationDispatcher) handleNotification(notif subscription.Notification) {
 	d.mu.RLock()
-	connID, exists := d.subscriptionMap[notif.SubscriptionID]
+	mappedConnID, exists := d.subscriptionMap[notif.SubscriptionID]
 	if !exists {
 		d.mu.RUnlock()
 		return
 	}
 
-	conn, ok := d.connections[connID]
+	conn, ok := d.connections[mappedConnID]
 	if !ok {
 		d.mu.RUnlock()
 		return
 	}
 
 	sender := conn.sender
+	logger := d.logger
+	logConnID := d.connID
 	d.mu.RUnlock()
 
 	// Convert to wire notification
@@ -351,6 +367,9 @@ func (d *NotificationDispatcher) handleNotification(notif subscription.Notificat
 		Changes:        notif.Attributes,
 	}
 
+	// Log the outgoing notification
+	d.logNotification(logger, logConnID, wireNotif)
+
 	// Encode and send
 	data, err := wire.EncodeNotification(wireNotif)
 	if err != nil {
@@ -358,6 +377,32 @@ func (d *NotificationDispatcher) handleNotification(notif subscription.Notificat
 	}
 
 	sender(data)
+}
+
+// logNotification logs an outgoing notification event.
+func (d *NotificationDispatcher) logNotification(logger log.Logger, connectionID string, notif *wire.Notification) {
+	if logger == nil {
+		return
+	}
+
+	subscriptionID := notif.SubscriptionID
+	endpointID := notif.EndpointID
+	featureID := notif.FeatureID
+
+	logger.Log(log.Event{
+		Timestamp:    time.Now(),
+		ConnectionID: connectionID,
+		Direction:    log.DirectionOut,
+		Layer:        log.LayerWire,
+		Category:     log.CategoryMessage,
+		Message: &log.MessageEvent{
+			Type:           log.MessageTypeNotification,
+			SubscriptionID: &subscriptionID,
+			EndpointID:     &endpointID,
+			FeatureID:      &featureID,
+			Payload:        notif.Changes,
+		},
+	})
 }
 
 // processLoop runs the background notification processing.

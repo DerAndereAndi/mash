@@ -3,7 +3,9 @@ package runner
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +15,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/internal/testharness/reporter"
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -68,6 +71,10 @@ type Config struct {
 
 	// ServerIdentity for PASE (defaults to "test-device").
 	ServerIdentity string
+
+	// ProtocolLogger receives structured protocol events for debugging.
+	// Set to nil to disable protocol logging.
+	ProtocolLogger log.Logger
 }
 
 // Connection represents a connection to the target.
@@ -244,6 +251,12 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	r.conn.tlsConn = conn
 	r.conn.framer = transport.NewFramer(conn)
 	r.conn.connected = true
+
+	// Set up protocol logging if configured
+	if r.config.ProtocolLogger != nil {
+		connID := generateConnectionID()
+		r.conn.framer.SetLogger(r.config.ProtocolLogger, connID)
+	}
 
 	// Store connection info in state
 	state.Set("connection", r.conn)
@@ -635,4 +648,11 @@ func hasPrefixStr(s, prefix string) bool {
 
 func hasSuffixStr(s, suffix string) bool {
 	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
+}
+
+// generateConnectionID generates a unique connection ID for logging.
+func generateConnectionID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }

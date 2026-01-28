@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/service"
 	"github.com/mash-protocol/mash-go/pkg/wire"
@@ -424,4 +425,144 @@ func TestNotificationDispatcher_NotificationEncoding(t *testing.T) {
 	}
 }
 
-// Note: createTestDevice is defined in protocol_handler_test.go
+// Note: createTestDevice and capturingLogger are defined in protocol_handler_test.go
+
+// =============================================================================
+// Notification Dispatcher Logging Tests
+// =============================================================================
+
+func TestNotificationDispatcher_LogsNotification(t *testing.T) {
+	device := createTestDevice()
+	handler := service.NewProtocolHandler(device)
+	dispatcher := service.NewNotificationDispatcher(handler)
+	dispatcher.SetProcessingInterval(50 * time.Millisecond)
+	defer dispatcher.Stop()
+
+	// Set up protocol logger
+	logger := newCapturingLogger()
+	dispatcher.SetLogger(logger, "conn-notif-test")
+
+	// Set up a notification channel to know when notification is sent
+	notifyCh := make(chan struct{}, 10)
+	sender := func(data []byte) error {
+		select {
+		case notifyCh <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+
+	connID := dispatcher.RegisterConnection(sender)
+	defer dispatcher.UnregisterConnection(connID)
+
+	// Subscribe to Electrical feature
+	req := &wire.Request{
+		MessageID:  1,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 1,
+		FeatureID:  uint8(model.FeatureElectrical),
+		Payload: &wire.SubscribePayload{
+			MinInterval: 10,
+			MaxInterval: 60000,
+		},
+	}
+
+	resp := dispatcher.HandleSubscribe(connID, req)
+	if !resp.IsSuccess() {
+		t.Fatalf("Subscribe failed: status %d", resp.Status)
+	}
+
+	subPayload := resp.Payload.(*wire.SubscribeResponsePayload)
+	subscriptionID := subPayload.SubscriptionID
+
+	dispatcher.Start()
+
+	// Trigger a change
+	dispatcher.NotifyChange(1, uint16(model.FeatureElectrical), 2, uint32(240))
+
+	// Wait for notification
+	select {
+	case <-notifyCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Timeout waiting for notification")
+	}
+
+	// Check that notification was logged
+	events := logger.Events()
+	if len(events) == 0 {
+		t.Fatal("Expected at least one log event for notification")
+	}
+
+	// Find the notification event
+	var notifEvent *log.Event
+	for i := range events {
+		if events[i].Message != nil && events[i].Message.Type == log.MessageTypeNotification {
+			notifEvent = &events[i]
+			break
+		}
+	}
+
+	if notifEvent == nil {
+		t.Fatal("Expected to find notification event in log")
+	}
+
+	// Verify event properties
+	if notifEvent.Direction != log.DirectionOut {
+		t.Errorf("Notification should have Direction=Out, got %s", notifEvent.Direction)
+	}
+	if notifEvent.Layer != log.LayerWire {
+		t.Errorf("Notification should have Layer=Wire, got %s", notifEvent.Layer)
+	}
+	if notifEvent.ConnectionID != "conn-notif-test" {
+		t.Errorf("Notification should have ConnectionID='conn-notif-test', got '%s'", notifEvent.ConnectionID)
+	}
+	if notifEvent.Message.SubscriptionID == nil || *notifEvent.Message.SubscriptionID != subscriptionID {
+		t.Errorf("Notification should have SubscriptionID=%d", subscriptionID)
+	}
+}
+
+func TestNotificationDispatcher_NoLoggerNoPanic(t *testing.T) {
+	device := createTestDevice()
+	handler := service.NewProtocolHandler(device)
+	dispatcher := service.NewNotificationDispatcher(handler)
+	dispatcher.SetProcessingInterval(50 * time.Millisecond)
+	defer dispatcher.Stop()
+
+	// No logger set - should not panic
+
+	notifyCh := make(chan struct{}, 10)
+	sender := func(data []byte) error {
+		select {
+		case notifyCh <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+
+	connID := dispatcher.RegisterConnection(sender)
+	defer dispatcher.UnregisterConnection(connID)
+
+	req := &wire.Request{
+		MessageID:  1,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 1,
+		FeatureID:  uint8(model.FeatureElectrical),
+		Payload: &wire.SubscribePayload{
+			MinInterval: 10,
+			MaxInterval: 60000,
+		},
+	}
+
+	dispatcher.HandleSubscribe(connID, req)
+	dispatcher.Start()
+
+	// Trigger a change - should not panic without logger
+	dispatcher.NotifyChange(1, uint16(model.FeatureElectrical), 2, uint32(240))
+
+	// Wait for notification to be processed
+	select {
+	case <-notifyCh:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Timeout waiting for notification")
+	}
+}

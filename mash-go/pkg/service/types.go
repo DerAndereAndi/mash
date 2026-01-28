@@ -8,6 +8,7 @@ import (
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
+	"github.com/mash-protocol/mash-go/pkg/log"
 )
 
 // Service errors.
@@ -136,6 +137,10 @@ type DeviceConfig struct {
 	// Logger is the optional logger for debug output.
 	// If nil, logging is disabled.
 	Logger *slog.Logger
+
+	// ProtocolLogger receives structured protocol events for debugging.
+	// Set to nil to disable protocol logging.
+	ProtocolLogger log.Logger
 }
 
 // ControllerConfig configures a ControllerService.
@@ -190,6 +195,10 @@ type ControllerConfig struct {
 	// Logger is the optional logger for debug output.
 	// If nil, logging is disabled.
 	Logger *slog.Logger
+
+	// ProtocolLogger receives structured protocol events for debugging.
+	// Set to nil to disable protocol logging.
+	ProtocolLogger log.Logger
 }
 
 // BackoffConfig configures exponential backoff for reconnection.

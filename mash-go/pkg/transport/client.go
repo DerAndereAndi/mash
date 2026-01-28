@@ -7,6 +7,10 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/mash-protocol/mash-go/pkg/log"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // ClientConfig configures a MASH client.
@@ -26,6 +30,9 @@ type ClientConfig struct {
 
 	// KeepAlive configuration.
 	KeepAlive KeepAliveConfig
+
+	// Logger for protocol logging (optional).
+	Logger log.Logger
 }
 
 // Client is a MASH TLS client that connects to devices.
@@ -95,13 +102,23 @@ func (c *Client) Connect(ctx context.Context, address string) (*ClientConn, erro
 		return nil, fmt.Errorf("connection verification failed: %w", err)
 	}
 
+	// Generate unique connection ID
+	connID := uuid.New().String()
+
+	// Create framer with optional logging
+	framer := NewFramerWithMaxSize(tlsConn, c.config.MaxMessageSize)
+	if c.config.Logger != nil {
+		framer.SetLogger(c.config.Logger, connID)
+	}
+
 	// Create client connection wrapper
 	clientConn := &ClientConn{
 		conn:     tlsConn,
-		framer:   NewFramerWithMaxSize(tlsConn, c.config.MaxMessageSize),
+		framer:   framer,
 		tlsState: state,
 		client:   c,
 		closeCh:  make(chan struct{}),
+		connID:   connID,
 	}
 
 	return clientConn, nil
@@ -114,6 +131,7 @@ type ClientConn struct {
 	tlsState tls.ConnectionState
 	client   *Client
 	closeCh  chan struct{}
+	connID   string // Unique connection identifier
 
 	closeOnce sync.Once
 	writeMu   sync.Mutex
@@ -133,6 +151,11 @@ func (c *ClientConn) LocalAddr() net.Addr {
 // RemoteAddr returns the remote network address.
 func (c *ClientConn) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
+}
+
+// ConnID returns the unique connection identifier.
+func (c *ClientConn) ConnID() string {
+	return c.connID
 }
 
 // Send sends a message to the server.
@@ -165,7 +188,18 @@ func (c *ClientConn) Receive(timeout time.Duration) ([]byte, error) {
 		defer c.conn.SetReadDeadline(time.Time{})
 	}
 
-	return c.framer.ReadFrame()
+	data, err := c.framer.ReadFrame()
+	if err != nil {
+		return nil, err
+	}
+
+	// Check if this is a control message and log it
+	if msgType, seq, decErr := DecodeControlMessage(data); decErr == nil {
+		_ = seq // unused but part of the decode
+		c.logControlMessage(wire.ControlMessageType(msgType), log.DirectionIn)
+	}
+
+	return data, nil
 }
 
 // Close closes the connection.
@@ -184,7 +218,11 @@ func (c *ClientConn) SendPing(seq uint32) error {
 	if err != nil {
 		return err
 	}
-	return c.Send(msg)
+	err = c.Send(msg)
+	if err == nil {
+		c.logControlMessage(ControlPing, log.DirectionOut)
+	}
+	return err
 }
 
 // SendClose sends a close control message.
@@ -193,5 +231,41 @@ func (c *ClientConn) SendClose() error {
 	if err != nil {
 		return err
 	}
-	return c.Send(msg)
+	err = c.Send(msg)
+	if err == nil {
+		c.logControlMessage(ControlClose, log.DirectionOut)
+	}
+	return err
+}
+
+// logControlMessage logs a control message event.
+func (c *ClientConn) logControlMessage(msgType wire.ControlMessageType, direction log.Direction) {
+	logger := c.client.config.Logger
+	if logger == nil {
+		return
+	}
+
+	var ctrlMsgType log.ControlMsgType
+	switch msgType {
+	case wire.ControlPing:
+		ctrlMsgType = log.ControlMsgPing
+	case wire.ControlPong:
+		ctrlMsgType = log.ControlMsgPong
+	case wire.ControlClose:
+		ctrlMsgType = log.ControlMsgClose
+	default:
+		return
+	}
+
+	logger.Log(log.Event{
+		Timestamp:    time.Now(),
+		ConnectionID: c.connID,
+		Direction:    direction,
+		Layer:        log.LayerTransport,
+		Category:     log.CategoryControl,
+		RemoteAddr:   c.conn.RemoteAddr().String(),
+		ControlMsg: &log.ControlMsgEvent{
+			Type: ctrlMsgType,
+		},
+	})
 }

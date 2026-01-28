@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"sync"
@@ -11,6 +13,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/persistence"
 	"github.com/mash-protocol/mash-go/pkg/subscription"
 	"github.com/mash-protocol/mash-go/pkg/transport"
@@ -56,12 +59,22 @@ type ControllerService struct {
 	certStore  cert.ControllerStore
 	stateStore *persistence.ControllerStateStore
 
+	// Protocol logger for structured event capture (optional)
+	protocolLogger log.Logger
+
 	// Active pairing requests (keyed by discriminator)
 	activePairingRequests map[uint16]context.CancelFunc
 
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+// generateControllerConnID generates a random connection ID for logging.
+func (s *ControllerService) generateControllerConnID() string {
+	b := make([]byte, 8) // 8 bytes = 16 hex chars
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // NewControllerService creates a new controller service.
@@ -77,6 +90,7 @@ func NewControllerService(config ControllerConfig) (*ControllerService, error) {
 		connectedDevices:      make(map[string]*ConnectedDevice),
 		deviceSessions:        make(map[string]*DeviceSession),
 		activePairingRequests: make(map[uint16]context.CancelFunc),
+		protocolLogger:        config.ProtocolLogger,
 	}
 
 	// Initialize subscription manager
@@ -400,6 +414,12 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 
 	// Create device session for operational messaging
 	deviceSession := NewDeviceSession(deviceID, framedConn)
+
+	// Set protocol logger if configured
+	if s.protocolLogger != nil {
+		connID := s.generateControllerConnID()
+		deviceSession.SetProtocolLogger(s.protocolLogger, connID)
+	}
 
 	// Create device record
 	device := &ConnectedDevice{
@@ -992,6 +1012,12 @@ func (s *ControllerService) attemptReconnection(ctx context.Context, svc *discov
 
 	// Create device session
 	session := NewDeviceSession(svc.DeviceID, framedConn)
+
+	// Set protocol logger if configured
+	if s.protocolLogger != nil {
+		connID := s.generateControllerConnID()
+		session.SetProtocolLogger(s.protocolLogger, connID)
+	}
 
 	s.mu.Lock()
 	s.deviceSessions[svc.DeviceID] = session

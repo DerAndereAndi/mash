@@ -7,9 +7,34 @@ import (
 	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/interaction"
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
+
+// testCapturingLogger records log events for testing.
+type testCapturingLogger struct {
+	mu     sync.Mutex
+	events []log.Event
+}
+
+func newTestCapturingLogger() *testCapturingLogger {
+	return &testCapturingLogger{}
+}
+
+func (l *testCapturingLogger) Log(event log.Event) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = append(l.events, event)
+}
+
+func (l *testCapturingLogger) Events() []log.Event {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	result := make([]log.Event, len(l.events))
+	copy(result, l.events)
+	return result
+}
 
 // mockResponseConnection simulates a device connection by echoing back responses.
 type mockResponseConnection struct {
@@ -616,4 +641,146 @@ func TestDeviceSession_ExistingNotificationHandlingStillWorks(t *testing.T) {
 	if received.SubscriptionID != 123 {
 		t.Errorf("Expected subscription ID 123, got %d", received.SubscriptionID)
 	}
+}
+
+// =============================================================================
+// DeviceSession Protocol Logging Tests
+// =============================================================================
+
+func TestDeviceSession_LogsIncomingResponse(t *testing.T) {
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	logger := newTestCapturingLogger()
+	session.SetProtocolLogger(logger, "conn-sess-resp")
+
+	// Simulate receiving a response
+	resp := &wire.Response{
+		MessageID: 42,
+		Status:    wire.StatusSuccess,
+		Payload:   map[uint16]any{1: "test"},
+	}
+	respData, _ := wire.EncodeResponse(resp)
+	session.OnMessage(respData)
+
+	// Wait for processing
+	time.Sleep(50 * time.Millisecond)
+
+	events := logger.Events()
+	if len(events) == 0 {
+		t.Fatal("Expected at least one log event for response")
+	}
+
+	// Find the response event
+	var respEvent *log.Event
+	for i := range events {
+		if events[i].Message != nil && events[i].Message.Type == log.MessageTypeResponse {
+			respEvent = &events[i]
+			break
+		}
+	}
+
+	if respEvent == nil {
+		t.Fatal("Expected to find response event in log")
+	}
+
+	// Verify event properties
+	if respEvent.Direction != log.DirectionIn {
+		t.Errorf("Response should have Direction=In, got %s", respEvent.Direction)
+	}
+	if respEvent.Layer != log.LayerWire {
+		t.Errorf("Response should have Layer=Wire, got %s", respEvent.Layer)
+	}
+	if respEvent.ConnectionID != "conn-sess-resp" {
+		t.Errorf("Response should have ConnectionID='conn-sess-resp', got '%s'", respEvent.ConnectionID)
+	}
+	if respEvent.Message.MessageID != 42 {
+		t.Errorf("Response should have MessageID=42, got %d", respEvent.Message.MessageID)
+	}
+	if respEvent.Message.Status == nil || *respEvent.Message.Status != wire.StatusSuccess {
+		t.Errorf("Response should have Status=Success")
+	}
+}
+
+func TestDeviceSession_LogsIncomingNotification(t *testing.T) {
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	logger := newTestCapturingLogger()
+	session.SetProtocolLogger(logger, "conn-sess-notif")
+
+	// Simulate receiving a notification
+	notif := &wire.Notification{
+		SubscriptionID: 999,
+		EndpointID:     1,
+		FeatureID:      5,
+		Changes:        map[uint16]any{1: "changed-value"},
+	}
+	notifData, _ := wire.EncodeNotification(notif)
+	session.OnMessage(notifData)
+
+	// Wait for processing
+	time.Sleep(50 * time.Millisecond)
+
+	events := logger.Events()
+	if len(events) == 0 {
+		t.Fatal("Expected at least one log event for notification")
+	}
+
+	// Find the notification event
+	var notifEvent *log.Event
+	for i := range events {
+		if events[i].Message != nil && events[i].Message.Type == log.MessageTypeNotification {
+			notifEvent = &events[i]
+			break
+		}
+	}
+
+	if notifEvent == nil {
+		t.Fatal("Expected to find notification event in log")
+	}
+
+	// Verify event properties
+	if notifEvent.Direction != log.DirectionIn {
+		t.Errorf("Notification should have Direction=In, got %s", notifEvent.Direction)
+	}
+	if notifEvent.Layer != log.LayerWire {
+		t.Errorf("Notification should have Layer=Wire, got %s", notifEvent.Layer)
+	}
+	if notifEvent.ConnectionID != "conn-sess-notif" {
+		t.Errorf("Notification should have ConnectionID='conn-sess-notif', got '%s'", notifEvent.ConnectionID)
+	}
+	if notifEvent.Message.SubscriptionID == nil || *notifEvent.Message.SubscriptionID != 999 {
+		t.Errorf("Notification should have SubscriptionID=999")
+	}
+}
+
+func TestDeviceSession_NoProtocolLoggerNoPanic(t *testing.T) {
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	// No protocol logger set - should not panic
+
+	// Simulate receiving a response
+	resp := &wire.Response{
+		MessageID: 1,
+		Status:    wire.StatusSuccess,
+	}
+	respData, _ := wire.EncodeResponse(resp)
+	session.OnMessage(respData)
+
+	// Simulate receiving a notification
+	notif := &wire.Notification{
+		SubscriptionID: 1,
+		EndpointID:     1,
+		FeatureID:      1,
+		Changes:        map[uint16]any{1: "value"},
+	}
+	notifData, _ := wire.EncodeNotification(notif)
+	session.OnMessage(notifData)
+
+	// If we get here without panic, the test passes
 }

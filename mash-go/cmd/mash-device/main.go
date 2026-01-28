@@ -24,6 +24,7 @@
 //	-interactive        Enable interactive command mode
 //	-state-dir string   Directory for persistent state
 //	-reset              Clear all persisted state before starting
+//	-protocol-log string File path for protocol event logging (CBOR format)
 //
 // Examples:
 //
@@ -71,6 +72,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/examples"
 	"github.com/mash-protocol/mash-go/pkg/features"
+	mashlog "github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/persistence"
 	"github.com/mash-protocol/mash-go/pkg/service"
@@ -106,6 +108,9 @@ type Config struct {
 	// Persistence settings
 	StateDir string
 	Reset    bool
+
+	// Protocol logging
+	ProtocolLogFile string
 }
 
 // DeviceType implements interactive.DeviceConfig.
@@ -144,6 +149,8 @@ func init() {
 
 	flag.StringVar(&config.StateDir, "state-dir", "", "Directory for persistent state")
 	flag.BoolVar(&config.Reset, "reset", false, "Clear all persisted state before starting")
+
+	flag.StringVar(&config.ProtocolLogFile, "protocol-log", "", "File path for protocol event logging (CBOR format)")
 }
 
 func main() {
@@ -183,6 +190,18 @@ func main() {
 	svcConfig.DeviceName = config.DeviceName
 	svcConfig.Categories = []discovery.DeviceCategory{deviceCategory}
 	svcConfig.ListenAddress = fmt.Sprintf(":%d", config.Port)
+
+	// Set up protocol logging if requested
+	var protocolLogger *mashlog.FileLogger
+	if config.ProtocolLogFile != "" {
+		var err error
+		protocolLogger, err = mashlog.NewFileLogger(config.ProtocolLogFile)
+		if err != nil {
+			log.Fatalf("Failed to create protocol logger: %v", err)
+		}
+		svcConfig.ProtocolLogger = protocolLogger
+		log.Printf("Protocol logging to: %s", config.ProtocolLogFile)
+	}
 
 	svc, err := service.NewDeviceService(device, svcConfig)
 	if err != nil {
@@ -294,6 +313,13 @@ func main() {
 
 	if err := svc.Stop(); err != nil {
 		log.Printf("Error stopping service: %v", err)
+	}
+
+	// Close protocol logger
+	if protocolLogger != nil {
+		if err := protocolLogger.Close(); err != nil {
+			log.Printf("Warning: Failed to close protocol logger: %v", err)
+		}
 	}
 
 	log.Println("Goodbye!")

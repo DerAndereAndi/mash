@@ -21,6 +21,7 @@
 //	-setup-code string      PASE setup code (8-digit numeric string)
 //	-client-identity string Client identity for PASE (default: test-client)
 //	-server-identity string Server identity for PASE (default: test-device)
+//	-protocol-log string    File path for protocol event logging (CBOR format)
 //
 // Examples:
 //
@@ -46,6 +47,7 @@ import (
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/runner"
+	mashlog "github.com/mash-protocol/mash-go/pkg/log"
 )
 
 var (
@@ -61,6 +63,7 @@ var (
 	setupCode      = flag.String("setup-code", "", "PASE setup code (8-digit numeric string)")
 	clientIdentity = flag.String("client-identity", "", "Client identity for PASE (default: test-client)")
 	serverIdentity = flag.String("server-identity", "", "Server identity for PASE (default: test-device)")
+	protocolLog    = flag.String("protocol-log", "", "File path for protocol event logging (CBOR format)")
 )
 
 func main() {
@@ -111,6 +114,20 @@ func main() {
 		log.Println()
 	}
 
+	// Set up protocol logging if requested
+	var protocolLogger *mashlog.FileLogger
+	if *protocolLog != "" {
+		var err error
+		protocolLogger, err = mashlog.NewFileLogger(*protocolLog)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: failed to create protocol logger: %v\n", err)
+			os.Exit(1)
+		}
+		if outputFormat == "text" {
+			log.Printf("Protocol logging to: %s", *protocolLog)
+		}
+	}
+
 	// Create runner configuration
 	config := &runner.Config{
 		Target:             *target,
@@ -126,11 +143,17 @@ func main() {
 		SetupCode:          *setupCode,
 		ClientIdentity:     *clientIdentity,
 		ServerIdentity:     *serverIdentity,
+		ProtocolLogger:     protocolLogger,
 	}
 
 	// Create and run test runner
 	r := runner.New(config)
-	defer r.Close()
+	defer func() {
+		r.Close()
+		if protocolLogger != nil {
+			protocolLogger.Close()
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()

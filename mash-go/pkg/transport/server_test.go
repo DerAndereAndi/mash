@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 )
 
@@ -598,4 +599,619 @@ func parseCert(t *testing.T, certDER []byte) *x509.Certificate {
 		t.Fatalf("Failed to parse certificate: %v", err)
 	}
 	return cert
+}
+
+// capturingLogger captures log events for testing.
+type capturingLogger struct {
+	mu     sync.Mutex
+	events []log.Event
+}
+
+func (l *capturingLogger) Log(event log.Event) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = append(l.events, event)
+}
+
+func (l *capturingLogger) Events() []log.Event {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]log.Event(nil), l.events...)
+}
+
+// TestServerPassesLoggerToConnection verifies the server passes logger to connections.
+func TestServerPassesLoggerToConnection(t *testing.T) {
+	serverCert, serverKey := generateTestCert(t)
+	clientCert, clientKey := generateTestCert(t)
+
+	serverTLSCert := loadCert(t, serverCert, serverKey)
+	clientTLSCert := loadCert(t, clientCert, clientKey)
+
+	clientCAPool := x509.NewCertPool()
+	clientCAPool.AddCert(parseCert(t, clientCert))
+
+	logger := &capturingLogger{}
+
+	server, err := transport.NewServer(transport.ServerConfig{
+		TLSConfig: &transport.TLSConfig{
+			Certificate:        serverTLSCert,
+			ClientCAs:          clientCAPool,
+			InsecureSkipVerify: true,
+		},
+		Address: "127.0.0.1:0",
+		Logger:  logger,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Start(ctx); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer server.Stop()
+
+	addr := server.Addr()
+
+	// Connect client
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		Certificates:       []tls.Certificate{clientTLSCert},
+		InsecureSkipVerify: true,
+		NextProtos:         []string{transport.ALPNProtocol},
+	}
+
+	conn, err := tls.Dial("tcp", addr.String(), tlsConfig)
+	if err != nil {
+		t.Fatalf("Connection failed: %v", err)
+	}
+
+	// Send a message to trigger frame logging
+	framer := transport.NewFramer(conn)
+	framer.WriteFrame([]byte("test"))
+
+	// Give server time to process
+	time.Sleep(100 * time.Millisecond)
+
+	conn.Close()
+
+	events := logger.Events()
+	if len(events) == 0 {
+		t.Fatal("Expected at least one log event, got none")
+	}
+
+	// Should have frame events from server receiving the message
+	var foundFrameEvent bool
+	for _, e := range events {
+		if e.Frame != nil {
+			foundFrameEvent = true
+			if e.ConnectionID == "" {
+				t.Error("Frame event has empty ConnectionID")
+			}
+			break
+		}
+	}
+	if !foundFrameEvent {
+		t.Error("Expected at least one frame event")
+	}
+}
+
+// TestClientPassesLoggerToConnection verifies the client passes logger to connections.
+func TestClientPassesLoggerToConnection(t *testing.T) {
+	serverCert, serverKey := generateTestCert(t)
+	clientCert, clientKey := generateTestCert(t)
+
+	serverTLSCert := loadCert(t, serverCert, serverKey)
+	clientTLSCert := loadCert(t, clientCert, clientKey)
+
+	// Start a simple echo server
+	tlsConfig := &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		MaxVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{serverTLSCert},
+		NextProtos:   []string{transport.ALPNProtocol},
+		ClientAuth:   tls.NoClientCert,
+	}
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", tlsConfig)
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	// Echo server
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		tlsConn := conn.(*tls.Conn)
+		tlsConn.Handshake()
+		framer := transport.NewFramer(tlsConn)
+		for {
+			msg, err := framer.ReadFrame()
+			if err != nil {
+				return
+			}
+			framer.WriteFrame(msg)
+		}
+	}()
+
+	logger := &capturingLogger{}
+
+	client, err := transport.NewClient(transport.ClientConfig{
+		TLSConfig: &transport.TLSConfig{
+			Certificate:        clientTLSCert,
+			InsecureSkipVerify: true,
+		},
+		Logger: logger,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := client.Connect(ctx, listener.Addr().String())
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+
+	// Send a message
+	conn.Send([]byte("hello"))
+
+	// Read response
+	conn.Receive(time.Second)
+
+	conn.Close()
+
+	events := logger.Events()
+	if len(events) == 0 {
+		t.Fatal("Expected at least one log event, got none")
+	}
+
+	// Should have frame events for both send and receive
+	var outEvents, inEvents int
+	for _, e := range events {
+		if e.Frame != nil {
+			if e.Direction == log.DirectionOut {
+				outEvents++
+			} else if e.Direction == log.DirectionIn {
+				inEvents++
+			}
+		}
+	}
+	if outEvents == 0 {
+		t.Error("Expected at least one outgoing frame event")
+	}
+	if inEvents == 0 {
+		t.Error("Expected at least one incoming frame event")
+	}
+}
+
+// TestConnectionGeneratesUUID verifies each connection gets a unique ID.
+func TestConnectionGeneratesUUID(t *testing.T) {
+	serverCert, serverKey := generateTestCert(t)
+	clientCert, clientKey := generateTestCert(t)
+
+	serverTLSCert := loadCert(t, serverCert, serverKey)
+	clientTLSCert := loadCert(t, clientCert, clientKey)
+
+	clientCAPool := x509.NewCertPool()
+	clientCAPool.AddCert(parseCert(t, clientCert))
+
+	logger := &capturingLogger{}
+
+	server, err := transport.NewServer(transport.ServerConfig{
+		TLSConfig: &transport.TLSConfig{
+			Certificate:        serverTLSCert,
+			ClientCAs:          clientCAPool,
+			InsecureSkipVerify: true,
+		},
+		Address: "127.0.0.1:0",
+		Logger:  logger,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Start(ctx); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer server.Stop()
+
+	addr := server.Addr()
+
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		Certificates:       []tls.Certificate{clientTLSCert},
+		InsecureSkipVerify: true,
+		NextProtos:         []string{transport.ALPNProtocol},
+	}
+
+	// Create two connections
+	conn1, err := tls.Dial("tcp", addr.String(), tlsConfig)
+	if err != nil {
+		t.Fatalf("Connection 1 failed: %v", err)
+	}
+	framer1 := transport.NewFramer(conn1)
+	framer1.WriteFrame([]byte("conn1"))
+	time.Sleep(50 * time.Millisecond)
+
+	conn2, err := tls.Dial("tcp", addr.String(), tlsConfig)
+	if err != nil {
+		t.Fatalf("Connection 2 failed: %v", err)
+	}
+	framer2 := transport.NewFramer(conn2)
+	framer2.WriteFrame([]byte("conn2"))
+	time.Sleep(50 * time.Millisecond)
+
+	conn1.Close()
+	conn2.Close()
+
+	events := logger.Events()
+
+	// Collect unique connection IDs
+	connIDs := make(map[string]bool)
+	for _, e := range events {
+		if e.ConnectionID != "" {
+			connIDs[e.ConnectionID] = true
+		}
+	}
+
+	if len(connIDs) < 2 {
+		t.Errorf("Expected at least 2 unique connection IDs, got %d: %v", len(connIDs), connIDs)
+	}
+
+	// Verify IDs look like UUIDs (basic format check)
+	for id := range connIDs {
+		if len(id) < 32 {
+			t.Errorf("Connection ID %q doesn't look like a UUID (too short)", id)
+		}
+	}
+}
+
+// TestConnectionLogsPing verifies ping control messages are logged.
+func TestConnectionLogsPing(t *testing.T) {
+	serverCert, serverKey := generateTestCert(t)
+	clientCert, clientKey := generateTestCert(t)
+
+	serverTLSCert := loadCert(t, serverCert, serverKey)
+	clientTLSCert := loadCert(t, clientCert, clientKey)
+
+	clientCAPool := x509.NewCertPool()
+	clientCAPool.AddCert(parseCert(t, clientCert))
+
+	logger := &capturingLogger{}
+
+	server, err := transport.NewServer(transport.ServerConfig{
+		TLSConfig: &transport.TLSConfig{
+			Certificate:        serverTLSCert,
+			ClientCAs:          clientCAPool,
+			InsecureSkipVerify: true,
+		},
+		Address: "127.0.0.1:0",
+		Logger:  logger,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Start(ctx); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer server.Stop()
+
+	addr := server.Addr()
+
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		Certificates:       []tls.Certificate{clientTLSCert},
+		InsecureSkipVerify: true,
+		NextProtos:         []string{transport.ALPNProtocol},
+	}
+
+	conn, err := tls.Dial("tcp", addr.String(), tlsConfig)
+	if err != nil {
+		t.Fatalf("Connection failed: %v", err)
+	}
+	defer conn.Close()
+
+	framer := transport.NewFramer(conn)
+
+	// Send ping
+	pingMsg, _ := transport.EncodePing(42)
+	framer.WriteFrame(pingMsg)
+
+	// Read pong
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	framer.ReadFrame()
+
+	time.Sleep(100 * time.Millisecond)
+
+	events := logger.Events()
+
+	// Should have control message events for ping received and pong sent
+	var foundPingIn, foundPongOut bool
+	for _, e := range events {
+		if e.ControlMsg != nil {
+			if e.Direction == log.DirectionIn && e.ControlMsg.Type == log.ControlMsgPing {
+				foundPingIn = true
+			}
+			if e.Direction == log.DirectionOut && e.ControlMsg.Type == log.ControlMsgPong {
+				foundPongOut = true
+			}
+		}
+	}
+
+	if !foundPingIn {
+		t.Error("Expected incoming PING control message event")
+	}
+	if !foundPongOut {
+		t.Error("Expected outgoing PONG control message event")
+	}
+}
+
+// TestConnectionLogsPong verifies pong control messages are logged.
+func TestConnectionLogsPong(t *testing.T) {
+	serverCert, serverKey := generateTestCert(t)
+	clientCert, clientKey := generateTestCert(t)
+
+	serverTLSCert := loadCert(t, serverCert, serverKey)
+	clientTLSCert := loadCert(t, clientCert, clientKey)
+
+	clientCAPool := x509.NewCertPool()
+	clientCAPool.AddCert(parseCert(t, clientCert))
+
+	logger := &capturingLogger{}
+
+	// Create a client that logs
+	client, err := transport.NewClient(transport.ClientConfig{
+		TLSConfig: &transport.TLSConfig{
+			Certificate:        clientTLSCert,
+			InsecureSkipVerify: true,
+		},
+		Logger: logger,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	// Start a server that echoes pong to ping
+	tlsConf := &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		MaxVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{serverTLSCert},
+		ClientCAs:    clientCAPool,
+		NextProtos:   []string{transport.ALPNProtocol},
+		ClientAuth:   tls.NoClientCert,
+	}
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", tlsConf)
+	if err != nil {
+		t.Fatalf("Failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	// Server that responds to ping with pong
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		tlsConn := conn.(*tls.Conn)
+		tlsConn.Handshake()
+		framer := transport.NewFramer(tlsConn)
+		for {
+			msg, err := framer.ReadFrame()
+			if err != nil {
+				return
+			}
+			// Decode and respond to ping
+			if msgType, seq, err := transport.DecodeControlMessage(msg); err == nil {
+				if msgType == transport.ControlPing {
+					pongMsg, _ := transport.EncodePong(seq)
+					framer.WriteFrame(pongMsg)
+				}
+			}
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := client.Connect(ctx, listener.Addr().String())
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	// Send ping
+	conn.SendPing(123)
+
+	// Read pong
+	conn.Receive(time.Second)
+
+	time.Sleep(100 * time.Millisecond)
+
+	events := logger.Events()
+
+	// Should have control message events for ping sent and pong received
+	var foundPingOut, foundPongIn bool
+	for _, e := range events {
+		if e.ControlMsg != nil {
+			if e.Direction == log.DirectionOut && e.ControlMsg.Type == log.ControlMsgPing {
+				foundPingOut = true
+			}
+			if e.Direction == log.DirectionIn && e.ControlMsg.Type == log.ControlMsgPong {
+				foundPongIn = true
+			}
+		}
+	}
+
+	if !foundPingOut {
+		t.Error("Expected outgoing PING control message event")
+	}
+	if !foundPongIn {
+		t.Error("Expected incoming PONG control message event")
+	}
+}
+
+// TestConnectionLogsClose verifies close control messages are logged.
+func TestConnectionLogsClose(t *testing.T) {
+	serverCert, serverKey := generateTestCert(t)
+	clientCert, clientKey := generateTestCert(t)
+
+	serverTLSCert := loadCert(t, serverCert, serverKey)
+	clientTLSCert := loadCert(t, clientCert, clientKey)
+
+	clientCAPool := x509.NewCertPool()
+	clientCAPool.AddCert(parseCert(t, clientCert))
+
+	logger := &capturingLogger{}
+
+	server, err := transport.NewServer(transport.ServerConfig{
+		TLSConfig: &transport.TLSConfig{
+			Certificate:        serverTLSCert,
+			ClientCAs:          clientCAPool,
+			InsecureSkipVerify: true,
+		},
+		Address: "127.0.0.1:0",
+		Logger:  logger,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Start(ctx); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer server.Stop()
+
+	addr := server.Addr()
+
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		Certificates:       []tls.Certificate{clientTLSCert},
+		InsecureSkipVerify: true,
+		NextProtos:         []string{transport.ALPNProtocol},
+	}
+
+	conn, err := tls.Dial("tcp", addr.String(), tlsConfig)
+	if err != nil {
+		t.Fatalf("Connection failed: %v", err)
+	}
+
+	framer := transport.NewFramer(conn)
+
+	// Send close message
+	closeMsg, _ := transport.EncodeClose()
+	framer.WriteFrame(closeMsg)
+
+	time.Sleep(200 * time.Millisecond)
+	conn.Close()
+
+	events := logger.Events()
+
+	// Should have control message event for close received
+	var foundCloseIn bool
+	for _, e := range events {
+		if e.ControlMsg != nil && e.ControlMsg.Type == log.ControlMsgClose {
+			foundCloseIn = true
+			break
+		}
+	}
+
+	if !foundCloseIn {
+		t.Error("Expected CLOSE control message event")
+	}
+}
+
+// TestConnectionLogsStateChanges verifies state changes are logged.
+func TestConnectionLogsStateChanges(t *testing.T) {
+	serverCert, serverKey := generateTestCert(t)
+	clientCert, clientKey := generateTestCert(t)
+
+	serverTLSCert := loadCert(t, serverCert, serverKey)
+	clientTLSCert := loadCert(t, clientCert, clientKey)
+
+	clientCAPool := x509.NewCertPool()
+	clientCAPool.AddCert(parseCert(t, clientCert))
+
+	logger := &capturingLogger{}
+
+	server, err := transport.NewServer(transport.ServerConfig{
+		TLSConfig: &transport.TLSConfig{
+			Certificate:        serverTLSCert,
+			ClientCAs:          clientCAPool,
+			InsecureSkipVerify: true,
+		},
+		Address: "127.0.0.1:0",
+		Logger:  logger,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create server: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := server.Start(ctx); err != nil {
+		t.Fatalf("Failed to start server: %v", err)
+	}
+	defer server.Stop()
+
+	addr := server.Addr()
+
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		Certificates:       []tls.Certificate{clientTLSCert},
+		InsecureSkipVerify: true,
+		NextProtos:         []string{transport.ALPNProtocol},
+	}
+
+	// Connect and disconnect
+	conn, err := tls.Dial("tcp", addr.String(), tlsConfig)
+	if err != nil {
+		t.Fatalf("Connection failed: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	conn.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	events := logger.Events()
+
+	// Look for state change events
+	var foundConnected, foundDisconnected bool
+	for _, e := range events {
+		if e.StateChange != nil {
+			if e.StateChange.NewState == "CONNECTED" {
+				foundConnected = true
+			}
+			if e.StateChange.NewState == "DISCONNECTED" {
+				foundDisconnected = true
+			}
+		}
+	}
+
+	if !foundConnected {
+		t.Error("Expected CONNECTED state change event")
+	}
+	if !foundDisconnected {
+		t.Error("Expected DISCONNECTED state change event")
+	}
 }

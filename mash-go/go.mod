@@ -6,6 +6,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/enbility/zeroconf/v3 v3.0.0-20251228204258-105c263fc7b9
 	github.com/fxamacker/cbor/v2 v2.9.0
+	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.11.1
 	github.com/vektra/mockery/v2 v2.53.5
 	golang.org/x/crypto v0.47.0

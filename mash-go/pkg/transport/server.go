@@ -7,7 +7,10 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -24,6 +27,9 @@ type ServerConfig struct {
 
 	// MaxMessageSize is the maximum message size (default: 64KB).
 	MaxMessageSize uint32
+
+	// Logger for protocol logging (optional).
+	Logger log.Logger
 
 	// OnConnect is called when a new connection is established.
 	OnConnect func(conn *ServerConn)
@@ -208,14 +214,38 @@ func (s *Server) handleConnection(conn net.Conn) {
 		return
 	}
 
+	// Generate unique connection ID
+	connID := uuid.New().String()
+
 	// Create server connection wrapper
+	framer := NewFramerWithMaxSize(tlsConn, s.config.MaxMessageSize)
+	if s.config.Logger != nil {
+		framer.SetLogger(s.config.Logger, connID)
+	}
+
 	sconn := &ServerConn{
 		conn:       tlsConn,
-		framer:     NewFramerWithMaxSize(tlsConn, s.config.MaxMessageSize),
+		framer:     framer,
 		tlsState:   state,
 		server:     s,
 		closeCh:    make(chan struct{}),
 		remoteAddr: conn.RemoteAddr(),
+		connID:     connID,
+	}
+
+	// Log connected state
+	if s.config.Logger != nil {
+		s.config.Logger.Log(log.Event{
+			Timestamp:    time.Now(),
+			ConnectionID: connID,
+			Layer:        log.LayerTransport,
+			Category:     log.CategoryState,
+			RemoteAddr:   conn.RemoteAddr().String(),
+			StateChange: &log.StateChangeEvent{
+				Entity:   log.StateEntityConnection,
+				NewState: "CONNECTED",
+			},
+		})
 	}
 
 	// Register connection
@@ -236,6 +266,22 @@ func (s *Server) handleConnection(conn net.Conn) {
 	delete(s.conns, sconn)
 	s.connsMu.Unlock()
 
+	// Log disconnected state
+	if s.config.Logger != nil {
+		s.config.Logger.Log(log.Event{
+			Timestamp:    time.Now(),
+			ConnectionID: sconn.connID,
+			Layer:        log.LayerTransport,
+			Category:     log.CategoryState,
+			RemoteAddr:   conn.RemoteAddr().String(),
+			StateChange: &log.StateChangeEvent{
+				Entity:   log.StateEntityConnection,
+				OldState: "CONNECTED",
+				NewState: "DISCONNECTED",
+			},
+		})
+	}
+
 	// Notify disconnect
 	if s.config.OnDisconnect != nil {
 		s.config.OnDisconnect(sconn)
@@ -251,6 +297,7 @@ type ServerConn struct {
 	closeCh    chan struct{}
 	closeOnce  sync.Once
 	remoteAddr net.Addr
+	connID     string // Unique connection identifier
 
 	// Synchronization
 	writeMu sync.Mutex
@@ -259,6 +306,11 @@ type ServerConn struct {
 // RemoteAddr returns the remote address of the client.
 func (c *ServerConn) RemoteAddr() net.Addr {
 	return c.remoteAddr
+}
+
+// ConnID returns the unique connection identifier.
+func (c *ServerConn) ConnID() string {
+	return c.connID
 }
 
 // TLSState returns the TLS connection state.
@@ -329,21 +381,59 @@ func (c *ServerConn) readLoop() {
 
 // handleControlMessage processes control messages.
 func (c *ServerConn) handleControlMessage(msg *wire.ControlMessage) {
+	// Log incoming control message
+	c.logControlMessage(msg.Type, log.DirectionIn)
+
 	switch msg.Type {
 	case wire.ControlPing:
 		// Respond with pong
 		pongMsg, _ := EncodePong(msg.Sequence)
 		c.Send(pongMsg)
+		// Log outgoing pong
+		c.logControlMessage(wire.ControlPong, log.DirectionOut)
 
 	case wire.ControlPong:
 		// Ignore pongs on server side (client initiated keep-alive)
 
 	case wire.ControlClose:
+		// Log outgoing close acknowledgment
+		c.logControlMessage(wire.ControlClose, log.DirectionOut)
 		// Peer initiated close - acknowledge and close
 		closeMsg, _ := EncodeClose()
 		c.Send(closeMsg)
 		c.Close()
 	}
+}
+
+// logControlMessage logs a control message event.
+func (c *ServerConn) logControlMessage(msgType wire.ControlMessageType, direction log.Direction) {
+	if c.server.config.Logger == nil {
+		return
+	}
+
+	var ctrlMsgType log.ControlMsgType
+	switch msgType {
+	case wire.ControlPing:
+		ctrlMsgType = log.ControlMsgPing
+	case wire.ControlPong:
+		ctrlMsgType = log.ControlMsgPong
+	case wire.ControlClose:
+		ctrlMsgType = log.ControlMsgClose
+	default:
+		return // Unknown control message type
+	}
+
+	c.server.config.Logger.Log(log.Event{
+		Timestamp:    time.Now(),
+		ConnectionID: c.connID,
+		Direction:    direction,
+		Layer:        log.LayerTransport,
+		Category:     log.CategoryControl,
+		RemoteAddr:   c.remoteAddr.String(),
+		ControlMsg: &log.ControlMsgEvent{
+			Type: ctrlMsgType,
+		},
+	})
 }
 
 // Control message encoding helpers

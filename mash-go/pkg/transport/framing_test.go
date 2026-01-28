@@ -5,7 +5,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"sync"
 	"testing"
+
+	"github.com/mash-protocol/mash-go/pkg/log"
 )
 
 func TestFrameWriterReader(t *testing.T) {
@@ -291,5 +294,200 @@ func BenchmarkFrameRead(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
+	}
+}
+
+// capturingLogger captures log events for testing.
+type capturingLogger struct {
+	mu     sync.Mutex
+	events []log.Event
+}
+
+func (l *capturingLogger) Log(event log.Event) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = append(l.events, event)
+}
+
+func (l *capturingLogger) Events() []log.Event {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]log.Event(nil), l.events...)
+}
+
+func TestFrameWriterLogsOnWrite(t *testing.T) {
+	buf := new(bytes.Buffer)
+	logger := &capturingLogger{}
+
+	writer := NewFrameWriter(buf)
+	writer.SetLogger(logger, "conn-123")
+
+	payload := []byte("hello")
+	if err := writer.WriteFrame(payload); err != nil {
+		t.Fatalf("WriteFrame failed: %v", err)
+	}
+
+	events := logger.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+
+	e := events[0]
+	if e.ConnectionID != "conn-123" {
+		t.Errorf("ConnectionID = %q, want %q", e.ConnectionID, "conn-123")
+	}
+	if e.Direction != log.DirectionOut {
+		t.Errorf("Direction = %v, want DirectionOut", e.Direction)
+	}
+	if e.Layer != log.LayerTransport {
+		t.Errorf("Layer = %v, want LayerTransport", e.Layer)
+	}
+	if e.Category != log.CategoryMessage {
+		t.Errorf("Category = %v, want CategoryMessage", e.Category)
+	}
+	if e.Frame == nil {
+		t.Fatal("Frame is nil")
+	}
+	// Size includes 4-byte length prefix
+	expectedSize := LengthPrefixSize + len(payload)
+	if e.Frame.Size != expectedSize {
+		t.Errorf("Frame.Size = %d, want %d", e.Frame.Size, expectedSize)
+	}
+	if !bytes.Equal(e.Frame.Data, payload) {
+		t.Errorf("Frame.Data = %v, want %v", e.Frame.Data, payload)
+	}
+}
+
+func TestFrameReaderLogsOnRead(t *testing.T) {
+	buf := new(bytes.Buffer)
+	writer := NewFrameWriter(buf)
+	payload := []byte("world")
+	writer.WriteFrame(payload)
+
+	logger := &capturingLogger{}
+	reader := NewFrameReader(buf)
+	reader.SetLogger(logger, "conn-456")
+
+	data, err := reader.ReadFrame()
+	if err != nil {
+		t.Fatalf("ReadFrame failed: %v", err)
+	}
+	if !bytes.Equal(data, payload) {
+		t.Errorf("payload mismatch")
+	}
+
+	events := logger.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+
+	e := events[0]
+	if e.ConnectionID != "conn-456" {
+		t.Errorf("ConnectionID = %q, want %q", e.ConnectionID, "conn-456")
+	}
+	if e.Direction != log.DirectionIn {
+		t.Errorf("Direction = %v, want DirectionIn", e.Direction)
+	}
+	if e.Layer != log.LayerTransport {
+		t.Errorf("Layer = %v, want LayerTransport", e.Layer)
+	}
+	if e.Frame == nil {
+		t.Fatal("Frame is nil")
+	}
+	if !bytes.Equal(e.Frame.Data, payload) {
+		t.Errorf("Frame.Data = %v, want %v", e.Frame.Data, payload)
+	}
+}
+
+func TestFramerLogsWithConnectionID(t *testing.T) {
+	r, w := io.Pipe()
+	defer r.Close()
+	defer w.Close()
+
+	logger := &capturingLogger{}
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		framer := NewFramer(&readWriter{r: r, w: w})
+		framer.SetLogger(logger, "conn-789")
+		framer.WriteFrame([]byte("test"))
+	}()
+
+	framer := NewFramer(&readWriter{r: r, w: w})
+	framer.SetLogger(logger, "conn-789")
+	framer.ReadFrame()
+
+	<-done
+
+	events := logger.Events()
+	// Should have at least 2 events (write + read)
+	if len(events) < 2 {
+		t.Fatalf("expected at least 2 events, got %d", len(events))
+	}
+
+	for _, e := range events {
+		if e.ConnectionID != "conn-789" {
+			t.Errorf("ConnectionID = %q, want %q", e.ConnectionID, "conn-789")
+		}
+	}
+}
+
+func TestFramerNoLoggerNoPanic(t *testing.T) {
+	buf := new(bytes.Buffer)
+
+	// Writer without logger should not panic
+	writer := NewFrameWriter(buf)
+	if err := writer.WriteFrame([]byte("hello")); err != nil {
+		t.Fatalf("WriteFrame failed: %v", err)
+	}
+
+	// Reader without logger should not panic
+	reader := NewFrameReader(buf)
+	if _, err := reader.ReadFrame(); err != nil {
+		t.Fatalf("ReadFrame failed: %v", err)
+	}
+
+	// Explicitly set nil logger should not panic
+	buf.Reset()
+	writer.SetLogger(nil, "conn-id")
+	if err := writer.WriteFrame([]byte("world")); err != nil {
+		t.Fatalf("WriteFrame with nil logger failed: %v", err)
+	}
+}
+
+func TestFramerLogsTruncatedData(t *testing.T) {
+	buf := new(bytes.Buffer)
+	logger := &capturingLogger{}
+
+	writer := NewFrameWriter(buf)
+	writer.SetLogger(logger, "conn-trunc")
+
+	// Create a payload larger than the truncation limit (4KB)
+	largePayload := bytes.Repeat([]byte("x"), 5000)
+	if err := writer.WriteFrame(largePayload); err != nil {
+		t.Fatalf("WriteFrame failed: %v", err)
+	}
+
+	events := logger.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+
+	e := events[0]
+	if e.Frame == nil {
+		t.Fatal("Frame is nil")
+	}
+	// Size should reflect the full frame
+	expectedSize := LengthPrefixSize + len(largePayload)
+	if e.Frame.Size != expectedSize {
+		t.Errorf("Frame.Size = %d, want %d", e.Frame.Size, expectedSize)
+	}
+	// Data should be truncated to MaxLogFrameDataSize
+	if len(e.Frame.Data) != MaxLogFrameDataSize {
+		t.Errorf("Frame.Data length = %d, want %d", len(e.Frame.Data), MaxLogFrameDataSize)
+	}
+	if !e.Frame.Truncated {
+		t.Error("Frame.Truncated = false, want true")
 	}
 }

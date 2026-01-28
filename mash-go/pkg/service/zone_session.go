@@ -9,6 +9,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -28,6 +29,10 @@ type ZoneSession struct {
 	handler *ProtocolHandler
 	closed  bool
 	logger  *slog.Logger
+
+	// Protocol logging (optional)
+	protocolLogger log.Logger
+	connID         string
 
 	// Bidirectional support: client for sending requests to controller
 	client *interaction.Client
@@ -71,6 +76,8 @@ func (s *ZoneSession) OnMessage(data []byte) {
 	renewalHandler := s.renewalHandler
 	client := s.client
 	logger := s.logger
+	protocolLogger := s.protocolLogger
+	connID := s.connID
 	s.mu.RUnlock()
 
 	// Check for renewal messages first (MsgType 30-33 at key 1)
@@ -94,10 +101,10 @@ func (s *ZoneSession) OnMessage(data []byte) {
 		s.handleRequest(data)
 	case wire.MessageTypeResponse:
 		// Response to a request we sent - deliver to client
-		s.handleResponse(data, client, logger)
+		s.handleResponse(data, client, logger, protocolLogger, connID)
 	case wire.MessageTypeNotification:
 		// Notification from controller (subscription update) - deliver to client
-		s.handleNotification(data, client, logger)
+		s.handleNotification(data, client, logger, protocolLogger, connID)
 	default:
 		// Unknown message type - ignore
 	}
@@ -143,7 +150,7 @@ func (s *ZoneSession) sendErrorResponse(messageID uint32, status wire.Status, me
 }
 
 // handleResponse processes a response to a request we sent to the controller.
-func (s *ZoneSession) handleResponse(data []byte, client *interaction.Client, logger *slog.Logger) {
+func (s *ZoneSession) handleResponse(data []byte, client *interaction.Client, logger *slog.Logger, protocolLogger log.Logger, connID string) {
 	resp, err := wire.DecodeResponse(data)
 	if err != nil {
 		if logger != nil {
@@ -153,11 +160,13 @@ func (s *ZoneSession) handleResponse(data []byte, client *interaction.Client, lo
 		}
 		return
 	}
+	// Log the incoming response
+	s.logIncomingResponse(protocolLogger, connID, resp)
 	client.HandleResponse(resp)
 }
 
 // handleNotification processes a notification from the controller (subscription update).
-func (s *ZoneSession) handleNotification(data []byte, client *interaction.Client, logger *slog.Logger) {
+func (s *ZoneSession) handleNotification(data []byte, client *interaction.Client, logger *slog.Logger, protocolLogger log.Logger, connID string) {
 	notif, err := wire.DecodeNotification(data)
 	if err != nil {
 		if logger != nil {
@@ -167,6 +176,8 @@ func (s *ZoneSession) handleNotification(data []byte, client *interaction.Client
 		}
 		return
 	}
+	// Log the incoming notification
+	s.logIncomingNotification(protocolLogger, connID, notif)
 	if logger != nil {
 		logger.Debug("handleNotification: received notification from controller",
 			"zoneID", s.zoneID,
@@ -176,6 +187,55 @@ func (s *ZoneSession) handleNotification(data []byte, client *interaction.Client
 			"changesCount", len(notif.Changes))
 	}
 	client.HandleNotification(notif)
+}
+
+// logIncomingResponse logs an incoming response event.
+func (s *ZoneSession) logIncomingResponse(logger log.Logger, connectionID string, resp *wire.Response) {
+	if logger == nil {
+		return
+	}
+
+	status := resp.Status
+
+	logger.Log(log.Event{
+		Timestamp:    time.Now(),
+		ConnectionID: connectionID,
+		Direction:    log.DirectionIn,
+		Layer:        log.LayerWire,
+		Category:     log.CategoryMessage,
+		Message: &log.MessageEvent{
+			Type:      log.MessageTypeResponse,
+			MessageID: resp.MessageID,
+			Status:    &status,
+			Payload:   resp.Payload,
+		},
+	})
+}
+
+// logIncomingNotification logs an incoming notification event.
+func (s *ZoneSession) logIncomingNotification(logger log.Logger, connectionID string, notif *wire.Notification) {
+	if logger == nil {
+		return
+	}
+
+	subscriptionID := notif.SubscriptionID
+	endpointID := notif.EndpointID
+	featureID := notif.FeatureID
+
+	logger.Log(log.Event{
+		Timestamp:    time.Now(),
+		ConnectionID: connectionID,
+		Direction:    log.DirectionIn,
+		Layer:        log.LayerWire,
+		Category:     log.CategoryMessage,
+		Message: &log.MessageEvent{
+			Type:           log.MessageTypeNotification,
+			SubscriptionID: &subscriptionID,
+			EndpointID:     &endpointID,
+			FeatureID:      &featureID,
+			Payload:        notif.Changes,
+		},
+	})
 }
 
 // SendNotification sends a subscription notification to the zone.
@@ -226,6 +286,18 @@ func (s *ZoneSession) SetLogger(logger *slog.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.logger = logger
+}
+
+// SetProtocolLogger sets the protocol logger and connection ID.
+// Events logged will include the connectionID for correlation.
+// This also sets the logger on the embedded ProtocolHandler.
+func (s *ZoneSession) SetProtocolLogger(logger log.Logger, connectionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.protocolLogger = logger
+	s.connID = connectionID
+	// Also set on the protocol handler for request/response logging
+	s.handler.SetLogger(logger, connectionID)
 }
 
 // SubscriptionCount returns the number of active subscriptions.

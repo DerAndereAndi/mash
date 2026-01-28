@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -17,6 +19,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/duration"
 	"github.com/mash-protocol/mash-go/pkg/failsafe"
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/persistence"
 	"github.com/mash-protocol/mash-go/pkg/subscription"
@@ -80,6 +83,9 @@ type DeviceService struct {
 	// Logger for debug output (optional)
 	logger *slog.Logger
 
+	// Protocol logger for structured event capture (optional)
+	protocolLogger log.Logger
+
 	// Persistence (optional, set by CLI)
 	certStore  cert.Store
 	stateStore *persistence.DeviceStateStore
@@ -87,6 +93,13 @@ type DeviceService struct {
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+// generateConnectionID generates a random connection ID for logging.
+func generateConnectionID() string {
+	b := make([]byte, 8) // 8 bytes = 16 hex chars
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // NewDeviceService creates a new device service.
@@ -105,6 +118,7 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 		failsafeTimers: make(map[string]*failsafe.Timer),
 		zoneIndexMap:   make(map[string]uint8),
 		logger:         config.Logger,
+		protocolLogger: config.ProtocolLogger,
 	}
 
 	// Initialize duration manager with expiry callback
@@ -408,6 +422,12 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 	zoneSession := NewZoneSession(targetZoneID, framedConn, s.device)
 	zoneSession.SetLogger(s.logger)
 
+	// Set protocol logger if configured
+	if s.protocolLogger != nil {
+		connID := generateConnectionID()
+		zoneSession.SetProtocolLogger(s.protocolLogger, connID)
+	}
+
 	// Initialize renewal handler for certificate renewal support
 	zoneSession.InitializeRenewalHandler(s.buildDeviceIdentity())
 
@@ -468,6 +488,12 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// Create zone session for this connection
 	zoneSession := NewZoneSession(zoneID, framedConn, s.device)
 	zoneSession.SetLogger(s.logger)
+
+	// Set protocol logger if configured
+	if s.protocolLogger != nil {
+		connID := generateConnectionID()
+		zoneSession.SetProtocolLogger(s.protocolLogger, connID)
+	}
 
 	// Initialize renewal handler for certificate renewal support
 	zoneSession.InitializeRenewalHandler(s.buildDeviceIdentity())

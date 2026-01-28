@@ -1,13 +1,46 @@
 package service_test
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/features"
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/service"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
+
+// capturingLogger records log events for testing.
+type capturingLogger struct {
+	mu     sync.Mutex
+	events []log.Event
+}
+
+func newCapturingLogger() *capturingLogger {
+	return &capturingLogger{}
+}
+
+func (l *capturingLogger) Log(event log.Event) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = append(l.events, event)
+}
+
+func (l *capturingLogger) Events() []log.Event {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	result := make([]log.Event, len(l.events))
+	copy(result, l.events)
+	return result
+}
+
+func (l *capturingLogger) Clear() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = nil
+}
 
 // Feature IDs match model.FeatureType values
 const (
@@ -626,5 +659,193 @@ func TestProtocolHandler_UnsubscribeRemovesFromManager(t *testing.T) {
 	// Verify subscription is removed from manager
 	if subMgr.GetInbound(subID) != nil {
 		t.Error("Expected subscription to be removed from manager after unsubscribe")
+	}
+}
+
+// =============================================================================
+// Protocol Logging Tests
+// =============================================================================
+
+func TestProtocolHandler_LogsRequest(t *testing.T) {
+	device := createTestDevice()
+	handler := service.NewProtocolHandler(device)
+
+	logger := newCapturingLogger()
+	handler.SetLogger(logger, "conn-123")
+
+	req := &wire.Request{
+		MessageID:  42,
+		Operation:  wire.OpRead,
+		EndpointID: 0,
+		FeatureID:  featureIDDeviceInfo,
+	}
+
+	_ = handler.HandleRequest(req)
+
+	events := logger.Events()
+	if len(events) < 2 {
+		t.Fatalf("Expected at least 2 log events (request + response), got %d", len(events))
+	}
+
+	// First event should be the request
+	reqEvent := events[0]
+	if reqEvent.Direction != log.DirectionIn {
+		t.Errorf("Request should have Direction=In, got %s", reqEvent.Direction)
+	}
+	if reqEvent.Layer != log.LayerWire {
+		t.Errorf("Request should have Layer=Wire, got %s", reqEvent.Layer)
+	}
+	if reqEvent.Category != log.CategoryMessage {
+		t.Errorf("Request should have Category=Message, got %s", reqEvent.Category)
+	}
+	if reqEvent.ConnectionID != "conn-123" {
+		t.Errorf("Request should have ConnectionID='conn-123', got '%s'", reqEvent.ConnectionID)
+	}
+
+	// Check message event details
+	if reqEvent.Message == nil {
+		t.Fatal("Request event should have Message payload")
+	}
+	if reqEvent.Message.Type != log.MessageTypeRequest {
+		t.Errorf("Request should have Type=Request, got %s", reqEvent.Message.Type)
+	}
+	if reqEvent.Message.MessageID != 42 {
+		t.Errorf("Request should have MessageID=42, got %d", reqEvent.Message.MessageID)
+	}
+	if reqEvent.Message.Operation == nil || *reqEvent.Message.Operation != wire.OpRead {
+		t.Errorf("Request should have Operation=Read")
+	}
+}
+
+func TestProtocolHandler_LogsResponse(t *testing.T) {
+	device := createTestDevice()
+	handler := service.NewProtocolHandler(device)
+
+	logger := newCapturingLogger()
+	handler.SetLogger(logger, "conn-456")
+
+	req := &wire.Request{
+		MessageID:  99,
+		Operation:  wire.OpRead,
+		EndpointID: 0,
+		FeatureID:  featureIDDeviceInfo,
+	}
+
+	_ = handler.HandleRequest(req)
+
+	events := logger.Events()
+	if len(events) < 2 {
+		t.Fatalf("Expected at least 2 log events, got %d", len(events))
+	}
+
+	// Second event should be the response
+	respEvent := events[1]
+	if respEvent.Direction != log.DirectionOut {
+		t.Errorf("Response should have Direction=Out, got %s", respEvent.Direction)
+	}
+	if respEvent.Layer != log.LayerWire {
+		t.Errorf("Response should have Layer=Wire, got %s", respEvent.Layer)
+	}
+	if respEvent.Message == nil {
+		t.Fatal("Response event should have Message payload")
+	}
+	if respEvent.Message.Type != log.MessageTypeResponse {
+		t.Errorf("Response should have Type=Response, got %s", respEvent.Message.Type)
+	}
+	if respEvent.Message.MessageID != 99 {
+		t.Errorf("Response should have MessageID=99, got %d", respEvent.Message.MessageID)
+	}
+	if respEvent.Message.Status == nil || *respEvent.Message.Status != wire.StatusSuccess {
+		t.Errorf("Response should have Status=Success")
+	}
+}
+
+func TestProtocolHandler_LogsProcessingTime(t *testing.T) {
+	device := createTestDevice()
+	handler := service.NewProtocolHandler(device)
+
+	logger := newCapturingLogger()
+	handler.SetLogger(logger, "conn-789")
+
+	req := &wire.Request{
+		MessageID:  55,
+		Operation:  wire.OpRead,
+		EndpointID: 0,
+		FeatureID:  featureIDDeviceInfo,
+	}
+
+	// Add a small delay to ensure measurable processing time
+	time.Sleep(1 * time.Millisecond)
+	_ = handler.HandleRequest(req)
+
+	events := logger.Events()
+	if len(events) < 2 {
+		t.Fatalf("Expected at least 2 log events, got %d", len(events))
+	}
+
+	// Response should have processing time
+	respEvent := events[1]
+	if respEvent.Message == nil {
+		t.Fatal("Response event should have Message payload")
+	}
+	if respEvent.Message.ProcessingTime == nil {
+		t.Error("Response should have ProcessingTime set")
+	} else if *respEvent.Message.ProcessingTime < 0 {
+		t.Error("ProcessingTime should be non-negative")
+	}
+}
+
+func TestProtocolHandler_NoLoggerNoPanic(t *testing.T) {
+	device := createTestDevice()
+	handler := service.NewProtocolHandler(device)
+
+	// No logger set - should not panic
+	req := &wire.Request{
+		MessageID:  1,
+		Operation:  wire.OpRead,
+		EndpointID: 0,
+		FeatureID:  featureIDDeviceInfo,
+	}
+
+	// Should not panic
+	resp := handler.HandleRequest(req)
+
+	if !resp.IsSuccess() {
+		t.Errorf("Expected success response even without logger, got status %d", resp.Status)
+	}
+}
+
+func TestProtocolHandler_LogsErrorResponse(t *testing.T) {
+	device := createTestDevice()
+	handler := service.NewProtocolHandler(device)
+
+	logger := newCapturingLogger()
+	handler.SetLogger(logger, "conn-err")
+
+	// Request for non-existent endpoint
+	req := &wire.Request{
+		MessageID:  77,
+		Operation:  wire.OpRead,
+		EndpointID: 99, // Non-existent
+		FeatureID:  featureIDDeviceInfo,
+	}
+
+	_ = handler.HandleRequest(req)
+
+	events := logger.Events()
+	if len(events) < 2 {
+		t.Fatalf("Expected at least 2 log events, got %d", len(events))
+	}
+
+	// Response should have error status
+	respEvent := events[1]
+	if respEvent.Message == nil {
+		t.Fatal("Response event should have Message payload")
+	}
+	if respEvent.Message.Status == nil {
+		t.Fatal("Response should have Status")
+	}
+	if *respEvent.Message.Status == wire.StatusSuccess {
+		t.Error("Response should have error status for invalid endpoint")
 	}
 }

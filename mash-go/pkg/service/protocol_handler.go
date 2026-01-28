@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"sync"
+	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -26,6 +28,10 @@ type ProtocolHandler struct {
 
 	// Send function for notifications
 	sendNotification NotificationSender
+
+	// Protocol logging (optional)
+	logger log.Logger
+	connID string
 }
 
 // NewProtocolHandler creates a new protocol handler for a device.
@@ -88,38 +94,121 @@ func (h *ProtocolHandler) SetZoneID(zoneID string) {
 	h.SetPeerID(zoneID)
 }
 
+// SetLogger sets the protocol logger and connection ID.
+// Events logged will include the connectionID for correlation.
+func (h *ProtocolHandler) SetLogger(logger log.Logger, connectionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.logger = logger
+	h.connID = connectionID
+}
+
 // HandleRequest processes a protocol request and returns a response.
 func (h *ProtocolHandler) HandleRequest(req *wire.Request) *wire.Response {
+	startTime := time.Now()
+
+	// Log the incoming request
+	h.logRequest(req)
+
+	var resp *wire.Response
+
 	// Validate the operation
 	if !req.Operation.IsValid() {
-		return &wire.Response{
+		resp = &wire.Response{
 			MessageID: req.MessageID,
 			Status:    wire.StatusUnsupported,
 			Payload: &wire.ErrorPayload{
 				Message: "unsupported operation",
 			},
+		}
+	} else {
+		// Route to appropriate handler
+		switch req.Operation {
+		case wire.OpRead:
+			resp = h.handleRead(req)
+		case wire.OpWrite:
+			resp = h.handleWrite(req)
+		case wire.OpSubscribe:
+			resp = h.handleSubscribe(req)
+		case wire.OpInvoke:
+			resp = h.handleInvoke(req)
+		default:
+			resp = &wire.Response{
+				MessageID: req.MessageID,
+				Status:    wire.StatusUnsupported,
+				Payload: &wire.ErrorPayload{
+					Message: "unsupported operation",
+				},
+			}
 		}
 	}
 
-	// Route to appropriate handler
-	switch req.Operation {
-	case wire.OpRead:
-		return h.handleRead(req)
-	case wire.OpWrite:
-		return h.handleWrite(req)
-	case wire.OpSubscribe:
-		return h.handleSubscribe(req)
-	case wire.OpInvoke:
-		return h.handleInvoke(req)
-	default:
-		return &wire.Response{
-			MessageID: req.MessageID,
-			Status:    wire.StatusUnsupported,
-			Payload: &wire.ErrorPayload{
-				Message: "unsupported operation",
-			},
-		}
+	// Log the outgoing response with processing time
+	processingTime := time.Since(startTime)
+	h.logResponse(resp, processingTime)
+
+	return resp
+}
+
+// logRequest logs an incoming request event.
+func (h *ProtocolHandler) logRequest(req *wire.Request) {
+	h.mu.RLock()
+	logger := h.logger
+	connID := h.connID
+	h.mu.RUnlock()
+
+	if logger == nil {
+		return
 	}
+
+	op := req.Operation
+	endpointID := req.EndpointID
+	featureID := req.FeatureID
+
+	logger.Log(log.Event{
+		Timestamp:    time.Now(),
+		ConnectionID: connID,
+		Direction:    log.DirectionIn,
+		Layer:        log.LayerWire,
+		Category:     log.CategoryMessage,
+		Message: &log.MessageEvent{
+			Type:       log.MessageTypeRequest,
+			MessageID:  req.MessageID,
+			Operation:  &op,
+			EndpointID: &endpointID,
+			FeatureID:  &featureID,
+			Payload:    req.Payload,
+		},
+	})
+}
+
+// logResponse logs an outgoing response event.
+func (h *ProtocolHandler) logResponse(resp *wire.Response, processingTime time.Duration) {
+	h.mu.RLock()
+	logger := h.logger
+	connID := h.connID
+	h.mu.RUnlock()
+
+	if logger == nil {
+		return
+	}
+
+	status := resp.Status
+
+	logger.Log(log.Event{
+		Timestamp:    time.Now(),
+		ConnectionID: connID,
+		Direction:    log.DirectionOut,
+		Layer:        log.LayerWire,
+		Category:     log.CategoryMessage,
+		Message: &log.MessageEvent{
+			Type:           log.MessageTypeResponse,
+			MessageID:      resp.MessageID,
+			Status:         &status,
+			Payload:        resp.Payload,
+			ProcessingTime: &processingTime,
+		},
+	})
 }
 
 // handleRead processes a Read request.
