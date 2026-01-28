@@ -2,11 +2,6 @@
 
 Remaining work items for the MASH protocol and implementation.
 
-## Testing Infrastructure
-
-- [x] Implement test harness to execute YAML test cases against devices
-- [ ] Build PICS parser/validator tooling
-
 ## Features (Code Implementation)
 
 - [ ] Implement Tariff feature

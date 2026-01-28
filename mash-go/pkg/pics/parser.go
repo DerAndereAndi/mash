@@ -2,6 +2,7 @@ package pics
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,57 @@ import (
 	"strconv"
 	"strings"
 )
+
+// detectFormat examines the data to determine if it's key=value or YAML format.
+// Returns FormatKeyValue for key=value format, FormatYAML for YAML format.
+func detectFormat(data []byte) Format {
+	if len(data) == 0 {
+		return FormatKeyValue // Empty defaults to key=value
+	}
+
+	// Look at non-comment, non-empty lines
+	lines := bytes.Split(data, []byte("\n"))
+	for _, line := range lines {
+		trimmed := bytes.TrimSpace(line)
+
+		// Skip empty lines and comments
+		if len(trimmed) == 0 || trimmed[0] == '#' {
+			continue
+		}
+
+		// YAML indicators: lines starting with "device:" or "items:" or key starting with "D." or "  "
+		if bytes.HasPrefix(trimmed, []byte("device:")) ||
+			bytes.HasPrefix(trimmed, []byte("items:")) {
+			return FormatYAML
+		}
+
+		// Key=value indicator: lines containing "=" with MASH. prefix
+		if bytes.Contains(trimmed, []byte("=")) {
+			if bytes.HasPrefix(trimmed, []byte("MASH.")) {
+				return FormatKeyValue
+			}
+		}
+
+		// YAML indicator: indented content or colon without equals
+		if bytes.HasPrefix(line, []byte("  ")) {
+			return FormatYAML
+		}
+		if bytes.Contains(trimmed, []byte(": ")) && !bytes.Contains(trimmed, []byte("=")) {
+			return FormatYAML
+		}
+	}
+
+	// Default to key=value if no clear indicators
+	return FormatKeyValue
+}
+
+// ParseOptions configures PICS parsing behavior.
+type ParseOptions struct {
+	// Format specifies the input format. Use FormatAuto to auto-detect.
+	Format Format
+	// Strict enables strict parsing mode (errors on unknown codes).
+	Strict bool
+}
 
 // Parser parses PICS files.
 type Parser struct {
@@ -25,18 +77,76 @@ func NewParser() *Parser {
 
 // ParseFile parses a PICS file from the filesystem.
 func (p *Parser) ParseFile(path string) (*PICS, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
-	defer f.Close()
-	return p.Parse(f)
+	pics, err := p.ParseBytes(data)
+	if err != nil {
+		return nil, err
+	}
+	pics.SourceFile = path
+	return pics, nil
 }
 
-// Parse parses a PICS file from a reader.
+// ParseFileWithOptions parses a PICS file with explicit options.
+func (p *Parser) ParseFileWithOptions(path string, opts ParseOptions) (*PICS, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+	pics, err := p.ParseBytesWithOptions(data, opts)
+	if err != nil {
+		return nil, err
+	}
+	pics.SourceFile = path
+	return pics, nil
+}
+
+// Parse parses a PICS file from a reader with auto-detection.
 func (p *Parser) Parse(r io.Reader) (*PICS, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read data: %w", err)
+	}
+	return p.ParseBytes(data)
+}
+
+// ParseBytes parses PICS data from a byte slice with auto-detection.
+func (p *Parser) ParseBytes(data []byte) (*PICS, error) {
+	return p.ParseBytesWithOptions(data, ParseOptions{Format: FormatAuto, Strict: p.Strict})
+}
+
+// ParseBytesWithOptions parses PICS data with explicit options.
+func (p *Parser) ParseBytesWithOptions(data []byte, opts ParseOptions) (*PICS, error) {
+	format := opts.Format
+	if format == FormatAuto {
+		format = detectFormat(data)
+	}
+
+	var pics *PICS
+	var err error
+
+	switch format {
+	case FormatYAML:
+		pics, err = p.parseYAML(data)
+	default:
+		pics, err = p.parseKeyValue(data)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	pics.Format = format
+	return pics, nil
+}
+
+// parseKeyValue parses PICS data in key=value format.
+func (p *Parser) parseKeyValue(data []byte) (*PICS, error) {
 	pics := NewPICS()
-	scanner := bufio.NewScanner(r)
+	pics.Format = FormatKeyValue
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	lineNum := 0
 
 	for scanner.Scan() {
@@ -60,9 +170,10 @@ func (p *Parser) Parse(r io.Reader) (*PICS, error) {
 
 		// Track side and version
 		if entry.Code.Feature == "" {
-			if entry.Code.Side == SideServer {
+			switch entry.Code.Side {
+			case SideServer:
 				pics.Side = SideServer
-			} else if entry.Code.Side == SideClient {
+			case SideClient:
 				pics.Side = SideClient
 			}
 		}
@@ -79,7 +190,7 @@ func (p *Parser) Parse(r io.Reader) (*PICS, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
+		return nil, fmt.Errorf("failed to read data: %w", err)
 	}
 
 	return pics, nil
@@ -242,9 +353,14 @@ func (p *Parser) parseValue(s string) Value {
 	}
 }
 
-// ParseString parses PICS from a string.
+// ParseString parses PICS from a string with auto-detection.
 func (p *Parser) ParseString(s string) (*PICS, error) {
-	return p.Parse(strings.NewReader(s))
+	return p.ParseBytes([]byte(s))
+}
+
+// ParseStringWithOptions parses PICS from a string with explicit options.
+func (p *Parser) ParseStringWithOptions(s string, opts ParseOptions) (*PICS, error) {
+	return p.ParseBytesWithOptions([]byte(s), opts)
 }
 
 // ParseFile is a convenience function to parse a PICS file.
@@ -255,4 +371,9 @@ func ParseFile(path string) (*PICS, error) {
 // ParseString is a convenience function to parse PICS from a string.
 func ParseString(s string) (*PICS, error) {
 	return NewParser().ParseString(s)
+}
+
+// ParseBytes is a convenience function to parse PICS from bytes.
+func ParseBytes(data []byte) (*PICS, error) {
+	return NewParser().ParseBytes(data)
 }

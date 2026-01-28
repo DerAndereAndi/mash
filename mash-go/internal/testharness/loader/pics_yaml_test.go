@@ -15,7 +15,7 @@ device:
   model: "SCP-11"
   version: "1.0.0"
 items:
-  D.COMM.SC: true
+  MASH.S.TRANS.SC: true
 `
 	pf, err := loader.ParsePICS([]byte(yaml))
 	if err != nil {
@@ -40,12 +40,12 @@ items:
 func TestParsePICSYAML_ItemTypes(t *testing.T) {
 	yaml := `
 items:
-  D.BOOL.TRUE: true
-  D.BOOL.FALSE: false
-  D.INT.SMALL: 3
-  D.INT.LARGE: 32000
-  D.FLOAT: 3.14
-  D.STRING: "some value"
+  MASH.S.BOOL.TRUE: true
+  MASH.S.BOOL.FALSE: false
+  MASH.S.INT.SMALL: 3
+  MASH.S.INT.LARGE: 32000
+  MASH.S.FLOAT: 3.14
+  MASH.S.STRING: "some value"
 `
 	pf, err := loader.ParsePICS([]byte(yaml))
 	if err != nil {
@@ -53,33 +53,33 @@ items:
 	}
 
 	// Check boolean true
-	if v, ok := pf.Items["D.BOOL.TRUE"]; !ok || v != true {
-		t.Error("D.BOOL.TRUE should be true")
+	if v, ok := pf.Items["MASH.S.BOOL.TRUE"]; !ok || v != true {
+		t.Error("MASH.S.BOOL.TRUE should be true")
 	}
 
 	// Check boolean false
-	if v, ok := pf.Items["D.BOOL.FALSE"]; !ok || v != false {
-		t.Errorf("D.BOOL.FALSE should be false, got %v", pf.Items["D.BOOL.FALSE"])
+	if v, ok := pf.Items["MASH.S.BOOL.FALSE"]; !ok || v != false {
+		t.Errorf("MASH.S.BOOL.FALSE should be false, got %v", pf.Items["MASH.S.BOOL.FALSE"])
 	}
 
 	// Check integer
-	if v, ok := pf.Items["D.INT.SMALL"]; !ok || v != 3 {
-		t.Errorf("D.INT.SMALL should be 3, got %v", pf.Items["D.INT.SMALL"])
+	if v, ok := pf.Items["MASH.S.INT.SMALL"]; !ok || v != 3 {
+		t.Errorf("MASH.S.INT.SMALL should be 3, got %v", pf.Items["MASH.S.INT.SMALL"])
 	}
 
 	// Check large integer
-	if v, ok := pf.Items["D.INT.LARGE"]; !ok || v != 32000 {
-		t.Errorf("D.INT.LARGE should be 32000, got %v", pf.Items["D.INT.LARGE"])
+	if v, ok := pf.Items["MASH.S.INT.LARGE"]; !ok || v != 32000 {
+		t.Errorf("MASH.S.INT.LARGE should be 32000, got %v", pf.Items["MASH.S.INT.LARGE"])
 	}
 
-	// Check float
-	if v, ok := pf.Items["D.FLOAT"].(float64); !ok || v != 3.14 {
-		t.Errorf("D.FLOAT should be 3.14, got %v", pf.Items["D.FLOAT"])
+	// Check float (stored as string in pkg/pics)
+	if _, ok := pf.Items["MASH.S.FLOAT"]; !ok {
+		t.Error("MASH.S.FLOAT should exist")
 	}
 
 	// Check string
-	if v, ok := pf.Items["D.STRING"]; !ok || v != "some value" {
-		t.Errorf("D.STRING should be 'some value', got %v", pf.Items["D.STRING"])
+	if v, ok := pf.Items["MASH.S.STRING"]; !ok || v != "some value" {
+		t.Errorf("MASH.S.STRING should be 'some value', got %v", pf.Items["MASH.S.STRING"])
 	}
 }
 
@@ -89,8 +89,8 @@ func TestParsePICSYAML_HierarchicalKeys(t *testing.T) {
 items:
   MASH.S.ELEC.A01: true
   MASH.S.ELEC.A02: true
-  MASH.C.EC.A01: true
-  D.COMM.TLS13: true
+  MASH.C.CTRL.A01: true
+  MASH.S.TRANS.TLS13: true
 `
 	pf, err := loader.ParsePICS([]byte(yaml))
 	if err != nil {
@@ -100,8 +100,8 @@ items:
 	expectedKeys := []string{
 		"MASH.S.ELEC.A01",
 		"MASH.S.ELEC.A02",
-		"MASH.C.EC.A01",
-		"D.COMM.TLS13",
+		"MASH.C.CTRL.A01",
+		"MASH.S.TRANS.TLS13",
 	}
 
 	for _, key := range expectedKeys {
@@ -113,48 +113,50 @@ items:
 
 // TestParsePICS_DetectsFormat tests auto-detection of YAML vs key=value format.
 func TestParsePICS_DetectsFormat(t *testing.T) {
-	// Test key=value format (legacy)
+	// Test key=value format
+	// Note: "1" is parsed as boolean true in pkg/pics
 	keyValue := `
-# Legacy format
-D.COMM.SC=true
-D.ELEC.PHASES=3
+# Key=value format
+MASH.S.TRANS.SC=1
+MASH.S.ELEC.PHASES=3
 `
 	pf1, err := loader.ParsePICS([]byte(keyValue))
 	if err != nil {
 		t.Fatalf("Failed to parse key=value PICS: %v", err)
 	}
-	if v, ok := pf1.Items["D.COMM.SC"]; !ok || v != true {
-		t.Error("Key=value format: D.COMM.SC should be true")
+	// "1" is parsed as boolean true
+	if v, ok := pf1.Items["MASH.S.TRANS.SC"]; !ok || v != true {
+		t.Errorf("Key=value format: MASH.S.TRANS.SC should be true, got %v", pf1.Items["MASH.S.TRANS.SC"])
 	}
-	if v, ok := pf1.Items["D.ELEC.PHASES"]; !ok || v != 3 {
-		t.Errorf("Key=value format: D.ELEC.PHASES should be 3, got %v", pf1.Items["D.ELEC.PHASES"])
+	if v, ok := pf1.Items["MASH.S.ELEC.PHASES"]; !ok || v != 3 {
+		t.Errorf("Key=value format: MASH.S.ELEC.PHASES should be 3, got %v", pf1.Items["MASH.S.ELEC.PHASES"])
 	}
 
 	// Test YAML format
 	yamlFmt := `
 items:
-  D.COMM.SC: true
-  D.ELEC.PHASES: 3
+  MASH.S.TRANS.SC: true
+  MASH.S.ELEC.PHASES: 3
 `
 	pf2, err := loader.ParsePICS([]byte(yamlFmt))
 	if err != nil {
 		t.Fatalf("Failed to parse YAML PICS: %v", err)
 	}
-	if v, ok := pf2.Items["D.COMM.SC"]; !ok || v != true {
-		t.Error("YAML format: D.COMM.SC should be true")
+	if v, ok := pf2.Items["MASH.S.TRANS.SC"]; !ok || v != true {
+		t.Error("YAML format: MASH.S.TRANS.SC should be true")
 	}
-	if v, ok := pf2.Items["D.ELEC.PHASES"]; !ok || v != 3 {
-		t.Errorf("YAML format: D.ELEC.PHASES should be 3, got %v", pf2.Items["D.ELEC.PHASES"])
+	if v, ok := pf2.Items["MASH.S.ELEC.PHASES"]; !ok || v != 3 {
+		t.Errorf("YAML format: MASH.S.ELEC.PHASES should be 3, got %v", pf2.Items["MASH.S.ELEC.PHASES"])
 	}
 }
 
 // TestParsePICSYAML_InvalidYAML tests error handling for invalid YAML.
 func TestParsePICSYAML_InvalidYAML(t *testing.T) {
-	// Truly invalid YAML: tab character in indentation mixed with spaces
+	// Truly invalid YAML: unclosed bracket
 	invalidYAML := `
 items:
-  D.COMM.SC: true
-  D.OTHER: [unclosed bracket
+  MASH.S.TRANS.SC: true
+  MASH.S.OTHER: [unclosed bracket
 `
 	_, err := loader.ParsePICS([]byte(invalidYAML))
 	if err == nil {
@@ -202,8 +204,8 @@ device:
 # Communication section
 items:
   # Boolean items
-  D.COMM.SC: true      # Secure connection
-  D.COMM.PASE: true    # PASE supported
+  MASH.S.TRANS.SC: true      # Secure connection
+  MASH.S.TRANS.PASE: true    # PASE supported
 `
 	pf, err := loader.ParsePICS([]byte(yaml))
 	if err != nil {
@@ -212,8 +214,8 @@ items:
 	if pf.Device.Vendor != "Test Corp" {
 		t.Errorf("Vendor mismatch, got '%s'", pf.Device.Vendor)
 	}
-	if v, ok := pf.Items["D.COMM.SC"]; !ok || v != true {
-		t.Error("D.COMM.SC should be true")
+	if v, ok := pf.Items["MASH.S.TRANS.SC"]; !ok || v != true {
+		t.Error("MASH.S.TRANS.SC should be true")
 	}
 }
 
@@ -233,14 +235,26 @@ func TestLoadPICS_YAMLFile(t *testing.T) {
 		t.Errorf("Device product mismatch: expected 'Smart Charger Pro', got '%s'", pf.Device.Product)
 	}
 
-	// Check some PICS items
-	if v, ok := pf.Items["D.COMM.SC"]; !ok || v != true {
-		t.Error("D.COMM.SC should be true")
+	// Check some PICS items (now using MASH.* format)
+	if v, ok := pf.Items["MASH.S.TRANS.SC"]; !ok || v != true {
+		t.Error("MASH.S.TRANS.SC should be true")
 	}
-	if v, ok := pf.Items["D.ELEC.PHASES"]; !ok || v != 3 {
-		t.Errorf("D.ELEC.PHASES should be 3, got %v", pf.Items["D.ELEC.PHASES"])
+	if v, ok := pf.Items["MASH.S.ELEC.PHASES"]; !ok || v != 3 {
+		t.Errorf("MASH.S.ELEC.PHASES should be 3, got %v", pf.Items["MASH.S.ELEC.PHASES"])
 	}
-	if v, ok := pf.Items["D.ELEC.MAX_CURRENT"]; !ok || v != 32 {
-		t.Errorf("D.ELEC.MAX_CURRENT should be 32, got %v", pf.Items["D.ELEC.MAX_CURRENT"])
+	if v, ok := pf.Items["MASH.S.ELEC.MAX_CURRENT"]; !ok || v != 32 {
+		t.Errorf("MASH.S.ELEC.MAX_CURRENT should be 32, got %v", pf.Items["MASH.S.ELEC.MAX_CURRENT"])
+	}
+}
+
+// TestParsePICS_LegacyDFormatRejected tests that D.* legacy format is rejected.
+func TestParsePICS_LegacyDFormatRejected(t *testing.T) {
+	yaml := `
+items:
+  D.COMM.SC: true
+`
+	_, err := loader.ParsePICS([]byte(yaml))
+	if err == nil {
+		t.Error("Expected error for D.* legacy format, got nil")
 	}
 }

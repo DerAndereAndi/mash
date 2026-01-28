@@ -14,23 +14,27 @@ device:
 
 # PICS Items
 items:
+  # Protocol declarations (this file has both server and controller items)
+  MASH.S: 1
+  MASH.C: 1
+
   # ==========================================================================
   # Certificate Management (Device-Side)
   # ==========================================================================
 
-  D.CERT.RENEWAL: true           # Device supports certificate renewal
-  D.CERT.IN_SESSION_RENEWAL: true # Renewal without TLS reconnection
-  D.CERT.EXPIRY_HANDLING: true   # Proper handling of expired certificates
-  D.CERT.GRACE_PERIOD: 7         # Days to accept connections after expiry
-  D.EVENT.CERT_EXPIRING: true    # Sends notification when cert near expiry
+  MASH.S.CERT.RENEWAL: true           # Device supports certificate renewal
+  MASH.S.CERT.IN_SESSION_RENEWAL: true # Renewal without TLS reconnection
+  MASH.S.CERT.EXPIRY_HANDLING: true   # Proper handling of expired certificates
+  MASH.S.CERT.GRACE_PERIOD: 7         # Days to accept connections after expiry
+  MASH.S.EVENT.CERT_EXPIRING: true    # Sends notification when cert near expiry
 
   # ==========================================================================
   # Certificate Management (Controller-Side)
   # ==========================================================================
 
-  C.CERT.ZONE_CA: true           # Controller has Zone CA for signing
-  C.CERT.RENEWAL_INITIATE: true  # Controller can initiate renewal
-  C.CERT.AUTO_RENEWAL: false     # Automatic renewal (optional)
+  MASH.C.CERT.ZONE_CA: true           # Controller has Zone CA for signing
+  MASH.C.CERT.RENEWAL_INITIATE: true  # Controller can initiate renewal
+  MASH.C.CERT.AUTO_RENEWAL: false     # Automatic renewal (optional)
 
   # ==========================================================================
   # Pairing Request Mechanism (DEC-042)
@@ -51,21 +55,21 @@ items:
 # =============================================================================
 #
 # TC-CERT-RENEW-1 (Normal Renewal):
-#   - D.CERT.RENEWAL: true
-#   - C.CERT.ZONE_CA: true
+#   - MASH.S.CERT.RENEWAL: true
+#   - MASH.C.CERT.ZONE_CA: true
 #
 # TC-CERT-RENEW-2 (Session Continuity):
-#   - D.CERT.IN_SESSION_RENEWAL: true
+#   - MASH.S.CERT.IN_SESSION_RENEWAL: true
 #
 # TC-CERT-RENEW-3 (Expiry Warning):
-#   - D.EVENT.CERT_EXPIRING: true
+#   - MASH.S.EVENT.CERT_EXPIRING: true
 #
 # TC-CERT-RENEW-4 (Expired Certificate):
-#   - D.CERT.EXPIRY_HANDLING: true
-#   - D.CERT.GRACE_PERIOD: 0
+#   - MASH.S.CERT.EXPIRY_HANDLING: true
+#   - MASH.S.CERT.GRACE_PERIOD: 0
 #
 # TC-CERT-RENEW-5 (Grace Period):
-#   - D.CERT.GRACE_PERIOD: > 0
+#   - MASH.S.CERT.GRACE_PERIOD: > 0
 #
 # =============================================================================
 # Pairing Request Tests (DEC-042)
@@ -86,7 +90,7 @@ items:
 # TC-PAIR-004 (Deferred Commissioning Flow):
 #   - MASH.S.DISC.PAIRING_REQUEST: true
 #   - MASH.S.COMM.PAIRING_REQUEST: true
-#   - D.COMM.PASE: true
+#   - MASH.S.TRANS.PASE: true
 #
 # TC-PAIR-005 (Commissioned Device Ignores Pairing Requests):
 #   - MASH.S.DISC.PAIRING_REQUEST: true

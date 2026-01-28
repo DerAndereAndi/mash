@@ -225,6 +225,79 @@ func ValidatePICSStrict(pics *PICS) *ValidationResult {
 	return v.Validate(pics)
 }
 
+// ValidateOptions configures validation behavior.
+type ValidateOptions struct {
+	// Registry is the rule registry to use. If nil, uses legacy validation.
+	Registry *RuleRegistry
+	// MinSeverity filters violations to only those at or above this severity.
+	MinSeverity Severity
+	// DisabledRules is a list of rule IDs to disable.
+	DisabledRules []string
+	// EnabledCategories limits validation to rules in these categories.
+	// If empty, all categories are included.
+	EnabledCategories []string
+}
+
+// ValidateWithOptions validates a PICS using the rule registry system.
+func (v *Validator) ValidateWithOptions(pics *PICS, opts ValidateOptions) *ValidationResult {
+	result := &ValidationResult{Valid: true}
+
+	if opts.Registry == nil {
+		// Fall back to legacy validation
+		return v.Validate(pics)
+	}
+
+	// Apply disabled rules
+	for _, id := range opts.DisabledRules {
+		opts.Registry.Disable(id)
+	}
+
+	// Apply category filter
+	if len(opts.EnabledCategories) > 0 {
+		opts.Registry.DisableAll()
+		for _, cat := range opts.EnabledCategories {
+			opts.Registry.EnableCategory(cat)
+		}
+	}
+
+	// Run rules
+	violations := opts.Registry.RunRules(pics)
+
+	// Convert violations to ValidationResult
+	for _, v := range violations {
+		// Filter by severity
+		if v.Severity > opts.MinSeverity {
+			continue
+		}
+
+		line := 0
+		if len(v.LineNumbers) > 0 {
+			line = v.LineNumbers[0]
+		}
+
+		switch v.Severity {
+		case SeverityError:
+			result.AddError(v.RuleID, v.Message, line)
+		case SeverityWarning:
+			result.AddWarning(v.RuleID, v.Message, line)
+		default:
+			// Info level - add as warning to avoid breaking backward compatibility
+			result.AddWarning(v.RuleID, v.Message, line)
+		}
+	}
+
+	return result
+}
+
+// ValidateWithRegistry validates using all rules in the provided registry.
+func ValidateWithRegistry(pics *PICS, registry *RuleRegistry) *ValidationResult {
+	v := NewValidator()
+	return v.ValidateWithOptions(pics, ValidateOptions{
+		Registry:    registry,
+		MinSeverity: SeverityWarning,
+	})
+}
+
 // MeetsRequirements checks if the PICS meets a set of requirements.
 // Requirements are PICS codes that must be present and true.
 func MeetsRequirements(pics *PICS, requirements []string) (bool, []string) {

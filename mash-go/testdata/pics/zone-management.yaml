@@ -14,6 +14,9 @@ device:
 
 # PICS Items
 items:
+  # Protocol declaration
+  MASH.S: 1
+
   # ==========================================================================
   # Zone Support
   # ==========================================================================
@@ -145,7 +148,7 @@ items:
 #   - MASH.S.ZONE.MAX: 2
 #   - MASH.S.ZONE.GRID: true
 #   - MASH.S.ZONE.LOCAL: true
-#   - D.COMM.PASE: true
+#   - MASH.S.TRANS.PASE: true
 #
 # TC-ZTYPE-002 (Second Zone Different Type Success):
 #   - MASH.S.ZONE.MAX: 2

@@ -48,9 +48,9 @@ id: TC-PICS-001
 name: PICS Test
 description: Test with PICS requirements
 pics_requirements:
-  - D.COMM.SC
-  - C.COMM.SC
-  - D.ELEC.PHASES
+  - MASH.S.TRANS.SC
+  - MASH.C.TRANS.SC
+  - MASH.S.ELEC.PHASES
 steps:
   - action: test
 `
@@ -63,7 +63,7 @@ steps:
 		t.Fatalf("Expected 3 PICS requirements, got %d", len(tc.PICSRequirements))
 	}
 
-	expected := []string{"D.COMM.SC", "C.COMM.SC", "D.ELEC.PHASES"}
+	expected := []string{"MASH.S.TRANS.SC", "MASH.C.TRANS.SC", "MASH.S.ELEC.PHASES"}
 	for i, req := range tc.PICSRequirements {
 		if req != expected[i] {
 			t.Errorf("PICS requirement %d mismatch: expected %s, got %s", i, expected[i], req)
@@ -287,37 +287,37 @@ steps:
 func TestLoaderParsePICS(t *testing.T) {
 	pics := `
 # EVSE PICS file
-D.DI.TYPE.EVSE=true
-D.DI.SOFT.VERSION=true
-D.ELEC.PHASES=3
-D.ELEC.MAX_CURRENT=32000
-D.COMM.SC=true
-D.COMM.WINDOW_TIMEOUT=120
-D.EC.LIMIT.CONSUMPTION=true
-D.EC.FAILSAFE.DURATION=14400
+MASH.S.INFO=1
+MASH.S.ELEC=1
+MASH.S.ELEC.PHASES=3
+MASH.S.ELEC.MAX_CURRENT=32000
+MASH.S.TRANS.SC=1
+MASH.S.TRANS.WINDOW_TIMEOUT=120
+MASH.S.CTRL.LIMIT=1
+MASH.S.CTRL.FAILSAFE=14400
 `
 	pf, err := loader.ParsePICS([]byte(pics))
 	if err != nil {
 		t.Fatalf("Failed to parse PICS: %v", err)
 	}
 
-	// Check boolean item
-	if v, ok := pf.Items["D.DI.TYPE.EVSE"]; !ok || v != true {
-		t.Error("D.DI.TYPE.EVSE should be true")
+	// Check boolean item (1 is parsed as bool true)
+	if v, ok := pf.Items["MASH.S.INFO"]; !ok || v != true {
+		t.Errorf("MASH.S.INFO should be true, got %v", v)
 	}
 
 	// Check numeric item
-	if v, ok := pf.Items["D.ELEC.PHASES"]; !ok {
-		t.Error("D.ELEC.PHASES should exist")
+	if v, ok := pf.Items["MASH.S.ELEC.PHASES"]; !ok {
+		t.Error("MASH.S.ELEC.PHASES should exist")
 	} else if v != 3 {
-		t.Errorf("D.ELEC.PHASES should be 3, got %v", v)
+		t.Errorf("MASH.S.ELEC.PHASES should be 3, got %v", v)
 	}
 
 	// Check larger numeric item
-	if v, ok := pf.Items["D.ELEC.MAX_CURRENT"]; !ok {
-		t.Error("D.ELEC.MAX_CURRENT should exist")
+	if v, ok := pf.Items["MASH.S.ELEC.MAX_CURRENT"]; !ok {
+		t.Error("MASH.S.ELEC.MAX_CURRENT should exist")
 	} else if v != 32000 {
-		t.Errorf("D.ELEC.MAX_CURRENT should be 32000, got %v", v)
+		t.Errorf("MASH.S.ELEC.MAX_CURRENT should be 32000, got %v", v)
 	}
 }
 
@@ -326,9 +326,9 @@ func TestLoaderCheckPICS(t *testing.T) {
 	pf := &loader.PICSFile{
 		Name: "test",
 		Items: map[string]interface{}{
-			"D.COMM.SC":      true,
-			"D.ELEC.PHASES":  3,
-			"D.ELEC.ENABLED": false,
+			"MASH.S.TRANS.SC":     true,
+			"MASH.S.ELEC.PHASES":  3,
+			"MASH.S.ELEC.ENABLED": false,
 		},
 	}
 
@@ -339,27 +339,27 @@ func TestLoaderCheckPICS(t *testing.T) {
 	}{
 		{
 			name:         "all present and true",
-			requirements: []string{"D.COMM.SC"},
+			requirements: []string{"MASH.S.TRANS.SC"},
 			shouldMatch:  true,
 		},
 		{
 			name:         "numeric requirement exists",
-			requirements: []string{"D.ELEC.PHASES"},
+			requirements: []string{"MASH.S.ELEC.PHASES"},
 			shouldMatch:  true,
 		},
 		{
 			name:         "missing requirement",
-			requirements: []string{"D.NONEXISTENT"},
+			requirements: []string{"MASH.S.NONEXISTENT"},
 			shouldMatch:  false,
 		},
 		{
 			name:         "false boolean",
-			requirements: []string{"D.ELEC.ENABLED"},
+			requirements: []string{"MASH.S.ELEC.ENABLED"},
 			shouldMatch:  false,
 		},
 		{
 			name:         "mixed - one fails",
-			requirements: []string{"D.COMM.SC", "D.NONEXISTENT"},
+			requirements: []string{"MASH.S.TRANS.SC", "MASH.S.NONEXISTENT"},
 			shouldMatch:  false,
 		},
 		{

@@ -12,43 +12,46 @@ device:
   version: "1.0.0"
 
 # PICS Items
-# Format: CATEGORY.SUBCATEGORY.ITEM: value
+# Format: MASH.{S|C}.FEATURE.ITEM: value
 items:
+  # Protocol declaration
+  MASH.S: 1                       # Server/device side
+
   # Communication capabilities
-  D.COMM.SC: true         # Secure connection supported
-  D.COMM.PASE: true       # PASE commissioning supported
-  D.COMM.MDNS: true       # mDNS discovery supported
-  D.COMM.TLS13: true      # TLS 1.3 supported
+  MASH.S.TRANS.SC: true           # Secure connection supported
+  MASH.S.TRANS.PASE: true         # PASE commissioning supported
+  MASH.S.TRANS.MDNS: true         # mDNS discovery supported
+  MASH.S.TRANS.TLS13: true        # TLS 1.3 supported
 
   # Device Information
-  D.INFO.BASIC: true      # Basic device info supported
-  D.INFO.LOCATION: false  # Location info not supported
+  MASH.S.INFO.BASIC: true         # Basic device info supported
+  MASH.S.INFO.LOCATION: false     # Location info not supported
 
   # Electrical Configuration
-  D.ELEC.AC: true         # AC charging supported
-  D.ELEC.DC: false        # DC charging not supported
-  D.ELEC.PHASES: 3        # Three-phase support
-  D.ELEC.MAX_CURRENT: 32  # Maximum current in amps
-  D.ELEC.MAX_POWER: 22000 # Maximum power in watts
+  MASH.S.ELEC.AC: true            # AC charging supported
+  MASH.S.ELEC.DC: false           # DC charging not supported
+  MASH.S.ELEC.PHASES: 3           # Three-phase support
+  MASH.S.ELEC.MAX_CURRENT: 32     # Maximum current in amps
+  MASH.S.ELEC.MAX_POWER: 22000    # Maximum power in watts
 
   # Measurement capabilities
-  D.MEAS.POWER: true      # Power measurement supported
-  D.MEAS.ENERGY: true     # Energy measurement supported
-  D.MEAS.VOLTAGE: true    # Voltage measurement supported
-  D.MEAS.CURRENT: true    # Current measurement supported
-  D.MEAS.FREQUENCY: false # Frequency not measured
+  MASH.S.MEAS.POWER: true         # Power measurement supported
+  MASH.S.MEAS.ENERGY: true        # Energy measurement supported
+  MASH.S.MEAS.VOLTAGE: true       # Voltage measurement supported
+  MASH.S.MEAS.CURRENT: true       # Current measurement supported
+  MASH.S.MEAS.FREQUENCY: false    # Frequency not measured
 
   # Control capabilities
-  D.CTRL.LIMIT: true      # Power limiting supported
-  D.CTRL.SETPOINT: true   # Setpoint control supported
-  D.CTRL.SCHEDULE: false  # Schedule not supported locally
+  MASH.S.CTRL.LIMIT: true         # Power limiting supported
+  MASH.S.CTRL.SETPOINT: true      # Setpoint control supported
+  MASH.S.CTRL.SCHEDULE: false     # Schedule not supported locally
 
   # Charging Session
-  D.CHARGE.SESSION: true  # Session tracking supported
-  D.CHARGE.ISO15118: false # ISO 15118 not supported
-  D.CHARGE.PLUG_LOCK: true # Cable lock supported
+  MASH.S.CHRG.SESSION: true       # Session tracking supported
+  MASH.S.CHRG.ISO15118: false     # ISO 15118 not supported
+  MASH.S.CHRG.PLUG_LOCK: true     # Cable lock supported
 
   # Multi-zone support
-  D.ZONE.MAX: 3           # Maximum 3 zones supported
-  D.ZONE.GRID: true       # Grid zone supported (external/regulatory)
-  D.ZONE.LOCAL: true      # Local zone supported (local energy management)
+  MASH.S.ZONE.MAX: 3              # Maximum 3 zones supported
+  MASH.S.ZONE.GRID: true          # Grid zone supported (external/regulatory)
+  MASH.S.ZONE.LOCAL: true         # Local zone supported (local energy management)

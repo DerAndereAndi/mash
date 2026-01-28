@@ -1,14 +1,12 @@
 package loader
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
+	"github.com/mash-protocol/mash-go/pkg/pics"
 	"gopkg.in/yaml.v3"
 )
 
@@ -136,140 +134,21 @@ func LoadDirectoryRecursive(dir string) ([]*TestCase, error) {
 }
 
 // ParsePICS parses a PICS file from bytes.
-// Auto-detects format: YAML (with device/items sections) or legacy key=value format.
+// Uses pkg/pics for parsing.
 func ParsePICS(data []byte) (*PICSFile, error) {
-	// Auto-detect format: if it looks like YAML (has "items:" or "device:"), parse as YAML
-	if isYAMLFormat(data) {
-		return parsePICSYAML(data)
-	}
-	return parsePICSKeyValue(data)
-}
-
-// isYAMLFormat detects if the data appears to be YAML format.
-// Returns true if the content contains YAML structure markers like "items:" or "device:".
-func isYAMLFormat(data []byte) bool {
-	content := string(data)
-	// Look for YAML section markers (ignoring comments)
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		// Skip empty lines and comments
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		// Check for YAML section markers at root level (no indentation after trim)
-		if strings.HasPrefix(trimmed, "items:") || strings.HasPrefix(trimmed, "device:") {
-			return true
-		}
-		// If first non-comment line contains "=" it's likely key=value format
-		if strings.Contains(trimmed, "=") && !strings.Contains(trimmed, ":") {
-			return false
-		}
-	}
-	return false
-}
-
-// parsePICSYAML parses PICS data in YAML format.
-func parsePICSYAML(data []byte) (*PICSFile, error) {
-	var yamlFile picsYAMLFile
-	if err := yaml.Unmarshal(data, &yamlFile); err != nil {
+	p, err := pics.ParseBytes(data)
+	if err != nil {
 		return nil, &LoadError{
-			Message: "failed to parse YAML PICS",
+			Message: "failed to parse PICS",
 			Cause:   err,
 		}
 	}
-
-	pf := &PICSFile{
-		Device: yamlFile.Device,
-		Items:  yamlFile.Items,
-	}
-
-	// Ensure Items map is initialized
-	if pf.Items == nil {
-		pf.Items = make(map[string]interface{})
-	}
-
-	// Normalize integer types (YAML unmarshals numbers as int, but we want consistency)
-	for key, value := range pf.Items {
-		// YAML unmarshals integers directly as int, keep them as-is
-		// Float64 values stay as float64
-		// Booleans and strings stay as-is
-		_ = key
-		_ = value
-	}
-
-	return pf, nil
-}
-
-// parsePICSKeyValue parses PICS data in legacy key=value format.
-func parsePICSKeyValue(data []byte) (*PICSFile, error) {
-	pf := &PICSFile{
-		Items: make(map[string]interface{}),
-	}
-
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	lineNum := 0
-
-	for scanner.Scan() {
-		lineNum++
-		line := strings.TrimSpace(scanner.Text())
-
-		// Skip empty lines and comments
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		// Parse key=value
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			return nil, &LoadError{
-				Line:    lineNum,
-				Message: fmt.Sprintf("invalid PICS line: %s", line),
-			}
-		}
-
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
-
-		// Try to parse as boolean
-		if value == "true" {
-			pf.Items[key] = true
-			continue
-		}
-		if value == "false" {
-			pf.Items[key] = false
-			continue
-		}
-
-		// Try to parse as integer
-		if i, err := strconv.Atoi(value); err == nil {
-			pf.Items[key] = i
-			continue
-		}
-
-		// Try to parse as float
-		if f, err := strconv.ParseFloat(value, 64); err == nil {
-			pf.Items[key] = f
-			continue
-		}
-
-		// Store as string
-		pf.Items[key] = value
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, &LoadError{
-			Message: "failed to read PICS data",
-			Cause:   err,
-		}
-	}
-
-	return pf, nil
+	return picsToFile(p), nil
 }
 
 // LoadPICS loads a PICS file from disk.
 func LoadPICS(path string) (*PICSFile, error) {
-	data, err := os.ReadFile(path)
+	p, err := pics.ParseFile(path)
 	if err != nil {
 		return nil, &LoadError{
 			File:    path,
@@ -278,14 +157,7 @@ func LoadPICS(path string) (*PICSFile, error) {
 		}
 	}
 
-	pf, err := ParsePICS(data)
-	if err != nil {
-		if le, ok := err.(*LoadError); ok {
-			le.File = path
-			return nil, le
-		}
-		return nil, err
-	}
+	pf := picsToFile(p)
 
 	// Use filename as name if not set
 	if pf.Name == "" {
@@ -293,6 +165,38 @@ func LoadPICS(path string) (*PICSFile, error) {
 	}
 
 	return pf, nil
+}
+
+// picsToFile converts a pics.PICS to a PICSFile for backward compatibility.
+func picsToFile(p *pics.PICS) *PICSFile {
+	pf := &PICSFile{
+		Items: make(map[string]interface{}),
+	}
+
+	// Copy device metadata
+	if p.Device != nil {
+		pf.Device = PICSDevice{
+			Vendor:  p.Device.Vendor,
+			Product: p.Device.Product,
+			Model:   p.Device.Model,
+			Version: p.Device.Version,
+		}
+	}
+
+	// Copy entries to Items map
+	for _, entry := range p.Entries {
+		code := entry.Code.String()
+		// Convert Value to appropriate type
+		if entry.Value.IsBool() {
+			pf.Items[code] = entry.Value.Bool
+		} else if entry.Value.Int != 0 || entry.Value.Raw == "0" {
+			pf.Items[code] = int(entry.Value.Int)
+		} else {
+			pf.Items[code] = entry.Value.String
+		}
+	}
+
+	return pf
 }
 
 // CheckPICSRequirements checks if a PICS file satisfies the given requirements.
@@ -315,10 +219,10 @@ func CheckPICSRequirements(pf *PICSFile, requirements []string) bool {
 }
 
 // FilterTestCases returns test cases that match the given PICS file.
-func FilterTestCases(cases []*TestCase, pics *PICSFile) []*TestCase {
+func FilterTestCases(cases []*TestCase, picsFile *PICSFile) []*TestCase {
 	var result []*TestCase
 	for _, tc := range cases {
-		if CheckPICSRequirements(pics, tc.PICSRequirements) {
+		if CheckPICSRequirements(picsFile, tc.PICSRequirements) {
 			result = append(result, tc)
 		}
 	}
@@ -335,49 +239,49 @@ func ValidatePICS(pf *PICSFile) []*ValidationError {
 	var errors []*ValidationError
 
 	// Rule: V2X requires EMOB base support
-	if getBool(pf.Items, "D.EMOB.V2X") && !getBool(pf.Items, "D.EMOB.BASE") {
+	if getBool(pf.Items, "MASH.S.CTRL.F0A") && !getBool(pf.Items, "MASH.S.CTRL.F03") {
 		errors = append(errors, &ValidationError{
-			Field:   "D.EMOB.V2X",
-			Message: "V2X support requires D.EMOB.BASE to be true",
+			Field:   "MASH.S.CTRL.F0A",
+			Message: "V2X support (F0A) requires EMOB (F03) to be enabled",
 			Level:   ValidationLevelError,
 		})
 	}
 
-	// Rule: ChargingSession requires EMOB base support
-	if getBool(pf.Items, "D.CHARGE.SESSION") && !getBool(pf.Items, "D.EMOB.BASE") {
+	// Rule: ChargingSession requires CHRG feature
+	if getBool(pf.Items, "MASH.S.CHRG.SESSION") && !getBool(pf.Items, "MASH.S.CHRG") {
 		errors = append(errors, &ValidationError{
-			Field:   "D.CHARGE.SESSION",
-			Message: "Charging session support requires D.EMOB.BASE to be true",
+			Field:   "MASH.S.CHRG.SESSION",
+			Message: "Charging session support requires MASH.S.CHRG feature",
 			Level:   ValidationLevelError,
 		})
 	}
 
 	// Rule: Electrical feature requires phase count
-	if getBool(pf.Items, "D.ELEC.PRESENT") && !hasKey(pf.Items, "D.ELEC.PHASES") {
+	if getBool(pf.Items, "MASH.S.ELEC") && !hasKey(pf.Items, "MASH.S.ELEC.A01") {
 		errors = append(errors, &ValidationError{
-			Field:   "D.ELEC.PHASES",
-			Message: "Electrical feature (D.ELEC.PRESENT) requires D.ELEC.PHASES",
+			Field:   "MASH.S.ELEC.A01",
+			Message: "Electrical feature requires phaseCount attribute (A01)",
 			Level:   ValidationLevelError,
 		})
 	}
 
 	// Rule: Phase count must be 1-3
-	if phases, ok := getInt(pf.Items, "D.ELEC.PHASES"); ok {
+	if phases, ok := getInt(pf.Items, "MASH.S.ELEC.A01"); ok {
 		if phases < 1 || phases > 3 {
 			errors = append(errors, &ValidationError{
-				Field:   "D.ELEC.PHASES",
-				Message: fmt.Sprintf("D.ELEC.PHASES must be 1-3, got %d", phases),
+				Field:   "MASH.S.ELEC.A01",
+				Message: fmt.Sprintf("phaseCount must be 1-3, got %d", phases),
 				Level:   ValidationLevelError,
 			})
 		}
 	}
 
 	// Rule: Max zones must be 1-5
-	if zones, ok := getInt(pf.Items, "D.ZONE.MAX"); ok {
+	if zones, ok := getInt(pf.Items, "MASH.S.ZONE.MAX"); ok {
 		if zones < 1 || zones > 5 {
 			errors = append(errors, &ValidationError{
-				Field:   "D.ZONE.MAX",
-				Message: fmt.Sprintf("D.ZONE.MAX must be 1-5, got %d", zones),
+				Field:   "MASH.S.ZONE.MAX",
+				Message: fmt.Sprintf("max zones must be 1-5, got %d", zones),
 				Level:   ValidationLevelError,
 			})
 		}
@@ -391,6 +295,10 @@ func getBool(items map[string]interface{}, key string) bool {
 	if v, ok := items[key]; ok {
 		if b, ok := v.(bool); ok {
 			return b
+		}
+		// Also check for integer 1
+		if i, ok := v.(int); ok {
+			return i != 0
 		}
 	}
 	return false

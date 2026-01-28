@@ -448,6 +448,261 @@ MASH.S.CTRL=1
 	}
 }
 
+func TestDetectFormat_KeyValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "simple key=value",
+			input: "MASH.S=1\nMASH.S.VERSION=1",
+		},
+		{
+			name: "with comments",
+			input: `# Comment
+MASH.S=1
+# Another comment
+MASH.S.CTRL=1`,
+		},
+		{
+			name: "realistic PICS",
+			input: `# MASH PICS File
+MASH.S=1
+MASH.S.VERSION=1
+MASH.S.CTRL=1
+MASH.S.CTRL.A01=1  # deviceType`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format := detectFormat([]byte(tt.input))
+			if format != FormatKeyValue {
+				t.Errorf("detectFormat() = %v, want FormatKeyValue", format)
+			}
+		})
+	}
+}
+
+func TestDetectFormat_YAML_Items(t *testing.T) {
+	input := `# PICS YAML format
+items:
+  MASH.S.TRANS.SC: true
+  MASH.S.ELEC.AC: true`
+
+	format := detectFormat([]byte(input))
+	if format != FormatYAML {
+		t.Errorf("detectFormat() = %v, want FormatYAML", format)
+	}
+}
+
+func TestDetectFormat_YAML_Device(t *testing.T) {
+	input := `device:
+  vendor: "Example Corp"
+  product: "Smart Charger"
+items:
+  MASH.S.TRANS.SC: true`
+
+	format := detectFormat([]byte(input))
+	if format != FormatYAML {
+		t.Errorf("detectFormat() = %v, want FormatYAML", format)
+	}
+}
+
+func TestDetectFormat_YAML_IndentedContent(t *testing.T) {
+	input := `# YAML with indentation
+device:
+  vendor: "Test"
+  product: "Test"`
+
+	format := detectFormat([]byte(input))
+	if format != FormatYAML {
+		t.Errorf("detectFormat() = %v, want FormatYAML", format)
+	}
+}
+
+func TestDetectFormat_Empty(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"empty string", ""},
+		{"only whitespace", "   \n   \n"},
+		{"only comments", "# comment\n# another"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format := detectFormat([]byte(tt.input))
+			if format != FormatKeyValue {
+				t.Errorf("detectFormat() = %v, want FormatKeyValue (default)", format)
+			}
+		})
+	}
+}
+
+func TestDetectFormat_MixedIndicators(t *testing.T) {
+	// First non-comment line determines format
+	tests := []struct {
+		name     string
+		input    string
+		expected Format
+	}{
+		{
+			name:     "key=value first",
+			input:    "# comment\nMASH.S=1\nitems:",
+			expected: FormatKeyValue,
+		},
+		{
+			name:     "items: first",
+			input:    "# comment\nitems:\n  MASH.S.TRANS.SC: true",
+			expected: FormatYAML,
+		},
+		{
+			name:     "device: first",
+			input:    "# comment\ndevice:\n  vendor: test",
+			expected: FormatYAML,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format := detectFormat([]byte(tt.input))
+			if format != tt.expected {
+				t.Errorf("detectFormat() = %v, want %v", format, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParse_AutoDetectKeyValue(t *testing.T) {
+	input := `MASH.S=1
+MASH.S.VERSION=1
+MASH.S.CTRL=1`
+
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	if pics.Format != FormatKeyValue {
+		t.Errorf("Format = %v, want FormatKeyValue", pics.Format)
+	}
+
+	if !pics.Has("MASH.S") {
+		t.Error("expected MASH.S to be present")
+	}
+
+	if !pics.HasFeature("CTRL") {
+		t.Error("expected CTRL feature to be present")
+	}
+}
+
+func TestParse_AutoDetectYAML(t *testing.T) {
+	input := `device:
+  vendor: "Test Corp"
+items:
+  MASH.S: 1
+  MASH.S.CTRL: 1`
+
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	if pics.Format != FormatYAML {
+		t.Errorf("Format = %v, want FormatYAML", pics.Format)
+	}
+
+	if !pics.Has("MASH.S") {
+		t.Error("expected MASH.S to be present")
+	}
+
+	if pics.Device == nil {
+		t.Error("expected Device to be non-nil")
+	}
+
+	if pics.Device.Vendor != "Test Corp" {
+		t.Errorf("Device.Vendor = %s, want Test Corp", pics.Device.Vendor)
+	}
+}
+
+func TestParseWithOptions_ExplicitFormat(t *testing.T) {
+	// YAML content but force key=value parsing (should fail or behave differently)
+	yamlInput := `items:
+  MASH.S: 1`
+
+	parser := NewParser()
+
+	// Auto-detect should work
+	pics, err := parser.ParseStringWithOptions(yamlInput, ParseOptions{Format: FormatAuto})
+	if err != nil {
+		t.Fatalf("Auto-detect failed: %v", err)
+	}
+	if pics.Format != FormatYAML {
+		t.Errorf("Auto-detect Format = %v, want FormatYAML", pics.Format)
+	}
+
+	// Force key-value format
+	_, err = parser.ParseStringWithOptions(yamlInput, ParseOptions{Format: FormatKeyValue})
+	// This should either fail or produce different results
+	// since YAML content doesn't have = signs
+	if err == nil {
+		// It parsed, but probably incorrectly - that's expected when forcing wrong format
+		t.Log("Forcing key-value format on YAML content succeeded (produces empty/incorrect results)")
+	}
+}
+
+func TestParseBytes(t *testing.T) {
+	data := []byte("MASH.S=1\nMASH.S.CTRL=1")
+
+	pics, err := ParseBytes(data)
+	if err != nil {
+		t.Fatalf("ParseBytes failed: %v", err)
+	}
+
+	if !pics.Has("MASH.S") {
+		t.Error("expected MASH.S to be present")
+	}
+}
+
+func TestParseFile_SourceFile(t *testing.T) {
+	// Parse an actual file to verify SourceFile is set
+	pics, err := ParseFile("../../testdata/pics/minimal-device-pairing.pics")
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	if pics.SourceFile != "../../testdata/pics/minimal-device-pairing.pics" {
+		t.Errorf("SourceFile = %s, want testdata path", pics.SourceFile)
+	}
+}
+
+func TestParseFile_YAML(t *testing.T) {
+	// Parse an actual YAML file
+	pics, err := ParseFile("../../testdata/pics/ev-charger.yaml")
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	if pics.Format != FormatYAML {
+		t.Errorf("Format = %v, want FormatYAML", pics.Format)
+	}
+
+	if pics.Device == nil {
+		t.Error("expected Device to be non-nil")
+	}
+
+	if pics.Device.Vendor != "Example Corp" {
+		t.Errorf("Device.Vendor = %s, want Example Corp", pics.Device.Vendor)
+	}
+
+	// Check that entries are present
+	if !pics.Has("MASH.S.TRANS.SC") {
+		t.Error("expected MASH.S.TRANS.SC to be present")
+	}
+}
+
 func BenchmarkParsePICS(b *testing.B) {
 	// A realistic PICS file content
 	input := strings.Repeat(`

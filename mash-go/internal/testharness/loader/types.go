@@ -84,15 +84,9 @@ type PICSFile struct {
 	Device PICSDevice `yaml:"device"`
 
 	// Items maps PICS identifiers to their values.
-	// Boolean items: D.COMM.SC=true
-	// Numeric items: D.ELEC.MAX_CURRENT=32000
+	// Boolean items: MASH.S.TRANS.SC=true
+	// Numeric items: MASH.S.ELEC.MAX_CURRENT=32000
 	Items map[string]interface{} `yaml:"items"`
-}
-
-// picsYAMLFile is used for YAML unmarshaling to detect format.
-type picsYAMLFile struct {
-	Device PICSDevice             `yaml:"device"`
-	Items  map[string]interface{} `yaml:"items"`
 }
 
 // ValidationLevel indicates the severity of a validation issue.

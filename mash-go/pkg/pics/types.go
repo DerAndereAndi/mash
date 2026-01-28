@@ -5,6 +5,43 @@ import (
 	"strings"
 )
 
+// Format represents the PICS file format.
+type Format int
+
+const (
+	// FormatAuto automatically detects the format.
+	FormatAuto Format = iota
+	// FormatKeyValue is the key=value format (e.g., MASH.S=1).
+	FormatKeyValue
+	// FormatYAML is the YAML format with device: and items: sections.
+	FormatYAML
+)
+
+func (f Format) String() string {
+	switch f {
+	case FormatAuto:
+		return "auto"
+	case FormatKeyValue:
+		return "key-value"
+	case FormatYAML:
+		return "yaml"
+	default:
+		return fmt.Sprintf("unknown(%d)", f)
+	}
+}
+
+// DeviceMetadata contains device identification from YAML PICS files.
+type DeviceMetadata struct {
+	// Vendor is the device manufacturer.
+	Vendor string
+	// Product is the product name.
+	Product string
+	// Model is the model identifier.
+	Model string
+	// Version is the firmware/software version.
+	Version string
+}
+
 // Side represents whether the PICS is for a device (server) or controller (client).
 type Side string
 
@@ -137,6 +174,15 @@ type PICS struct {
 
 	// Features lists all features that are enabled.
 	Features []string
+
+	// Device contains optional device metadata (from YAML format).
+	Device *DeviceMetadata
+
+	// Format is the detected or specified file format.
+	Format Format
+
+	// SourceFile is the path to the source file (if parsed from file).
+	SourceFile string
 }
 
 // NewPICS creates a new empty PICS.

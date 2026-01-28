@@ -8,12 +8,12 @@ import (
 
 // TestPICSValidation_V2XRequiresEMOB tests that V2X implies EMOB support.
 func TestPICSValidation_V2XRequiresEMOB(t *testing.T) {
-	// V2X (bidirectional EV) requires EMOB (e-mobility) base support
+	// V2X (F0A) requires EMOB (F03) base support
 	pf := &loader.PICSFile{
 		Name: "test",
 		Items: map[string]interface{}{
-			"D.EMOB.V2X": true,
-			// Missing D.EMOB.BASE
+			"MASH.S.CTRL.F0A": true,
+			// Missing MASH.S.CTRL.F03
 		},
 	}
 
@@ -22,17 +22,17 @@ func TestPICSValidation_V2XRequiresEMOB(t *testing.T) {
 		t.Error("Expected validation error: V2X requires EMOB")
 	}
 
-	// Should pass when EMOB is present
-	pf.Items["D.EMOB.BASE"] = true
+	// Should pass when EMOB (F03) is present
+	pf.Items["MASH.S.CTRL.F03"] = true
 	errors = loader.ValidatePICS(pf)
 	hasV2XError := false
 	for _, e := range errors {
-		if e.Field == "D.EMOB.V2X" {
+		if e.Field == "MASH.S.CTRL.F0A" {
 			hasV2XError = true
 		}
 	}
 	if hasV2XError {
-		t.Error("V2X validation should pass when EMOB.BASE is present")
+		t.Error("V2X validation should pass when EMOB (F03) is present")
 	}
 }
 
@@ -42,33 +42,33 @@ func TestPICSValidation_FeatureImpliesAttributes(t *testing.T) {
 	pf := &loader.PICSFile{
 		Name: "test",
 		Items: map[string]interface{}{
-			"D.ELEC.PRESENT": true,
-			// Missing D.ELEC.PHASES
+			"MASH.S.ELEC": true,
+			// Missing MASH.S.ELEC.A01 (phaseCount)
 		},
 	}
 
 	errors := loader.ValidatePICS(pf)
 	hasPhaseError := false
 	for _, e := range errors {
-		if e.Field == "D.ELEC.PHASES" {
+		if e.Field == "MASH.S.ELEC.A01" {
 			hasPhaseError = true
 		}
 	}
 	if !hasPhaseError {
-		t.Error("Expected validation error: ELEC feature requires PHASES")
+		t.Error("Expected validation error: ELEC feature requires phaseCount (A01)")
 	}
 
 	// Should pass when phases is specified
-	pf.Items["D.ELEC.PHASES"] = 3
+	pf.Items["MASH.S.ELEC.A01"] = 3
 	errors = loader.ValidatePICS(pf)
 	hasPhaseError = false
 	for _, e := range errors {
-		if e.Field == "D.ELEC.PHASES" {
+		if e.Field == "MASH.S.ELEC.A01" {
 			hasPhaseError = true
 		}
 	}
 	if hasPhaseError {
-		t.Error("PHASES validation should pass when specified")
+		t.Error("phaseCount validation should pass when specified")
 	}
 }
 
@@ -82,36 +82,36 @@ func TestPICSValidation_NumericRanges(t *testing.T) {
 	}{
 		{
 			name:        "phases valid 1",
-			items:       map[string]interface{}{"D.ELEC.PHASES": 1},
+			items:       map[string]interface{}{"MASH.S.ELEC.A01": 1},
 			shouldError: false,
 		},
 		{
 			name:        "phases valid 3",
-			items:       map[string]interface{}{"D.ELEC.PHASES": 3},
+			items:       map[string]interface{}{"MASH.S.ELEC.A01": 3},
 			shouldError: false,
 		},
 		{
 			name:        "phases invalid 0",
-			items:       map[string]interface{}{"D.ELEC.PHASES": 0},
+			items:       map[string]interface{}{"MASH.S.ELEC.A01": 0},
 			shouldError: true,
-			errorField:  "D.ELEC.PHASES",
+			errorField:  "MASH.S.ELEC.A01",
 		},
 		{
 			name:        "phases invalid 4",
-			items:       map[string]interface{}{"D.ELEC.PHASES": 4},
+			items:       map[string]interface{}{"MASH.S.ELEC.A01": 4},
 			shouldError: true,
-			errorField:  "D.ELEC.PHASES",
+			errorField:  "MASH.S.ELEC.A01",
 		},
 		{
 			name:        "max zones valid",
-			items:       map[string]interface{}{"D.ZONE.MAX": 5},
+			items:       map[string]interface{}{"MASH.S.ZONE.MAX": 5},
 			shouldError: false,
 		},
 		{
 			name:        "max zones invalid",
-			items:       map[string]interface{}{"D.ZONE.MAX": 10},
+			items:       map[string]interface{}{"MASH.S.ZONE.MAX": 10},
 			shouldError: true,
-			errorField:  "D.ZONE.MAX",
+			errorField:  "MASH.S.ZONE.MAX",
 		},
 	}
 
@@ -148,15 +148,15 @@ func TestPICSValidation_ValidFile(t *testing.T) {
 			Version: "1.0.0",
 		},
 		Items: map[string]interface{}{
-			"D.COMM.SC":       true,
-			"D.COMM.TLS13":    true,
-			"D.ELEC.PRESENT":  true,
-			"D.ELEC.PHASES":   3,
-			"D.ELEC.AC":       true,
-			"D.MEAS.POWER":    true,
-			"D.ZONE.MAX":      3,
-			"D.EMOB.BASE":     true,
-			"D.CHARGE.SESSION": true,
+			"MASH.S.TRANS.SC":    true,
+			"MASH.S.TRANS.TLS13": true,
+			"MASH.S.ELEC":        true,
+			"MASH.S.ELEC.A01":    3,
+			"MASH.S.ELEC.AC":     true,
+			"MASH.S.MEAS.POWER":  true,
+			"MASH.S.ZONE.MAX":    3,
+			"MASH.S.CHRG":        true,
+			"MASH.S.CHRG.SESSION": true,
 		},
 	}
 
@@ -173,13 +173,13 @@ func TestPICSValidation_ErrorLevels(t *testing.T) {
 	pf := &loader.PICSFile{
 		Name: "test",
 		Items: map[string]interface{}{
-			"D.ELEC.PHASES": 0, // Error: invalid range
+			"MASH.S.ELEC.A01": 0, // Error: invalid range
 		},
 	}
 
 	errors := loader.ValidatePICS(pf)
 	for _, e := range errors {
-		if e.Field == "D.ELEC.PHASES" {
+		if e.Field == "MASH.S.ELEC.A01" {
 			if e.Level != loader.ValidationLevelError {
 				t.Errorf("Phase range violation should be Level=Error, got %s", e.Level)
 			}
@@ -206,24 +206,24 @@ func TestPICSValidation_NilAndEmpty(t *testing.T) {
 	}
 }
 
-// TestPICSValidation_ChargingSessionRequiresEMOB tests ChargingSession implies EMOB.
-func TestPICSValidation_ChargingSessionRequiresEMOB(t *testing.T) {
+// TestPICSValidation_ChargingSessionRequiresCHRG tests ChargingSession implies CHRG feature.
+func TestPICSValidation_ChargingSessionRequiresCHRG(t *testing.T) {
 	pf := &loader.PICSFile{
 		Name: "test",
 		Items: map[string]interface{}{
-			"D.CHARGE.SESSION": true,
-			// Missing D.EMOB.BASE
+			"MASH.S.CHRG.SESSION": true,
+			// Missing MASH.S.CHRG
 		},
 	}
 
 	errors := loader.ValidatePICS(pf)
 	hasError := false
 	for _, e := range errors {
-		if e.Field == "D.CHARGE.SESSION" {
+		if e.Field == "MASH.S.CHRG.SESSION" {
 			hasError = true
 		}
 	}
 	if !hasError {
-		t.Error("Expected validation error: CHARGE.SESSION requires EMOB.BASE")
+		t.Error("Expected validation error: CHRG.SESSION requires CHRG feature")
 	}
 }
