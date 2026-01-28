@@ -29,6 +29,8 @@ vendor/
 .DS_Store
 Thumbs.db
 
-# Runtime state and identity files (generated per-instance)
+# Runtime state and data files (generated per-instance)
 cmd/*/state.json
 cmd/*/identity/
+cmd/*/zones/
+cmd/*/controller/
