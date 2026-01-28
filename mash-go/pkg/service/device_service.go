@@ -423,6 +423,9 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 	// Initialize renewal handler for certificate renewal support
 	zoneSession.InitializeRenewalHandler(s.buildDeviceIdentity())
 
+	// Set callback to persist certificate after renewal
+	zoneSession.SetOnCertRenewalSuccess(s.handleCertRenewalSuccess)
+
 	// Store the session
 	s.mu.Lock()
 	s.zoneSessions[targetZoneID] = zoneSession
@@ -528,6 +531,9 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 
 	// Initialize renewal handler for certificate renewal support
 	zoneSession.InitializeRenewalHandler(s.buildDeviceIdentity())
+
+	// Set callback to persist certificate after renewal
+	zoneSession.SetOnCertRenewalSuccess(s.handleCertRenewalSuccess)
 
 	// Store the session
 	s.mu.Lock()
@@ -730,6 +736,56 @@ func (s *DeviceService) handleZoneSessionClose(zoneID string) {
 
 	// Notify disconnect
 	s.HandleZoneDisconnect(zoneID)
+}
+
+// handleCertRenewalSuccess persists a renewed certificate to the cert store.
+// This is called by the ZoneSession after successful certificate renewal.
+func (s *DeviceService) handleCertRenewalSuccess(zoneID string, handler *DeviceRenewalHandler) {
+	s.mu.RLock()
+	certStore := s.certStore
+	// Get ZoneType from connectedZones (source of truth for zone metadata)
+	zoneType := cert.ZoneTypeLocal // default
+	if cz, exists := s.connectedZones[zoneID]; exists {
+		zoneType = cz.Type
+	}
+	s.mu.RUnlock()
+
+	if certStore == nil {
+		s.debugLog("handleCertRenewalSuccess: no cert store, skipping persistence")
+		return
+	}
+
+	// Get the new certificate and key from the handler
+	newCert := handler.ActiveCert()
+	newKey := handler.ActiveKey()
+	if newCert == nil || newKey == nil {
+		s.debugLog("handleCertRenewalSuccess: no active cert/key in handler")
+		return
+	}
+
+	// Create new operational cert
+	opCert := &cert.OperationalCert{
+		Certificate: newCert,
+		PrivateKey:  newKey,
+		ZoneID:      zoneID,
+		ZoneType:    zoneType,
+	}
+
+	// Store and persist
+	if err := certStore.SetOperationalCert(opCert); err != nil {
+		s.debugLog("handleCertRenewalSuccess: failed to store cert", "error", err)
+		return
+	}
+
+	if err := certStore.Save(); err != nil {
+		s.debugLog("handleCertRenewalSuccess: failed to save cert store", "error", err)
+		return
+	}
+
+	s.debugLog("handleCertRenewalSuccess: certificate renewed and persisted",
+		"zoneID", zoneID,
+		"subject", newCert.Subject.CommonName,
+		"notAfter", newCert.NotAfter)
 }
 
 // GetZoneSession returns the session for a connected zone.

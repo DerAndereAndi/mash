@@ -39,7 +39,8 @@ type ZoneSession struct {
 	sender *TransportRequestSender
 
 	// Renewal handling
-	renewalHandler *DeviceRenewalHandler
+	renewalHandler         *DeviceRenewalHandler
+	onCertRenewalSuccess   func(zoneID string, handler *DeviceRenewalHandler)
 }
 
 // NewZoneSession creates a new zone session.
@@ -352,12 +353,17 @@ func (s *ZoneSession) handleRenewalMessage(data []byte, handler *DeviceRenewalHa
 	}
 
 	var resp any
+	var installSuccess bool
 
 	switch m := msg.(type) {
 	case *commissioning.CertRenewalRequest:
 		resp, err = handler.HandleRenewalRequest(m)
 	case *commissioning.CertRenewalInstall:
 		resp, err = handler.HandleCertInstall(m)
+		// Check if installation was successful
+		if ack, ok := resp.(*commissioning.CertRenewalAck); ok && ack.Status == commissioning.RenewalStatusSuccess {
+			installSuccess = true
+		}
 	default:
 		// Unknown renewal message type
 		return
@@ -374,6 +380,18 @@ func (s *ZoneSession) handleRenewalMessage(data []byte, handler *DeviceRenewalHa
 	}
 
 	s.conn.Send(respData)
+
+	// Notify callback after successful certificate installation
+	if installSuccess {
+		s.mu.RLock()
+		callback := s.onCertRenewalSuccess
+		zoneID := s.zoneID
+		s.mu.RUnlock()
+
+		if callback != nil {
+			callback(zoneID, handler)
+		}
+	}
 }
 
 // isRenewalMessage checks if data is a renewal message (MsgType 30-33).
@@ -401,6 +419,14 @@ func (s *ZoneSession) RenewalHandler() *DeviceRenewalHandler {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.renewalHandler
+}
+
+// SetOnCertRenewalSuccess sets a callback to be invoked when certificate renewal succeeds.
+// The callback receives the zone ID and the renewal handler (to access the new cert/key).
+func (s *ZoneSession) SetOnCertRenewalSuccess(callback func(zoneID string, handler *DeviceRenewalHandler)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onCertRenewalSuccess = callback
 }
 
 // ============================================================================

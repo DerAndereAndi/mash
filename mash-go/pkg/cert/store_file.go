@@ -2,7 +2,6 @@ package cert
 
 import (
 	"crypto/x509"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -219,12 +218,6 @@ func (s *FileStore) Load() error {
 	return nil
 }
 
-// zoneMetadata stores zone-specific metadata in JSON.
-type zoneMetadata struct {
-	ZoneID   string   `json:"zone_id"`
-	ZoneType ZoneType `json:"zone_type"`
-}
-
 func (s *FileStore) saveOperationalCert(zoneID string, opCert *OperationalCert) error {
 	dir := filepath.Join(s.baseDir, "zones", zoneID)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -249,20 +242,6 @@ func (s *FileStore) saveOperationalCert(zoneID string, opCert *OperationalCert) 
 		if err := WriteCertFile(caPath, opCert.ZoneCACert); err != nil {
 			return err
 		}
-	}
-
-	// Save metadata
-	meta := zoneMetadata{
-		ZoneID:   zoneID,
-		ZoneType: opCert.ZoneType,
-	}
-	metaPath := filepath.Join(dir, "zone.json")
-	data, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(metaPath, data, 0644); err != nil {
-		return err
 	}
 
 	return nil
@@ -292,22 +271,12 @@ func (s *FileStore) loadOperationalCert(zoneID string) (*OperationalCert, error)
 		return nil, err
 	}
 
-	// Load metadata
-	meta := zoneMetadata{}
-	metaPath := filepath.Join(dir, "zone.json")
-	data, err := os.ReadFile(metaPath)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return nil, err
-	}
-
+	// Note: ZoneType is not stored in cert store - caller sets it from state.json
 	return &OperationalCert{
 		Certificate: cert,
 		PrivateKey:  key,
 		ZoneID:      zoneID,
-		ZoneType:    meta.ZoneType,
+		ZoneType:    0, // Unknown - caller should set from state.json
 		ZoneCACert:  zoneCACert,
 	}, nil
 }

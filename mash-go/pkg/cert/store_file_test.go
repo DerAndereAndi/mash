@@ -89,9 +89,7 @@ func TestFileStore(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(zoneDir, "zone-ca.pem")); err != nil {
 			t.Errorf("zone-ca.pem not found: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(zoneDir, "zone.json")); err != nil {
-			t.Errorf("zone.json not found: %v", err)
-		}
+		// Note: zone.json is no longer stored - ZoneType comes from state.json
 
 		// Load into new store
 		store2 := NewFileStore(dir)
@@ -106,8 +104,9 @@ func TestFileStore(t *testing.T) {
 		if got.ZoneID != "zone-1" {
 			t.Errorf("ZoneID = %q, want %q", got.ZoneID, "zone-1")
 		}
-		if got.ZoneType != ZoneTypeLocal {
-			t.Errorf("ZoneType = %v, want %v", got.ZoneType, ZoneTypeLocal)
+		// Note: ZoneType is 0 after loading - caller should set from state.json
+		if got.ZoneType != 0 {
+			t.Errorf("ZoneType = %v, want 0 (caller sets from state.json)", got.ZoneType)
 		}
 		if got.ZoneCACert == nil {
 			t.Error("ZoneCACert should not be nil")
