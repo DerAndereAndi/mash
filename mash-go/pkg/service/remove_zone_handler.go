@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
@@ -56,6 +57,25 @@ func CallerZoneIDFromContext(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+// callerZoneTypeKey is the context key for storing the caller's zone type.
+type callerZoneTypeKey struct{}
+
+// ContextWithCallerZoneType returns a new context with the caller's zone type.
+func ContextWithCallerZoneType(ctx context.Context, zoneType cert.ZoneType) context.Context {
+	return context.WithValue(ctx, callerZoneTypeKey{}, zoneType)
+}
+
+// CallerZoneTypeFromContext extracts the caller's zone type from the context.
+// Returns 0 (invalid) if not set.
+func CallerZoneTypeFromContext(ctx context.Context) cert.ZoneType {
+	if v := ctx.Value(callerZoneTypeKey{}); v != nil {
+		if zt, ok := v.(cert.ZoneType); ok {
+			return zt
+		}
+	}
+	return 0
 }
 
 // makeRemoveZoneHandler creates a command handler for the RemoveZone command.

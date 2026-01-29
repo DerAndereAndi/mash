@@ -433,6 +433,13 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 	zoneSession := NewZoneSession(targetZoneID, framedConn, s.device)
 	zoneSession.SetLogger(s.logger)
 
+	// Set zone type from connected zone metadata
+	s.mu.RLock()
+	if cz, exists := s.connectedZones[targetZoneID]; exists {
+		zoneSession.SetZoneType(cz.Type)
+	}
+	s.mu.RUnlock()
+
 	// Set protocol logger if configured
 	if s.protocolLogger != nil {
 		connID := generateConnectionID()
@@ -584,6 +591,7 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// Create zone session for this connection
 	zoneSession := NewZoneSession(zoneID, framedConn, s.device)
 	zoneSession.SetLogger(s.logger)
+	zoneSession.SetZoneType(cert.ZoneTypeLocal)
 
 	// Set protocol logger if configured
 	if s.protocolLogger != nil {

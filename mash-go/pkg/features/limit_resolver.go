@@ -1,0 +1,278 @@
+package features
+
+import (
+	"context"
+	"log"
+	"sync"
+	"time"
+
+	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/duration"
+	"github.com/mash-protocol/mash-go/pkg/zone"
+)
+
+// LimitResolver tracks per-zone limits and resolves the effective limit
+// using "most restrictive wins" semantics. It manages duration timers
+// per zone and updates the EnergyControl feature attributes when limits change.
+//
+// Context extraction functions are injected as fields to avoid import cycles
+// with pkg/service.
+type LimitResolver struct {
+	mu sync.Mutex
+
+	ec *EnergyControl
+
+	consumptionLimits *zone.MultiZoneValue
+	productionLimits  *zone.MultiZoneValue
+
+	timers       *duration.Manager
+	zoneIndexMap map[string]uint8
+	indexZoneMap map[uint8]string
+	nextIndex    uint8
+
+	// Injected context extractors (avoids import cycle with pkg/service).
+	ZoneIDFromContext   func(ctx context.Context) string
+	ZoneTypeFromContext func(ctx context.Context) cert.ZoneType
+}
+
+// NewLimitResolver creates a new LimitResolver for the given EnergyControl feature.
+func NewLimitResolver(ec *EnergyControl) *LimitResolver {
+	lr := &LimitResolver{
+		ec:                ec,
+		consumptionLimits: zone.NewMultiZoneValue(),
+		productionLimits:  zone.NewMultiZoneValue(),
+		timers:            duration.NewManager(),
+		zoneIndexMap:      make(map[string]uint8),
+		indexZoneMap:      make(map[uint8]string),
+	}
+
+	lr.timers.OnExpiry(lr.handleTimerExpiry)
+
+	return lr
+}
+
+// Register wires the resolver's handlers into the EnergyControl feature.
+func (lr *LimitResolver) Register() {
+	lr.ec.OnSetLimit(lr.HandleSetLimit)
+	lr.ec.OnClearLimit(lr.HandleClearLimit)
+}
+
+// HandleSetLimit handles a SetLimit command from a zone.
+func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest) SetLimitResponse {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+
+	// Extract zone identity from context
+	zoneID := ""
+	if lr.ZoneIDFromContext != nil {
+		zoneID = lr.ZoneIDFromContext(ctx)
+	}
+	if zoneID == "" {
+		reason := LimitRejectInvalidValue
+		return SetLimitResponse{
+			Applied:      false,
+			RejectReason: &reason,
+			ControlState: lr.ec.ControlState(),
+		}
+	}
+
+	var zoneType cert.ZoneType
+	if lr.ZoneTypeFromContext != nil {
+		zoneType = lr.ZoneTypeFromContext(ctx)
+	}
+
+	// Validate negative values
+	if req.ConsumptionLimit != nil && *req.ConsumptionLimit < 0 {
+		reason := LimitRejectInvalidValue
+		return SetLimitResponse{
+			Applied:      false,
+			RejectReason: &reason,
+			ControlState: lr.ec.ControlState(),
+		}
+	}
+	if req.ProductionLimit != nil && *req.ProductionLimit < 0 {
+		reason := LimitRejectInvalidValue
+		return SetLimitResponse{
+			Applied:      false,
+			RejectReason: &reason,
+			ControlState: lr.ec.ControlState(),
+		}
+	}
+
+	// Check override state
+	if lr.ec.IsOverride() {
+		reason := LimitRejectDeviceOverride
+		return SetLimitResponse{
+			Applied:      false,
+			RejectReason: &reason,
+			ControlState: ControlStateOverride,
+		}
+	}
+
+	// Both nil = deactivate this zone's limits
+	if req.ConsumptionLimit == nil && req.ProductionLimit == nil {
+		lr.clearZoneLocked(zoneID)
+		lr.resolveAndApply()
+		return SetLimitResponse{
+			Applied:      true,
+			ControlState: lr.ec.ControlState(),
+		}
+	}
+
+	// Ensure zone has an index for duration timers
+	zoneIdx := lr.ensureZoneIndex(zoneID)
+
+	// Compute duration
+	var dur time.Duration
+	if req.Duration != nil && *req.Duration > 0 {
+		dur = time.Duration(*req.Duration) * time.Second
+	}
+
+	// Store per-zone values
+	if req.ConsumptionLimit != nil {
+		lr.consumptionLimits.Set(zoneID, zoneType, *req.ConsumptionLimit, dur)
+		if dur > 0 {
+			_ = lr.timers.SetTimer(zoneIdx, duration.CmdLimitConsumption, dur, *req.ConsumptionLimit)
+		} else {
+			_ = lr.timers.CancelTimer(zoneIdx, duration.CmdLimitConsumption)
+		}
+	}
+	if req.ProductionLimit != nil {
+		lr.productionLimits.Set(zoneID, zoneType, *req.ProductionLimit, dur)
+		if dur > 0 {
+			_ = lr.timers.SetTimer(zoneIdx, duration.CmdLimitProduction, dur, *req.ProductionLimit)
+		} else {
+			_ = lr.timers.CancelTimer(zoneIdx, duration.CmdLimitProduction)
+		}
+	}
+
+	lr.resolveAndApply()
+
+	// Build response with effective values
+	resp := SetLimitResponse{
+		Applied:      true,
+		ControlState: lr.ec.ControlState(),
+	}
+	if effC, ok := lr.ec.EffectiveConsumptionLimit(); ok {
+		resp.EffectiveConsumptionLimit = &effC
+	}
+	if effP, ok := lr.ec.EffectiveProductionLimit(); ok {
+		resp.EffectiveProductionLimit = &effP
+	}
+
+	if req.Duration != nil && *req.Duration > 0 {
+		log.Printf("[LIMIT] Zone %s set limit with duration: %ds", zoneID, *req.Duration)
+	}
+
+	return resp
+}
+
+// HandleClearLimit handles a ClearLimit command from a zone.
+func (lr *LimitResolver) HandleClearLimit(ctx context.Context, direction *Direction) error {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+
+	zoneID := ""
+	if lr.ZoneIDFromContext != nil {
+		zoneID = lr.ZoneIDFromContext(ctx)
+	}
+	if zoneID == "" {
+		return nil
+	}
+
+	zoneIdx, hasIdx := lr.zoneIndexMap[zoneID]
+
+	if direction == nil {
+		// Clear both directions
+		lr.consumptionLimits.Clear(zoneID)
+		lr.productionLimits.Clear(zoneID)
+		if hasIdx {
+			_ = lr.timers.CancelTimer(zoneIdx, duration.CmdLimitConsumption)
+			_ = lr.timers.CancelTimer(zoneIdx, duration.CmdLimitProduction)
+		}
+	} else if *direction == DirectionConsumption {
+		lr.consumptionLimits.Clear(zoneID)
+		if hasIdx {
+			_ = lr.timers.CancelTimer(zoneIdx, duration.CmdLimitConsumption)
+		}
+	} else if *direction == DirectionProduction {
+		lr.productionLimits.Clear(zoneID)
+		if hasIdx {
+			_ = lr.timers.CancelTimer(zoneIdx, duration.CmdLimitProduction)
+		}
+	}
+
+	lr.resolveAndApply()
+	return nil
+}
+
+// ClearZone removes all limits for a zone (e.g., on disconnect/failsafe).
+func (lr *LimitResolver) ClearZone(zoneID string) {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+
+	lr.clearZoneLocked(zoneID)
+	lr.resolveAndApply()
+}
+
+// clearZoneLocked clears a zone's limits and timers. Must be called with mu held.
+func (lr *LimitResolver) clearZoneLocked(zoneID string) {
+	lr.consumptionLimits.Clear(zoneID)
+	lr.productionLimits.Clear(zoneID)
+
+	if zoneIdx, ok := lr.zoneIndexMap[zoneID]; ok {
+		lr.timers.CancelZoneTimers(zoneIdx)
+	}
+}
+
+// handleTimerExpiry is called by the duration manager when a timer expires.
+func (lr *LimitResolver) handleTimerExpiry(zoneIdx uint8, cmdType duration.CommandType, _ any) {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+
+	zoneID, ok := lr.indexZoneMap[zoneIdx]
+	if !ok {
+		return
+	}
+
+	switch cmdType {
+	case duration.CmdLimitConsumption:
+		lr.consumptionLimits.Clear(zoneID)
+		log.Printf("[LIMIT] Zone %s consumption limit expired", zoneID)
+	case duration.CmdLimitProduction:
+		lr.productionLimits.Clear(zoneID)
+		log.Printf("[LIMIT] Zone %s production limit expired", zoneID)
+	}
+
+	lr.resolveAndApply()
+}
+
+// resolveAndApply computes effective limits and updates the EnergyControl feature.
+// Must be called with mu held.
+func (lr *LimitResolver) resolveAndApply() {
+	effConsumption, _ := lr.consumptionLimits.ResolveLimits()
+	effProduction, _ := lr.productionLimits.ResolveLimits()
+
+	_ = lr.ec.SetEffectiveConsumptionLimit(effConsumption)
+	_ = lr.ec.SetEffectiveProductionLimit(effProduction)
+
+	// Update control state
+	if effConsumption != nil || effProduction != nil {
+		_ = lr.ec.SetControlState(ControlStateLimited)
+	} else {
+		_ = lr.ec.SetControlState(ControlStateControlled)
+	}
+}
+
+// ensureZoneIndex returns a uint8 index for the zone, creating one if needed.
+// Must be called with mu held.
+func (lr *LimitResolver) ensureZoneIndex(zoneID string) uint8 {
+	if idx, ok := lr.zoneIndexMap[zoneID]; ok {
+		return idx
+	}
+	idx := lr.nextIndex
+	lr.zoneIndexMap[zoneID] = idx
+	lr.indexZoneMap[idx] = zoneID
+	lr.nextIndex++
+	return idx
+}

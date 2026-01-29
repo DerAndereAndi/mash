@@ -282,6 +282,11 @@ func (s *ZoneSession) SendNotification(notif *wire.Notification) error {
 	return s.conn.Send(data)
 }
 
+// SetZoneType sets the zone type on the underlying protocol handler.
+func (s *ZoneSession) SetZoneType(zt cert.ZoneType) {
+	s.handler.SetPeerZoneType(zt)
+}
+
 // SetLogger sets the logger for this session.
 func (s *ZoneSession) SetLogger(logger *slog.Logger) {
 	s.mu.Lock()

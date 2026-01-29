@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
@@ -28,8 +29,9 @@ type InvokeCallback func(endpointID uint8, featureID uint8, commandID uint8, par
 type ProtocolHandler struct {
 	mu sync.RWMutex
 
-	device *model.Device
-	peerID string // The remote peer's identifier (generic, works for both device and controller)
+	device       *model.Device
+	peerID       string         // The remote peer's identifier (generic, works for both device and controller)
+	peerZoneType cert.ZoneType  // The remote peer's zone type (GRID, LOCAL, etc.)
 
 	// Subscription management using SubscriptionManager
 	subscriptions *SubscriptionManager
@@ -120,6 +122,20 @@ func (h *ProtocolHandler) ZoneID() string {
 // Deprecated: Use SetPeerID instead for generic peer identification.
 func (h *ProtocolHandler) SetZoneID(zoneID string) {
 	h.SetPeerID(zoneID)
+}
+
+// PeerZoneType returns the remote peer's zone type.
+func (h *ProtocolHandler) PeerZoneType() cert.ZoneType {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.peerZoneType
+}
+
+// SetPeerZoneType sets the remote peer's zone type.
+func (h *ProtocolHandler) SetPeerZoneType(zt cert.ZoneType) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.peerZoneType = zt
 }
 
 // SetLogger sets the protocol logger and connection ID.
@@ -577,10 +593,13 @@ func (h *ProtocolHandler) handleInvoke(req *wire.Request) *wire.Response {
 		}
 	}
 
-	// Invoke the command with caller zone ID in context
+	// Invoke the command with caller zone ID and type in context
 	ctx := context.Background()
 	if h.peerID != "" {
 		ctx = ContextWithCallerZoneID(ctx, h.peerID)
+	}
+	if h.peerZoneType != 0 {
+		ctx = ContextWithCallerZoneType(ctx, h.peerZoneType)
 	}
 	result, err := feature.InvokeCommand(ctx, commandID, params)
 	if err != nil {
