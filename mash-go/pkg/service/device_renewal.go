@@ -66,9 +66,13 @@ func (h *DeviceRenewalHandler) HandleRenewalRequest(req *commissioning.CertRenew
 		return nil, err
 	}
 
+	// DEC-047: Compute nonce hash to bind CSR to this renewal request
+	nonceHash := commissioning.ComputeNonceHash(req.Nonce)
+
 	return &commissioning.CertRenewalCSR{
-		MsgType: commissioning.MsgCertRenewalCSR,
-		CSR:     csrDER,
+		MsgType:   commissioning.MsgCertRenewalCSR,
+		CSR:       csrDER,
+		NonceHash: nonceHash,
 	}, nil
 }
 

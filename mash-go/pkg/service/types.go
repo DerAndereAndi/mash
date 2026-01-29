@@ -135,6 +135,37 @@ type DeviceConfig struct {
 	// EnableAutoReconnect enables automatic reconnection to zones.
 	EnableAutoReconnect bool
 
+	// Security Hardening (DEC-047)
+
+	// ConnectionCooldown is the minimum time between commissioning connection attempts.
+	// Default: 500ms. Set to 0 to disable cooldown.
+	ConnectionCooldown time.Duration
+
+	// HandshakeTimeout is the overall timeout for commissioning handshake.
+	// Default: 85s. This is an absolute limit across all phases.
+	HandshakeTimeout time.Duration
+
+	// PASEBackoffEnabled enables exponential backoff on failed PASE attempts.
+	// Default: true.
+	PASEBackoffEnabled bool
+
+	// PASEBackoffTiers configures the backoff delays for failed attempts.
+	// Index 0 = delay for attempts 1-3, Index 1 = 4-6, Index 2 = 7-10, Index 3 = 11+.
+	// Default: [0ms, 1000ms, 3000ms, 10000ms].
+	PASEBackoffTiers [4]time.Duration
+
+	// GenericErrors enables generic error responses to prevent information leakage.
+	// Default: true. When enabled, all authentication failures return AUTH_FAILED.
+	GenericErrors bool
+
+	// ErrorDelayMin is the minimum random delay added to error responses (milliseconds).
+	// Default: 100ms.
+	ErrorDelayMin time.Duration
+
+	// ErrorDelayMax is the maximum random delay added to error responses (milliseconds).
+	// Default: 500ms.
+	ErrorDelayMax time.Duration
+
 	// Logger is the optional logger for debug output.
 	// If nil, logging is disabled.
 	Logger *slog.Logger
@@ -232,6 +263,19 @@ func DefaultDeviceConfig() DeviceConfig {
 			Multiplier:      2.0,
 			MaxRetries:      0, // Unlimited
 		},
+		// Security Hardening (DEC-047)
+		ConnectionCooldown: 500 * time.Millisecond,
+		HandshakeTimeout:   85 * time.Second,
+		PASEBackoffEnabled: true,
+		PASEBackoffTiers: [4]time.Duration{
+			0,                        // Tier 1: attempts 1-3, no delay
+			1000 * time.Millisecond,  // Tier 2: attempts 4-6, 1s delay
+			3000 * time.Millisecond,  // Tier 3: attempts 7-10, 3s delay
+			10000 * time.Millisecond, // Tier 4: attempts 11+, 10s delay
+		},
+		GenericErrors: true,
+		ErrorDelayMin: 100 * time.Millisecond,
+		ErrorDelayMax: 500 * time.Millisecond,
 	}
 }
 

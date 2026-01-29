@@ -2672,6 +2672,61 @@ EEBUS uses heartbeats for **semantic gating**, not just liveness: commands are o
 
 ---
 
+### DEC-047: Commissioning Security Hardening
+
+**Date:** 2026-01-29
+**Status:** Proposed
+
+**Context:** Security analysis of the commissioning process identified several
+hardening opportunities, particularly around DoS protection during the
+commissioning window when the device is most vulnerable.
+
+**Options Evaluated:**
+
+1. **No changes** - Accept current design as sufficient
+   - Pro: Simpler, no breaking changes
+   - Con: Leaves DoS vectors unaddressed
+
+2. **Arbitrary connection limits** - e.g., max 3 commissioning connections
+   - Pro: Simple to implement
+   - Con: Number is arbitrary, not derived from device capabilities
+
+3. **Zone-based connection model** - Derive limits from zone capacity (CHOSEN)
+   - Pro: Logically consistent, resource-bounded, predictable
+   - Con: Slightly more complex tracking
+
+**Decision:** Implement zone-based connection model with comprehensive hardening:
+
+**Connection Model:**
+- Max operational connections = max_zones (one per paired zone)
+- Max commissioning connections = 1 (single concurrent commissioning)
+- Total max connections = max_zones + 1
+- When zones full: reject commissioning (no advertisement, TLS rejection)
+
+**Additional Hardening:**
+- PASE attempt tracking with exponential backoff
+- Nonce binding for certificate renewal
+- Generic error responses to prevent information leakage
+- Explicit handshake timeouts (85s overall)
+- Connection cooldown (500ms between attempts)
+
+**Rationale:**
+- Connection limits derived from zone capacity are logically defensible
+- No wasted effort on commissioning that would fail with ZONE_FULL
+- Operational connections never blocked by commissioning activity
+- Single commissioning connection minimizes attack surface
+- MCU devices (256KB RAM) benefit from predictable resource usage
+- Protocol-level fixes ensure all implementations benefit
+
+**Declined Alternatives:**
+- Memory-hard functions (Argon2): Excluded due to MCU constraints
+- Certificate pinning: Deferred to future release
+- Multiple concurrent commissioning: Increases attack surface without benefit
+
+**Related:** DEC-034 (ControlStateEnum), DEC-039 (State Machine Rules)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -2790,3 +2845,4 @@ Key learnings:
 | 2025-01-25 | Added DEC-039: State machine interaction rules. Process continues during FAILSAFE, scheduled processes start as planned, PAUSED behavior is device-specific (PICS). Connection loss detection max 95s, failsafe timer accuracy +/- 1%. |
 | 2026-01-28 | Added DEC-044: Message correlation via MessageID, 32-bit ID rationale, 10-second request timeout. Documents implicit ACK/NACK model (response status = ack) and MessageID wraparound behavior. |
 | 2026-01-28 | Added DEC-045: Transport-layer heartbeat sufficient for failsafe. No application-layer heartbeats needed. Analyzes EEBUS LPC/LPP redundant heartbeat design, Matter's approach, and why command arrival itself proves controller liveness. |
+| 2026-01-29 | Added DEC-047: Commissioning security hardening. Zone-based connection model, PASE attempt backoff, nonce binding for renewal, generic error responses, handshake timeout. |

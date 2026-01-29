@@ -28,8 +28,10 @@ func TestErrorCodeString_AllCodes(t *testing.T) {
 		expected string
 	}{
 		{commissioning.ErrCodeSuccess, "success"},
-		{commissioning.ErrCodeInvalidPublicKey, "invalid public key"},
-		{commissioning.ErrCodeConfirmFailed, "confirmation failed"},
+		// DEC-047: Authentication errors now return generic "authentication failed"
+		{commissioning.ErrCodeAuthFailed, "authentication failed"},
+		{commissioning.ErrCodeInvalidPublicKey, "authentication failed"}, // Same as AuthFailed
+		{commissioning.ErrCodeConfirmFailed, "authentication failed"},    // Generic message
 		{commissioning.ErrCodeCSRFailed, "CSR generation failed"},
 		{commissioning.ErrCodeCertInstallFailed, "certificate installation failed"},
 		{commissioning.ErrCodeZoneTypeExists, "zone type already exists"},

@@ -330,3 +330,128 @@ func TestDecodeRenewalMessage(t *testing.T) {
 		}
 	})
 }
+
+// TestComputeNonceHash verifies nonce hash computation (DEC-047).
+func TestComputeNonceHash(t *testing.T) {
+	// Test with a known nonce
+	nonce := make([]byte, 32)
+	for i := range nonce {
+		nonce[i] = byte(i)
+	}
+
+	hash := commissioning.ComputeNonceHash(nonce)
+
+	// Verify hash length
+	if len(hash) != commissioning.NonceHashLen {
+		t.Errorf("Expected hash length %d, got %d", commissioning.NonceHashLen, len(hash))
+	}
+
+	// Verify consistency
+	hash2 := commissioning.ComputeNonceHash(nonce)
+	if !bytes.Equal(hash, hash2) {
+		t.Error("Same nonce should produce same hash")
+	}
+
+	// Verify different nonces produce different hashes
+	differentNonce := make([]byte, 32)
+	copy(differentNonce, nonce)
+	differentNonce[0] = 255
+
+	differentHash := commissioning.ComputeNonceHash(differentNonce)
+	if bytes.Equal(hash, differentHash) {
+		t.Error("Different nonces should produce different hashes")
+	}
+}
+
+// TestValidateNonceHash verifies nonce hash validation (DEC-047).
+func TestValidateNonceHash(t *testing.T) {
+	nonce := make([]byte, 32)
+	for i := range nonce {
+		nonce[i] = byte(i)
+	}
+	hash := commissioning.ComputeNonceHash(nonce)
+
+	t.Run("ValidHash", func(t *testing.T) {
+		if !commissioning.ValidateNonceHash(nonce, hash) {
+			t.Error("Valid hash should pass validation")
+		}
+	})
+
+	t.Run("WrongNonce", func(t *testing.T) {
+		differentNonce := make([]byte, 32)
+		copy(differentNonce, nonce)
+		differentNonce[0] = 255
+
+		if commissioning.ValidateNonceHash(differentNonce, hash) {
+			t.Error("Wrong nonce should fail validation")
+		}
+	})
+
+	t.Run("WrongHash", func(t *testing.T) {
+		tamperedHash := make([]byte, len(hash))
+		copy(tamperedHash, hash)
+		tamperedHash[0] ^= 0xFF
+
+		if commissioning.ValidateNonceHash(nonce, tamperedHash) {
+			t.Error("Tampered hash should fail validation")
+		}
+	})
+
+	t.Run("WrongHashLength", func(t *testing.T) {
+		shortHash := hash[:8]
+		if commissioning.ValidateNonceHash(nonce, shortHash) {
+			t.Error("Wrong hash length should fail validation")
+		}
+	})
+
+	t.Run("EmptyHash", func(t *testing.T) {
+		if commissioning.ValidateNonceHash(nonce, nil) {
+			t.Error("Empty hash should fail validation")
+		}
+	})
+}
+
+// TestCertRenewalCSR_WithNonceHash verifies CSR encoding with nonce hash (DEC-047).
+func TestCertRenewalCSR_WithNonceHash(t *testing.T) {
+	nonce := make([]byte, 32)
+	for i := range nonce {
+		nonce[i] = byte(i)
+	}
+	nonceHash := commissioning.ComputeNonceHash(nonce)
+
+	csr := &commissioning.CertRenewalCSR{
+		MsgType:   commissioning.MsgCertRenewalCSR,
+		CSR:       []byte{0x30, 0x82, 0x01, 0x22},
+		NonceHash: nonceHash,
+	}
+
+	// Encode
+	data, err := cbor.Marshal(csr)
+	if err != nil {
+		t.Fatalf("Failed to encode: %v", err)
+	}
+
+	// Verify raw CBOR has nonce hash field
+	var decoded map[int]any
+	if err := cbor.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Failed to decode as map: %v", err)
+	}
+
+	hashBytes, ok := decoded[3].([]byte)
+	if !ok {
+		t.Fatalf("Expected nonce hash as bytes, got %T", decoded[3])
+	}
+	if len(hashBytes) != commissioning.NonceHashLen {
+		t.Errorf("Expected %d-byte nonce hash, got %d bytes", commissioning.NonceHashLen, len(hashBytes))
+	}
+
+	// Verify round-trip
+	var roundTrip commissioning.CertRenewalCSR
+	if err := cbor.Unmarshal(data, &roundTrip); err != nil {
+		t.Fatalf("Failed to decode to struct: %v", err)
+	}
+
+	if !bytes.Equal(roundTrip.NonceHash, nonceHash) {
+		t.Error("Nonce hash mismatch after round-trip")
+	}
+}

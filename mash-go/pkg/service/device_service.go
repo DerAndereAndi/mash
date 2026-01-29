@@ -93,6 +93,15 @@ type DeviceService struct {
 	// Context for cancellation
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Security Hardening (DEC-047)
+	// Connection tracking
+	commissioningConnActive bool      // Only one commissioning connection allowed
+	lastCommissioningAttempt time.Time // For connection cooldown
+	connectionMu            sync.Mutex // Protects connection tracking fields
+
+	// PASE attempt tracking
+	paseTracker *PASEAttemptTracker
 }
 
 // generateConnectionID generates a random connection ID for logging.
@@ -130,6 +139,11 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 	// Initialize subscription manager
 	subConfig := subscription.DefaultConfig()
 	svc.subscriptionManager = subscription.NewManagerWithConfig(subConfig)
+
+	// Initialize PASE attempt tracker (DEC-047)
+	if config.PASEBackoffEnabled {
+		svc.paseTracker = NewPASEAttemptTracker(config.PASEBackoffTiers)
+	}
 
 	// Register service-level commands on DeviceInfo feature
 	svc.registerDeviceCommands()
@@ -451,6 +465,22 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 // After PASE succeeds, it performs the certificate exchange to receive an
 // operational certificate from the controller's Zone CA.
 func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
+	// DEC-047: Connection protection
+	if !s.acceptCommissioningConnection() {
+		s.debugLog("handleCommissioningConnection: rejected - connection limit or cooldown")
+		conn.Close()
+		return
+	}
+	defer s.releaseCommissioningConnection()
+
+	// DEC-047: Overall handshake timeout
+	handshakeCtx := s.ctx
+	if s.config.HandshakeTimeout > 0 {
+		var cancel context.CancelFunc
+		handshakeCtx, cancel = context.WithTimeout(s.ctx, s.config.HandshakeTimeout)
+		defer cancel()
+	}
+
 	// Create PASE server session
 	paseSession, err := commissioning.NewPASEServerSession(s.verifier, s.serverID)
 	if err != nil {
@@ -458,13 +488,34 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 		return
 	}
 
+	// DEC-047: Apply PASE backoff delay before processing
+	if s.paseTracker != nil {
+		delay := s.paseTracker.GetDelay()
+		if delay > 0 {
+			s.debugLog("handleCommissioningConnection: applying backoff delay", "delay", delay)
+			select {
+			case <-time.After(delay):
+			case <-handshakeCtx.Done():
+				conn.Close()
+				return
+			}
+		}
+	}
+
 	// Perform PASE handshake
-	sharedSecret, err := paseSession.Handshake(s.ctx, conn)
+	sharedSecret, err := paseSession.Handshake(handshakeCtx, conn)
 	if err != nil {
 		// PASE failed - wrong setup code or protocol error
+		// DEC-047: Record failure for backoff
+		if s.paseTracker != nil {
+			s.paseTracker.RecordFailure()
+		}
 		conn.Close()
 		return
 	}
+
+	// DEC-047: Reset PASE tracker on successful authentication
+	s.ResetPASETracker()
 
 	// Derive zone ID from shared secret
 	zoneID := deriveZoneID(sharedSecret)
@@ -909,6 +960,9 @@ func (s *DeviceService) ExitCommissioningMode() error {
 			return err
 		}
 	}
+
+	// DEC-047: Reset PASE tracker when commissioning window closes
+	s.ResetPASETracker()
 
 	s.emitEvent(Event{Type: EventCommissioningClosed, Reason: "commissioned"})
 	return nil
@@ -1796,4 +1850,87 @@ func (s *DeviceService) updatePairingRequestListening() {
 		s.debugLog("updatePairingRequestListening: starting (below max zones)")
 		_ = s.StartPairingRequestListening(ctx)
 	}
+}
+
+// =============================================================================
+// Security Hardening (DEC-047)
+// =============================================================================
+
+// acceptCommissioningConnection checks if a new commissioning connection should be accepted.
+// Returns true if the connection can proceed, false if it should be rejected.
+//
+// Connection protection rules:
+// 1. Only one commissioning connection at a time
+// 2. Connection cooldown (500ms default) between attempts
+// 3. All zone slots must not be full (commissioning would fail anyway)
+func (s *DeviceService) acceptCommissioningConnection() bool {
+	s.connectionMu.Lock()
+	defer s.connectionMu.Unlock()
+
+	// Check 1: Is commissioning already in progress?
+	if s.commissioningConnActive {
+		return false
+	}
+
+	// Check 2: Connection cooldown
+	if s.config.ConnectionCooldown > 0 {
+		if time.Since(s.lastCommissioningAttempt) < s.config.ConnectionCooldown {
+			return false
+		}
+	}
+
+	// Check 3: Is there a zone slot available?
+	s.mu.RLock()
+	zoneCount := len(s.connectedZones)
+	maxZones := s.config.MaxZones
+	s.mu.RUnlock()
+
+	if zoneCount >= maxZones {
+		return false
+	}
+
+	// Accept the connection
+	s.commissioningConnActive = true
+	s.lastCommissioningAttempt = time.Now()
+	return true
+}
+
+// releaseCommissioningConnection marks the commissioning connection as complete.
+// Call this when commissioning finishes (success or failure).
+func (s *DeviceService) releaseCommissioningConnection() {
+	s.connectionMu.Lock()
+	defer s.connectionMu.Unlock()
+	s.commissioningConnActive = false
+}
+
+// ResetPASETracker resets the PASE attempt tracker.
+// Called when commissioning window closes or commissioning succeeds.
+func (s *DeviceService) ResetPASETracker() {
+	if s.paseTracker != nil {
+		s.paseTracker.Reset()
+	}
+}
+
+// randomErrorDelay returns a random duration between ErrorDelayMin and ErrorDelayMax.
+// This is used to add jitter to error responses to prevent timing attacks (DEC-047).
+func (s *DeviceService) randomErrorDelay() time.Duration {
+	if !s.config.GenericErrors {
+		return 0
+	}
+	if s.config.ErrorDelayMin >= s.config.ErrorDelayMax {
+		return s.config.ErrorDelayMin
+	}
+
+	// Generate random delay in the range [min, max]
+	delayRange := s.config.ErrorDelayMax - s.config.ErrorDelayMin
+	randomBytes := make([]byte, 8)
+	rand.Read(randomBytes)
+	// Convert to uint64 and take modulo to get random offset
+	randomOffset := time.Duration(0)
+	for _, b := range randomBytes {
+		randomOffset = (randomOffset << 8) | time.Duration(b)
+	}
+	randomOffset = randomOffset % (delayRange + 1)
+
+	return s.config.ErrorDelayMin + randomOffset
 }

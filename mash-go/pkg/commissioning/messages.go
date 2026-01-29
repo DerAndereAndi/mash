@@ -40,12 +40,17 @@ const (
 // Commissioning error codes.
 const (
 	ErrCodeSuccess           uint8 = 0
-	ErrCodeInvalidPublicKey  uint8 = 1
-	ErrCodeConfirmFailed     uint8 = 2
+	ErrCodeInvalidPublicKey  uint8 = 1   // Deprecated: use ErrCodeAuthFailed
+	ErrCodeConfirmFailed     uint8 = 2   // Deprecated: use ErrCodeAuthFailed
 	ErrCodeCSRFailed         uint8 = 3
 	ErrCodeCertInstallFailed uint8 = 4
 	ErrCodeZoneTypeExists    uint8 = 10  // Device already has a zone of this type
 	ErrCodeInternalError     uint8 = 255
+
+	// DEC-047: Generic error code to prevent information leakage.
+	// Replaces ErrCodeInvalidPublicKey and ErrCodeConfirmFailed.
+	// All SPAKE2+ authentication failures should return this code.
+	ErrCodeAuthFailed uint8 = 1
 )
 
 // ErrorCodeString returns a human-readable string for a commissioning error code.
@@ -53,10 +58,13 @@ func ErrorCodeString(code uint8) string {
 	switch code {
 	case ErrCodeSuccess:
 		return "success"
-	case ErrCodeInvalidPublicKey:
-		return "invalid public key"
+	case ErrCodeAuthFailed:
+		// DEC-047: Generic error message for authentication failures.
+		// Intentionally vague to prevent information leakage.
+		return "authentication failed"
 	case ErrCodeConfirmFailed:
-		return "confirmation failed"
+		// Legacy code - same message as AuthFailed
+		return "authentication failed"
 	case ErrCodeCSRFailed:
 		return "CSR generation failed"
 	case ErrCodeCertInstallFailed:

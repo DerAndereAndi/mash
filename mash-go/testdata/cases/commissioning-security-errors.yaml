@@ -1,0 +1,84 @@
+# Test Cases: Generic Error Responses (DEC-047)
+# Security hardening for error response consolidation and timing
+
+---
+id: TC-SEC-ERR-001
+name: Generic Error Response
+description: |
+  Verifies device returns same error code for different authentication failures.
+  Both invalid public key and wrong password should return AUTH_FAILED (1).
+
+pics_requirements:
+  - MASH.S.COMM.GENERIC_ERRORS
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Trigger invalid public key error
+    action: pase_request_invalid_pubkey
+    expect:
+      error_code: 1
+      error_name: "AUTH_FAILED"
+
+  - name: Trigger wrong password error
+    action: pase_request_wrong_password
+    expect:
+      error_code: 1
+      error_name: "AUTH_FAILED"
+
+postconditions:
+  - error_codes_consolidated: true
+
+timeout: "30s"
+tags:
+  - security
+  - commissioning
+  - error
+  - DEC-047
+
+---
+id: TC-SEC-ERR-002
+name: Error Response Timing Consistency
+description: |
+  Verifies error responses have consistent timing regardless of failure type.
+  This prevents timing-based oracle attacks that could distinguish error types.
+
+pics_requirements:
+  - MASH.S.COMM.GENERIC_ERRORS
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Measure invalid public key timing
+    action: measure_error_timing
+    params:
+      error_type: invalid_pubkey
+      iterations: 50
+    expect:
+      mean_recorded: true
+
+  - name: Measure wrong password timing
+    action: measure_error_timing
+    params:
+      error_type: wrong_password
+      iterations: 50
+    expect:
+      mean_recorded: true
+
+  - name: Compare timing distributions
+    action: compare_timing_distributions
+    expect:
+      mean_difference_ms_max: 100
+      distributions_overlap: true
+
+postconditions:
+  - timing_oracle_prevented: true
+
+timeout: "120s"
+tags:
+  - security
+  - commissioning
+  - timing
+  - DEC-047

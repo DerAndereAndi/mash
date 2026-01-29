@@ -513,6 +513,30 @@ def create_operational_cert(
 | Standard (RPi) | < 1 second | 5 seconds |
 | Powerful (x86) | < 100 ms | 1 second |
 
+### 5.4 Connection Protection Timing (DEC-047)
+
+| Parameter | Value | PICS Item |
+|-----------|-------|-----------|
+| Max commissioning connections | 1 | MASH.S.COMM.MAX_COMMISSIONING_CONN |
+| Connection cooldown | 500ms | MASH.S.COMM.CONN_COOLDOWN |
+| Overall handshake timeout | 85s | MASH.S.COMM.HANDSHAKE_TIMEOUT |
+
+**Note:** Max operational connections = MASH.S.ZONE.MAX (one per zone).
+
+### 5.5 PASE Attempt Backoff (DEC-047)
+
+| Attempts | Backoff Delay | PICS Item |
+|----------|---------------|-----------|
+| 1-3 | 0ms | MASH.S.COMM.BACKOFF_TIER1 |
+| 4-6 | 1000ms | MASH.S.COMM.BACKOFF_TIER2 |
+| 7-10 | 3000ms | MASH.S.COMM.BACKOFF_TIER3 |
+| 11+ | 10000ms | MASH.S.COMM.BACKOFF_TIER4 |
+
+**Behavior:**
+- Backoff counter resets when commissioning window closes
+- Backoff counter resets on successful commissioning
+- Delay is applied before sending PASE response (prevents timing analysis)
+
 ---
 
 ## 6. Error Handling
@@ -587,6 +611,26 @@ A device can have at most one zone per zone type (see DEC-043):
 **To add another zone of the same type:**
 1. Controller must remove existing zone first (RemoveZone command)
 2. Then retry commissioning
+
+### 6.5 Consolidated Error Codes (DEC-047)
+
+To prevent information leakage, authentication errors are consolidated:
+
+| Code | Name | When Used |
+|------|------|-----------|
+| 0 | SUCCESS | Operation successful |
+| 1 | AUTH_FAILED | Any SPAKE2+ or verification failure |
+| 2 | TIMEOUT | Operation timed out |
+| 3 | ZONE_FULL | Device has maximum zones |
+| 4 | ALREADY_COMMISSIONED | Already in this zone |
+| 5 | INVALID_CERT | Certificate validation failed |
+| 6 | STORAGE_ERROR | Cannot store certificate |
+| 7 | KEY_GENERATION_ERROR | Cannot generate key pair |
+| 10 | ZONE_TYPE_EXISTS | Zone type already present |
+
+**Removed codes:** InvalidPublicKey (merged into AUTH_FAILED), ConfirmFailed (merged into AUTH_FAILED)
+
+**Timing requirement:** Device MUST add random delay (100-500ms) to all error responses to prevent timing-based oracle attacks.
 
 ---
 
@@ -856,3 +900,57 @@ MASH.S.PASE.RETRY_BACKOFF=0          # No backoff between retries
 - **Rotation:** 1-year validity with 30-day renewal window
 - **Revocation:** Immediate via RemoveZone command
 - **Path validation:** Maximum path length = 2 (Zone CA → Op Cert)
+
+---
+
+## 13. Security Hardening (DEC-047)
+
+### 13.1 Connection Flood Protection
+
+**Requirement:** Device MUST limit concurrent commissioning connections.
+
+**Test Procedure:**
+1. Device enters commissioning mode
+2. Tester opens a commissioning connection
+3. Tester attempts a second commissioning connection
+4. Verify: Second connection is rejected at TLS level
+
+**Expected Result:** Connection rejected (no PASE exchange)
+
+### 13.2 PASE Backoff Enforcement
+
+**Requirement:** Device MUST implement exponential backoff on failed attempts.
+
+**Test Procedure:**
+1. Device enters commissioning mode
+2. Tester sends 4 PASE requests with wrong setup code
+3. Measure time between request and error response for attempt 4
+4. Verify: Delay >= BACKOFF_TIER2 (1000ms)
+
+**Expected Result:** Response delayed by at least 1000ms
+
+### 13.3 Nonce Binding Validation
+
+**Requirement:** Certificate renewal MUST validate nonce binding.
+
+**Test Procedure:**
+1. Controller sends CertRenewalRequest with nonce A
+2. Device responds with CertRenewalCSR including NonceHash(A)
+3. Controller sends CertRenewalInstall (simulating different session)
+4. Controller sends another CertRenewalRequest with nonce B
+5. Controller sends CertRenewalInstall with cert from step 2
+6. Verify: Device rejects with RenewalStatusInvalidNonce
+
+**Expected Result:** Renewal rejected due to nonce mismatch
+
+### 13.4 Error Response Timing
+
+**Requirement:** Error responses MUST have consistent timing.
+
+**Test Procedure:**
+1. Measure response time for: invalid public key (100 attempts)
+2. Measure response time for: wrong password (100 attempts)
+3. Calculate mean and standard deviation for each
+4. Verify: Mean difference < 100ms, distributions overlap
+
+**Expected Result:** Cannot distinguish error types by timing

@@ -1,10 +1,39 @@
 package commissioning
 
 import (
+	"crypto/sha256"
 	"fmt"
 
 	"github.com/fxamacker/cbor/v2"
 )
+
+// NonceHashLen is the length of the truncated nonce hash (16 bytes = 128 bits).
+const NonceHashLen = 16
+
+// ComputeNonceHash computes SHA256(nonce)[0:16] for binding CSR to renewal request.
+// This is used in CertRenewalCSR.NonceHash (DEC-047).
+func ComputeNonceHash(nonce []byte) []byte {
+	hash := sha256.Sum256(nonce)
+	return hash[:NonceHashLen]
+}
+
+// ValidateNonceHash verifies that the provided hash matches the expected nonce.
+// Returns true if the hash is valid, false otherwise.
+func ValidateNonceHash(nonce, hash []byte) bool {
+	if len(hash) != NonceHashLen {
+		return false
+	}
+	expected := ComputeNonceHash(nonce)
+	// Constant-time comparison to prevent timing attacks
+	if len(expected) != len(hash) {
+		return false
+	}
+	result := byte(0)
+	for i := 0; i < len(expected); i++ {
+		result |= expected[i] ^ hash[i]
+	}
+	return result == 0
+}
 
 // Certificate renewal message types.
 const (
@@ -27,6 +56,7 @@ const (
 	RenewalStatusCSRFailed     uint8 = 1
 	RenewalStatusInstallFailed uint8 = 2
 	RenewalStatusInvalidCert   uint8 = 3
+	RenewalStatusInvalidNonce  uint8 = 4 // DEC-047: Nonce binding validation failed
 )
 
 // CertRenewalRequest initiates certificate renewal.
@@ -45,10 +75,15 @@ type CertRenewalRequest struct {
 
 // CertRenewalCSR contains the device's new CSR.
 // Sent by device in response to CertRenewalRequest.
-// CBOR: { 1: msgType, 2: csr }
+// CBOR: { 1: msgType, 2: csr, 3?: nonceHash }
+//
+// DEC-047: NonceHash binds the CSR to the renewal request nonce.
+// This prevents replay attacks where an attacker captures a CSR and
+// attempts to use it with a different renewal session.
 type CertRenewalCSR struct {
-	MsgType uint8  `cbor:"1,keyasint"`
-	CSR     []byte `cbor:"2,keyasint"` // PKCS#10 DER-encoded CSR
+	MsgType   uint8  `cbor:"1,keyasint"`
+	CSR       []byte `cbor:"2,keyasint"`           // PKCS#10 DER-encoded CSR
+	NonceHash []byte `cbor:"3,keyasint,omitempty"` // SHA256(nonce)[0:16] - binds CSR to request
 }
 
 // CertRenewalInstall delivers the new certificate.

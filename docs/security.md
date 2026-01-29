@@ -3,7 +3,7 @@
 > Certificates, commissioning, zones, and trust
 
 **Status:** Draft
-**Last Updated:** 2025-01-25
+**Last Updated:** 2026-01-29
 
 ---
 
@@ -368,3 +368,140 @@ User           Phone App       DSO Backend       SMGW          Device
 - Controller issues certificates (clean revocation)
 - SPAKE2+ is proven and audited
 - Multi-zone with explicit priority resolution
+
+---
+
+## 11. Commissioning Security Hardening (DEC-047)
+
+### 11.1 Connection Model
+
+The connection model is derived from zone capacity to ensure predictable resource usage:
+
+**Connection Capacity:**
+
+| Connection Type | Maximum | Description |
+|-----------------|---------|-------------|
+| Operational | max_zones | One persistent connection per paired zone |
+| Commissioning | 1 | Single concurrent commissioning attempt |
+| **Total** | max_zones + 1 | Maximum simultaneous connections |
+
+**Example for typical device (max_zones = 2):**
+- Up to 2 operational connections (Zone 1 GRID + Zone 2 LOCAL)
+- Up to 1 commissioning connection (when zone slot available)
+- Total maximum: 3 connections
+
+**Commissioning Availability:**
+
+| Zone Slots Used | Commissioning Allowed | Rationale |
+|-----------------|----------------------|-----------|
+| 0 | Yes | Device uncommissioned |
+| 1 (of 2) | Yes | One slot available |
+| 2 (of 2) | **No** | No slot for new zone |
+
+**Device Behavior:**
+1. Device MUST track operational connections per zone (0 or 1 each)
+2. Device MUST track commissioning connection state (0 or 1)
+3. When all zone slots filled:
+   - Device MUST NOT advertise as commissionable (CM=0 or no _mash-comm._tcp)
+   - Device MUST reject commissioning connections at TLS level
+4. When commissioning already in progress:
+   - Device MUST reject additional commissioning connections at TLS level
+5. Operational connections from existing zones MUST be allowed during commissioning
+6. Device SHOULD implement connection cooldown (500ms) to prevent rapid reconnection
+
+**Rationale:** This model ensures:
+- Resource usage is bounded and predictable (critical for 256KB MCUs)
+- No wasted effort on commissioning that would fail with ZONE_FULL
+- Operational connections are never blocked by commissioning activity
+- Single commissioning connection minimizes attack surface
+
+### 11.2 PASE Attempt Tracking
+
+To mitigate brute force attacks while maintaining usability:
+
+**Attempt Tracking:**
+
+| Attempt Range | Delay Before Next | Rationale |
+|---------------|-------------------|-----------|
+| 1-3 | 0ms | Normal user mistakes |
+| 4-6 | 1000ms | Possible attack |
+| 7-10 | 3000ms | Likely attack |
+| 11+ | 10000ms | Definite attack |
+
+**Device Behavior:**
+1. Device MUST track failed PASE attempts per commissioning window
+2. Device MUST implement backoff delays as specified above
+3. Attempt counter MUST reset when commissioning window closes
+4. Attempt counter MUST reset on successful commissioning
+5. Device SHOULD NOT reveal attempt count to controller
+
+**Implementation Note:** Delay is applied before sending PASE response, not
+after receiving request. This prevents timing analysis.
+
+### 11.3 Certificate Renewal Nonce Binding
+
+Certificate renewal requests MUST be bound to prevent replay attacks:
+
+**Protocol Enhancement:**
+
+The CertRenewalCSR message MUST include a nonce acknowledgment:
+
+```cbor
+CertRenewalCSR = {
+  1: 31,                    ; MsgType
+  2: <bytes[]>,             ; CSR (PKCS#10 DER)
+  3: <bytes[16]>            ; NonceHash = SHA256(nonce)[0:16]
+}
+```
+
+**Validation:**
+1. Controller sends CertRenewalRequest with 32-byte nonce
+2. Device stores nonce, generates key pair, creates CSR
+3. Device includes NonceHash in CertRenewalCSR
+4. Controller validates NonceHash matches sent nonce
+5. If mismatch, controller SHOULD abort renewal
+
+**New Error Code:**
+
+| Code | Name | Description |
+|------|------|-------------|
+| 4 | RenewalStatusInvalidNonce | Nonce binding validation failed |
+
+### 11.4 Generic Error Responses
+
+To prevent information leakage about authentication progress:
+
+**Error Code Consolidation:**
+
+| Old Code | Old Name | New Code | New Name |
+|----------|----------|----------|----------|
+| 1 | ErrCodeInvalidPublicKey | 1 | ErrCodeAuthFailed |
+| 2 | ErrCodeConfirmFailed | 1 | ErrCodeAuthFailed |
+
+**Device Behavior:**
+1. Device MUST return ErrCodeAuthFailed (1) for all authentication failures
+2. Device SHOULD log detailed error information locally
+3. Device MUST NOT vary response timing based on failure type
+
+**Timing Requirement:**
+- Device MUST add random delay (100-500ms) to all error responses
+- This prevents timing-based oracle attacks
+
+### 11.5 Overall Handshake Timeout
+
+**Requirement:** Device MUST enforce maximum time for complete commissioning.
+
+| Phase | Individual Timeout | Cumulative Max |
+|-------|-------------------|----------------|
+| TLS Handshake | 10s | 10s |
+| PASE Exchange | 30s | 40s |
+| CSR Generation | 10s | 50s |
+| Cert Exchange | 30s | 80s |
+| Cert Install | 5s | 85s |
+| **Total** | - | **85s** |
+
+**Device Behavior:**
+1. Device MUST start overall timer when TLS connection accepted
+2. If timer expires before CERT_ACK, device MUST close connection
+3. Timer does not reset on message receipt
+4. Individual phase timeouts still apply

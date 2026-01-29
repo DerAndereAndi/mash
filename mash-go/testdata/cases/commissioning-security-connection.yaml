@@ -1,0 +1,226 @@
+# Test Cases: Connection Protection (DEC-047)
+# Security hardening for commissioning connection model
+
+---
+id: TC-SEC-CONN-001
+name: Single Commissioning Connection Limit
+description: |
+  Verifies device allows only one concurrent commissioning connection.
+  Second commissioning attempt should be rejected at TLS level.
+
+pics_requirements:
+  - MASH.S.COMM.HARDENING
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - device_has_available_zone_slot: true
+
+steps:
+  - name: Open first commissioning connection
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+  - name: Attempt second commissioning connection
+    action: open_commissioning_connection
+    expect:
+      connection_rejected: true
+      rejection_at_tls_level: true
+
+  - name: Close first connection
+    action: close_connection
+    params:
+      index: 0
+
+  - name: Retry commissioning connection after close
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+postconditions:
+  - max_commissioning_connections: 1
+
+timeout: "30s"
+tags:
+  - security
+  - commissioning
+  - connection
+  - DEC-047
+
+---
+id: TC-SEC-CONN-002
+name: Commissioning Blocked When Zones Full
+description: |
+  Verifies device rejects commissioning when all zone slots are filled.
+  Device should not advertise as commissionable and reject at TLS level.
+
+pics_requirements:
+  - MASH.S.COMM.HARDENING
+  - MASH.S.ZONE.MAX
+
+preconditions:
+  - device_zones_full: true
+
+steps:
+  - name: Verify device not advertising commissioning
+    action: check_mdns_advertisement
+    expect:
+      commissionable: false
+
+  - name: Attempt commissioning connection anyway
+    action: open_commissioning_connection
+    expect:
+      connection_rejected: true
+
+postconditions:
+  - commissioning_rejected: true
+
+timeout: "15s"
+tags:
+  - security
+  - commissioning
+  - zones
+  - DEC-047
+
+---
+id: TC-SEC-CONN-003
+name: Operational Connections During Commissioning
+description: |
+  Verifies operational connections from existing zones are not blocked
+  during commissioning of a new zone.
+
+pics_requirements:
+  - MASH.S.COMM.HARDENING
+  - MASH.S.ZONE.MAX
+
+preconditions:
+  - device_has_one_zone: true
+  - device_has_available_zone_slot: true
+
+steps:
+  - name: Establish operational connection for Zone 1
+    action: connect_operational
+    params:
+      zone_id: "${zone1_id}"
+    expect:
+      connection_established: true
+
+  - name: Enter commissioning mode for Zone 2
+    action: enter_commissioning_mode
+
+  - name: Start commissioning connection for Zone 2
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+  - name: Verify Zone 1 operational connection still active
+    action: send_ping
+    params:
+      connection: zone1
+    expect:
+      pong_received: true
+
+  - name: Simulate Zone 1 reconnection
+    action: reconnect_operational
+    params:
+      zone_id: "${zone1_id}"
+    expect:
+      reconnection_successful: true
+
+postconditions:
+  - zone1_connection_active: true
+  - commissioning_in_progress: true
+
+timeout: "45s"
+tags:
+  - security
+  - commissioning
+  - operational
+  - multi-zone
+  - DEC-047
+
+---
+id: TC-SEC-CONN-004
+name: Overall Handshake Timeout
+description: |
+  Verifies device enforces overall handshake timeout, not just per-phase.
+  Device should close connection if total commissioning time exceeds timeout.
+
+pics_requirements:
+  - MASH.S.COMM.HARDENING
+  - MASH.S.COMM.HANDSHAKE_TIMEOUT
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Establish TLS connection
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
+
+  - name: Send PASE request but delay response processing
+    action: pase_request_slow
+    params:
+      delay_between_messages_ms: 20000
+
+  - name: Continue slow exchange past timeout
+    action: continue_slow_exchange
+    params:
+      total_duration_ms: 90000
+    expect:
+      connection_closed_by_device: true
+
+postconditions:
+  - connection_terminated: true
+  - termination_reason: timeout
+
+timeout: "120s"
+tags:
+  - security
+  - commissioning
+  - timeout
+  - DEC-047
+
+---
+id: TC-SEC-CONN-005
+name: Flood Resistance with Zone-Based Limits
+description: |
+  Verifies device remains responsive under connection flood.
+  Uses zone-based connection model (max_zones + 1 total).
+
+pics_requirements:
+  - MASH.S.COMM.HARDENING
+  - MASH.S.ZONE.MAX
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Start connection flood
+    action: flood_connections
+    params:
+      rate_per_second: 100
+      duration_seconds: 5
+    expect:
+      device_remains_responsive: true
+      max_accepted_connections: "${MASH.S.ZONE.MAX + 1}"
+
+  - name: Attempt legitimate commissioning
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+    expect:
+      commissioning_succeeds: true
+
+postconditions:
+  - device_commissioned: true
+
+timeout: "60s"
+tags:
+  - security
+  - commissioning
+  - stress
+  - DEC-047

@@ -3,7 +3,7 @@
 > TCP/TLS transport with length-prefixed framing
 
 **Status:** Draft
-**Last Updated:** 2025-01-25
+**Last Updated:** 2026-01-29
 
 ---
 
@@ -142,6 +142,43 @@ MASH uses length-prefix for simplicity and efficiency on constrained devices.
 
 - Default port: **8443** (TBD - needs IANA registration consideration)
 - Configurable per device
+
+### 5.4 Connection Limits (DEC-047)
+
+Connection limits are derived from zone capacity to ensure predictable resource usage.
+
+**Zone-Based Connection Model:**
+
+| Connection Type | Maximum | Derivation |
+|-----------------|---------|------------|
+| Operational | max_zones | One per paired zone |
+| Commissioning | 1 | Single concurrent |
+| **Total** | max_zones + 1 | Maximum simultaneous |
+
+**Example (typical device, max_zones=2):**
+- 2 operational connections (GRID zone + LOCAL zone)
+- 1 commissioning connection (when slot available)
+- Total: 3 connections maximum
+
+**Commissioning Rejection:**
+
+| Condition | Behavior |
+|-----------|----------|
+| All zone slots filled | Do not advertise CM=1; reject at TLS level |
+| Commissioning in progress | Reject new commissioning at TLS level |
+| Cooldown period active | Delay or reject at TLS level |
+
+**Behavior:**
+1. Device MUST track operational and commissioning connections separately
+2. When commissioning rejected, device SHOULD send TLS alert `user_canceled` (90)
+3. Device MUST NOT reveal current connection count or zone capacity
+4. Device MAY implement per-IP tracking for diagnostics
+
+**Rationale:**
+- Limits derived from zone capacity are logically defensible
+- Prevents resource exhaustion on 256KB MCUs
+- Ensures operational connections are never blocked by commissioning
+- Single commissioning connection minimizes attack surface
 
 ---
 

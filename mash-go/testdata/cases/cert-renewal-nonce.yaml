@@ -1,0 +1,116 @@
+# Test Cases: Certificate Renewal Nonce Binding (DEC-047)
+# Security hardening for certificate renewal anti-replay protection
+
+---
+id: TC-SEC-NONCE-001
+name: Nonce Binding in CSR
+description: |
+  Verifies device includes correct nonce hash in CertRenewalCSR.
+  The NonceHash field should be SHA256(nonce)[0:16].
+
+pics_requirements:
+  - MASH.S.CERT.NONCE_BINDING
+  - MASH.S.CERT.IN_SESSION_RENEWAL
+
+preconditions:
+  - device_commissioned: true
+  - tls_connection_established: true
+
+steps:
+  - name: Connect to device
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
+
+  - name: Send renewal request with known nonce
+    action: send_cert_renewal_request
+    params:
+      nonce: "0102030405060708091011121314151617181920212223242526272829303132"
+
+  - name: Receive CSR response
+    action: receive_cert_renewal_csr
+    expect:
+      csr_valid: true
+      nonce_hash_present: true
+      nonce_hash_matches_expected: true
+
+postconditions:
+  - nonce_binding_verified: true
+
+timeout: "30s"
+tags:
+  - security
+  - certificate
+  - renewal
+  - nonce
+  - DEC-047
+
+---
+id: TC-SEC-NONCE-002
+name: Nonce Mismatch Rejection
+description: |
+  Verifies device rejects certificate install with wrong nonce binding.
+  Simulates a replay attack where CSR from one session is used in another.
+
+pics_requirements:
+  - MASH.S.CERT.NONCE_BINDING
+  - MASH.S.CERT.IN_SESSION_RENEWAL
+
+preconditions:
+  - device_commissioned: true
+  - tls_connection_established: true
+
+steps:
+  - name: Connect to device
+    action: connect
+    params:
+      insecure: true
+    expect:
+      connection_established: true
+
+  - name: Send renewal request with nonce A
+    action: send_cert_renewal_request
+    params:
+      nonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+  - name: Receive CSR bound to nonce A
+    action: receive_cert_renewal_csr
+    expect:
+      csr_valid: true
+
+  - name: Start new renewal with nonce B
+    action: send_cert_renewal_request
+    params:
+      nonce: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+
+  - name: Receive new CSR bound to nonce B
+    action: receive_cert_renewal_csr
+    expect:
+      csr_valid: true
+
+  - name: Send install with certificate from nonce A session
+    action: send_cert_renewal_install
+    params:
+      use_previous_csr: true
+      csr_index: 0
+
+  - name: Receive rejection
+    action: receive_cert_renewal_ack
+    expect:
+      status: 4
+      status_name: "RenewalStatusInvalidNonce"
+
+postconditions:
+  - original_certificate_unchanged: true
+  - renewal_rejected: true
+
+timeout: "30s"
+tags:
+  - security
+  - certificate
+  - renewal
+  - nonce
+  - replay-attack
+  - DEC-047
