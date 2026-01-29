@@ -1,0 +1,632 @@
+# Test Suite: LPC/LPP Use Case Tests
+# Verifies EEBUS LPC/LPP compatibility behaviors
+#
+# LPC = Limitation of Power Consumption
+# LPP = Limitation of Power Production
+#
+# Key concepts:
+# - Enhanced SetLimit response with applied/rejectReason/controlState
+# - Contractual limits (EMS uses building grid contract, not device nominal)
+# - Override tracking (device explains why it's exceeding limits)
+# - Negative value validation (limits must be >= 0)
+
+---
+# TC-LPC-001: SetLimit Returns Enhanced Response
+id: TC-LPC-001
+name: SetLimit Returns Enhanced Response
+description: |
+  Verifies SetLimit returns the enhanced response with applied,
+  rejectReason, and controlState fields per DEC-049.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_APPLIED
+  - MASH.S.CTRL.B_CTRLSTATE
+
+preconditions:
+  - session_established: true
+  - device_accepts_limits: true
+
+steps:
+  - name: Send SetLimit command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000  # 5 kW
+        cause: 0                   # GRID_EMERGENCY
+    expect:
+      invoke_success: true
+      response_contains:
+        - applied
+        - controlState
+
+  - name: Verify applied is true
+    action: check_response
+    params:
+      field: applied
+    expect:
+      value: true
+
+  - name: Verify controlState is LIMITED
+    action: check_response
+    params:
+      field: controlState
+    expect:
+      value: 2                     # LIMITED
+
+postconditions:
+  - limit_applied: true
+
+timeout: "10s"
+tags:
+  - lpc
+  - setlimit
+  - enhanced-response
+
+---
+# TC-LPC-002: Negative Limit Rejected
+id: TC-LPC-002
+name: Negative Limit Rejected
+description: |
+  Verifies that negative limit values are rejected with
+  INVALID_VALUE reason per LPC spec requirement.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_VALIDATE_NEG
+  - MASH.S.CTRL.B_REJECT
+
+preconditions:
+  - session_established: true
+  - device_accepts_limits: true
+
+steps:
+  - name: Send SetLimit with negative value
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: -1000    # Invalid negative
+        cause: 0
+    expect:
+      invoke_success: true
+      response_contains:
+        - applied
+        - rejectReason
+
+  - name: Verify applied is false
+    action: check_response
+    params:
+      field: applied
+    expect:
+      value: false
+
+  - name: Verify rejectReason is INVALID_VALUE
+    action: check_response
+    params:
+      field: rejectReason
+    expect:
+      value: 2                     # INVALID_VALUE
+
+postconditions:
+  - negative_limit_rejected: true
+
+timeout: "10s"
+tags:
+  - lpc
+  - validation
+  - negative
+
+---
+# TC-LPC-003: Limit Deactivation via null
+id: TC-LPC-003
+name: Limit Deactivation via null
+description: |
+  Verifies that setting limit to null deactivates the limit
+  and transitions to CONTROLLED state (not LIMITED).
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_CTRLSTATE
+
+preconditions:
+  - session_established: true
+  - limit_is_set: true
+
+steps:
+  - name: Set an initial limit
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 7000000
+        cause: 0
+    expect:
+      invoke_success: true
+
+  - name: Verify controlState is LIMITED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 2                     # LIMITED
+
+  - name: Send SetLimit with null to deactivate
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: null     # Deactivate
+        cause: 0
+    expect:
+      invoke_success: true
+
+  - name: Verify controlState is CONTROLLED (not LIMITED)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 1                     # CONTROLLED
+
+postconditions:
+  - limit_deactivated: true
+
+timeout: "10s"
+tags:
+  - lpc
+  - deactivation
+  - null-limit
+
+---
+# TC-LPC-004: Override State with Reason
+id: TC-LPC-004
+name: Override State with Reason
+description: |
+  Verifies that when device enters OVERRIDE state, the
+  overrideReason and overrideDirection are set.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A4B              # overrideReason
+  - MASH.S.CTRL.A4C              # overrideDirection
+
+preconditions:
+  - session_established: true
+  - device_supports_override: true
+
+steps:
+  - name: Trigger override (device-initiated)
+    action: device_trigger
+    params:
+      trigger: enter_override
+      reason: SELF_PROTECTION
+      direction: consumption
+
+  - name: Verify controlState is OVERRIDE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 4                     # OVERRIDE
+
+  - name: Verify overrideReason is SELF_PROTECTION
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: overrideReason
+    expect:
+      read_success: true
+      value: 0                     # SELF_PROTECTION
+
+  - name: Verify overrideDirection is CONSUMPTION
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: overrideDirection
+    expect:
+      read_success: true
+      value: 0                     # CONSUMPTION
+
+postconditions:
+  - override_with_reason: true
+
+timeout: "10s"
+tags:
+  - lpc
+  - override
+  - safety
+
+---
+# TC-LPC-005: Contractual Limits for EMS
+id: TC-LPC-005
+name: Contractual Limits for EMS
+description: |
+  Verifies that EMS devices report contractualConsumptionMax
+  and contractualProductionMax instead of nominal max.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A49              # contractualConsumptionMax
+
+preconditions:
+  - session_established: true
+  - device_is_ems: true
+
+steps:
+  - name: Read contractualConsumptionMax
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: contractualConsumptionMax
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+  - name: Verify value is reasonable (>0)
+    action: check_value
+    params:
+      attribute: contractualConsumptionMax
+    expect:
+      value_gt: 0
+
+  - name: Read contractualProductionMax (if bidirectional)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: contractualProductionMax
+    expect:
+      read_success: true
+      # May be null if not bidirectional
+
+postconditions:
+  - contractual_limits_available: true
+
+timeout: "10s"
+tags:
+  - lpc
+  - lpp
+  - ems
+  - contractual
+
+---
+# TC-LPC-006: Failsafe Duration Shared
+id: TC-LPC-006
+name: Failsafe Duration Shared Between LPC/LPP
+description: |
+  Verifies that failsafeDuration is a single shared value
+  (not separate for consumption/production).
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A48              # failsafeDuration
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read failsafeDuration
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: failsafeDuration
+    expect:
+      read_success: true
+      value_gte: 7200              # >= 2 hours
+      value_lte: 86400             # <= 24 hours
+
+  - name: Verify single value (not per-direction)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: failsafeDuration
+    expect:
+      read_success: true
+      value_type: uint32           # Not a map
+
+postconditions:
+  - failsafe_duration_valid: true
+
+timeout: "10s"
+tags:
+  - lpc
+  - lpp
+  - failsafe
+  - shared
+
+---
+# TC-LPC-007: Limit Above Contractual Rejected
+id: TC-LPC-007
+name: Limit Above Contractual Max Rejected
+description: |
+  Verifies that limits exceeding the contractual maximum
+  are rejected with ABOVE_CONTRACTUAL reason.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A49              # contractualConsumptionMax
+  - MASH.S.CTRL.B_REJECT
+
+preconditions:
+  - session_established: true
+  - device_is_ems: true
+  - contractual_limit_set: true
+
+steps:
+  - name: Read contractualConsumptionMax
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: contractualConsumptionMax
+    expect:
+      read_success: true
+      save_as: contractual_max
+
+  - name: Attempt to set limit above contractual
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 999999999999  # Very high value
+        cause: 0
+    expect:
+      invoke_success: true
+      response_contains:
+        - applied
+        - rejectReason
+
+  - name: Verify applied is false
+    action: check_response
+    params:
+      field: applied
+    expect:
+      value: false
+
+  - name: Verify rejectReason is ABOVE_CONTRACTUAL
+    action: check_response
+    params:
+      field: rejectReason
+    expect:
+      value: 1                     # ABOVE_CONTRACTUAL
+
+postconditions:
+  - excessive_limit_rejected: true
+
+timeout: "10s"
+tags:
+  - lpc
+  - validation
+  - contractual
+  - ems
+
+---
+# TC-LPC-008: Override Clears on Exit
+id: TC-LPC-008
+name: Override Reason Clears on Exit
+description: |
+  Verifies that overrideReason and overrideDirection are
+  cleared (null) when device exits OVERRIDE state.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A4B              # overrideReason
+  - MASH.S.CTRL.A4C              # overrideDirection
+
+preconditions:
+  - session_established: true
+  - device_in_override: true
+
+steps:
+  - name: Verify device is in OVERRIDE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 4                     # OVERRIDE
+
+  - name: Verify overrideReason is set
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: overrideReason
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+  - name: Exit override (device-initiated)
+    action: device_trigger
+    params:
+      trigger: exit_override
+
+  - name: Verify controlState is not OVERRIDE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value_not_equal: 4           # Not OVERRIDE
+
+  - name: Verify overrideReason is cleared
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: overrideReason
+    expect:
+      read_success: true
+      value_is_null: true
+
+  - name: Verify overrideDirection is cleared
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: overrideDirection
+    expect:
+      read_success: true
+      value_is_null: true
+
+postconditions:
+  - override_cleared: true
+
+timeout: "10s"
+tags:
+  - lpc
+  - override
+  - cleanup
+
+---
+# TC-LPC-009: SetLimit During Override Returns Device Override
+id: TC-LPC-009
+name: SetLimit During Override Returns Device Override
+description: |
+  Verifies that SetLimit during OVERRIDE state returns
+  applied=false with DEVICE_OVERRIDE reason.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_REJECT
+
+preconditions:
+  - session_established: true
+  - device_in_override: true
+
+steps:
+  - name: Verify device is in OVERRIDE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 4                     # OVERRIDE
+
+  - name: Attempt to set limit during override
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+        cause: 0
+    expect:
+      invoke_success: true
+      response_contains:
+        - applied
+        - rejectReason
+
+  - name: Verify applied is false
+    action: check_response
+    params:
+      field: applied
+    expect:
+      value: false
+
+  - name: Verify rejectReason is DEVICE_OVERRIDE
+    action: check_response
+    params:
+      field: rejectReason
+    expect:
+      value: 3                     # DEVICE_OVERRIDE
+
+postconditions:
+  - limit_rejected_during_override: true
+
+timeout: "10s"
+tags:
+  - lpc
+  - override
+  - rejection
+
+---
+# TC-LPC-010: Production Limit (LPP)
+id: TC-LPC-010
+name: Production Limit for LPP
+description: |
+  Verifies that production limits work correctly for
+  LPP (Limitation of Power Production) use case.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A16              # effectiveProductionLimit
+  - MASH.S.CTRL.B_APPLIED
+
+preconditions:
+  - session_established: true
+  - device_supports_production: true
+
+steps:
+  - name: Send SetLimit with production limit
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        productionLimit: 3000000   # 3 kW feed-in limit
+        cause: 0
+    expect:
+      invoke_success: true
+      response_contains:
+        - applied
+        - controlState
+
+  - name: Verify applied is true
+    action: check_response
+    params:
+      field: applied
+    expect:
+      value: true
+
+  - name: Verify effectiveProductionLimit updated
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveProductionLimit
+    expect:
+      read_success: true
+      value: 3000000
+
+postconditions:
+  - production_limit_set: true
+
+timeout: "10s"
+tags:
+  - lpp
+  - production
+  - setlimit

@@ -163,35 +163,45 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 
 func (e *EVSE) setupCommandHandlers() {
 	// SetLimit handler - CEM sets power limits
-	e.energyControl.OnSetLimit(func(ctx context.Context, consumptionLimit, productionLimit *int64, cause features.LimitCause) (int64, int64, error) {
+	e.energyControl.OnSetLimitEnhanced(func(ctx context.Context, req features.SetLimitRequest) features.SetLimitResponse {
 		e.mu.Lock()
 		defer e.mu.Unlock()
 
-		// Store the limit
-		e.effectiveLimit = consumptionLimit
-
-		// Update control state
-		if consumptionLimit != nil {
-			_ = e.energyControl.SetControlState(features.ControlStateLimited)
-			_ = e.energyControl.SetEffectiveConsumptionLimit(consumptionLimit)
+		// Validate: reject negative limits
+		if req.ConsumptionLimit != nil && *req.ConsumptionLimit < 0 {
+			reason := features.LimitRejectInvalidValue
+			return features.SetLimitResponse{
+				Applied:      false,
+				RejectReason: &reason,
+				ControlState: e.energyControl.ControlState(),
+			}
 		}
+
+		// Store the limit
+		e.effectiveLimit = req.ConsumptionLimit
+
+		// Update control state based on whether limit is set
+		var newState features.ControlState
+		if req.ConsumptionLimit != nil {
+			newState = features.ControlStateLimited
+			_ = e.energyControl.SetEffectiveConsumptionLimit(req.ConsumptionLimit)
+		} else {
+			newState = features.ControlStateControlled
+			_ = e.energyControl.SetEffectiveConsumptionLimit(nil)
+		}
+		_ = e.energyControl.SetControlState(newState)
 
 		// Notify callback
 		if e.onLimitChanged != nil {
-			e.onLimitChanged(consumptionLimit)
+			e.onLimitChanged(req.ConsumptionLimit)
 		}
 
-		// Return effective limits
-		effConsumption := int64(0)
-		if consumptionLimit != nil {
-			effConsumption = *consumptionLimit
+		return features.SetLimitResponse{
+			Applied:                   true,
+			EffectiveConsumptionLimit: req.ConsumptionLimit,
+			EffectiveProductionLimit:  req.ProductionLimit,
+			ControlState:              newState,
 		}
-		effProduction := int64(0)
-		if productionLimit != nil {
-			effProduction = *productionLimit
-		}
-
-		return effConsumption, effProduction, nil
 	})
 
 	// ClearLimit handler

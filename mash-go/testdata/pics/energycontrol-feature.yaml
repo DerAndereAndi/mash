@@ -116,6 +116,20 @@ items:
   MASH.S.CTRL.A48: true           # failsafeDuration (seconds, default 7200)
 
   # ==========================================================================
+  # Contractual Limits (EMS/CEM only - LPC/LPP support)
+  # ==========================================================================
+
+  MASH.S.CTRL.A49: false          # contractualConsumptionMax (EMS only)
+  MASH.S.CTRL.A4A: false          # contractualProductionMax (EMS only)
+
+  # ==========================================================================
+  # Override Tracking (LPC/LPP support)
+  # ==========================================================================
+
+  MASH.S.CTRL.A4B: true           # overrideReason (set when in OVERRIDE)
+  MASH.S.CTRL.A4C: true           # overrideDirection
+
+  # ==========================================================================
   # Process Attributes (requires PROCESS)
   # ==========================================================================
 
@@ -165,6 +179,19 @@ items:
 
   # OptOut states filter commands
   MASH.S.CTRL.B_OPTOUT: true      # OptOut state filtering
+
+  # ==========================================================================
+  # LPC/LPP Behavioral Capabilities
+  # ==========================================================================
+
+  # SetLimit enhanced response fields
+  MASH.S.CTRL.B_APPLIED: true     # SetLimit returns 'applied' field
+  MASH.S.CTRL.B_REJECT: true      # SetLimit returns 'rejectReason' field
+  MASH.S.CTRL.B_CTRLSTATE: true   # SetLimit returns 'controlState' field
+
+  # Limit validation behaviors
+  MASH.S.CTRL.B_VALIDATE_NEG: true    # Rejects negative limit values
+  MASH.S.CTRL.B_VALIDATE_MIN: true    # Checks against minimum operating power
 
 # =============================================================================
 # ControlState Enum Values
@@ -237,3 +264,33 @@ items:
 # TC-CTRL-012 (Per-phase current limits):
 #   - MASH.S.CTRL.F09: true
 #   - MASH.S.CTRL.C05.Rsp: true
+#
+# =============================================================================
+# LPC/LPP Test Case Mappings
+# =============================================================================
+#
+# TC-LPC-001 (SetLimit returns enhanced response):
+#   - MASH.S.CTRL: true
+#   - MASH.S.CTRL.B_APPLIED: true
+#   - MASH.S.CTRL.B_CTRLSTATE: true
+#
+# TC-LPC-002 (Negative limit rejected):
+#   - MASH.S.CTRL: true
+#   - MASH.S.CTRL.B_VALIDATE_NEG: true
+#
+# TC-LPC-003 (Limit deactivation via null):
+#   - MASH.S.CTRL: true
+#   - MASH.S.CTRL.B_CTRLSTATE: true
+#
+# TC-LPC-004 (Override state with reason):
+#   - MASH.S.CTRL: true
+#   - MASH.S.CTRL.A4B: true
+#   - MASH.S.CTRL.A4C: true
+#
+# TC-LPC-005 (Contractual limits for EMS):
+#   - MASH.S.CTRL: true
+#   - MASH.S.CTRL.A49: true
+#
+# TC-LPC-006 (Failsafe duration shared):
+#   - MASH.S.CTRL: true
+#   - MASH.S.CTRL.A48: true

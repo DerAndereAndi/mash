@@ -55,6 +55,14 @@ const (
 	EnergyControlAttrFailsafeProductionLimit  uint16 = 71
 	EnergyControlAttrFailsafeDuration         uint16 = 72
 
+	// Contractual limits (73-74) - EMS/CEM only
+	EnergyControlAttrContractualConsumptionMax uint16 = 73
+	EnergyControlAttrContractualProductionMax  uint16 = 74
+
+	// Override tracking (75-76)
+	EnergyControlAttrOverrideReason    uint16 = 75
+	EnergyControlAttrOverrideDirection uint16 = 76
+
 	// Process management (80-89)
 	EnergyControlAttrProcessState    uint16 = 80
 	EnergyControlAttrOptionalProcess uint16 = 81
@@ -218,20 +226,95 @@ const (
 	SetpointCauseUserPreference    SetpointCause = 4
 )
 
+// OverrideReason represents why device is exceeding limits.
+type OverrideReason uint8
+
+const (
+	OverrideReasonSelfProtection       OverrideReason = 0x00
+	OverrideReasonSafety               OverrideReason = 0x01
+	OverrideReasonLegalRequirement     OverrideReason = 0x02
+	OverrideReasonUncontrolledLoad     OverrideReason = 0x03
+	OverrideReasonUncontrolledProducer OverrideReason = 0x04
+)
+
+// String returns the override reason name.
+func (o OverrideReason) String() string {
+	switch o {
+	case OverrideReasonSelfProtection:
+		return "SELF_PROTECTION"
+	case OverrideReasonSafety:
+		return "SAFETY"
+	case OverrideReasonLegalRequirement:
+		return "LEGAL_REQUIREMENT"
+	case OverrideReasonUncontrolledLoad:
+		return "UNCONTROLLED_LOAD"
+	case OverrideReasonUncontrolledProducer:
+		return "UNCONTROLLED_PRODUCER"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// LimitRejectReason represents why a SetLimit was not applied.
+type LimitRejectReason uint8
+
+const (
+	LimitRejectBelowMinimum     LimitRejectReason = 0x00
+	LimitRejectAboveContractual LimitRejectReason = 0x01
+	LimitRejectInvalidValue     LimitRejectReason = 0x02
+	LimitRejectDeviceOverride   LimitRejectReason = 0x03
+	LimitRejectNotSupported     LimitRejectReason = 0x04
+)
+
+// String returns the limit reject reason name.
+func (r LimitRejectReason) String() string {
+	switch r {
+	case LimitRejectBelowMinimum:
+		return "BELOW_MINIMUM"
+	case LimitRejectAboveContractual:
+		return "ABOVE_CONTRACTUAL"
+	case LimitRejectInvalidValue:
+		return "INVALID_VALUE"
+	case LimitRejectDeviceOverride:
+		return "DEVICE_OVERRIDE"
+	case LimitRejectNotSupported:
+		return "NOT_SUPPORTED"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// SetLimitRequest represents the SetLimit command parameters.
+type SetLimitRequest struct {
+	ConsumptionLimit *int64
+	ProductionLimit  *int64
+	Duration         *uint32
+	Cause            LimitCause
+}
+
+// SetLimitResponse represents the enhanced SetLimit response.
+type SetLimitResponse struct {
+	Applied                   bool
+	EffectiveConsumptionLimit *int64
+	EffectiveProductionLimit  *int64
+	RejectReason              *LimitRejectReason
+	ControlState              ControlState
+}
+
 // EnergyControl wraps a Feature with EnergyControl-specific functionality.
 type EnergyControl struct {
 	*model.Feature
 
 	// Handler callbacks for commands
-	onSetLimit            func(ctx context.Context, consumptionLimit, productionLimit *int64, cause LimitCause) (int64, int64, error)
-	onClearLimit          func(ctx context.Context, direction *Direction) error
-	onSetCurrentLimits    func(ctx context.Context, phases map[Phase]int64, direction Direction, cause LimitCause) (map[Phase]int64, error)
-	onClearCurrentLimits  func(ctx context.Context, direction *Direction) error
-	onSetSetpoint         func(ctx context.Context, consumptionSetpoint, productionSetpoint *int64, cause SetpointCause) (int64, int64, error)
-	onClearSetpoint       func(ctx context.Context, direction *Direction) error
-	onPause               func(ctx context.Context, duration *uint32) error
-	onResume              func(ctx context.Context) error
-	onStop                func(ctx context.Context) error
+	onSetLimit           func(ctx context.Context, req SetLimitRequest) SetLimitResponse
+	onClearLimit         func(ctx context.Context, direction *Direction) error
+	onSetCurrentLimits   func(ctx context.Context, phases map[Phase]int64, direction Direction, cause LimitCause) (map[Phase]int64, error)
+	onClearCurrentLimits func(ctx context.Context, direction *Direction) error
+	onSetSetpoint        func(ctx context.Context, consumptionSetpoint, productionSetpoint *int64, cause SetpointCause) (int64, int64, error)
+	onClearSetpoint      func(ctx context.Context, direction *Direction) error
+	onPause              func(ctx context.Context, duration *uint32) error
+	onResume             func(ctx context.Context) error
+	onStop               func(ctx context.Context) error
 }
 
 // NewEnergyControl creates a new EnergyControl feature.
@@ -351,6 +434,29 @@ func NewEnergyControl() *EnergyControl {
 		Description: "Time in FAILSAFE before returning to AUTONOMOUS (2-24h)",
 	}))
 
+	// Contractual limits (EMS/CEM only) - used for building-level LPC/LPP
+	addPowerAttr(EnergyControlAttrContractualConsumptionMax, "contractualConsumptionMax", "Building's max allowed consumption (EMS only)", false)
+	addPowerAttr(EnergyControlAttrContractualProductionMax, "contractualProductionMax", "Building's max allowed feed-in (EMS only)", false)
+
+	// Override tracking - explains why device is in OVERRIDE state
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          EnergyControlAttrOverrideReason,
+		Name:        "overrideReason",
+		Type:        model.DataTypeUint8,
+		Access:      model.AccessReadOnly,
+		Nullable:    true,
+		Description: "Why device is in OVERRIDE state",
+	}))
+
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          EnergyControlAttrOverrideDirection,
+		Name:        "overrideDirection",
+		Type:        model.DataTypeUint8,
+		Access:      model.AccessReadOnly,
+		Nullable:    true,
+		Description: "Which direction triggered override",
+	}))
+
 	// Process management
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
 		ID:          EnergyControlAttrProcessState,
@@ -467,32 +573,40 @@ func (e *EnergyControl) addCommands() {
 
 func (e *EnergyControl) handleSetLimit(ctx context.Context, params map[string]any) (map[string]any, error) {
 	if e.onSetLimit == nil {
-		return map[string]any{"success": false}, nil
+		return map[string]any{"applied": false}, nil
 	}
 
-	var consumptionLimit, productionLimit *int64
+	// Parse request
+	req := SetLimitRequest{}
 	if v, ok := params["consumptionLimit"].(int64); ok {
-		consumptionLimit = &v
+		req.ConsumptionLimit = &v
 	}
 	if v, ok := params["productionLimit"].(int64); ok {
-		productionLimit = &v
+		req.ProductionLimit = &v
 	}
-
-	cause := LimitCause(0)
+	if v, ok := params["duration"].(uint32); ok {
+		req.Duration = &v
+	}
 	if v, ok := params["cause"].(uint8); ok {
-		cause = LimitCause(v)
+		req.Cause = LimitCause(v)
 	}
 
-	effConsumption, effProduction, err := e.onSetLimit(ctx, consumptionLimit, productionLimit, cause)
-	if err != nil {
-		return map[string]any{"success": false}, err
+	// Call handler
+	resp := e.onSetLimit(ctx, req)
+	result := map[string]any{
+		"applied":      resp.Applied,
+		"controlState": uint8(resp.ControlState),
 	}
-
-	return map[string]any{
-		"success":                    true,
-		"effectiveConsumptionLimit":  effConsumption,
-		"effectiveProductionLimit":   effProduction,
-	}, nil
+	if resp.EffectiveConsumptionLimit != nil {
+		result["effectiveConsumptionLimit"] = *resp.EffectiveConsumptionLimit
+	}
+	if resp.EffectiveProductionLimit != nil {
+		result["effectiveProductionLimit"] = *resp.EffectiveProductionLimit
+	}
+	if resp.RejectReason != nil {
+		result["rejectReason"] = uint8(*resp.RejectReason)
+	}
+	return result, nil
 }
 
 func (e *EnergyControl) handleClearLimit(ctx context.Context, params map[string]any) (map[string]any, error) {
@@ -642,7 +756,13 @@ func (e *EnergyControl) handleStop(ctx context.Context, params map[string]any) (
 // Handler setters
 
 // OnSetLimit sets the handler for SetLimit command.
-func (e *EnergyControl) OnSetLimit(handler func(ctx context.Context, consumptionLimit, productionLimit *int64, cause LimitCause) (int64, int64, error)) {
+func (e *EnergyControl) OnSetLimit(handler func(ctx context.Context, req SetLimitRequest) SetLimitResponse) {
+	e.onSetLimit = handler
+}
+
+// OnSetLimitEnhanced is an alias for OnSetLimit for API clarity.
+// Deprecated: Use OnSetLimit instead.
+func (e *EnergyControl) OnSetLimitEnhanced(handler func(ctx context.Context, req SetLimitRequest) SetLimitResponse) {
 	e.onSetLimit = handler
 }
 
@@ -834,4 +954,109 @@ func (e *EnergyControl) IsLimited() bool {
 // IsFailsafe returns true if in FAILSAFE state.
 func (e *EnergyControl) IsFailsafe() bool {
 	return e.ControlState() == ControlStateFailsafe
+}
+
+// IsOverride returns true if in OVERRIDE state.
+func (e *EnergyControl) IsOverride() bool {
+	return e.ControlState() == ControlStateOverride
+}
+
+// Contractual limits (EMS/CEM only)
+
+// SetContractualConsumptionMax sets the building's contractual consumption max (EMS only).
+func (e *EnergyControl) SetContractualConsumptionMax(limit *int64) error {
+	attr, err := e.GetAttribute(EnergyControlAttrContractualConsumptionMax)
+	if err != nil {
+		return err
+	}
+	if limit == nil {
+		return attr.SetValueInternal(nil)
+	}
+	return attr.SetValueInternal(*limit)
+}
+
+// ContractualConsumptionMax returns the building's contractual consumption max.
+func (e *EnergyControl) ContractualConsumptionMax() (int64, bool) {
+	val, err := e.ReadAttribute(EnergyControlAttrContractualConsumptionMax)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(int64); ok {
+		return v, true
+	}
+	return 0, false
+}
+
+// SetContractualProductionMax sets the building's contractual production max (EMS only).
+func (e *EnergyControl) SetContractualProductionMax(limit *int64) error {
+	attr, err := e.GetAttribute(EnergyControlAttrContractualProductionMax)
+	if err != nil {
+		return err
+	}
+	if limit == nil {
+		return attr.SetValueInternal(nil)
+	}
+	return attr.SetValueInternal(*limit)
+}
+
+// ContractualProductionMax returns the building's contractual production max.
+func (e *EnergyControl) ContractualProductionMax() (int64, bool) {
+	val, err := e.ReadAttribute(EnergyControlAttrContractualProductionMax)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(int64); ok {
+		return v, true
+	}
+	return 0, false
+}
+
+// Override tracking
+
+// SetOverrideReason sets the override reason (when in OVERRIDE state).
+func (e *EnergyControl) SetOverrideReason(reason *OverrideReason) error {
+	attr, err := e.GetAttribute(EnergyControlAttrOverrideReason)
+	if err != nil {
+		return err
+	}
+	if reason == nil {
+		return attr.SetValueInternal(nil)
+	}
+	return attr.SetValueInternal(uint8(*reason))
+}
+
+// GetOverrideReason returns the override reason.
+func (e *EnergyControl) GetOverrideReason() (OverrideReason, bool) {
+	val, err := e.ReadAttribute(EnergyControlAttrOverrideReason)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(uint8); ok {
+		return OverrideReason(v), true
+	}
+	return 0, false
+}
+
+// SetOverrideDirection sets which direction triggered override.
+func (e *EnergyControl) SetOverrideDirection(dir *Direction) error {
+	attr, err := e.GetAttribute(EnergyControlAttrOverrideDirection)
+	if err != nil {
+		return err
+	}
+	if dir == nil {
+		return attr.SetValueInternal(nil)
+	}
+	return attr.SetValueInternal(uint8(*dir))
+}
+
+// GetOverrideDirection returns which direction triggered override.
+func (e *EnergyControl) GetOverrideDirection() (Direction, bool) {
+	val, err := e.ReadAttribute(EnergyControlAttrOverrideDirection)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(uint8); ok {
+		return Direction(v), true
+	}
+	return 0, false
 }
