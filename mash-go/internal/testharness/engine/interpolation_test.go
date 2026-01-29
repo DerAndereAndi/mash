@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"testing"
+
+	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 )
 
 // TestInterpolation_Basic tests basic variable interpolation.
@@ -280,5 +282,169 @@ func TestInterpolateParams_EmptyParams(t *testing.T) {
 	result = InterpolateParams(map[string]interface{}{}, state)
 	if len(result) != 0 {
 		t.Errorf("InterpolateParams({}, state) has %d items, want 0", len(result))
+	}
+}
+
+// ============================================================================
+// PICS Interpolation Tests (DEC-047)
+// ============================================================================
+
+// TestInterpolatePICS_Basic tests basic PICS value substitution.
+func TestInterpolatePICS_Basic(t *testing.T) {
+	state := NewExecutionState(context.Background())
+	pics := &loader.PICSFile{
+		Items: map[string]interface{}{
+			"MASH.S.COMM.BACKOFF_TIER2": 1000,
+			"MASH.S.ZONE.MAX":           2,
+			"MASH.S.COMM.HARDENING":     true,
+		},
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"numeric value", "Delay: ${MASH.S.COMM.BACKOFF_TIER2}ms", "Delay: 1000ms"},
+		{"integer value", "Max zones: ${MASH.S.ZONE.MAX}", "Max zones: 2"},
+		{"boolean value", "Hardening: ${MASH.S.COMM.HARDENING}", "Hardening: true"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := InterpolateWithPICS(tt.input, state, pics)
+			if result != tt.expected {
+				t.Errorf("InterpolateWithPICS(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestInterpolatePICS_Arithmetic tests PICS arithmetic operations.
+func TestInterpolatePICS_Arithmetic(t *testing.T) {
+	state := NewExecutionState(context.Background())
+	pics := &loader.PICSFile{
+		Items: map[string]interface{}{
+			"MASH.S.ZONE.MAX": 2,
+		},
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"addition", "${MASH.S.ZONE.MAX + 1}", "3"},
+		{"subtraction", "${MASH.S.ZONE.MAX - 1}", "1"},
+		{"larger addition", "${MASH.S.ZONE.MAX + 10}", "12"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := InterpolateWithPICS(tt.input, state, pics)
+			if result != tt.expected {
+				t.Errorf("InterpolateWithPICS(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestInterpolatePICS_MixedWithState tests combining PICS and state variables.
+func TestInterpolatePICS_MixedWithState(t *testing.T) {
+	state := NewExecutionState(context.Background())
+	state.Set("device_id", "test-123")
+
+	pics := &loader.PICSFile{
+		Items: map[string]interface{}{
+			"MASH.S.ZONE.MAX": 2,
+		},
+	}
+
+	input := "Device {{ device_id }} supports ${MASH.S.ZONE.MAX} zones"
+	expected := "Device test-123 supports 2 zones"
+
+	result := InterpolateWithPICS(input, state, pics)
+	if result != expected {
+		t.Errorf("InterpolateWithPICS() = %q, want %q", result, expected)
+	}
+}
+
+// TestInterpolatePICS_Undefined tests undefined PICS items are left as-is.
+func TestInterpolatePICS_Undefined(t *testing.T) {
+	state := NewExecutionState(context.Background())
+	pics := &loader.PICSFile{
+		Items: map[string]interface{}{},
+	}
+
+	input := "${MASH.S.UNDEFINED}"
+	result := InterpolateWithPICS(input, state, pics)
+
+	if result != input {
+		t.Errorf("InterpolateWithPICS(%q) = %q, want %q (unchanged)", input, result, input)
+	}
+}
+
+// TestInterpolateParamsWithPICS_TypePreservation tests PICS type preservation.
+func TestInterpolateParamsWithPICS_TypePreservation(t *testing.T) {
+	state := NewExecutionState(context.Background())
+	pics := &loader.PICSFile{
+		Items: map[string]interface{}{
+			"MASH.S.COMM.BACKOFF_TIER2": 1000,
+			"MASH.S.ZONE.MAX":           2,
+			"MASH.S.COMM.HARDENING":     true,
+		},
+	}
+
+	params := map[string]interface{}{
+		"backoff":   "${MASH.S.COMM.BACKOFF_TIER2}",
+		"max_zones": "${MASH.S.ZONE.MAX}",
+		"hardening": "${MASH.S.COMM.HARDENING}",
+		"computed":  "${MASH.S.ZONE.MAX + 1}",
+	}
+
+	result := InterpolateParamsWithPICS(params, state, pics)
+
+	// Pure PICS reference should preserve type
+	if backoff, ok := result["backoff"].(int); !ok || backoff != 1000 {
+		t.Errorf("backoff = %v (%T), want 1000 (int)", result["backoff"], result["backoff"])
+	}
+
+	if maxZones, ok := result["max_zones"].(int); !ok || maxZones != 2 {
+		t.Errorf("max_zones = %v (%T), want 2 (int)", result["max_zones"], result["max_zones"])
+	}
+
+	if hardening, ok := result["hardening"].(bool); !ok || !hardening {
+		t.Errorf("hardening = %v (%T), want true (bool)", result["hardening"], result["hardening"])
+	}
+
+	// Arithmetic should return int64
+	if computed, ok := result["computed"].(int64); !ok || computed != 3 {
+		t.Errorf("computed = %v (%T), want 3 (int64)", result["computed"], result["computed"])
+	}
+}
+
+// TestIsPurePICSRef tests the PICS reference detection.
+func TestIsPurePICSRef(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		{"${MASH.S.ZONE.MAX}", true},
+		{"${MASH.S.ZONE.MAX + 1}", true},
+		{"${MASH.S.COMM.BACKOFF_TIER2}", true},
+		{"prefix ${MASH.S.ZONE.MAX}", false},
+		{"${MASH.S.ZONE.MAX} suffix", false},
+		{"{{ variable }}", false},
+		{"plain text", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := isPurePICSRef(tt.input)
+			if result != tt.expected {
+				t.Errorf("isPurePICSRef(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
 	}
 }

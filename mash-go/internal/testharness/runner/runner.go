@@ -29,6 +29,7 @@ type Runner struct {
 	resolver  *Resolver
 	messageID uint32 // Atomic counter for message IDs
 	paseState *PASEState
+	pics      *loader.PICSFile // Cached PICS for handler access
 }
 
 // Config configures the test runner.
@@ -92,8 +93,10 @@ func New(config *Config) *Runner {
 	engineConfig.DefaultTimeout = config.Timeout
 
 	// Load PICS if provided
+	var pics *loader.PICSFile
 	if config.PICSFile != "" {
-		pics, err := loader.LoadPICS(config.PICSFile)
+		var err error
+		pics, err = loader.LoadPICS(config.PICSFile)
 		if err == nil {
 			engineConfig.PICS = pics
 		}
@@ -104,6 +107,7 @@ func New(config *Config) *Runner {
 		engine:   engine.NewWithConfig(engineConfig),
 		conn:     &Connection{},
 		resolver: NewResolver(),
+		pics:     pics,
 	}
 
 	// Register enhanced checkers
@@ -208,6 +212,9 @@ func (r *Runner) registerHandlers() {
 
 	// Certificate renewal handlers
 	r.registerRenewalHandlers()
+
+	// Security testing handlers (DEC-047)
+	r.registerSecurityHandlers()
 }
 
 // handleConnect establishes a connection to the target.

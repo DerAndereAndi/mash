@@ -167,9 +167,10 @@ func (e *Engine) executeStep(ctx context.Context, step *loader.Step, index int, 
 		result.Output[k] = v
 	}
 
-	// Check expectations
+	// Check expectations with PICS-aware interpolation
 	result.Passed = true
-	for key, expected := range step.Expect {
+	interpolatedExpect := InterpolateParamsWithPICS(step.Expect, state, e.config.PICS)
+	for key, expected := range interpolatedExpect {
 		expectResult := e.checkExpectation(key, expected, state)
 		result.ExpectResults[key] = expectResult
 		if !expectResult.Passed {
