@@ -406,6 +406,40 @@ func setupDeviceMonitoring(deviceID string) {
 				}
 			}
 		}
+
+		// Log energy control updates
+		if notif.FeatureID == uint8(model.FeatureEnergyControl) {
+			shortID := deviceID[:8]
+			if rawVal, exists := notif.Changes[features.EnergyControlAttrControlState]; exists {
+				if v, ok := wire.ToUint8Public(rawVal); ok {
+					log.Printf("[NOTIFY] Device %s control state: %s", shortID, features.ControlState(v))
+				}
+			}
+			if rawVal, exists := notif.Changes[features.EnergyControlAttrEffectiveConsumptionLimit]; exists {
+				if v, ok := wire.ToInt64(rawVal); ok {
+					log.Printf("[NOTIFY] Device %s effective consumption limit: %.1f kW", shortID, float64(v)/1_000_000.0)
+				}
+			}
+			if rawVal, exists := notif.Changes[features.EnergyControlAttrEffectiveProductionLimit]; exists {
+				if v, ok := wire.ToInt64(rawVal); ok {
+					log.Printf("[NOTIFY] Device %s effective production limit: %.1f kW", shortID, float64(v)/1_000_000.0)
+				}
+			}
+			if rawVal, ok := notif.Changes[features.EnergyControlAttrOverrideReason]; ok {
+				if rawVal != nil {
+					if v, ok := wire.ToUint8Public(rawVal); ok {
+						log.Printf("[NOTIFY] Device %s OVERRIDE: %s", shortID, features.OverrideReason(v))
+					}
+				} else {
+					log.Printf("[NOTIFY] Device %s override cleared", shortID)
+				}
+			}
+			if rawVal, exists := notif.Changes[features.EnergyControlAttrProcessState]; exists {
+				if v, ok := wire.ToUint8Public(rawVal); ok {
+					log.Printf("[NOTIFY] Device %s process state: %s", shortID, features.ProcessState(v))
+				}
+			}
+		}
 	})
 
 	// Subscribe to Measurement on endpoint 1 (functional endpoint)
@@ -413,6 +447,13 @@ func setupDeviceMonitoring(deviceID string) {
 		log.Printf("[MONITOR] Failed to subscribe to measurement: %v", err)
 	} else {
 		log.Printf("[MONITOR] Subscribed to measurements for device %s", deviceID)
+	}
+
+	// Subscribe to EnergyControl on endpoint 1
+	if err := cem.SubscribeToEnergyControl(ctx, deviceID, 1); err != nil {
+		log.Printf("[MONITOR] Failed to subscribe to energy control: %v", err)
+	} else {
+		log.Printf("[MONITOR] Subscribed to energy control for device %s", deviceID)
 	}
 }
 

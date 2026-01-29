@@ -903,6 +903,11 @@ func (f *featureChangeSubscriber) OnAttributeChanged(featureType model.FeatureTy
 		AttributeID: attrID,
 		Value:       value,
 	})
+
+	// Bridge to zone session notifications so subscribed controllers
+	// receive push updates for attribute changes from command handlers,
+	// timer callbacks, and interactive commands.
+	f.svc.notifyZoneSessions(f.endpointID, uint8(featureType), attrID, value)
 }
 
 // subscribeToFeatureChanges registers a FeatureSubscriber on all features
@@ -1317,14 +1322,22 @@ func (s *DeviceService) NotifyAttributeChange(endpointID uint8, featureID uint8,
 		return err
 	}
 
-	// Use SetAttributeInternal to bypass access checks for device-side updates
-	// (measurement attributes are read-only for controllers but writable internally)
+	// Use SetAttributeInternal to bypass access checks for device-side updates.
+	// SetAttributeInternal triggers notifyAttributeChanged(), which calls the
+	// featureChangeSubscriber, which in turn calls notifyZoneSessions() to push
+	// notifications to all subscribed controllers.
 	if err := feature.SetAttributeInternal(attrID, value); err != nil {
 		s.debugLog("NotifyAttributeChange: failed to set attribute", "attrID", attrID, "error", err)
 		return err
 	}
 
-	// Send notifications to all subscribed zones
+	return nil
+}
+
+// notifyZoneSessions sends a notification to all zone sessions with subscriptions
+// matching the given endpoint, feature, and attribute. The attribute value must
+// already be set on the feature before calling this method.
+func (s *DeviceService) notifyZoneSessions(endpointID uint8, featureID uint8, attrID uint16, value any) {
 	s.mu.RLock()
 	sessions := make([]*ZoneSession, 0, len(s.zoneSessions))
 	for _, session := range s.zoneSessions {
@@ -1332,7 +1345,9 @@ func (s *DeviceService) NotifyAttributeChange(endpointID uint8, featureID uint8,
 	}
 	s.mu.RUnlock()
 
-	s.debugLog("NotifyAttributeChange: checking zone sessions", "sessionCount", len(sessions))
+	if len(sessions) == 0 {
+		return
+	}
 
 	changes := map[uint16]any{attrID: value}
 	notificationsSent := 0
@@ -1340,10 +1355,6 @@ func (s *DeviceService) NotifyAttributeChange(endpointID uint8, featureID uint8,
 	for _, session := range sessions {
 		// Get matching subscriptions from this session's handler
 		matchingSubIDs := session.handler.GetMatchingSubscriptions(endpointID, featureID, attrID)
-		s.debugLog("NotifyAttributeChange: found matching subscriptions",
-			"zoneID", session.ZoneID(),
-			"matchCount", len(matchingSubIDs),
-			"subscriptionIDs", matchingSubIDs)
 
 		for _, subID := range matchingSubIDs {
 			notif := &wire.Notification{
@@ -1354,21 +1365,23 @@ func (s *DeviceService) NotifyAttributeChange(endpointID uint8, featureID uint8,
 			}
 			// Send notification (log errors but don't fail - zone may have disconnected)
 			if err := session.SendNotification(notif); err != nil {
-				s.debugLog("NotifyAttributeChange: failed to send notification",
+				s.debugLog("notifyZoneSessions: failed to send notification",
 					"zoneID", session.ZoneID(),
 					"subscriptionID", subID,
 					"error", err)
 			} else {
 				notificationsSent++
-				s.debugLog("NotifyAttributeChange: notification sent",
-					"zoneID", session.ZoneID(),
-					"subscriptionID", subID)
 			}
 		}
 	}
 
-	s.debugLog("NotifyAttributeChange: complete", "notificationsSent", notificationsSent)
-	return nil
+	if notificationsSent > 0 {
+		s.debugLog("notifyZoneSessions: complete",
+			"endpointID", endpointID,
+			"featureID", featureID,
+			"attrID", attrID,
+			"notificationsSent", notificationsSent)
+	}
 }
 
 // SetAdvertiser sets the discovery advertiser (for testing/DI).

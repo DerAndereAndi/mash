@@ -60,6 +60,9 @@ type ConnectedDevice struct {
 	EVStateOfCharge       *uint8
 	EVTargetEnergyRequest *int64
 
+	EffectiveProductionLimit *int64                // From EnergyControl subscription
+	ProcessState             features.ProcessState // From EnergyControl subscription
+
 	// LPC/LPP state
 	LimitApplied      bool                        // Was last SetLimit applied?
 	RejectReason      *features.LimitRejectReason // Why limit was rejected
@@ -346,6 +349,72 @@ func (c *CEM) SubscribeToChargingSession(ctx context.Context, deviceID string, e
 	return nil
 }
 
+// SubscribeToEnergyControl subscribes to energy control state changes from a device.
+// This includes control state transitions, effective limits, override events, and process state.
+func (c *CEM) SubscribeToEnergyControl(ctx context.Context, deviceID string, endpointID uint8) error {
+	c.mu.RLock()
+	device, exists := c.connectedDevices[deviceID]
+	c.mu.RUnlock()
+
+	if !exists {
+		return errors.New("device not connected")
+	}
+
+	subID, values, err := device.Client.Subscribe(ctx, endpointID, uint8(model.FeatureEnergyControl), &interaction.SubscribeOptions{
+		AttributeIDs: []uint16{
+			features.EnergyControlAttrControlState,
+			features.EnergyControlAttrEffectiveConsumptionLimit,
+			features.EnergyControlAttrEffectiveProductionLimit,
+			features.EnergyControlAttrOverrideReason,
+			features.EnergyControlAttrOverrideDirection,
+			features.EnergyControlAttrProcessState,
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	device.SubscriptionIDs = append(device.SubscriptionIDs, subID)
+
+	// Process priming report using type-safe coercion
+	if rawVal, exists := values[features.EnergyControlAttrControlState]; exists {
+		if v, ok := wire.ToUint8Public(rawVal); ok {
+			device.ControlState = features.ControlState(v)
+		}
+	}
+	if rawVal, exists := values[features.EnergyControlAttrEffectiveConsumptionLimit]; exists {
+		if v, ok := wire.ToInt64(rawVal); ok {
+			device.EffectiveLimit = &v
+		}
+	}
+	if rawVal, exists := values[features.EnergyControlAttrEffectiveProductionLimit]; exists {
+		if v, ok := wire.ToInt64(rawVal); ok {
+			device.EffectiveProductionLimit = &v
+		}
+	}
+	if rawVal, exists := values[features.EnergyControlAttrOverrideReason]; exists && rawVal != nil {
+		if v, ok := wire.ToUint8Public(rawVal); ok {
+			reason := features.OverrideReason(v)
+			device.OverrideReason = &reason
+		}
+	}
+	if rawVal, exists := values[features.EnergyControlAttrOverrideDirection]; exists && rawVal != nil {
+		if v, ok := wire.ToUint8Public(rawVal); ok {
+			dir := features.Direction(v)
+			device.OverrideDirection = &dir
+		}
+	}
+	if rawVal, exists := values[features.EnergyControlAttrProcessState]; exists {
+		if v, ok := wire.ToUint8Public(rawVal); ok {
+			device.ProcessState = features.ProcessState(v)
+		}
+	}
+	c.mu.Unlock()
+
+	return nil
+}
+
 // SetPowerLimit sets a consumption limit on a device.
 // Returns an enhanced result with applied status and effective limits.
 func (c *CEM) SetPowerLimit(ctx context.Context, deviceID string, endpointID uint8, limitMW int64) (*SetLimitResult, error) {
@@ -563,6 +632,36 @@ func (c *CEM) HandleNotification(deviceID string, endpointID uint8, featureID ui
 		if rawVal, exists := changes[features.EnergyControlAttrEffectiveConsumptionLimit]; exists {
 			if v, ok := wire.ToInt64(rawVal); ok {
 				device.EffectiveLimit = &v
+			}
+		}
+		if rawVal, exists := changes[features.EnergyControlAttrEffectiveProductionLimit]; exists {
+			if v, ok := wire.ToInt64(rawVal); ok {
+				device.EffectiveProductionLimit = &v
+			}
+		}
+		if rawVal, ok := changes[features.EnergyControlAttrOverrideReason]; ok {
+			if rawVal != nil {
+				if v, ok := wire.ToUint8Public(rawVal); ok {
+					reason := features.OverrideReason(v)
+					device.OverrideReason = &reason
+				}
+			} else {
+				device.OverrideReason = nil
+			}
+		}
+		if rawVal, ok := changes[features.EnergyControlAttrOverrideDirection]; ok {
+			if rawVal != nil {
+				if v, ok := wire.ToUint8Public(rawVal); ok {
+					dir := features.Direction(v)
+					device.OverrideDirection = &dir
+				}
+			} else {
+				device.OverrideDirection = nil
+			}
+		}
+		if rawVal, exists := changes[features.EnergyControlAttrProcessState]; exists {
+			if v, ok := wire.ToUint8Public(rawVal); ok {
+				device.ProcessState = features.ProcessState(v)
 			}
 		}
 

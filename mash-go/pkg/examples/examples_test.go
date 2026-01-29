@@ -91,7 +91,7 @@ func TestEVSECharging(t *testing.T) {
 	}
 }
 
-// mockRequestSender captures requests for testing
+// mockRequestSender captures requests for testing (one-way, discards responses)
 type mockRequestSender struct {
 	server *interaction.Server
 }
@@ -109,6 +109,25 @@ func (m *mockRequestSender) Send(data []byte) error {
 	// The response would normally go back through the wire
 	// For testing, we just verify it worked
 	_ = resp
+	return nil
+}
+
+// roundTripSender routes responses back to the client, enabling Subscribe/Read via interaction.Client.
+type roundTripSender struct {
+	server *interaction.Server
+	client *interaction.Client
+}
+
+func (m *roundTripSender) Send(data []byte) error {
+	req, err := wire.DecodeRequest(data)
+	if err != nil {
+		return err
+	}
+
+	resp := m.server.HandleRequest(context.Background(), req)
+
+	// Route response back to client asynchronously (like a real transport would)
+	go m.client.HandleResponse(resp)
 	return nil
 }
 
@@ -367,6 +386,80 @@ func TestSubscribeToMeasurements(t *testing.T) {
 	// Verify subscription count
 	if evseServer.SubscriptionCount() != 1 {
 		t.Errorf("expected 1 subscription, got %d", evseServer.SubscriptionCount())
+	}
+}
+
+func TestSubscribeToEnergyControl(t *testing.T) {
+	evse := NewEVSE(EVSEConfig{
+		DeviceID:           "PEN12345.EVSE-001",
+		VendorName:         "Test Vendor",
+		ProductName:        "Test Charger",
+		SerialNumber:       "SN-001",
+		VendorID:           12345,
+		ProductID:          100,
+		PhaseCount:         3,
+		NominalVoltage:     400,
+		MaxCurrentPerPhase: 32000,
+		MinCurrentPerPhase: 6000,
+		NominalMaxPower:    22000000,
+		NominalMinPower:    1400000,
+	})
+
+	evseServer := interaction.NewServer(evse.Device())
+
+	// Track notifications
+	var notifications []*wire.Notification
+	evseServer.SetNotificationHandler(func(notif *wire.Notification) {
+		notifications = append(notifications, notif)
+	})
+
+	// Create CEM and connect
+	cem := NewCEM(CEMConfig{
+		DeviceID:     "PEN67890.CEM-001",
+		VendorName:   "Test Vendor",
+		ProductName:  "Test CEM",
+		SerialNumber: "SN-CEM-001",
+		VendorID:     67890,
+		ProductID:    200,
+	})
+
+	sender := &roundTripSender{server: evseServer}
+	client := interaction.NewClient(sender)
+	sender.client = client
+	client.SetTimeout(5 * time.Second)
+
+	_, err := cem.ConnectDevice("PEN12345.EVSE-001", client)
+	if err != nil {
+		t.Fatalf("ConnectDevice failed: %v", err)
+	}
+
+	// Mark EVSE as accepting control
+	evse.AcceptController()
+
+	// Subscribe to EnergyControl on endpoint 1
+	ctx := context.Background()
+	if err := cem.SubscribeToEnergyControl(ctx, "PEN12345.EVSE-001", 1); err != nil {
+		t.Fatalf("SubscribeToEnergyControl failed: %v", err)
+	}
+
+	// Verify priming report populated control state
+	// AcceptController() sets state to CONTROLLED, so that's what we expect
+	device := cem.GetDevice("PEN12345.EVSE-001")
+	if device == nil {
+		t.Fatal("expected device to exist")
+	}
+	if device.ControlState != features.ControlStateControlled {
+		t.Errorf("expected CONTROLLED control state from priming report, got %s", device.ControlState)
+	}
+
+	// Verify subscription ID is tracked
+	if len(device.SubscriptionIDs) != 1 {
+		t.Errorf("expected 1 subscription ID, got %d", len(device.SubscriptionIDs))
+	}
+
+	// Verify server has the subscription
+	if evseServer.SubscriptionCount() != 1 {
+		t.Errorf("expected 1 subscription on server, got %d", evseServer.SubscriptionCount())
 	}
 }
 
