@@ -64,6 +64,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -515,7 +516,32 @@ func createBatteryDevice() *model.Device {
 
 // setupEnergyControlHandler configures the SetLimit handler for a device's EnergyControl feature.
 func setupEnergyControlHandler(energyControl *features.EnergyControl) {
+	// Timer for duration-based limit expiry
+	var limitTimer *time.Timer
+	var timerMu sync.Mutex
+
+	// Helper to cancel any existing timer
+	cancelTimer := func() {
+		timerMu.Lock()
+		defer timerMu.Unlock()
+		if limitTimer != nil {
+			limitTimer.Stop()
+			limitTimer = nil
+		}
+	}
+
+	// Helper to clear limits (used by timer and ClearLimit)
+	clearLimits := func() {
+		_ = energyControl.SetControlState(features.ControlStateControlled)
+		_ = energyControl.SetEffectiveConsumptionLimit(nil)
+		_ = energyControl.SetEffectiveProductionLimit(nil)
+		log.Printf("[LIMIT] Duration expired, limits cleared -> CONTROLLED")
+	}
+
 	energyControl.OnSetLimit(func(ctx context.Context, req features.SetLimitRequest) features.SetLimitResponse {
+		// Cancel any existing duration timer
+		cancelTimer()
+
 		// Validate negative values
 		if req.ConsumptionLimit != nil && *req.ConsumptionLimit < 0 {
 			reason := features.LimitRejectInvalidValue
@@ -554,6 +580,20 @@ func setupEnergyControlHandler(energyControl *features.EnergyControl) {
 			if req.ProductionLimit != nil {
 				_ = energyControl.SetEffectiveProductionLimit(req.ProductionLimit)
 			}
+
+			// Start duration timer if specified
+			if req.Duration != nil && *req.Duration > 0 {
+				duration := time.Duration(*req.Duration) * time.Second
+				timerMu.Lock()
+				limitTimer = time.AfterFunc(duration, func() {
+					timerMu.Lock()
+					limitTimer = nil
+					timerMu.Unlock()
+					clearLimits()
+				})
+				timerMu.Unlock()
+				log.Printf("[LIMIT] Set with duration: %ds", *req.Duration)
+			}
 		} else {
 			// null limit = deactivate
 			newState = features.ControlStateControlled
@@ -572,6 +612,7 @@ func setupEnergyControlHandler(energyControl *features.EnergyControl) {
 
 	// ClearLimit handler
 	energyControl.OnClearLimit(func(ctx context.Context, direction *features.Direction) error {
+		cancelTimer()
 		_ = energyControl.SetControlState(features.ControlStateControlled)
 		_ = energyControl.SetEffectiveConsumptionLimit(nil)
 		_ = energyControl.SetEffectiveProductionLimit(nil)

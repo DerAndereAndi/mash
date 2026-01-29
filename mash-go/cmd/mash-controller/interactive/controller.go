@@ -855,19 +855,21 @@ func (c *Controller) cmdLpcDemo(ctx context.Context, args []string) {
 		}
 	}
 
-	// Demo sequence with delays
+	// Demo sequence with delays and durations
 	demoSteps := []struct {
 		delay       time.Duration
 		limitKW     float64
 		cause       features.LimitCause
+		durationSec *uint32 // nil = indefinite
 		description string
 		clear       bool
+		waitExpiry  bool // wait for duration to expire
 	}{
-		{2 * time.Second, 15.0, features.LimitCauseLocalOptimization, "Initial limit (local optimization)", false},
-		{5 * time.Second, 10.0, features.LimitCauseGridOptimization, "Reducing limit (grid optimization)", false},
-		{5 * time.Second, 5.0, features.LimitCauseGridEmergency, "Grid emergency - severe curtailment", false},
-		{5 * time.Second, 8.0, features.LimitCauseGridOptimization, "Emergency over - partial recovery", false},
-		{5 * time.Second, 0, features.LimitCause(0), "Clearing all limits", true},
+		{2 * time.Second, 15.0, features.LimitCauseLocalOptimization, nil, "Initial limit (local optimization)", false, false},
+		{5 * time.Second, 10.0, features.LimitCauseGridOptimization, ptr(uint32(8)), "Timed limit (8s duration)", false, false},
+		{5 * time.Second, 5.0, features.LimitCauseGridEmergency, ptr(uint32(6)), "Grid emergency (6s duration)", false, true},
+		{2 * time.Second, 12.0, features.LimitCauseLocalOptimization, nil, "Recovery - new indefinite limit", false, false},
+		{5 * time.Second, 0, features.LimitCause(0), nil, "Clearing all limits", true, false},
 	}
 
 	for _, step := range demoSteps {
@@ -888,9 +890,13 @@ func (c *Controller) cmdLpcDemo(ctx context.Context, args []string) {
 			}
 		} else {
 			limitMW := int64(step.limitKW * 1000000)
-			fmt.Fprintf(c.rl.Stdout(), "%s %s: %.1f kW\n", elapsed(), step.description, step.limitKW)
+			durationStr := ""
+			if step.durationSec != nil {
+				durationStr = fmt.Sprintf(" [%ds]", *step.durationSec)
+			}
+			fmt.Fprintf(c.rl.Stdout(), "%s %s: %.1f kW%s\n", elapsed(), step.description, step.limitKW, durationStr)
 
-			result, err := c.cem.SetPowerLimitWithCause(ctx, deviceID, 1, limitMW, step.cause)
+			result, err := c.cem.SetPowerLimitFull(ctx, deviceID, 1, limitMW, step.cause, step.durationSec)
 			if err != nil {
 				fmt.Fprintf(c.rl.Stdout(), "        Error: %v\n", err)
 				continue
@@ -904,6 +910,19 @@ func (c *Controller) cmdLpcDemo(ctx context.Context, args []string) {
 				}
 				fmt.Fprintf(c.rl.Stdout(), "        -> Applied, State: %s%s\n",
 					result.ControlState, effectiveStr)
+
+				// Wait for duration to expire if requested
+				if step.waitExpiry && step.durationSec != nil {
+					waitTime := time.Duration(*step.durationSec+1) * time.Second
+					fmt.Fprintf(c.rl.Stdout(), "%s Waiting for duration to expire...\n", elapsed())
+					select {
+					case <-ctx.Done():
+						fmt.Fprintf(c.rl.Stdout(), "\n%s Demo cancelled\n", elapsed())
+						return
+					case <-time.After(waitTime):
+					}
+					fmt.Fprintf(c.rl.Stdout(), "%s Duration expired (device auto-cleared limit)\n", elapsed())
+				}
 			} else {
 				reasonStr := ""
 				if result.RejectReason != nil {
@@ -917,6 +936,11 @@ func (c *Controller) cmdLpcDemo(ctx context.Context, args []string) {
 
 	fmt.Fprintln(c.rl.Stdout(), "─────────────────────────────────────────────────────────")
 	fmt.Fprintf(c.rl.Stdout(), "%s LPC/LPP demo complete\n\n", elapsed())
+}
+
+// ptr returns a pointer to the given value (helper for inline literals).
+func ptr[T any](v T) *T {
+	return &v
 }
 
 // cmdStatus handles the status command.
