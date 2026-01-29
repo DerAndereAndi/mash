@@ -12,6 +12,7 @@ import (
 
 	"github.com/chzyer/readline"
 	"github.com/mash-protocol/mash-go/pkg/examples"
+	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/inspect"
 	"github.com/mash-protocol/mash-go/pkg/service"
 )
@@ -143,6 +144,15 @@ func (c *Controller) Run(ctx context.Context, cancel context.CancelFunc) {
 		case "resume":
 			c.cmdResume(ctx, args)
 
+		case "capacity", "cap":
+			c.cmdCapacity(ctx, args)
+
+		case "override":
+			c.cmdOverride(ctx, args)
+
+		case "lpc-demo", "lpp-demo":
+			c.cmdLpcDemo(ctx, args)
+
 		case "status":
 			c.cmdStatus()
 
@@ -182,10 +192,13 @@ MASH Controller Commands:
     write <device-id>/<path> <value>  - Write an attribute value
 
   Control:
-    limit <device-id> <power-kw>      - Set power limit (kW)
+    limit <device-id> <kw> [cause] [duration-sec] - Set power limit
     clear <device-id>                 - Clear power limit
     pause <device-id>                 - Pause device
     resume <device-id>                - Resume device
+    capacity <device-id>              - Show device capacity information
+    override <device-id>              - Show override state (if in OVERRIDE)
+    lpc-demo <device-id>              - Run automated LPC/LPP demo sequence
 
   Certificate Management:
     cert                              - Show Zone CA and controller cert
@@ -540,31 +553,86 @@ func (c *Controller) cmdWrite(ctx context.Context, args []string) {
 // cmdLimit handles the limit command.
 func (c *Controller) cmdLimit(ctx context.Context, args []string) {
 	if len(args) < 2 {
-		fmt.Fprintln(c.rl.Stdout(),"Usage: limit <device-id> <power-kw>")
+		fmt.Fprintln(c.rl.Stdout(), "Usage: limit <device-id> <power-kw> [cause] [duration-sec]")
+		fmt.Fprintln(c.rl.Stdout(), "Causes: grid-emergency, grid-optimization, local-protection, local-optimization, user")
 		return
 	}
 
 	deviceID := c.resolveDeviceID(args[0])
 	if deviceID == "" {
-		fmt.Fprintf(c.rl.Stdout(),"Device not found: %s\n", args[0])
+		fmt.Fprintf(c.rl.Stdout(), "Device not found: %s\n", args[0])
 		return
 	}
 
 	powerKW, err := strconv.ParseFloat(args[1], 64)
 	if err != nil {
-		fmt.Fprintf(c.rl.Stdout(),"Invalid power: %v\n", err)
+		fmt.Fprintf(c.rl.Stdout(), "Invalid power: %v\n", err)
 		return
+	}
+
+	// Parse optional cause
+	cause := parseLimitCause("")
+	if len(args) >= 3 {
+		cause = parseLimitCause(args[2])
+	}
+
+	// Parse optional duration (seconds)
+	var durationSec *uint32
+	if len(args) >= 4 {
+		d, err := strconv.ParseUint(args[3], 10, 32)
+		if err != nil {
+			fmt.Fprintf(c.rl.Stdout(), "Invalid duration: %v\n", err)
+			return
+		}
+		dur := uint32(d)
+		durationSec = &dur
 	}
 
 	limitMW := int64(powerKW * 1000000)
-	fmt.Fprintf(c.rl.Stdout(),"Setting power limit to %.1f kW on %s...\n", powerKW, deviceID)
+	durationStr := ""
+	if durationSec != nil {
+		durationStr = fmt.Sprintf(" (duration: %ds)", *durationSec)
+	}
+	fmt.Fprintf(c.rl.Stdout(), "Setting power limit to %.1f kW on %s%s...\n", powerKW, deviceID, durationStr)
 
-	if err := c.cem.SetPowerLimit(ctx, deviceID, 1, limitMW); err != nil {
-		fmt.Fprintf(c.rl.Stdout(),"Failed to set limit: %v\n", err)
+	result, err := c.cem.SetPowerLimitFull(ctx, deviceID, 1, limitMW, cause, durationSec)
+	if err != nil {
+		fmt.Fprintf(c.rl.Stdout(), "Failed to set limit: %v\n", err)
 		return
 	}
 
-	fmt.Fprintln(c.rl.Stdout(),"Limit set successfully")
+	if result.Applied {
+		fmt.Fprintln(c.rl.Stdout(), "Limit applied successfully")
+		fmt.Fprintf(c.rl.Stdout(), "  State: %s\n", result.ControlState)
+		if result.EffectiveConsumptionLimit != nil {
+			fmt.Fprintf(c.rl.Stdout(), "  Effective limit: %.1f kW\n",
+				float64(*result.EffectiveConsumptionLimit)/1000000)
+		}
+	} else {
+		fmt.Fprintln(c.rl.Stdout(), "Limit NOT applied")
+		if result.RejectReason != nil {
+			fmt.Fprintf(c.rl.Stdout(), "  Reason: %s\n", result.RejectReason)
+		}
+		fmt.Fprintf(c.rl.Stdout(), "  State: %s\n", result.ControlState)
+	}
+}
+
+// parseLimitCause parses a limit cause string.
+func parseLimitCause(s string) features.LimitCause {
+	switch strings.ToLower(s) {
+	case "grid-emergency", "emergency":
+		return features.LimitCauseGridEmergency
+	case "grid-optimization", "grid":
+		return features.LimitCauseGridOptimization
+	case "local-protection", "protection":
+		return features.LimitCauseLocalProtection
+	case "local-optimization", "local":
+		return features.LimitCauseLocalOptimization
+	case "user", "user-preference":
+		return features.LimitCauseUserPreference
+	default:
+		return features.LimitCauseLocalOptimization // default
+	}
 }
 
 // cmdClear handles the clear command.
@@ -633,7 +701,222 @@ func (c *Controller) cmdResume(ctx context.Context, args []string) {
 		return
 	}
 
-	fmt.Fprintln(c.rl.Stdout(),"Device resumed")
+	fmt.Fprintln(c.rl.Stdout(), "Device resumed")
+}
+
+// cmdCapacity shows device capacity information.
+func (c *Controller) cmdCapacity(ctx context.Context, args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(c.rl.Stdout(), "Usage: capacity <device-id>")
+		return
+	}
+
+	deviceID := c.resolveDeviceID(args[0])
+	if deviceID == "" {
+		fmt.Fprintf(c.rl.Stdout(), "Device not found: %s\n", args[0])
+		return
+	}
+
+	// Read capacity from device
+	if err := c.cem.ReadDeviceCapacity(ctx, deviceID, 1); err != nil {
+		fmt.Fprintf(c.rl.Stdout(), "Failed to read capacity: %v\n", err)
+		return
+	}
+
+	device := c.cem.GetDevice(deviceID)
+	if device == nil {
+		return
+	}
+
+	fmt.Fprintf(c.rl.Stdout(), "Capacity for %s:\n", deviceID)
+
+	// Hardware limits (Electrical)
+	fmt.Fprintln(c.rl.Stdout(), "  Hardware limits (Electrical):")
+	if device.NominalMaxConsumption != nil {
+		fmt.Fprintf(c.rl.Stdout(), "    Max consumption: %.1f kW\n",
+			float64(*device.NominalMaxConsumption)/1000000)
+	} else {
+		fmt.Fprintln(c.rl.Stdout(), "    Max consumption: unknown")
+	}
+	if device.NominalMaxProduction != nil {
+		fmt.Fprintf(c.rl.Stdout(), "    Max production:  %.1f kW\n",
+			float64(*device.NominalMaxProduction)/1000000)
+	} else {
+		fmt.Fprintln(c.rl.Stdout(), "    Max production:  unknown")
+	}
+
+	// Contractual limits (EnergyControl - EMS only)
+	if device.ContractualConsumptionMax != nil || device.ContractualProductionMax != nil {
+		fmt.Fprintln(c.rl.Stdout(), "  Contractual limits (EMS):")
+		if device.ContractualConsumptionMax != nil {
+			fmt.Fprintf(c.rl.Stdout(), "    Max consumption: %.1f kW\n",
+				float64(*device.ContractualConsumptionMax)/1000000)
+		}
+		if device.ContractualProductionMax != nil {
+			fmt.Fprintf(c.rl.Stdout(), "    Max production:  %.1f kW\n",
+				float64(*device.ContractualProductionMax)/1000000)
+		}
+	}
+}
+
+// cmdOverride shows device override state.
+func (c *Controller) cmdOverride(ctx context.Context, args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(c.rl.Stdout(), "Usage: override <device-id>")
+		return
+	}
+
+	deviceID := c.resolveDeviceID(args[0])
+	if deviceID == "" {
+		fmt.Fprintf(c.rl.Stdout(), "Device not found: %s\n", args[0])
+		return
+	}
+
+	// Read energy control state first
+	if err := c.cem.ReadEnergyControlState(ctx, deviceID, 1); err != nil {
+		fmt.Fprintf(c.rl.Stdout(), "Failed to read state: %v\n", err)
+		return
+	}
+
+	device := c.cem.GetDevice(deviceID)
+	if device == nil {
+		return
+	}
+
+	if device.ControlState != features.ControlStateOverride {
+		fmt.Fprintf(c.rl.Stdout(), "%s is not in OVERRIDE state (current: %s)\n",
+			deviceID, device.ControlState)
+		return
+	}
+
+	// Read override details
+	if err := c.cem.ReadOverrideState(ctx, deviceID, 1); err != nil {
+		fmt.Fprintf(c.rl.Stdout(), "Failed to read override state: %v\n", err)
+		return
+	}
+
+	fmt.Fprintf(c.rl.Stdout(), "%s OVERRIDE state:\n", deviceID)
+	if device.OverrideReason != nil {
+		fmt.Fprintf(c.rl.Stdout(), "  Reason:    %s\n", device.OverrideReason)
+	}
+	if device.OverrideDirection != nil {
+		fmt.Fprintf(c.rl.Stdout(), "  Direction: %s\n", device.OverrideDirection)
+	}
+}
+
+// cmdLpcDemo runs an automated LPC/LPP demonstration sequence.
+func (c *Controller) cmdLpcDemo(ctx context.Context, args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(c.rl.Stdout(), "Usage: lpc-demo <device-id>")
+		fmt.Fprintln(c.rl.Stdout(), "  Runs an automated LPC/LPP demo showing limit changes and state transitions")
+		return
+	}
+
+	deviceID := c.resolveDeviceID(args[0])
+	if deviceID == "" {
+		fmt.Fprintf(c.rl.Stdout(), "Device not found: %s\n", args[0])
+		return
+	}
+
+	// Check device is connected
+	device := c.cem.GetDevice(deviceID)
+	if device == nil {
+		fmt.Fprintf(c.rl.Stdout(), "Device not connected in CEM: %s\n", deviceID)
+		return
+	}
+
+	// Shorten device ID for display
+	shortID := deviceID
+	if len(shortID) > 12 {
+		shortID = shortID[:12] + "..."
+	}
+
+	startTime := time.Now()
+	elapsed := func() string {
+		return fmt.Sprintf("[%5.1fs]", time.Since(startTime).Seconds())
+	}
+
+	fmt.Fprintf(c.rl.Stdout(), "\n%s Starting LPC/LPP demo on %s\n", elapsed(), shortID)
+	fmt.Fprintln(c.rl.Stdout(), "─────────────────────────────────────────────────────────")
+
+	// Step 1: Read initial capacity
+	fmt.Fprintf(c.rl.Stdout(), "%s Reading device capacity...\n", elapsed())
+	if err := c.cem.ReadDeviceCapacity(ctx, deviceID, 1); err != nil {
+		fmt.Fprintf(c.rl.Stdout(), "        Warning: Failed to read capacity: %v\n", err)
+	} else {
+		device = c.cem.GetDevice(deviceID)
+		if device.NominalMaxConsumption != nil {
+			fmt.Fprintf(c.rl.Stdout(), "        Max consumption: %.1f kW\n",
+				float64(*device.NominalMaxConsumption)/1000000)
+		}
+		if device.NominalMaxProduction != nil && *device.NominalMaxProduction > 0 {
+			fmt.Fprintf(c.rl.Stdout(), "        Max production:  %.1f kW\n",
+				float64(*device.NominalMaxProduction)/1000000)
+		}
+	}
+
+	// Demo sequence with delays
+	demoSteps := []struct {
+		delay       time.Duration
+		limitKW     float64
+		cause       features.LimitCause
+		description string
+		clear       bool
+	}{
+		{2 * time.Second, 15.0, features.LimitCauseLocalOptimization, "Initial limit (local optimization)", false},
+		{5 * time.Second, 10.0, features.LimitCauseGridOptimization, "Reducing limit (grid optimization)", false},
+		{5 * time.Second, 5.0, features.LimitCauseGridEmergency, "Grid emergency - severe curtailment", false},
+		{5 * time.Second, 8.0, features.LimitCauseGridOptimization, "Emergency over - partial recovery", false},
+		{5 * time.Second, 0, features.LimitCause(0), "Clearing all limits", true},
+	}
+
+	for _, step := range demoSteps {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			fmt.Fprintf(c.rl.Stdout(), "\n%s Demo cancelled\n", elapsed())
+			return
+		case <-time.After(step.delay):
+		}
+
+		if step.clear {
+			fmt.Fprintf(c.rl.Stdout(), "%s %s\n", elapsed(), step.description)
+			if err := c.cem.ClearPowerLimit(ctx, deviceID, 1); err != nil {
+				fmt.Fprintf(c.rl.Stdout(), "        Error: %v\n", err)
+			} else {
+				fmt.Fprintln(c.rl.Stdout(), "        -> Limit cleared, State: CONTROLLED")
+			}
+		} else {
+			limitMW := int64(step.limitKW * 1000000)
+			fmt.Fprintf(c.rl.Stdout(), "%s %s: %.1f kW\n", elapsed(), step.description, step.limitKW)
+
+			result, err := c.cem.SetPowerLimitWithCause(ctx, deviceID, 1, limitMW, step.cause)
+			if err != nil {
+				fmt.Fprintf(c.rl.Stdout(), "        Error: %v\n", err)
+				continue
+			}
+
+			if result.Applied {
+				effectiveStr := ""
+				if result.EffectiveConsumptionLimit != nil {
+					effectiveStr = fmt.Sprintf(", Effective: %.1f kW",
+						float64(*result.EffectiveConsumptionLimit)/1000000)
+				}
+				fmt.Fprintf(c.rl.Stdout(), "        -> Applied, State: %s%s\n",
+					result.ControlState, effectiveStr)
+			} else {
+				reasonStr := ""
+				if result.RejectReason != nil {
+					reasonStr = fmt.Sprintf(" (%s)", result.RejectReason)
+				}
+				fmt.Fprintf(c.rl.Stdout(), "        -> NOT Applied%s, State: %s\n",
+					reasonStr, result.ControlState)
+			}
+		}
+	}
+
+	fmt.Fprintln(c.rl.Stdout(), "─────────────────────────────────────────────────────────")
+	fmt.Fprintf(c.rl.Stdout(), "%s LPC/LPP demo complete\n\n", elapsed())
 }
 
 // cmdStatus handles the status command.

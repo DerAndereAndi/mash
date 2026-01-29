@@ -438,6 +438,15 @@ func createInverterDevice() *model.Device {
 	measurement.Feature.SetFeatureMap(pvCapabilities)
 	inverter.AddFeature(measurement.Feature)
 
+	// EnergyControl - accepts production limits (curtailment)
+	energyControl := features.NewEnergyControl()
+	energyControl.Feature.SetFeatureMap(pvCapabilities)
+	_ = energyControl.SetDeviceType(features.DeviceTypeInverter)
+	_ = energyControl.SetControlState(features.ControlStateAutonomous)
+	energyControl.SetCapabilities(true, false, false, false, false, false, false)
+	setupEnergyControlHandler(energyControl)
+	inverter.AddFeature(energyControl.Feature)
+
 	// Status
 	status := features.NewStatus()
 	status.Feature.SetFeatureMap(pvCapabilities)
@@ -490,6 +499,7 @@ func createBatteryDevice() *model.Device {
 	_ = energyControl.SetDeviceType(features.DeviceTypeBattery)
 	_ = energyControl.SetControlState(features.ControlStateAutonomous)
 	energyControl.SetCapabilities(true, false, true, false, true, true, true)
+	setupEnergyControlHandler(energyControl)
 	battery.AddFeature(energyControl.Feature)
 
 	// Status
@@ -501,6 +511,72 @@ func createBatteryDevice() *model.Device {
 	_ = device.AddEndpoint(battery)
 
 	return device
+}
+
+// setupEnergyControlHandler configures the SetLimit handler for a device's EnergyControl feature.
+func setupEnergyControlHandler(energyControl *features.EnergyControl) {
+	energyControl.OnSetLimit(func(ctx context.Context, req features.SetLimitRequest) features.SetLimitResponse {
+		// Validate negative values
+		if req.ConsumptionLimit != nil && *req.ConsumptionLimit < 0 {
+			reason := features.LimitRejectInvalidValue
+			return features.SetLimitResponse{
+				Applied:      false,
+				RejectReason: &reason,
+				ControlState: energyControl.ControlState(),
+			}
+		}
+		if req.ProductionLimit != nil && *req.ProductionLimit < 0 {
+			reason := features.LimitRejectInvalidValue
+			return features.SetLimitResponse{
+				Applied:      false,
+				RejectReason: &reason,
+				ControlState: energyControl.ControlState(),
+			}
+		}
+
+		// Check if device is in override (can't apply limits)
+		if energyControl.IsOverride() {
+			reason := features.LimitRejectDeviceOverride
+			return features.SetLimitResponse{
+				Applied:      false,
+				RejectReason: &reason,
+				ControlState: features.ControlStateOverride,
+			}
+		}
+
+		// Apply the limit
+		var newState features.ControlState
+		if req.ConsumptionLimit != nil || req.ProductionLimit != nil {
+			newState = features.ControlStateLimited
+			if req.ConsumptionLimit != nil {
+				_ = energyControl.SetEffectiveConsumptionLimit(req.ConsumptionLimit)
+			}
+			if req.ProductionLimit != nil {
+				_ = energyControl.SetEffectiveProductionLimit(req.ProductionLimit)
+			}
+		} else {
+			// null limit = deactivate
+			newState = features.ControlStateControlled
+			_ = energyControl.SetEffectiveConsumptionLimit(nil)
+			_ = energyControl.SetEffectiveProductionLimit(nil)
+		}
+		_ = energyControl.SetControlState(newState)
+
+		return features.SetLimitResponse{
+			Applied:                   true,
+			EffectiveConsumptionLimit: req.ConsumptionLimit,
+			EffectiveProductionLimit:  req.ProductionLimit,
+			ControlState:              newState,
+		}
+	})
+
+	// ClearLimit handler
+	energyControl.OnClearLimit(func(ctx context.Context, direction *features.Direction) error {
+		_ = energyControl.SetControlState(features.ControlStateControlled)
+		_ = energyControl.SetEffectiveConsumptionLimit(nil)
+		_ = energyControl.SetEffectiveProductionLimit(nil)
+		return nil
+	})
 }
 
 func handleEvent(event service.Event) {

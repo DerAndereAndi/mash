@@ -60,6 +60,18 @@ type ConnectedDevice struct {
 	EVStateOfCharge       *uint8
 	EVTargetEnergyRequest *int64
 
+	// LPC/LPP state
+	LimitApplied      bool                        // Was last SetLimit applied?
+	RejectReason      *features.LimitRejectReason // Why limit was rejected
+	OverrideReason    *features.OverrideReason    // If in OVERRIDE state
+	OverrideDirection *features.Direction         // Which direction triggered override
+
+	// Capacity info (read from device)
+	NominalMaxConsumption     *int64 // From Electrical
+	NominalMaxProduction      *int64 // From Electrical
+	ContractualConsumptionMax *int64 // From EnergyControl (EMS only)
+	ContractualProductionMax  *int64 // From EnergyControl (EMS only)
+
 	// Active subscriptions
 	SubscriptionIDs []uint32
 }
@@ -72,6 +84,15 @@ type CEMConfig struct {
 	SerialNumber string
 	VendorID     uint32
 	ProductID    uint32
+}
+
+// SetLimitResult contains the enhanced SetLimit response.
+type SetLimitResult struct {
+	Applied                   bool
+	EffectiveConsumptionLimit *int64
+	EffectiveProductionLimit  *int64
+	RejectReason              *features.LimitRejectReason
+	ControlState              features.ControlState
 }
 
 // NewCEM creates a new CEM device with the given configuration.
@@ -326,38 +347,100 @@ func (c *CEM) SubscribeToChargingSession(ctx context.Context, deviceID string, e
 }
 
 // SetPowerLimit sets a consumption limit on a device.
-func (c *CEM) SetPowerLimit(ctx context.Context, deviceID string, endpointID uint8, limitMW int64) error {
+// Returns an enhanced result with applied status and effective limits.
+func (c *CEM) SetPowerLimit(ctx context.Context, deviceID string, endpointID uint8, limitMW int64) (*SetLimitResult, error) {
+	return c.SetPowerLimitFull(ctx, deviceID, endpointID, limitMW, features.LimitCause(0), nil)
+}
+
+// SetPowerLimitWithCause sets a consumption limit on a device with a specified cause.
+// Returns an enhanced result with applied status and effective limits.
+func (c *CEM) SetPowerLimitWithCause(ctx context.Context, deviceID string, endpointID uint8, limitMW int64, cause features.LimitCause) (*SetLimitResult, error) {
+	return c.SetPowerLimitFull(ctx, deviceID, endpointID, limitMW, cause, nil)
+}
+
+// SetPowerLimitFull sets a consumption limit on a device with cause and optional duration.
+// Duration is in seconds; pass nil for indefinite limit.
+// Returns an enhanced result with applied status and effective limits.
+func (c *CEM) SetPowerLimitFull(ctx context.Context, deviceID string, endpointID uint8, limitMW int64, cause features.LimitCause, durationSec *uint32) (*SetLimitResult, error) {
 	c.mu.RLock()
 	device, exists := c.connectedDevices[deviceID]
 	zoneType := c.zoneType
 	c.mu.RUnlock()
 
 	if !exists {
-		return errors.New("device not connected")
+		return nil, errors.New("device not connected")
 	}
 
-	result, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeatureEnergyControl),
-		features.EnergyControlCmdSetLimit, map[string]any{
-			"consumptionLimit": limitMW,
-			"cause":            uint8(zoneType),
-		})
+	// Use provided cause, or fall back to zone type
+	effectiveCause := cause
+	if cause == 0 {
+		effectiveCause = zoneType
+	}
+
+	params := map[string]any{
+		"consumptionLimit": limitMW,
+		"cause":            uint8(effectiveCause),
+	}
+	if durationSec != nil {
+		params["duration"] = *durationSec
+	}
+
+	rawResult, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeatureEnergyControl),
+		features.EnergyControlCmdSetLimit, params)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// Update cached state from response using type-safe coercion
-	if resultMap, ok := result.(map[string]any); ok {
-		c.mu.Lock()
-		if rawVal, exists := resultMap["effectiveConsumptionLimit"]; exists {
-			if v, ok := wire.ToInt64(rawVal); ok {
-				device.EffectiveLimit = &v
+	result := &SetLimitResult{}
+
+	// Parse enhanced response using type-safe coercion
+	if resultMap, ok := rawResult.(map[string]any); ok {
+		// Parse applied
+		if rawVal, exists := resultMap["applied"]; exists {
+			if v, ok := rawVal.(bool); ok {
+				result.Applied = v
 			}
 		}
-		device.ControlState = features.ControlStateLimited
-		c.mu.Unlock()
+
+		// Parse controlState
+		if rawVal, exists := resultMap["controlState"]; exists {
+			if v, ok := wire.ToUint8Public(rawVal); ok {
+				result.ControlState = features.ControlState(v)
+			}
+		}
+
+		// Parse rejectReason (only if not applied)
+		if rawVal, exists := resultMap["rejectReason"]; exists {
+			if v, ok := wire.ToUint8Public(rawVal); ok {
+				reason := features.LimitRejectReason(v)
+				result.RejectReason = &reason
+			}
+		}
+
+		// Parse effective limits
+		if rawVal, exists := resultMap["effectiveConsumptionLimit"]; exists {
+			if v, ok := wire.ToInt64(rawVal); ok {
+				result.EffectiveConsumptionLimit = &v
+			}
+		}
+		if rawVal, exists := resultMap["effectiveProductionLimit"]; exists {
+			if v, ok := wire.ToInt64(rawVal); ok {
+				result.EffectiveProductionLimit = &v
+			}
+		}
 	}
 
-	return nil
+	// Update cached device state
+	c.mu.Lock()
+	device.LimitApplied = result.Applied
+	device.RejectReason = result.RejectReason
+	device.ControlState = result.ControlState
+	if result.EffectiveConsumptionLimit != nil {
+		device.EffectiveLimit = result.EffectiveConsumptionLimit
+	}
+	c.mu.Unlock()
+
+	return result, nil
 }
 
 // ClearPowerLimit removes the consumption limit from a device.
@@ -511,4 +594,125 @@ func (c *CEM) GetTotalPower() int64 {
 		total += device.CurrentPower
 	}
 	return total
+}
+
+// GetDevice returns a connected device by ID (or nil if not found).
+func (c *CEM) GetDevice(deviceID string) *ConnectedDevice {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.connectedDevices[deviceID]
+}
+
+// ReadDeviceCapacity reads capacity information from a device.
+func (c *CEM) ReadDeviceCapacity(ctx context.Context, deviceID string, endpointID uint8) error {
+	c.mu.RLock()
+	device, exists := c.connectedDevices[deviceID]
+	c.mu.RUnlock()
+
+	if !exists {
+		return errors.New("device not connected")
+	}
+
+	// Read Electrical.nominalMaxConsumption
+	val, err := device.Client.Read(ctx, endpointID, uint8(model.FeatureElectrical),
+		[]uint16{features.ElectricalAttrNominalMaxConsumption})
+	if err == nil && val != nil {
+		if rawVal, ok := val[features.ElectricalAttrNominalMaxConsumption]; ok {
+			if v, ok := wire.ToInt64(rawVal); ok {
+				c.mu.Lock()
+				device.NominalMaxConsumption = &v
+				c.mu.Unlock()
+			}
+		}
+	}
+
+	// Read Electrical.nominalMaxProduction
+	val, err = device.Client.Read(ctx, endpointID, uint8(model.FeatureElectrical),
+		[]uint16{features.ElectricalAttrNominalMaxProduction})
+	if err == nil && val != nil {
+		if rawVal, ok := val[features.ElectricalAttrNominalMaxProduction]; ok {
+			if v, ok := wire.ToInt64(rawVal); ok {
+				c.mu.Lock()
+				device.NominalMaxProduction = &v
+				c.mu.Unlock()
+			}
+		}
+	}
+
+	// Read EnergyControl.contractualConsumptionMax (may not exist)
+	val, err = device.Client.Read(ctx, endpointID, uint8(model.FeatureEnergyControl),
+		[]uint16{features.EnergyControlAttrContractualConsumptionMax})
+	if err == nil && val != nil {
+		if rawVal, ok := val[features.EnergyControlAttrContractualConsumptionMax]; ok {
+			if v, ok := wire.ToInt64(rawVal); ok {
+				c.mu.Lock()
+				device.ContractualConsumptionMax = &v
+				c.mu.Unlock()
+			}
+		}
+	}
+
+	// Read EnergyControl.contractualProductionMax (may not exist)
+	val, err = device.Client.Read(ctx, endpointID, uint8(model.FeatureEnergyControl),
+		[]uint16{features.EnergyControlAttrContractualProductionMax})
+	if err == nil && val != nil {
+		if rawVal, ok := val[features.EnergyControlAttrContractualProductionMax]; ok {
+			if v, ok := wire.ToInt64(rawVal); ok {
+				c.mu.Lock()
+				device.ContractualProductionMax = &v
+				c.mu.Unlock()
+			}
+		}
+	}
+
+	return nil
+}
+
+// ReadOverrideState reads override state from a device.
+func (c *CEM) ReadOverrideState(ctx context.Context, deviceID string, endpointID uint8) error {
+	c.mu.RLock()
+	device, exists := c.connectedDevices[deviceID]
+	c.mu.RUnlock()
+
+	if !exists {
+		return errors.New("device not connected")
+	}
+
+	// Read overrideReason
+	val, err := device.Client.Read(ctx, endpointID, uint8(model.FeatureEnergyControl),
+		[]uint16{features.EnergyControlAttrOverrideReason})
+	if err == nil && val != nil {
+		if rawVal, ok := val[features.EnergyControlAttrOverrideReason]; ok && rawVal != nil {
+			if v, ok := wire.ToUint8Public(rawVal); ok {
+				c.mu.Lock()
+				reason := features.OverrideReason(v)
+				device.OverrideReason = &reason
+				c.mu.Unlock()
+			}
+		} else {
+			c.mu.Lock()
+			device.OverrideReason = nil
+			c.mu.Unlock()
+		}
+	}
+
+	// Read overrideDirection
+	val, err = device.Client.Read(ctx, endpointID, uint8(model.FeatureEnergyControl),
+		[]uint16{features.EnergyControlAttrOverrideDirection})
+	if err == nil && val != nil {
+		if rawVal, ok := val[features.EnergyControlAttrOverrideDirection]; ok && rawVal != nil {
+			if v, ok := wire.ToUint8Public(rawVal); ok {
+				c.mu.Lock()
+				dir := features.Direction(v)
+				device.OverrideDirection = &dir
+				c.mu.Unlock()
+			}
+		} else {
+			c.mu.Lock()
+			device.OverrideDirection = nil
+			c.mu.Unlock()
+		}
+	}
+
+	return nil
 }

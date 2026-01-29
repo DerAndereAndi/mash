@@ -48,6 +48,9 @@ type Device struct {
 	simCtx     context.Context
 	simCancel  context.CancelFunc
 	simRunning bool
+
+	// State tracking for transitions display
+	lastControlState features.ControlState
 }
 
 // New creates a new interactive device handler.
@@ -156,6 +159,15 @@ func (d *Device) Run(ctx context.Context, cancel context.CancelFunc) {
 		case "status":
 			d.cmdStatus()
 
+		case "override":
+			d.cmdOverride(args)
+
+		case "contractual":
+			d.cmdContractual(args)
+
+		case "limit-status", "ls":
+			d.cmdLimitStatus()
+
 		case "quit", "exit", "q":
 			fmt.Fprintln(d.rl.Stdout(), "Exiting...")
 			cancel()
@@ -186,6 +198,11 @@ MASH Device Commands:
     stop               - Stop simulation
     power <kw>         - Set power value (kW, positive=consume, negative=produce)
     status             - Show device status
+
+  LPC/LPP Simulation:
+    override <reason>|clear  - Enter/exit OVERRIDE state
+    contractual <kw> [kw]    - Set contractual limits (EMS mode)
+    limit-status             - Show current limit state
 
   General:
     help               - Show this help
@@ -752,6 +769,163 @@ func (d *Device) IsRunning() bool {
 	return d.simRunning
 }
 
+// cmdOverride simulates entering/exiting OVERRIDE state.
+func (d *Device) cmdOverride(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(d.rl.Stdout(), "Usage: override <reason>|clear")
+		fmt.Fprintln(d.rl.Stdout(), "Reasons: self-protection, safety, legal, uncontrolled-load, uncontrolled-producer")
+		return
+	}
+
+	ec := d.getEnergyControlFeature(1)
+	if ec == nil {
+		fmt.Fprintln(d.rl.Stdout(), "No EnergyControl feature found")
+		return
+	}
+
+	if args[0] == "clear" {
+		_ = ec.SetControlState(features.ControlStateControlled)
+		_ = ec.SetOverrideReason(nil)
+		_ = ec.SetOverrideDirection(nil)
+		fmt.Fprintln(d.rl.Stdout(), "Override cleared, state: CONTROLLED")
+		return
+	}
+
+	reason := parseOverrideReason(args[0])
+	direction := features.DirectionConsumption
+	if len(args) >= 2 && args[1] == "production" {
+		direction = features.DirectionProduction
+	}
+
+	_ = ec.SetControlState(features.ControlStateOverride)
+	_ = ec.SetOverrideReason(&reason)
+	_ = ec.SetOverrideDirection(&direction)
+
+	fmt.Fprintf(d.rl.Stdout(), "Override set: %s (%s)\n", reason, direction)
+}
+
+func parseOverrideReason(s string) features.OverrideReason {
+	switch strings.ToLower(s) {
+	case "self-protection", "protection":
+		return features.OverrideReasonSelfProtection
+	case "safety":
+		return features.OverrideReasonSafety
+	case "legal", "legal-requirement":
+		return features.OverrideReasonLegalRequirement
+	case "uncontrolled-load", "load":
+		return features.OverrideReasonUncontrolledLoad
+	case "uncontrolled-producer", "producer":
+		return features.OverrideReasonUncontrolledProducer
+	default:
+		return features.OverrideReasonSelfProtection
+	}
+}
+
+// cmdContractual sets contractual limits (EMS simulation).
+func (d *Device) cmdContractual(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(d.rl.Stdout(), "Usage: contractual <consumption-kw> [production-kw]")
+		fmt.Fprintln(d.rl.Stdout(), "       contractual clear")
+		return
+	}
+
+	ec := d.getEnergyControlFeature(1)
+	if ec == nil {
+		fmt.Fprintln(d.rl.Stdout(), "No EnergyControl feature found")
+		return
+	}
+
+	if args[0] == "clear" {
+		_ = ec.SetContractualConsumptionMax(nil)
+		_ = ec.SetContractualProductionMax(nil)
+		fmt.Fprintln(d.rl.Stdout(), "Contractual limits cleared")
+		return
+	}
+
+	consumptionKW, err := strconv.ParseFloat(args[0], 64)
+	if err != nil {
+		fmt.Fprintf(d.rl.Stdout(), "Invalid consumption: %v\n", err)
+		return
+	}
+	consumptionMW := int64(consumptionKW * 1000000)
+	_ = ec.SetContractualConsumptionMax(&consumptionMW)
+
+	if len(args) >= 2 {
+		productionKW, err := strconv.ParseFloat(args[1], 64)
+		if err != nil {
+			fmt.Fprintf(d.rl.Stdout(), "Invalid production: %v\n", err)
+			return
+		}
+		productionMW := int64(productionKW * 1000000)
+		_ = ec.SetContractualProductionMax(&productionMW)
+		fmt.Fprintf(d.rl.Stdout(), "Contractual limits set: consumption=%.1f kW, production=%.1f kW\n",
+			consumptionKW, productionKW)
+	} else {
+		fmt.Fprintf(d.rl.Stdout(), "Contractual consumption limit set: %.1f kW\n", consumptionKW)
+	}
+}
+
+// cmdLimitStatus shows current limit state.
+func (d *Device) cmdLimitStatus() {
+	ec := d.getEnergyControlFeature(1)
+	if ec == nil {
+		fmt.Fprintln(d.rl.Stdout(), "No EnergyControl feature found")
+		return
+	}
+
+	fmt.Fprintln(d.rl.Stdout(), "Limit Status:")
+	fmt.Fprintf(d.rl.Stdout(), "  Control State: %s\n", ec.ControlState())
+
+	// Consumption limit
+	if limit, ok := ec.EffectiveConsumptionLimit(); ok {
+		fmt.Fprintf(d.rl.Stdout(), "  Effective Consumption Limit: %.1f kW\n", float64(limit)/1000000)
+	} else {
+		fmt.Fprintln(d.rl.Stdout(), "  Effective Consumption Limit: none")
+	}
+
+	// Production limit
+	if limit, ok := ec.EffectiveProductionLimit(); ok {
+		fmt.Fprintf(d.rl.Stdout(), "  Effective Production Limit:  %.1f kW\n", float64(limit)/1000000)
+	} else {
+		fmt.Fprintln(d.rl.Stdout(), "  Effective Production Limit:  none")
+	}
+
+	// Override info
+	if ec.IsOverride() {
+		if reason, ok := ec.GetOverrideReason(); ok {
+			fmt.Fprintf(d.rl.Stdout(), "  Override Reason: %s\n", reason)
+		}
+		if dir, ok := ec.GetOverrideDirection(); ok {
+			fmt.Fprintf(d.rl.Stdout(), "  Override Direction: %s\n", dir)
+		}
+	}
+
+	// Contractual limits
+	if limit, ok := ec.ContractualConsumptionMax(); ok {
+		fmt.Fprintf(d.rl.Stdout(), "  Contractual Consumption Max: %.1f kW\n", float64(limit)/1000000)
+	}
+	if limit, ok := ec.ContractualProductionMax(); ok {
+		fmt.Fprintf(d.rl.Stdout(), "  Contractual Production Max:  %.1f kW\n", float64(limit)/1000000)
+	}
+}
+
+// getEnergyControlFeature returns the EnergyControl feature wrapper for an endpoint.
+func (d *Device) getEnergyControlFeature(endpointID uint8) *features.EnergyControl {
+	device := d.svc.Device()
+	endpoint, err := device.GetEndpoint(endpointID)
+	if err != nil || endpoint == nil {
+		return nil
+	}
+
+	feature, err := endpoint.GetFeature(model.FeatureEnergyControl)
+	if err != nil || feature == nil {
+		return nil
+	}
+
+	// Wrap the model.Feature in features.EnergyControl
+	return &features.EnergyControl{Feature: feature}
+}
+
 func abs(x int) int {
 	if x < 0 {
 		return -x
@@ -763,19 +937,25 @@ func abs(x int) int {
 func (d *Device) handleEvent(event service.Event) {
 	switch event.Type {
 	case service.EventValueChanged:
-		// Only show EnergyControl attribute changes (limits, setpoints)
+		// Only show EnergyControl attribute changes (limits, setpoints, state)
 		if event.FeatureID == uint16(model.FeatureEnergyControl) {
-			d.displayLimitChange(event)
+			d.displayEnergyControlChange(event)
 		}
 	}
 }
 
-// displayLimitChange displays a limit or setpoint change event.
-func (d *Device) displayLimitChange(event service.Event) {
-	// Get attribute name
+// displayEnergyControlChange displays an EnergyControl attribute change event.
+func (d *Device) displayEnergyControlChange(event service.Event) {
+	// Check for control state change first (special handling)
+	if event.AttributeID == features.EnergyControlAttrControlState {
+		d.displayStateTransition(event)
+		return
+	}
+
+	// Get attribute name for limit/setpoint changes
 	attrName := d.getEnergyControlAttrName(event.AttributeID)
 	if attrName == "" {
-		return // Not a limit/setpoint attribute we care about
+		return // Not an attribute we care about
 	}
 
 	// Format the zone ID (truncate for display)
@@ -807,6 +987,41 @@ func (d *Device) displayLimitChange(event service.Event) {
 		attrName,
 		valueStr)
 	d.rl.Refresh()
+}
+
+// displayStateTransition displays a control state transition.
+func (d *Device) displayStateTransition(event service.Event) {
+	var newState features.ControlState
+	switch v := event.Value.(type) {
+	case uint8:
+		newState = features.ControlState(v)
+	case int64:
+		newState = features.ControlState(v)
+	default:
+		return
+	}
+
+	// Skip if state hasn't actually changed
+	if newState == d.lastControlState {
+		return
+	}
+
+	// Format the zone ID
+	zoneID := event.ZoneID
+	if len(zoneID) > 8 {
+		zoneID = zoneID[:8]
+	}
+
+	// Show transition
+	fmt.Fprintf(d.rl.Stdout(), "\n[%s] Zone %s: State %s -> %s\n",
+		time.Now().Format("15:04:05"),
+		zoneID,
+		d.lastControlState,
+		newState)
+	d.rl.Refresh()
+
+	// Update tracked state
+	d.lastControlState = newState
 }
 
 // getEnergyControlAttrName returns a human-readable name for limit/setpoint attributes.
