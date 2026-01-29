@@ -193,6 +193,8 @@ MASH Controller Commands:
 
   Control:
     limit <device-id> <kw> [cause] [duration-sec] - Set power limit
+          causes: grid-emergency, grid-optimization, local-protection,
+                  local-optimization (default), user
     clear <device-id>                 - Clear power limit
     pause <device-id>                 - Pause device
     resume <device-id>                - Resume device
