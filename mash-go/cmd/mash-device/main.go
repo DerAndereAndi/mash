@@ -664,7 +664,11 @@ func handleEvent(event service.Event) {
 		}
 
 	case service.EventValueChanged:
-		log.Printf("[EVENT] Value changed (zone: %s)", event.ZoneID)
+		// In interactive mode, the interactive handler displays these with better formatting.
+		// Only log in non-interactive mode.
+		if !config.Interactive {
+			log.Printf("[EVENT] Value changed (zone: %s)", event.ZoneID)
+		}
 
 	case service.EventZoneRestored:
 		log.Printf("[EVENT] Zone restored from persistence: %s (awaiting reconnection)", event.ZoneID)

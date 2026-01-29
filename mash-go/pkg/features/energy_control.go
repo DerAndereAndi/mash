@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // EnergyControl attribute IDs.
@@ -576,19 +577,27 @@ func (e *EnergyControl) handleSetLimit(ctx context.Context, params map[string]an
 		return map[string]any{"applied": false}, nil
 	}
 
-	// Parse request
+	// Parse request using wire type coercion helpers (CBOR decodes integers as uint64)
 	req := SetLimitRequest{}
-	if v, ok := params["consumptionLimit"].(int64); ok {
-		req.ConsumptionLimit = &v
+	if raw, exists := params["consumptionLimit"]; exists {
+		if v, ok := wire.ToInt64(raw); ok {
+			req.ConsumptionLimit = &v
+		}
 	}
-	if v, ok := params["productionLimit"].(int64); ok {
-		req.ProductionLimit = &v
+	if raw, exists := params["productionLimit"]; exists {
+		if v, ok := wire.ToInt64(raw); ok {
+			req.ProductionLimit = &v
+		}
 	}
-	if v, ok := params["duration"].(uint32); ok {
-		req.Duration = &v
+	if raw, exists := params["duration"]; exists {
+		if v, ok := wire.ToUint32(raw); ok {
+			req.Duration = &v
+		}
 	}
-	if v, ok := params["cause"].(uint8); ok {
-		req.Cause = LimitCause(v)
+	if raw, exists := params["cause"]; exists {
+		if v, ok := wire.ToUint8Public(raw); ok {
+			req.Cause = LimitCause(v)
+		}
 	}
 
 	// Call handler
@@ -615,9 +624,11 @@ func (e *EnergyControl) handleClearLimit(ctx context.Context, params map[string]
 	}
 
 	var direction *Direction
-	if v, ok := params["direction"].(uint8); ok {
-		d := Direction(v)
-		direction = &d
+	if raw, exists := params["direction"]; exists {
+		if v, ok := wire.ToUint8Public(raw); ok {
+			d := Direction(v)
+			direction = &d
+		}
 	}
 
 	err := e.onClearLimit(ctx, direction)
@@ -632,8 +643,8 @@ func (e *EnergyControl) handleSetCurrentLimits(ctx context.Context, params map[s
 	phases := make(map[Phase]int64)
 	if p, ok := params["phases"].(map[any]any); ok {
 		for k, v := range p {
-			if phase, ok := k.(uint8); ok {
-				if current, ok := v.(int64); ok {
+			if phase, ok := wire.ToUint8Public(k); ok {
+				if current, ok := wire.ToInt64(v); ok {
 					phases[Phase(phase)] = current
 				}
 			}
@@ -641,13 +652,17 @@ func (e *EnergyControl) handleSetCurrentLimits(ctx context.Context, params map[s
 	}
 
 	direction := DirectionConsumption
-	if v, ok := params["direction"].(uint8); ok {
-		direction = Direction(v)
+	if raw, exists := params["direction"]; exists {
+		if v, ok := wire.ToUint8Public(raw); ok {
+			direction = Direction(v)
+		}
 	}
 
 	cause := LimitCause(0)
-	if v, ok := params["cause"].(uint8); ok {
-		cause = LimitCause(v)
+	if raw, exists := params["cause"]; exists {
+		if v, ok := wire.ToUint8Public(raw); ok {
+			cause = LimitCause(v)
+		}
 	}
 
 	effective, err := e.onSetCurrentLimits(ctx, phases, direction, cause)
@@ -667,9 +682,11 @@ func (e *EnergyControl) handleClearCurrentLimits(ctx context.Context, params map
 	}
 
 	var direction *Direction
-	if v, ok := params["direction"].(uint8); ok {
-		d := Direction(v)
-		direction = &d
+	if raw, exists := params["direction"]; exists {
+		if v, ok := wire.ToUint8Public(raw); ok {
+			d := Direction(v)
+			direction = &d
+		}
 	}
 
 	err := e.onClearCurrentLimits(ctx, direction)
@@ -682,16 +699,22 @@ func (e *EnergyControl) handleSetSetpoint(ctx context.Context, params map[string
 	}
 
 	var consumptionSetpoint, productionSetpoint *int64
-	if v, ok := params["consumptionSetpoint"].(int64); ok {
-		consumptionSetpoint = &v
+	if raw, exists := params["consumptionSetpoint"]; exists {
+		if v, ok := wire.ToInt64(raw); ok {
+			consumptionSetpoint = &v
+		}
 	}
-	if v, ok := params["productionSetpoint"].(int64); ok {
-		productionSetpoint = &v
+	if raw, exists := params["productionSetpoint"]; exists {
+		if v, ok := wire.ToInt64(raw); ok {
+			productionSetpoint = &v
+		}
 	}
 
 	cause := SetpointCause(0)
-	if v, ok := params["cause"].(uint8); ok {
-		cause = SetpointCause(v)
+	if raw, exists := params["cause"]; exists {
+		if v, ok := wire.ToUint8Public(raw); ok {
+			cause = SetpointCause(v)
+		}
 	}
 
 	effConsumption, effProduction, err := e.onSetSetpoint(ctx, consumptionSetpoint, productionSetpoint, cause)
@@ -712,9 +735,11 @@ func (e *EnergyControl) handleClearSetpoint(ctx context.Context, params map[stri
 	}
 
 	var direction *Direction
-	if v, ok := params["direction"].(uint8); ok {
-		d := Direction(v)
-		direction = &d
+	if raw, exists := params["direction"]; exists {
+		if v, ok := wire.ToUint8Public(raw); ok {
+			d := Direction(v)
+			direction = &d
+		}
 	}
 
 	err := e.onClearSetpoint(ctx, direction)
@@ -727,8 +752,10 @@ func (e *EnergyControl) handlePause(ctx context.Context, params map[string]any) 
 	}
 
 	var duration *uint32
-	if v, ok := params["duration"].(uint32); ok {
-		duration = &v
+	if raw, exists := params["duration"]; exists {
+		if v, ok := wire.ToUint32(raw); ok {
+			duration = &v
+		}
 	}
 
 	err := e.onPause(ctx, duration)
@@ -810,69 +837,44 @@ func (e *EnergyControl) OnStop(handler func(ctx context.Context) error) {
 
 // SetDeviceType sets the device type.
 func (e *EnergyControl) SetDeviceType(dt DeviceType) error {
-	attr, err := e.GetAttribute(EnergyControlAttrDeviceType)
-	if err != nil {
-		return err
-	}
-	return attr.SetValueInternal(uint8(dt))
+	return e.SetAttributeInternal(EnergyControlAttrDeviceType, uint8(dt))
 }
 
 // SetControlState sets the control state.
 func (e *EnergyControl) SetControlState(state ControlState) error {
-	attr, err := e.GetAttribute(EnergyControlAttrControlState)
-	if err != nil {
-		return err
-	}
-	return attr.SetValueInternal(uint8(state))
+	return e.SetAttributeInternal(EnergyControlAttrControlState, uint8(state))
 }
 
 // SetCapabilities sets the control capabilities.
 func (e *EnergyControl) SetCapabilities(limits, currentLimits, setpoints, currentSetpoints, pausable, shiftable, stoppable bool) {
-	setAttr := func(id uint16, val bool) {
-		if attr, err := e.GetAttribute(id); err == nil {
-			_ = attr.SetValueInternal(val)
-		}
-	}
-	setAttr(EnergyControlAttrAcceptsLimits, limits)
-	setAttr(EnergyControlAttrAcceptsCurrentLimits, currentLimits)
-	setAttr(EnergyControlAttrAcceptsSetpoints, setpoints)
-	setAttr(EnergyControlAttrAcceptsCurrentSetpoints, currentSetpoints)
-	setAttr(EnergyControlAttrIsPausable, pausable)
-	setAttr(EnergyControlAttrIsShiftable, shiftable)
-	setAttr(EnergyControlAttrIsStoppable, stoppable)
+	_ = e.SetAttributeInternal(EnergyControlAttrAcceptsLimits, limits)
+	_ = e.SetAttributeInternal(EnergyControlAttrAcceptsCurrentLimits, currentLimits)
+	_ = e.SetAttributeInternal(EnergyControlAttrAcceptsSetpoints, setpoints)
+	_ = e.SetAttributeInternal(EnergyControlAttrAcceptsCurrentSetpoints, currentSetpoints)
+	_ = e.SetAttributeInternal(EnergyControlAttrIsPausable, pausable)
+	_ = e.SetAttributeInternal(EnergyControlAttrIsShiftable, shiftable)
+	_ = e.SetAttributeInternal(EnergyControlAttrIsStoppable, stoppable)
 }
 
 // SetEffectiveConsumptionLimit sets the effective consumption limit.
 func (e *EnergyControl) SetEffectiveConsumptionLimit(limit *int64) error {
-	attr, err := e.GetAttribute(EnergyControlAttrEffectiveConsumptionLimit)
-	if err != nil {
-		return err
-	}
 	if limit == nil {
-		return attr.SetValueInternal(nil)
+		return e.SetAttributeInternal(EnergyControlAttrEffectiveConsumptionLimit, nil)
 	}
-	return attr.SetValueInternal(*limit)
+	return e.SetAttributeInternal(EnergyControlAttrEffectiveConsumptionLimit, *limit)
 }
 
 // SetEffectiveProductionLimit sets the effective production limit.
 func (e *EnergyControl) SetEffectiveProductionLimit(limit *int64) error {
-	attr, err := e.GetAttribute(EnergyControlAttrEffectiveProductionLimit)
-	if err != nil {
-		return err
-	}
 	if limit == nil {
-		return attr.SetValueInternal(nil)
+		return e.SetAttributeInternal(EnergyControlAttrEffectiveProductionLimit, nil)
 	}
-	return attr.SetValueInternal(*limit)
+	return e.SetAttributeInternal(EnergyControlAttrEffectiveProductionLimit, *limit)
 }
 
 // SetProcessState sets the process state.
 func (e *EnergyControl) SetProcessState(state ProcessState) error {
-	attr, err := e.GetAttribute(EnergyControlAttrProcessState)
-	if err != nil {
-		return err
-	}
-	return attr.SetValueInternal(uint8(state))
+	return e.SetAttributeInternal(EnergyControlAttrProcessState, uint8(state))
 }
 
 // Getters
@@ -965,14 +967,10 @@ func (e *EnergyControl) IsOverride() bool {
 
 // SetContractualConsumptionMax sets the building's contractual consumption max (EMS only).
 func (e *EnergyControl) SetContractualConsumptionMax(limit *int64) error {
-	attr, err := e.GetAttribute(EnergyControlAttrContractualConsumptionMax)
-	if err != nil {
-		return err
-	}
 	if limit == nil {
-		return attr.SetValueInternal(nil)
+		return e.SetAttributeInternal(EnergyControlAttrContractualConsumptionMax, nil)
 	}
-	return attr.SetValueInternal(*limit)
+	return e.SetAttributeInternal(EnergyControlAttrContractualConsumptionMax, *limit)
 }
 
 // ContractualConsumptionMax returns the building's contractual consumption max.
@@ -989,14 +987,10 @@ func (e *EnergyControl) ContractualConsumptionMax() (int64, bool) {
 
 // SetContractualProductionMax sets the building's contractual production max (EMS only).
 func (e *EnergyControl) SetContractualProductionMax(limit *int64) error {
-	attr, err := e.GetAttribute(EnergyControlAttrContractualProductionMax)
-	if err != nil {
-		return err
-	}
 	if limit == nil {
-		return attr.SetValueInternal(nil)
+		return e.SetAttributeInternal(EnergyControlAttrContractualProductionMax, nil)
 	}
-	return attr.SetValueInternal(*limit)
+	return e.SetAttributeInternal(EnergyControlAttrContractualProductionMax, *limit)
 }
 
 // ContractualProductionMax returns the building's contractual production max.
@@ -1015,14 +1009,10 @@ func (e *EnergyControl) ContractualProductionMax() (int64, bool) {
 
 // SetOverrideReason sets the override reason (when in OVERRIDE state).
 func (e *EnergyControl) SetOverrideReason(reason *OverrideReason) error {
-	attr, err := e.GetAttribute(EnergyControlAttrOverrideReason)
-	if err != nil {
-		return err
-	}
 	if reason == nil {
-		return attr.SetValueInternal(nil)
+		return e.SetAttributeInternal(EnergyControlAttrOverrideReason, nil)
 	}
-	return attr.SetValueInternal(uint8(*reason))
+	return e.SetAttributeInternal(EnergyControlAttrOverrideReason, uint8(*reason))
 }
 
 // GetOverrideReason returns the override reason.
@@ -1039,14 +1029,10 @@ func (e *EnergyControl) GetOverrideReason() (OverrideReason, bool) {
 
 // SetOverrideDirection sets which direction triggered override.
 func (e *EnergyControl) SetOverrideDirection(dir *Direction) error {
-	attr, err := e.GetAttribute(EnergyControlAttrOverrideDirection)
-	if err != nil {
-		return err
-	}
 	if dir == nil {
-		return attr.SetValueInternal(nil)
+		return e.SetAttributeInternal(EnergyControlAttrOverrideDirection, nil)
 	}
-	return attr.SetValueInternal(uint8(*dir))
+	return e.SetAttributeInternal(EnergyControlAttrOverrideDirection, uint8(*dir))
 }
 
 // GetOverrideDirection returns which direction triggered override.

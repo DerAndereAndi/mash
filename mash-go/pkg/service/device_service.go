@@ -148,6 +148,11 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 	// Register service-level commands on DeviceInfo feature
 	svc.registerDeviceCommands()
 
+	// Subscribe to attribute changes on all features so that command handlers
+	// (e.g., SetLimit) that modify attributes internally trigger EventValueChanged
+	// events for the interactive display and other event listeners.
+	svc.subscribeToFeatureChanges()
+
 	return svc, nil
 }
 
@@ -443,6 +448,9 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 	// Set callback to emit events when attributes are written
 	zoneSession.SetOnWrite(s.makeWriteCallback(targetZoneID))
 
+	// Set callback to emit events when commands are invoked
+	zoneSession.SetOnInvoke(s.makeInvokeCallback(targetZoneID))
+
 	// Store the session
 	s.mu.Lock()
 	s.zoneSessions[targetZoneID] = zoneSession
@@ -591,6 +599,9 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 
 	// Set callback to emit events when attributes are written
 	zoneSession.SetOnWrite(s.makeWriteCallback(zoneID))
+
+	// Set callback to emit events when commands are invoked
+	zoneSession.SetOnInvoke(s.makeInvokeCallback(zoneID))
 
 	// Store the session
 	s.mu.Lock()
@@ -857,6 +868,52 @@ func (s *DeviceService) makeWriteCallback(zoneID string) WriteCallback {
 				FeatureID:   uint16(featureID),
 				AttributeID: attrID,
 				Value:       value,
+			})
+		}
+	}
+}
+
+// makeInvokeCallback creates an invoke callback that emits events for command invocations.
+func (s *DeviceService) makeInvokeCallback(zoneID string) InvokeCallback {
+	return func(endpointID uint8, featureID uint8, commandID uint8, params map[string]any, result any) {
+		s.emitEvent(Event{
+			Type:          EventCommandInvoked,
+			ZoneID:        zoneID,
+			EndpointID:    endpointID,
+			FeatureID:     uint16(featureID),
+			CommandID:     commandID,
+			CommandParams: params,
+			Value:         result,
+		})
+	}
+}
+
+// featureChangeSubscriber implements model.FeatureSubscriber to bridge
+// model-layer attribute changes to the service event system.
+type featureChangeSubscriber struct {
+	svc        *DeviceService
+	endpointID uint8
+}
+
+func (f *featureChangeSubscriber) OnAttributeChanged(featureType model.FeatureType, attrID uint16, value any) {
+	f.svc.emitEvent(Event{
+		Type:        EventValueChanged,
+		EndpointID:  f.endpointID,
+		FeatureID:   uint16(featureType),
+		AttributeID: attrID,
+		Value:       value,
+	})
+}
+
+// subscribeToFeatureChanges registers a FeatureSubscriber on all features
+// across all endpoints so that internal attribute changes (from command handlers)
+// emit EventValueChanged events.
+func (s *DeviceService) subscribeToFeatureChanges() {
+	for _, ep := range s.device.Endpoints() {
+		for _, feat := range ep.Features() {
+			feat.Subscribe(&featureChangeSubscriber{
+				svc:        s,
+				endpointID: ep.ID(),
 			})
 		}
 	}

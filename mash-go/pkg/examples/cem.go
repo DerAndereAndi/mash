@@ -394,7 +394,8 @@ func (c *CEM) SetPowerLimitFull(ctx context.Context, deviceID string, endpointID
 	result := &SetLimitResult{}
 
 	// Parse enhanced response using type-safe coercion
-	if resultMap, ok := rawResult.(map[string]any); ok {
+	// CBOR decodes maps as map[any]any when target is any, so normalize first
+	if resultMap := wire.ToStringMap(rawResult); resultMap != nil {
 		// Parse applied
 		if rawVal, exists := resultMap["applied"]; exists {
 			if v, ok := rawVal.(bool); ok {

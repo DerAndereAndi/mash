@@ -325,6 +325,33 @@ func ToInt64(v any) (int64, bool) {
 	}
 }
 
+// ToUint32 safely converts any numeric type to uint32.
+// CBOR decoding into `any` may produce different integer types depending on value size.
+func ToUint32(v any) (uint32, bool) {
+	switch n := v.(type) {
+	case uint32:
+		return n, true
+	case uint64:
+		return uint32(n), true
+	case uint16:
+		return uint32(n), true
+	case uint8:
+		return uint32(n), true
+	case int64:
+		return uint32(n), true
+	case int32:
+		return uint32(n), true
+	case int16:
+		return uint32(n), true
+	case int8:
+		return uint32(n), true
+	case int:
+		return uint32(n), true
+	default:
+		return 0, false
+	}
+}
+
 // ToUint8Public safely converts any numeric type to uint8.
 // This is the public version of toUint8 for use by notification handlers.
 func ToUint8Public(v any) (uint8, bool) {
@@ -349,5 +376,24 @@ func ToUint8Public(v any) (uint8, bool) {
 		return uint8(n), true
 	default:
 		return 0, false
+	}
+}
+
+// ToStringMap normalizes a CBOR-decoded map to map[string]any.
+// CBOR decodes maps into map[any]any when the target is any.
+// This converts both map[any]any and map[string]any to map[string]any.
+// Returns nil if the value is not a map type.
+func ToStringMap(v any) map[string]any {
+	switch m := v.(type) {
+	case map[string]any:
+		return m
+	case map[any]any:
+		result := make(map[string]any, len(m))
+		for k, val := range m {
+			result[fmt.Sprintf("%v", k)] = val
+		}
+		return result
+	default:
+		return nil
 	}
 }

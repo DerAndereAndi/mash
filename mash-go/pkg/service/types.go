@@ -455,6 +455,9 @@ const (
 	// EventControllerCertRenewed - controller's own certificate was renewed.
 	EventControllerCertRenewed
 
+	// EventCommandInvoked - a command was invoked on the device.
+	EventCommandInvoked
+
 	// EventError - an error occurred during background operations.
 	EventError
 )
@@ -502,6 +505,8 @@ func (e EventType) String() string {
 		return "CERTIFICATE_RENEWED"
 	case EventControllerCertRenewed:
 		return "CONTROLLER_CERT_RENEWED"
+	case EventCommandInvoked:
+		return "COMMAND_INVOKED"
 	case EventError:
 		return "ERROR"
 	default:
@@ -531,6 +536,12 @@ type Event struct {
 
 	// Value is the new value (for value change events).
 	Value any
+
+	// CommandID is the command that was invoked (for command events).
+	CommandID uint8
+
+	// CommandParams are the parameters passed to the command (for command events).
+	CommandParams map[string]any
 
 	// DiscoveredService contains the discovered service info (for discovery events).
 	DiscoveredService any

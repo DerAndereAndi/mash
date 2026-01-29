@@ -312,6 +312,12 @@ func (s *ZoneSession) SetOnWrite(cb WriteCallback) {
 	s.handler.SetOnWrite(cb)
 }
 
+// SetOnInvoke sets the callback for invoke operations.
+// The callback receives the endpoint ID, feature ID, command ID, parameters, and result.
+func (s *ZoneSession) SetOnInvoke(cb InvokeCallback) {
+	s.handler.SetOnInvoke(cb)
+}
+
 // Close closes the session and cleans up resources.
 func (s *ZoneSession) Close() {
 	s.mu.Lock()

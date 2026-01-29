@@ -936,11 +936,139 @@ func abs(x int) int {
 // handleEvent handles service events and displays relevant ones to the user.
 func (d *Device) handleEvent(event service.Event) {
 	switch event.Type {
+	case service.EventCommandInvoked:
+		// Show command invocations on EnergyControl
+		if event.FeatureID == uint16(model.FeatureEnergyControl) {
+			d.displayCommandInvoked(event)
+		}
 	case service.EventValueChanged:
 		// Only show EnergyControl attribute changes (limits, setpoints, state)
 		if event.FeatureID == uint16(model.FeatureEnergyControl) {
 			d.displayEnergyControlChange(event)
 		}
+	}
+}
+
+// displayCommandInvoked displays an EnergyControl command invocation with parameters.
+func (d *Device) displayCommandInvoked(event service.Event) {
+	cmdName := d.getEnergyControlCmdName(event.CommandID)
+	if cmdName == "" {
+		cmdName = fmt.Sprintf("command_%d", event.CommandID)
+	}
+
+	// Format zone ID
+	zoneID := event.ZoneID
+	if zoneID == "" {
+		zoneID = "local"
+	} else if len(zoneID) > 8 {
+		zoneID = zoneID[:8]
+	}
+
+	// Build parameter summary
+	var paramParts []string
+	if event.CommandParams != nil {
+		if v, ok := event.CommandParams["consumptionLimit"]; ok {
+			paramParts = append(paramParts, fmt.Sprintf("consumption=%.1f kW", toKW(v)))
+		}
+		if v, ok := event.CommandParams["productionLimit"]; ok {
+			paramParts = append(paramParts, fmt.Sprintf("production=%.1f kW", toKW(v)))
+		}
+		if v, ok := event.CommandParams["duration"]; ok {
+			paramParts = append(paramParts, fmt.Sprintf("duration=%vs", v))
+		}
+		if v, ok := event.CommandParams["cause"]; ok {
+			paramParts = append(paramParts, fmt.Sprintf("cause=%s", formatLimitCause(v)))
+		}
+		if v, ok := event.CommandParams["consumptionSetpoint"]; ok {
+			paramParts = append(paramParts, fmt.Sprintf("consumption=%.1f kW", toKW(v)))
+		}
+		if v, ok := event.CommandParams["productionSetpoint"]; ok {
+			paramParts = append(paramParts, fmt.Sprintf("production=%.1f kW", toKW(v)))
+		}
+	}
+
+	paramStr := ""
+	if len(paramParts) > 0 {
+		paramStr = " " + strings.Join(paramParts, ", ")
+	}
+
+	fmt.Fprintf(d.rl.Stdout(), "\n[%s] << %s (zone: %s)%s\n",
+		time.Now().Format("15:04:05"),
+		cmdName,
+		zoneID,
+		paramStr)
+	d.rl.Refresh()
+}
+
+// getEnergyControlCmdName returns a human-readable name for an EnergyControl command.
+func (d *Device) getEnergyControlCmdName(cmdID uint8) string {
+	switch cmdID {
+	case features.EnergyControlCmdSetLimit:
+		return "SetLimit"
+	case features.EnergyControlCmdClearLimit:
+		return "ClearLimit"
+	case features.EnergyControlCmdSetCurrentLimits:
+		return "SetCurrentLimits"
+	case features.EnergyControlCmdClearCurrentLimits:
+		return "ClearCurrentLimits"
+	case features.EnergyControlCmdSetSetpoint:
+		return "SetSetpoint"
+	case features.EnergyControlCmdClearSetpoint:
+		return "ClearSetpoint"
+	case features.EnergyControlCmdPause:
+		return "Pause"
+	case features.EnergyControlCmdResume:
+		return "Resume"
+	case features.EnergyControlCmdStop:
+		return "Stop"
+	default:
+		return ""
+	}
+}
+
+// toKW converts a milliwatt value (any integer type) to kilowatts.
+func toKW(v any) float64 {
+	switch n := v.(type) {
+	case int64:
+		return float64(n) / 1_000_000
+	case uint64:
+		return float64(n) / 1_000_000
+	case float64:
+		return n / 1_000_000
+	case int:
+		return float64(n) / 1_000_000
+	default:
+		return 0
+	}
+}
+
+// formatLimitCause returns a human-readable name for a limit cause value.
+func formatLimitCause(v any) string {
+	var cause uint8
+	switch n := v.(type) {
+	case uint8:
+		cause = n
+	case uint64:
+		cause = uint8(n)
+	case int64:
+		cause = uint8(n)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+
+	switch features.LimitCause(cause) {
+	case features.LimitCauseGridEmergency:
+		return "grid-emergency"
+	case features.LimitCauseGridOptimization:
+		return "grid-optimization"
+	case features.LimitCauseLocalProtection:
+		return "local-protection"
+	case features.LimitCauseLocalOptimization:
+		return "local-optimization"
+	case features.LimitCauseUserPreference:
+		return "user-preference"
+	default:
+		return fmt.Sprintf("cause(%d)", cause)
 	}
 }
 
@@ -960,7 +1088,9 @@ func (d *Device) displayEnergyControlChange(event service.Event) {
 
 	// Format the zone ID (truncate for display)
 	zoneID := event.ZoneID
-	if len(zoneID) > 8 {
+	if zoneID == "" {
+		zoneID = "local"
+	} else if len(zoneID) > 8 {
 		zoneID = zoneID[:8]
 	}
 
@@ -981,9 +1111,8 @@ func (d *Device) displayEnergyControlChange(event service.Event) {
 	}
 
 	// Print the event
-	fmt.Fprintf(d.rl.Stdout(), "\n[%s] Zone %s: %s = %s\n",
+	fmt.Fprintf(d.rl.Stdout(), "\n[%s] %s = %s\n",
 		time.Now().Format("15:04:05"),
-		zoneID,
 		attrName,
 		valueStr)
 	d.rl.Refresh()
@@ -1006,16 +1135,9 @@ func (d *Device) displayStateTransition(event service.Event) {
 		return
 	}
 
-	// Format the zone ID
-	zoneID := event.ZoneID
-	if len(zoneID) > 8 {
-		zoneID = zoneID[:8]
-	}
-
 	// Show transition
-	fmt.Fprintf(d.rl.Stdout(), "\n[%s] Zone %s: State %s -> %s\n",
+	fmt.Fprintf(d.rl.Stdout(), "\n[%s] State %s -> %s\n",
 		time.Now().Format("15:04:05"),
-		zoneID,
 		d.lastControlState,
 		newState)
 	d.rl.Refresh()

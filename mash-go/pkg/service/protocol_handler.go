@@ -17,6 +17,10 @@ type NotificationSender func(notification *wire.Notification) error
 // It receives the endpoint ID, feature ID, and the map of attribute IDs to values that were written.
 type WriteCallback func(endpointID uint8, featureID uint8, attrs map[uint16]any)
 
+// InvokeCallback is called after a successful invoke operation.
+// It receives the endpoint ID, feature ID, command ID, parameters, and result.
+type InvokeCallback func(endpointID uint8, featureID uint8, commandID uint8, params map[string]any, result any)
+
 // ProtocolHandler handles MASH protocol messages for a device or controller.
 // It routes Read/Write/Subscribe/Invoke requests to the appropriate
 // features and generates responses. The handler is bidirectional and can be
@@ -35,6 +39,9 @@ type ProtocolHandler struct {
 
 	// Write callback (optional) - called after successful writes
 	onWrite WriteCallback
+
+	// Invoke callback (optional) - called after successful invokes
+	onInvoke InvokeCallback
 
 	// Protocol logging (optional)
 	logger log.Logger
@@ -80,6 +87,13 @@ func (h *ProtocolHandler) SetOnWrite(cb WriteCallback) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.onWrite = cb
+}
+
+// SetOnInvoke sets the callback for invoke operations.
+func (h *ProtocolHandler) SetOnInvoke(cb InvokeCallback) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onInvoke = cb
 }
 
 // PeerID returns the remote peer's identifier.
@@ -581,6 +595,14 @@ func (h *ProtocolHandler) handleInvoke(req *wire.Request) *wire.Response {
 				Message: err.Error(),
 			},
 		}
+	}
+
+	// Call invoke callback if set
+	h.mu.RLock()
+	onInvoke := h.onInvoke
+	h.mu.RUnlock()
+	if onInvoke != nil {
+		onInvoke(req.EndpointID, req.FeatureID, commandID, params, result)
 	}
 
 	return &wire.Response{
