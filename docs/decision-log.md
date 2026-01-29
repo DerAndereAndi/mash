@@ -3,7 +3,7 @@
 > Tracking what we evaluated, decided, and declined
 
 **Created:** 2025-01-24
-**Last Updated:** 2026-01-26
+**Last Updated:** 2026-01-29
 
 ---
 
@@ -2769,6 +2769,84 @@ Align commissioning window default with Matter, with MASH-specific maximum:
 - Default user experience unchanged (pairing request handles window expiry)
 
 **Related:** DEC-047 (Commissioning Security Hardening)
+
+---
+
+### DEC-049: LPC/LPP Use Case Support - Contractual Limits and Override Tracking
+
+**Status:** Accepted
+**Date:** 2026-01-29
+
+**Context:**
+
+Supporting the EEBUS LPC (Limitation of Power Consumption) and LPP (Limitation of Power Production) use cases for German EnWG §14a compliance. Analysis revealed:
+
+1. LPC and LPP share identical state machines (init, limited, controlled, failsafe, autonomous)
+2. `failsafeDuration` is a shared data point between LPC and LPP
+3. EEBUS distinguishes hardware limits (devices) from contractual limits (EMS/CEM)
+4. Override reasons differ by direction (self-protection for consumption, not production)
+
+**Options Evaluated:**
+
+1. Add contractual limits to Electrical feature
+2. Add contractual limits to EnergyControl, keep nominal in Electrical (chosen)
+3. Create new GridConnection feature
+4. Separate control states per direction (rejected)
+
+**Decision:** Option 2 - Add contractual limits to EnergyControl with unified control state
+
+**Additions to EnergyControl:**
+- `contractualConsumptionMax` (attr 73): Building's max allowed consumption (EMS only)
+- `contractualProductionMax` (attr 74): Building's max allowed feed-in (EMS only)
+- `overrideReason` (attr 75): Why device is in OVERRIDE state
+- `overrideDirection` (attr 76): Which direction triggered override
+- `OverrideReasonEnum`: SELF_PROTECTION, SAFETY, LEGAL_REQUIREMENT, UNCONTROLLED_LOAD, UNCONTROLLED_PRODUCER
+- `LimitRejectReasonEnum`: BELOW_MINIMUM, ABOVE_CONTRACTUAL, INVALID_VALUE, DEVICE_OVERRIDE, NOT_SUPPORTED
+- Enhanced `SetLimit` response with `applied`, `rejectReason`, `controlState`
+
+**Rationale:**
+
+1. **Nominal vs Contractual separation:**
+   - Nominal max = hardware capability → belongs in Electrical (existing)
+   - Contractual max = building's contract → belongs in EnergyControl (added)
+   - These are mutually exclusive per EEBUS spec
+
+2. **Unified control state (vs separate per direction):**
+   - Single `controlState` shows "most concerning" state (FAILSAFE > OVERRIDE > LIMITED > CONTROLLED > AUTONOMOUS)
+   - `overrideDirection` indicates which direction triggered override
+   - Simpler for controllers; MASH zone architecture manages both directions together
+   - EEBUS complexity (independent state machines) not needed
+
+3. **Shared failsafeDuration:**
+   - MASH already models this correctly as single value
+   - Matches EEBUS [LPC-022] = [LPP-022]
+
+4. **TLS replaces heartbeat:**
+   - EEBUS uses explicit heartbeat (120s timeout)
+   - MASH uses TLS connection state - simpler, more reliable
+   - Already decided in DEC-045
+
+**LPC/LPP Data Point Mapping:**
+
+| EEBUS | MASH | Notes |
+|-------|------|-------|
+| LPC-011 Active Consumption Limit | `myConsumptionLimit` | Exists |
+| LPP-011 Active Production Limit | `myProductionLimit` | Exists |
+| LPC-021 Failsafe Consumption Limit | `failsafeConsumptionLimit` | Exists |
+| LPP-021 Failsafe Production Limit | `failsafeProductionLimit` | Exists |
+| LPC/LPP-022 Failsafe Duration | `failsafeDuration` | Shared, exists |
+| LPC-041 Nominal Consumption Max | `Electrical.nominalMaxConsumption` | Device only |
+| LPP-041 Nominal Production Max | `Electrical.nominalMaxProduction` | Device only |
+| LPC-042 Contractual Consumption Max | `contractualConsumptionMax` | **Added**, EMS only |
+| LPP-042 Contractual Production Max | `contractualProductionMax` | **Added**, EMS only |
+
+**Declined Alternatives:**
+
+- **Separate control states per direction:** Adds complexity without benefit; MASH's zone architecture means controllers typically manage both directions together
+- **Contractual in Electrical:** Electrical is for hardware characteristics, not contract terms
+- **New GridConnection feature:** Over-engineering; contractual limits fit naturally in EnergyControl
+
+**Related:** DEC-026 (EnergyControl design), DEC-045 (Failsafe via TLS)
 
 ---
 
