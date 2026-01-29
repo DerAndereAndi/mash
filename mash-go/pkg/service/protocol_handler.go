@@ -30,8 +30,8 @@ type ProtocolHandler struct {
 	mu sync.RWMutex
 
 	device       *model.Device
-	peerID       string         // The remote peer's identifier (generic, works for both device and controller)
-	peerZoneType cert.ZoneType  // The remote peer's zone type (GRID, LOCAL, etc.)
+	peerID       string        // The remote peer's identifier (generic, works for both device and controller)
+	peerZoneType cert.ZoneType // The remote peer's zone type (GRID, LOCAL, etc.)
 
 	// Subscription management using SubscriptionManager
 	subscriptions *SubscriptionManager
@@ -289,16 +289,25 @@ func (h *ProtocolHandler) handleRead(req *wire.Request) *wire.Response {
 		}
 	}
 
-	// Read attributes
+	// Build context with caller zone identity
+	ctx := context.Background()
+	if h.peerID != "" {
+		ctx = ContextWithCallerZoneID(ctx, h.peerID)
+	}
+	if h.peerZoneType != 0 {
+		ctx = ContextWithCallerZoneType(ctx, h.peerZoneType)
+	}
+
+	// Read attributes using context-aware methods
 	var result map[uint16]any
 	if len(attributeIDs) == 0 {
 		// Read all attributes
-		result = feature.ReadAllAttributes()
+		result = feature.ReadAllAttributesWithContext(ctx)
 	} else {
 		// Read specific attributes
 		result = make(map[uint16]any)
 		for _, attrID := range attributeIDs {
-			value, err := feature.ReadAttribute(attrID)
+			value, err := feature.ReadAttributeWithContext(ctx, attrID)
 			if err == nil {
 				result[attrID] = value
 			}
@@ -459,14 +468,23 @@ func (h *ProtocolHandler) handleSubscribe(req *wire.Request) *wire.Response {
 	// Add subscription using SubscriptionManager (inbound = from remote peer to our features)
 	subID := h.subscriptions.AddInbound(req.EndpointID, req.FeatureID, attributeIDs)
 
-	// Read current values for priming report
+	// Build context with caller zone identity for priming report
+	ctx := context.Background()
+	if h.peerID != "" {
+		ctx = ContextWithCallerZoneID(ctx, h.peerID)
+	}
+	if h.peerZoneType != 0 {
+		ctx = ContextWithCallerZoneType(ctx, h.peerZoneType)
+	}
+
+	// Read current values for priming report using context-aware methods
 	var currentValues map[uint16]any
 	if len(attributeIDs) == 0 {
-		currentValues = feature.ReadAllAttributes()
+		currentValues = feature.ReadAllAttributesWithContext(ctx)
 	} else {
 		currentValues = make(map[uint16]any)
 		for _, attrID := range attributeIDs {
-			if value, err := feature.ReadAttribute(attrID); err == nil {
+			if value, err := feature.ReadAttributeWithContext(ctx, attrID); err == nil {
 				currentValues[attrID] = value
 			}
 		}

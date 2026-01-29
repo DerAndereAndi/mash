@@ -210,6 +210,10 @@ func (d *NotificationDispatcher) HandleSubscribe(connID uint64, req *wire.Reques
 	}
 
 	// Read current values for priming
+	// TODO(task-4): Use ReadAllAttributesWithContext / ReadAttributeWithContext here once
+	// the dispatcher tracks per-connection zone identity. Currently the dispatcher
+	// only knows connections by numeric ID and does not have access to the peer's
+	// zone ID or zone type needed to build the context.
 	var currentValues map[uint16]any
 	if len(attributeIDs) == 0 {
 		currentValues = feature.ReadAllAttributes()

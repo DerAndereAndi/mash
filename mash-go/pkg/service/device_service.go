@@ -96,9 +96,9 @@ type DeviceService struct {
 
 	// Security Hardening (DEC-047)
 	// Connection tracking
-	commissioningConnActive bool      // Only one commissioning connection allowed
-	lastCommissioningAttempt time.Time // For connection cooldown
-	connectionMu            sync.Mutex // Protects connection tracking fields
+	commissioningConnActive  bool       // Only one commissioning connection allowed
+	lastCommissioningAttempt time.Time  // For connection cooldown
+	connectionMu             sync.Mutex // Protects connection tracking fields
 
 	// PASE attempt tracking
 	paseTracker *PASEAttemptTracker
@@ -1340,6 +1340,33 @@ func (s *DeviceService) NotifyAttributeChange(endpointID uint8, featureID uint8,
 	}
 
 	return nil
+}
+
+// NotifyZoneAttributeChange sends attribute change notifications to a specific zone's session.
+// This is used for per-zone attributes (like myConsumptionLimit) where each zone sees different values.
+func (s *DeviceService) NotifyZoneAttributeChange(zoneID string, endpointID uint8, featureID uint8, changes map[uint16]any) {
+	s.mu.RLock()
+	session, ok := s.zoneSessions[zoneID]
+	s.mu.RUnlock()
+	if !ok {
+		return
+	}
+
+	for attrID, value := range changes {
+		matchingSubIDs := session.handler.GetMatchingSubscriptions(endpointID, featureID, attrID)
+		for _, subID := range matchingSubIDs {
+			notif := &wire.Notification{
+				SubscriptionID: subID,
+				EndpointID:     endpointID,
+				FeatureID:      featureID,
+				Changes:        map[uint16]any{attrID: value},
+			}
+			if err := session.SendNotification(notif); err != nil {
+				s.debugLog("NotifyZoneAttributeChange: failed to send",
+					"zoneID", zoneID, "attrID", attrID, "error", err)
+			}
+		}
+	}
 }
 
 // notifyZoneSessions sends a notification to all zone sessions with subscriptions

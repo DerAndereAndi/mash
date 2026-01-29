@@ -33,6 +33,11 @@ type LimitResolver struct {
 	// Injected context extractors (avoids import cycle with pkg/service).
 	ZoneIDFromContext   func(ctx context.Context) string
 	ZoneTypeFromContext func(ctx context.Context) cert.ZoneType
+
+	// OnZoneMyChange is called when a zone's "my" attribute values change.
+	// The callback receives the zone ID and a map of changed attribute IDs to values.
+	// Injected by the service layer to avoid import cycles.
+	OnZoneMyChange func(zoneID string, changes map[uint16]any)
 }
 
 // NewLimitResolver creates a new LimitResolver for the given EnergyControl feature.
@@ -55,6 +60,39 @@ func NewLimitResolver(ec *EnergyControl) *LimitResolver {
 func (lr *LimitResolver) Register() {
 	lr.ec.OnSetLimit(lr.HandleSetLimit)
 	lr.ec.OnClearLimit(lr.HandleClearLimit)
+
+	lr.ec.SetReadHook(func(ctx context.Context, attrID uint16) (any, bool) {
+		switch attrID {
+		case EnergyControlAttrMyConsumptionLimit, EnergyControlAttrMyProductionLimit:
+			// Intercept per-zone "my" attributes
+		default:
+			return nil, false
+		}
+
+		zoneID := ""
+		if lr.ZoneIDFromContext != nil {
+			zoneID = lr.ZoneIDFromContext(ctx)
+		}
+		if zoneID == "" {
+			return nil, true
+		}
+
+		lr.mu.Lock()
+		defer lr.mu.Unlock()
+
+		var mzv *zone.MultiZoneValue
+		if attrID == EnergyControlAttrMyConsumptionLimit {
+			mzv = lr.consumptionLimits
+		} else {
+			mzv = lr.productionLimits
+		}
+
+		zv := mzv.Get(zoneID)
+		if zv == nil {
+			return nil, true
+		}
+		return zv.Value, true
+	})
 }
 
 // HandleSetLimit handles a SetLimit command from a zone.
@@ -113,6 +151,12 @@ func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest
 	if req.ConsumptionLimit == nil && req.ProductionLimit == nil {
 		lr.clearZoneLocked(zoneID)
 		lr.resolveAndApply()
+		if lr.OnZoneMyChange != nil {
+			lr.OnZoneMyChange(zoneID, map[uint16]any{
+				EnergyControlAttrMyConsumptionLimit: nil,
+				EnergyControlAttrMyProductionLimit:  nil,
+			})
+		}
 		return SetLimitResponse{
 			Applied:      true,
 			ControlState: lr.ec.ControlState(),
@@ -147,6 +191,17 @@ func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest
 	}
 
 	lr.resolveAndApply()
+
+	if lr.OnZoneMyChange != nil {
+		changes := make(map[uint16]any)
+		if req.ConsumptionLimit != nil {
+			changes[EnergyControlAttrMyConsumptionLimit] = *req.ConsumptionLimit
+		}
+		if req.ProductionLimit != nil {
+			changes[EnergyControlAttrMyProductionLimit] = *req.ProductionLimit
+		}
+		lr.OnZoneMyChange(zoneID, changes)
+	}
 
 	// Build response with effective values
 	resp := SetLimitResponse{
@@ -203,6 +258,18 @@ func (lr *LimitResolver) HandleClearLimit(ctx context.Context, direction *Direct
 	}
 
 	lr.resolveAndApply()
+
+	if lr.OnZoneMyChange != nil {
+		changes := make(map[uint16]any)
+		if direction == nil || *direction == DirectionConsumption {
+			changes[EnergyControlAttrMyConsumptionLimit] = nil
+		}
+		if direction == nil || *direction == DirectionProduction {
+			changes[EnergyControlAttrMyProductionLimit] = nil
+		}
+		lr.OnZoneMyChange(zoneID, changes)
+	}
+
 	return nil
 }
 
@@ -213,6 +280,13 @@ func (lr *LimitResolver) ClearZone(zoneID string) {
 
 	lr.clearZoneLocked(zoneID)
 	lr.resolveAndApply()
+
+	if lr.OnZoneMyChange != nil {
+		lr.OnZoneMyChange(zoneID, map[uint16]any{
+			EnergyControlAttrMyConsumptionLimit: nil,
+			EnergyControlAttrMyProductionLimit:  nil,
+		})
+	}
 }
 
 // clearZoneLocked clears a zone's limits and timers. Must be called with mu held.
@@ -245,6 +319,17 @@ func (lr *LimitResolver) handleTimerExpiry(zoneIdx uint8, cmdType duration.Comma
 	}
 
 	lr.resolveAndApply()
+
+	if lr.OnZoneMyChange != nil {
+		changes := make(map[uint16]any)
+		switch cmdType {
+		case duration.CmdLimitConsumption:
+			changes[EnergyControlAttrMyConsumptionLimit] = nil
+		case duration.CmdLimitProduction:
+			changes[EnergyControlAttrMyProductionLimit] = nil
+		}
+		lr.OnZoneMyChange(zoneID, changes)
+	}
 }
 
 // resolveAndApply computes effective limits and updates the EnergyControl feature.

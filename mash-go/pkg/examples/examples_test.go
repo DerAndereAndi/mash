@@ -5,9 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/service"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -150,16 +152,11 @@ func TestZoneInteraction(t *testing.T) {
 
 	evseServer := interaction.NewServer(evse.Device())
 
-	// Track limit changes
-	var receivedLimit *int64
-	evse.OnLimitChanged(func(limit *int64) {
-		if limit != nil {
-			val := *limit
-			receivedLimit = &val
-		} else {
-			receivedLimit = nil
-		}
-	})
+	// Wire LimitResolver context extractors so it can identify zones
+	evse.LimitResolver().ZoneIDFromContext = service.CallerZoneIDFromContext
+	evse.LimitResolver().ZoneTypeFromContext = func(ctx context.Context) cert.ZoneType {
+		return service.CallerZoneTypeFromContext(ctx)
+	}
 
 	// Mark EVSE as accepting control
 	evse.AcceptController()
@@ -200,8 +197,11 @@ func TestZoneInteraction(t *testing.T) {
 		t.Errorf("expected power 22000000, got %d", evse.GetCurrentPower())
 	}
 
-	// CEM sets a limit via the interaction model
+	// CEM sets a limit via the interaction model.
+	// LimitResolver requires zone identity on the context.
 	ctx := context.Background()
+	ctx = service.ContextWithCallerZoneID(ctx, "zone-cem-001")
+	ctx = service.ContextWithCallerZoneType(ctx, cert.ZoneTypeLocal)
 
 	// Direct command invocation since we're simulating the wire protocol
 	req := &wire.Request{
@@ -224,11 +224,12 @@ func TestZoneInteraction(t *testing.T) {
 	}
 
 	// Verify the limit was applied
-	if receivedLimit == nil {
-		t.Fatal("expected limit to be set")
+	effectiveLimit := evse.GetEffectiveLimit()
+	if effectiveLimit == nil {
+		t.Fatal("expected effective limit to be set")
 	}
-	if *receivedLimit != 11000000 {
-		t.Errorf("expected limit 11000000, got %d", *receivedLimit)
+	if *effectiveLimit != 11000000 {
+		t.Errorf("expected effective limit 11000000, got %d", *effectiveLimit)
 	}
 
 	// EVSE should now respect the limit
@@ -254,8 +255,8 @@ func TestZoneInteraction(t *testing.T) {
 		t.Fatalf("ClearLimit failed: %v", resp.Status)
 	}
 
-	if receivedLimit != nil {
-		t.Error("expected limit to be cleared")
+	if evse.GetEffectiveLimit() != nil {
+		t.Error("expected effective limit to be cleared")
 	}
 
 	// Disconnect

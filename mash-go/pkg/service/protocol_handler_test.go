@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -847,5 +848,229 @@ func TestProtocolHandler_LogsErrorResponse(t *testing.T) {
 	}
 	if *respEvent.Message.Status == wire.StatusSuccess {
 		t.Error("Response should have error status for invalid endpoint")
+	}
+}
+
+// =============================================================================
+// Context Threading Tests
+// =============================================================================
+
+// featureTypeForHookTest is a feature type used in context threading tests.
+// Using EnergyControl (0x05) since per-zone reads are most relevant there.
+const featureTypeForHookTest = model.FeatureEnergyControl
+
+// testAttrID is the attribute ID used in hook tests.
+const testAttrID uint16 = 20
+
+// createDeviceWithReadHook creates a device with endpoint 1 containing a feature
+// that has a ReadHook installed. The hook captures the context it receives via
+// the provided pointer. The feature has a single readable attribute (testAttrID)
+// with a stored value of "stored-value".
+func createDeviceWithReadHook(hookCalled *bool, capturedZoneID *string) *model.Device {
+	device := model.NewDevice("test-hook-device", 0x1234, 0x0001)
+
+	// Add DeviceInfo to root endpoint (required by convention)
+	deviceInfo := features.NewDeviceInfo()
+	_ = deviceInfo.SetDeviceID("test-hook-device")
+	device.RootEndpoint().AddFeature(deviceInfo.Feature)
+
+	// Create endpoint 1 with a feature that has a ReadHook
+	ep := model.NewEndpoint(1, model.EndpointEVCharger, "Test EP")
+
+	feature := model.NewFeature(featureTypeForHookTest, 1)
+	feature.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:      testAttrID,
+		Name:    "testAttr",
+		Type:    model.DataTypeString,
+		Access:  model.AccessReadOnly,
+		Default: "stored-value",
+	}))
+
+	feature.SetReadHook(func(ctx context.Context, attrID uint16) (any, bool) {
+		*hookCalled = true
+		*capturedZoneID = service.CallerZoneIDFromContext(ctx)
+		if attrID == testAttrID {
+			return "hook-value-for-" + *capturedZoneID, true
+		}
+		return nil, false
+	})
+
+	ep.AddFeature(feature)
+	_ = device.AddEndpoint(ep)
+
+	return device
+}
+
+func TestProtocolHandler_HandleRead_PassesZoneContext(t *testing.T) {
+	var hookCalled bool
+	var capturedZoneID string
+	device := createDeviceWithReadHook(&hookCalled, &capturedZoneID)
+
+	handler := service.NewProtocolHandler(device)
+	handler.SetPeerID("zone-alpha")
+
+	// Read all attributes
+	resp := handler.HandleRequest(&wire.Request{
+		MessageID:  200,
+		Operation:  wire.OpRead,
+		EndpointID: 1,
+		FeatureID:  uint8(featureTypeForHookTest),
+	})
+
+	if !resp.IsSuccess() {
+		t.Fatalf("expected success, got status %d", resp.Status)
+	}
+
+	if !hookCalled {
+		t.Fatal("expected ReadHook to be called during handleRead")
+	}
+
+	if capturedZoneID != "zone-alpha" {
+		t.Errorf("expected zone ID 'zone-alpha' in context, got %q", capturedZoneID)
+	}
+
+	// Verify the hook's return value is used
+	payload, ok := resp.Payload.(map[uint16]any)
+	if !ok {
+		t.Fatalf("expected map[uint16]any payload, got %T", resp.Payload)
+	}
+	if v, exists := payload[testAttrID]; !exists {
+		t.Error("expected testAttrID in response")
+	} else if v != "hook-value-for-zone-alpha" {
+		t.Errorf("expected hook value 'hook-value-for-zone-alpha', got %v", v)
+	}
+
+	// Also test specific attribute read path
+	hookCalled = false
+	capturedZoneID = ""
+
+	resp = handler.HandleRequest(&wire.Request{
+		MessageID:  201,
+		Operation:  wire.OpRead,
+		EndpointID: 1,
+		FeatureID:  uint8(featureTypeForHookTest),
+		Payload: &wire.ReadPayload{
+			AttributeIDs: []uint16{testAttrID},
+		},
+	})
+
+	if !resp.IsSuccess() {
+		t.Fatalf("expected success for specific attribute read, got status %d", resp.Status)
+	}
+
+	if !hookCalled {
+		t.Fatal("expected ReadHook to be called for specific attribute read")
+	}
+
+	if capturedZoneID != "zone-alpha" {
+		t.Errorf("expected zone ID 'zone-alpha' for specific read, got %q", capturedZoneID)
+	}
+}
+
+func TestProtocolHandler_HandleRead_NoPeerID(t *testing.T) {
+	var hookCalled bool
+	var capturedZoneID string
+	device := createDeviceWithReadHook(&hookCalled, &capturedZoneID)
+
+	handler := service.NewProtocolHandler(device)
+	// Do NOT set peerID
+
+	resp := handler.HandleRequest(&wire.Request{
+		MessageID:  210,
+		Operation:  wire.OpRead,
+		EndpointID: 1,
+		FeatureID:  uint8(featureTypeForHookTest),
+	})
+
+	if !resp.IsSuccess() {
+		t.Fatalf("expected success, got status %d", resp.Status)
+	}
+
+	if !hookCalled {
+		t.Fatal("expected ReadHook to be called even without peerID")
+	}
+
+	// Zone ID should be empty string (from background context without value)
+	if capturedZoneID != "" {
+		t.Errorf("expected empty zone ID when no peerID set, got %q", capturedZoneID)
+	}
+
+	// The hook still returns a value (with empty zone ID)
+	payload, ok := resp.Payload.(map[uint16]any)
+	if !ok {
+		t.Fatalf("expected map[uint16]any payload, got %T", resp.Payload)
+	}
+	if v, exists := payload[testAttrID]; !exists {
+		t.Error("expected testAttrID in response")
+	} else if v != "hook-value-for-" {
+		t.Errorf("expected hook value 'hook-value-for-', got %v", v)
+	}
+}
+
+func TestProtocolHandler_HandleSubscribe_PrimingUsesContext(t *testing.T) {
+	var hookCalled bool
+	var capturedZoneID string
+	device := createDeviceWithReadHook(&hookCalled, &capturedZoneID)
+
+	handler := service.NewProtocolHandler(device)
+	handler.SetPeerID("zone-beta")
+
+	// Subscribe to all attributes - the priming report should use context-aware reads
+	resp := handler.HandleRequest(&wire.Request{
+		MessageID:  220,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 1,
+		FeatureID:  uint8(featureTypeForHookTest),
+		Payload:    &wire.SubscribePayload{},
+	})
+
+	if !resp.IsSuccess() {
+		t.Fatalf("expected success, got status %d", resp.Status)
+	}
+
+	if !hookCalled {
+		t.Fatal("expected ReadHook to be called during subscribe priming")
+	}
+
+	if capturedZoneID != "zone-beta" {
+		t.Errorf("expected zone ID 'zone-beta' in context, got %q", capturedZoneID)
+	}
+
+	// Verify priming report uses hook values
+	subResp, ok := resp.Payload.(*wire.SubscribeResponsePayload)
+	if !ok {
+		t.Fatalf("expected *wire.SubscribeResponsePayload, got %T", resp.Payload)
+	}
+
+	if v, exists := subResp.CurrentValues[testAttrID]; !exists {
+		t.Error("expected testAttrID in priming report")
+	} else if v != "hook-value-for-zone-beta" {
+		t.Errorf("expected hook value 'hook-value-for-zone-beta' in priming, got %v", v)
+	}
+
+	// Also test subscribe with specific attribute IDs
+	hookCalled = false
+	capturedZoneID = ""
+
+	resp = handler.HandleRequest(&wire.Request{
+		MessageID:  221,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 1,
+		FeatureID:  uint8(featureTypeForHookTest),
+		Payload: &wire.SubscribePayload{
+			AttributeIDs: []uint16{testAttrID},
+		},
+	})
+
+	if !resp.IsSuccess() {
+		t.Fatalf("expected success for specific subscribe, got status %d", resp.Status)
+	}
+
+	if !hookCalled {
+		t.Fatal("expected ReadHook to be called for specific attribute subscribe priming")
+	}
+
+	if capturedZoneID != "zone-beta" {
+		t.Errorf("expected zone ID 'zone-beta' for specific subscribe, got %q", capturedZoneID)
 	}
 }

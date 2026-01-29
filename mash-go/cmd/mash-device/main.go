@@ -175,7 +175,7 @@ func main() {
 	applyDefaults()
 
 	// Create device based on type
-	device, deviceCategory := createDevice()
+	device, limitResolver, deviceCategory := createDevice()
 	if device == nil {
 		log.Fatalf("Failed to create device of type: %s", config.Type)
 	}
@@ -206,6 +206,17 @@ func main() {
 	svc, err := service.NewDeviceService(device, svcConfig)
 	if err != nil {
 		log.Fatalf("Failed to create device service: %v", err)
+	}
+
+	// Wire per-zone "my" attribute notifications.
+	// When a zone's limit changes, the resolver notifies that specific zone's
+	// subscriptions so it sees its own myConsumptionLimit/myProductionLimit values.
+	if limitResolver != nil {
+		const endpointID uint8 = 1
+		featureID := uint8(model.FeatureEnergyControl)
+		limitResolver.OnZoneMyChange = func(zoneID string, changes map[uint16]any) {
+			svc.NotifyZoneAttributeChange(zoneID, endpointID, featureID, changes)
+		}
 	}
 
 	// Store for simulation
@@ -371,7 +382,7 @@ func applyDefaults() {
 	}
 }
 
-func createDevice() (*model.Device, discovery.DeviceCategory) {
+func createDevice() (*model.Device, *features.LimitResolver, discovery.DeviceCategory) {
 	switch config.Type {
 	case DeviceTypeEVSE:
 		evse := examples.NewEVSE(examples.EVSEConfig{
@@ -389,22 +400,27 @@ func createDevice() (*model.Device, discovery.DeviceCategory) {
 			NominalMinPower:       1380000,
 			SupportsBidirectional: false,
 		})
-		return evse.Device(), discovery.CategoryEMobility
+		resolver := evse.LimitResolver()
+		resolver.ZoneIDFromContext = service.CallerZoneIDFromContext
+		resolver.ZoneTypeFromContext = func(ctx context.Context) cert.ZoneType {
+			return service.CallerZoneTypeFromContext(ctx)
+		}
+		return evse.Device(), resolver, discovery.CategoryEMobility
 
 	case DeviceTypeInverter:
-		device := createInverterDevice()
-		return device, discovery.CategoryInverter
+		device, resolver := createInverterDevice()
+		return device, resolver, discovery.CategoryInverter
 
 	case DeviceTypeBattery:
-		device := createBatteryDevice()
-		return device, discovery.CategoryInverter
+		device, resolver := createBatteryDevice()
+		return device, resolver, discovery.CategoryInverter
 
 	default:
-		return nil, 0
+		return nil, nil, 0
 	}
 }
 
-func createInverterDevice() *model.Device {
+func createInverterDevice() (*model.Device, *features.LimitResolver) {
 	device := model.NewDevice(config.SerialNumber, 0x1234, 0x0002)
 
 	// Root endpoint with DeviceInfo
@@ -444,7 +460,7 @@ func createInverterDevice() *model.Device {
 	_ = energyControl.SetDeviceType(features.DeviceTypeInverter)
 	_ = energyControl.SetControlState(features.ControlStateAutonomous)
 	energyControl.SetCapabilities(true, false, false, false, false, false, false)
-	setupEnergyControlHandler(energyControl)
+	resolver := setupEnergyControlHandler(energyControl)
 	inverter.AddFeature(energyControl.Feature)
 
 	// Status
@@ -455,10 +471,10 @@ func createInverterDevice() *model.Device {
 
 	_ = device.AddEndpoint(inverter)
 
-	return device
+	return device, resolver
 }
 
-func createBatteryDevice() *model.Device {
+func createBatteryDevice() (*model.Device, *features.LimitResolver) {
 	device := model.NewDevice(config.SerialNumber, 0x1234, 0x0003)
 
 	// Root endpoint with DeviceInfo
@@ -499,7 +515,7 @@ func createBatteryDevice() *model.Device {
 	_ = energyControl.SetDeviceType(features.DeviceTypeBattery)
 	_ = energyControl.SetControlState(features.ControlStateAutonomous)
 	energyControl.SetCapabilities(true, false, true, false, true, true, true)
-	setupEnergyControlHandler(energyControl)
+	resolver := setupEnergyControlHandler(energyControl)
 	battery.AddFeature(energyControl.Feature)
 
 	// Status
@@ -510,18 +526,20 @@ func createBatteryDevice() *model.Device {
 
 	_ = device.AddEndpoint(battery)
 
-	return device
+	return device, resolver
 }
 
 // setupEnergyControlHandler configures the SetLimit/ClearLimit handlers
 // using LimitResolver for per-zone tracking with "most restrictive wins" resolution.
-func setupEnergyControlHandler(energyControl *features.EnergyControl) {
+// Returns the resolver so the caller can wire the OnZoneMyChange callback.
+func setupEnergyControlHandler(energyControl *features.EnergyControl) *features.LimitResolver {
 	resolver := features.NewLimitResolver(energyControl)
 	resolver.ZoneIDFromContext = service.CallerZoneIDFromContext
 	resolver.ZoneTypeFromContext = func(ctx context.Context) cert.ZoneType {
 		return service.CallerZoneTypeFromContext(ctx)
 	}
 	resolver.Register()
+	return resolver
 }
 
 func handleEvent(event service.Event) {

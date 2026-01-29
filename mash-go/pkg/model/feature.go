@@ -13,6 +13,12 @@ var (
 	ErrFeatureReadOnly   = errors.New("feature is read-only")
 )
 
+// ReadHook is called during context-aware reads to allow features to override
+// attribute values based on caller context (e.g., returning per-zone values).
+// It returns (value, true) to override the attribute, or (nil, false) to fall
+// through to the stored value.
+type ReadHook func(ctx context.Context, attrID uint16) (any, bool)
+
 // Feature represents a feature instance containing attributes and commands.
 type Feature struct {
 	mu sync.RWMutex
@@ -34,6 +40,9 @@ type Feature struct {
 
 	// Subscribers for change notifications.
 	subscribers []FeatureSubscriber
+
+	// readHook is an optional hook for context-aware attribute reads.
+	readHook ReadHook
 }
 
 // FeatureSubscriber is notified when attributes change.
@@ -231,6 +240,88 @@ func (f *Feature) ReadAllAttributes() map[uint16]any {
 				result[id] = attr.Value()
 			}
 		}
+	}
+	return result
+}
+
+// SetReadHook sets an optional hook for context-aware attribute reads.
+func (f *Feature) SetReadHook(hook ReadHook) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readHook = hook
+}
+
+// ReadAttributeWithContext reads an attribute value by ID, passing context to
+// the read hook if one is set. The hook may override the returned value based
+// on the caller's context (e.g., zone identity).
+func (f *Feature) ReadAttributeWithContext(ctx context.Context, id uint16) (any, error) {
+	// Handle dynamic attributes (not overridable by hooks)
+	if id == AttrIDAttributeList {
+		return f.AttributeList(), nil
+	}
+	if id == AttrIDCommandList {
+		return f.CommandList(), nil
+	}
+
+	attr, err := f.GetAttribute(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if !attr.Metadata().Access.CanRead() {
+		return nil, ErrAttributeNotFound
+	}
+
+	// Try hook first
+	f.mu.RLock()
+	hook := f.readHook
+	f.mu.RUnlock()
+
+	if hook != nil {
+		if val, ok := hook(ctx, id); ok {
+			return val, nil
+		}
+	}
+
+	return attr.Value(), nil
+}
+
+// ReadAllAttributesWithContext returns all readable attribute values, passing
+// context to the read hook for each attribute.
+func (f *Feature) ReadAllAttributesWithContext(ctx context.Context) map[uint16]any {
+	f.mu.RLock()
+	hook := f.readHook
+	attrs := make(map[uint16]*Attribute, len(f.attributes))
+	for id, attr := range f.attributes {
+		attrs[id] = attr
+	}
+	f.mu.RUnlock()
+
+	result := make(map[uint16]any)
+	for id, attr := range attrs {
+		if !attr.Metadata().Access.CanRead() {
+			continue
+		}
+
+		// Handle dynamic attributes
+		if id == AttrIDAttributeList {
+			result[id] = f.AttributeList()
+			continue
+		}
+		if id == AttrIDCommandList {
+			result[id] = f.CommandList()
+			continue
+		}
+
+		// Try hook first
+		if hook != nil {
+			if val, ok := hook(ctx, id); ok {
+				result[id] = val
+				continue
+			}
+		}
+
+		result[id] = attr.Value()
 	}
 	return result
 }

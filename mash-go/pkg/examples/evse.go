@@ -29,13 +29,12 @@ type EVSE struct {
 	chargingSession *features.ChargingSession
 	status          *features.Status
 
-	// Internal state
-	currentPower     int64 // mW - actual charging power
-	sessionCounter   uint32
-	effectiveLimit   *int64 // mW - active power limit from CEM
+	// Limit resolution
+	limitResolver *features.LimitResolver
 
-	// Callbacks for external integration
-	onLimitChanged func(limit *int64)
+	// Internal state
+	currentPower   int64 // mW - actual charging power
+	sessionCounter uint32
 }
 
 // EVSEConfig contains configuration for creating an EVSE.
@@ -162,63 +161,11 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 }
 
 func (e *EVSE) setupCommandHandlers() {
-	// SetLimit handler - CEM sets power limits
-	e.energyControl.OnSetLimitEnhanced(func(ctx context.Context, req features.SetLimitRequest) features.SetLimitResponse {
-		e.mu.Lock()
-		defer e.mu.Unlock()
-
-		// Validate: reject negative limits
-		if req.ConsumptionLimit != nil && *req.ConsumptionLimit < 0 {
-			reason := features.LimitRejectInvalidValue
-			return features.SetLimitResponse{
-				Applied:      false,
-				RejectReason: &reason,
-				ControlState: e.energyControl.ControlState(),
-			}
-		}
-
-		// Store the limit
-		e.effectiveLimit = req.ConsumptionLimit
-
-		// Update control state based on whether limit is set
-		var newState features.ControlState
-		if req.ConsumptionLimit != nil {
-			newState = features.ControlStateLimited
-			_ = e.energyControl.SetEffectiveConsumptionLimit(req.ConsumptionLimit)
-		} else {
-			newState = features.ControlStateControlled
-			_ = e.energyControl.SetEffectiveConsumptionLimit(nil)
-		}
-		_ = e.energyControl.SetControlState(newState)
-
-		// Notify callback
-		if e.onLimitChanged != nil {
-			e.onLimitChanged(req.ConsumptionLimit)
-		}
-
-		return features.SetLimitResponse{
-			Applied:                   true,
-			EffectiveConsumptionLimit: req.ConsumptionLimit,
-			EffectiveProductionLimit:  req.ProductionLimit,
-			ControlState:              newState,
-		}
-	})
-
-	// ClearLimit handler
-	e.energyControl.OnClearLimit(func(ctx context.Context, direction *features.Direction) error {
-		e.mu.Lock()
-		defer e.mu.Unlock()
-
-		e.effectiveLimit = nil
-		_ = e.energyControl.SetControlState(features.ControlStateControlled)
-		_ = e.energyControl.SetEffectiveConsumptionLimit(nil)
-
-		if e.onLimitChanged != nil {
-			e.onLimitChanged(nil)
-		}
-
-		return nil
-	})
+	// Multi-zone limit handling via LimitResolver.
+	// Context extractors (ZoneIDFromContext, ZoneTypeFromContext) must be
+	// injected by the caller before limits can be accepted.
+	e.limitResolver = features.NewLimitResolver(e.energyControl)
+	e.limitResolver.Register()
 
 	// Pause handler
 	e.energyControl.OnPause(func(ctx context.Context, duration *uint32) error {
@@ -341,8 +288,8 @@ func (e *EVSE) SimulateCharging(power int64) {
 	defer e.mu.Unlock()
 
 	// Apply limit if set
-	if e.effectiveLimit != nil && power > *e.effectiveLimit {
-		power = *e.effectiveLimit
+	if limit, ok := e.energyControl.EffectiveConsumptionLimit(); ok && power > limit {
+		power = limit
 	}
 
 	e.currentPower = power
@@ -359,20 +306,16 @@ func (e *EVSE) GetCurrentPower() int64 {
 
 // GetEffectiveLimit returns the current effective limit from CEM.
 func (e *EVSE) GetEffectiveLimit() *int64 {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.effectiveLimit == nil {
-		return nil
+	if limit, ok := e.energyControl.EffectiveConsumptionLimit(); ok {
+		return &limit
 	}
-	limit := *e.effectiveLimit
-	return &limit
+	return nil
 }
 
-// OnLimitChanged sets a callback for when the CEM changes limits.
-func (e *EVSE) OnLimitChanged(handler func(limit *int64)) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.onLimitChanged = handler
+// LimitResolver returns the LimitResolver for external wiring
+// (e.g., injecting ZoneIDFromContext, ZoneTypeFromContext, OnZoneMyChange).
+func (e *EVSE) LimitResolver() *features.LimitResolver {
+	return e.limitResolver
 }
 
 // AcceptController marks the EVSE as being controlled.

@@ -304,3 +304,322 @@ func TestLimitResolver_ClearZone(t *testing.T) {
 		t.Fatalf("expected zone B promoted to 6000000, got %d (ok=%v)", eff, ok)
 	}
 }
+
+// newTestResolverRegistered creates a test resolver with Register() called,
+// which wires up the ReadHook on the underlying model.Feature.
+func newTestResolverRegistered() *LimitResolver {
+	lr := newTestResolver()
+	lr.Register()
+	return lr
+}
+
+func TestLimitResolver_ReadHook_MyConsumptionLimit(t *testing.T) {
+	lr := newTestResolverRegistered()
+	ctxA := testCtx("zone-A", cert.ZoneTypeGrid)
+	ctxB := testCtx("zone-B", cert.ZoneTypeLocal)
+
+	// Zone A sets 6 kW consumption limit
+	lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
+
+	// Zone B sets 5 kW consumption limit
+	lr.HandleSetLimit(ctxB, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+
+	// Zone A reads myConsumptionLimit -> should see its own value (6 kW)
+	val, err := lr.ec.ReadAttributeWithContext(ctxA, EnergyControlAttrMyConsumptionLimit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	v, ok := val.(int64)
+	if !ok {
+		t.Fatalf("expected int64, got %T", val)
+	}
+	if v != 6000000 {
+		t.Fatalf("zone A: expected 6000000, got %d", v)
+	}
+
+	// Zone B reads myConsumptionLimit -> should see its own value (5 kW)
+	val, err = lr.ec.ReadAttributeWithContext(ctxB, EnergyControlAttrMyConsumptionLimit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	v, ok = val.(int64)
+	if !ok {
+		t.Fatalf("expected int64, got %T", val)
+	}
+	if v != 5000000 {
+		t.Fatalf("zone B: expected 5000000, got %d", v)
+	}
+}
+
+func TestLimitResolver_ReadHook_MyProductionLimit(t *testing.T) {
+	lr := newTestResolverRegistered()
+	ctxA := testCtx("zone-A", cert.ZoneTypeGrid)
+	ctxB := testCtx("zone-B", cert.ZoneTypeLocal)
+
+	// Zone A sets 4 kW production limit
+	lr.HandleSetLimit(ctxA, SetLimitRequest{ProductionLimit: intPtr(4000000)})
+
+	// Zone B sets 2 kW production limit
+	lr.HandleSetLimit(ctxB, SetLimitRequest{ProductionLimit: intPtr(2000000)})
+
+	// Zone A reads myProductionLimit -> should see 4 kW
+	val, err := lr.ec.ReadAttributeWithContext(ctxA, EnergyControlAttrMyProductionLimit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	v, ok := val.(int64)
+	if !ok {
+		t.Fatalf("expected int64, got %T", val)
+	}
+	if v != 4000000 {
+		t.Fatalf("zone A: expected 4000000, got %d", v)
+	}
+
+	// Zone B reads myProductionLimit -> should see 2 kW
+	val, err = lr.ec.ReadAttributeWithContext(ctxB, EnergyControlAttrMyProductionLimit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	v, ok = val.(int64)
+	if !ok {
+		t.Fatalf("expected int64, got %T", val)
+	}
+	if v != 2000000 {
+		t.Fatalf("zone B: expected 2000000, got %d", v)
+	}
+}
+
+func TestLimitResolver_ReadHook_NoLimitSet(t *testing.T) {
+	lr := newTestResolverRegistered()
+	ctx := testCtx("zone-A", cert.ZoneTypeLocal)
+
+	// Zone A has not set any limit, reads myConsumptionLimit -> expect nil
+	val, err := lr.ec.ReadAttributeWithContext(ctx, EnergyControlAttrMyConsumptionLimit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != nil {
+		t.Fatalf("expected nil for unset limit, got %v", val)
+	}
+}
+
+func TestLimitResolver_ReadHook_EffectiveUnchanged(t *testing.T) {
+	lr := newTestResolverRegistered()
+	ctxA := testCtx("zone-A", cert.ZoneTypeGrid)
+	ctxB := testCtx("zone-B", cert.ZoneTypeLocal)
+
+	// Zone A sets 6 kW, Zone B sets 5 kW
+	lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
+	lr.HandleSetLimit(ctxB, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+
+	// effectiveConsumptionLimit (attr 20) should NOT be intercepted by hook.
+	// It should return the resolved minimum (5 kW), regardless of which zone reads it.
+	val, err := lr.ec.ReadAttributeWithContext(ctxA, EnergyControlAttrEffectiveConsumptionLimit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	v, ok := val.(int64)
+	if !ok {
+		t.Fatalf("expected int64, got %T", val)
+	}
+	if v != 5000000 {
+		t.Fatalf("effective limit: expected 5000000, got %d", v)
+	}
+}
+
+func TestLimitResolver_ReadHook_AfterClear(t *testing.T) {
+	lr := newTestResolverRegistered()
+	ctx := testCtx("zone-A", cert.ZoneTypeLocal)
+
+	// Set a limit
+	lr.HandleSetLimit(ctx, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+
+	// Verify it's readable
+	val, err := lr.ec.ReadAttributeWithContext(ctx, EnergyControlAttrMyConsumptionLimit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val == nil {
+		t.Fatal("expected non-nil value after set")
+	}
+
+	// Clear the limit
+	_ = lr.HandleClearLimit(ctx, nil)
+
+	// After clear, myConsumptionLimit should be nil
+	val, err = lr.ec.ReadAttributeWithContext(ctx, EnergyControlAttrMyConsumptionLimit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != nil {
+		t.Fatalf("expected nil after clear, got %v", val)
+	}
+}
+
+func TestLimitResolver_ReadHook_NoContext(t *testing.T) {
+	lr := newTestResolverRegistered()
+
+	// Set a limit from zone-A
+	ctxA := testCtx("zone-A", cert.ZoneTypeLocal)
+	lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+
+	// Read with background context (no zone ID) -> expect nil
+	val, err := lr.ec.ReadAttributeWithContext(context.Background(), EnergyControlAttrMyConsumptionLimit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != nil {
+		t.Fatalf("expected nil with no zone context, got %v", val)
+	}
+}
+
+// =============================================================================
+// OnZoneMyChange callback tests
+// =============================================================================
+
+// zoneMyChangeCall records a single invocation of the OnZoneMyChange callback.
+type zoneMyChangeCall struct {
+	zoneID  string
+	changes map[uint16]any
+}
+
+func TestLimitResolver_NotifiesMyLimitOnSet(t *testing.T) {
+	lr := newTestResolver()
+	ctx := testCtx("zone-a", cert.ZoneTypeLocal)
+
+	var calls []zoneMyChangeCall
+	lr.OnZoneMyChange = func(zoneID string, changes map[uint16]any) {
+		calls = append(calls, zoneMyChangeCall{zoneID, changes})
+	}
+
+	lr.HandleSetLimit(ctx, SetLimitRequest{
+		ConsumptionLimit: intPtr(6000000),
+	})
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 callback call, got %d", len(calls))
+	}
+	if calls[0].zoneID != "zone-a" {
+		t.Fatalf("expected zoneID 'zone-a', got %q", calls[0].zoneID)
+	}
+	if v, ok := calls[0].changes[EnergyControlAttrMyConsumptionLimit]; !ok || v != int64(6000000) {
+		t.Fatalf("expected myConsumptionLimit=6000000, got %v", v)
+	}
+	if _, ok := calls[0].changes[EnergyControlAttrMyProductionLimit]; ok {
+		t.Fatal("did not expect myProductionLimit in changes")
+	}
+}
+
+func TestLimitResolver_NotifiesMyLimitOnClear(t *testing.T) {
+	lr := newTestResolver()
+	ctx := testCtx("zone-a", cert.ZoneTypeLocal)
+
+	// Set a limit first
+	lr.HandleSetLimit(ctx, SetLimitRequest{
+		ConsumptionLimit: intPtr(5000000),
+	})
+
+	var calls []zoneMyChangeCall
+	lr.OnZoneMyChange = func(zoneID string, changes map[uint16]any) {
+		calls = append(calls, zoneMyChangeCall{zoneID, changes})
+	}
+
+	// Clear consumption only
+	dirConsumption := DirectionConsumption
+	_ = lr.HandleClearLimit(ctx, &dirConsumption)
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 callback call, got %d", len(calls))
+	}
+	if calls[0].zoneID != "zone-a" {
+		t.Fatalf("expected zoneID 'zone-a', got %q", calls[0].zoneID)
+	}
+	v, ok := calls[0].changes[EnergyControlAttrMyConsumptionLimit]
+	if !ok {
+		t.Fatal("expected myConsumptionLimit in changes")
+	}
+	if v != nil {
+		t.Fatalf("expected nil for cleared limit, got %v", v)
+	}
+}
+
+func TestLimitResolver_NotifiesMyLimitOnDeactivate(t *testing.T) {
+	lr := newTestResolver()
+	ctx := testCtx("zone-a", cert.ZoneTypeLocal)
+
+	// Set a limit first
+	lr.HandleSetLimit(ctx, SetLimitRequest{
+		ConsumptionLimit: intPtr(5000000),
+	})
+
+	var calls []zoneMyChangeCall
+	lr.OnZoneMyChange = func(zoneID string, changes map[uint16]any) {
+		calls = append(calls, zoneMyChangeCall{zoneID, changes})
+	}
+
+	// Deactivate: both nil
+	lr.HandleSetLimit(ctx, SetLimitRequest{
+		ConsumptionLimit: nil,
+		ProductionLimit:  nil,
+	})
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 callback call, got %d", len(calls))
+	}
+	if calls[0].zoneID != "zone-a" {
+		t.Fatalf("expected zoneID 'zone-a', got %q", calls[0].zoneID)
+	}
+	// Both directions should be nil
+	if v, ok := calls[0].changes[EnergyControlAttrMyConsumptionLimit]; !ok || v != nil {
+		t.Fatalf("expected myConsumptionLimit=nil, got %v (ok=%v)", v, ok)
+	}
+	if v, ok := calls[0].changes[EnergyControlAttrMyProductionLimit]; !ok || v != nil {
+		t.Fatalf("expected myProductionLimit=nil, got %v (ok=%v)", v, ok)
+	}
+}
+
+func TestLimitResolver_NotifiesMyLimitOnClearZone(t *testing.T) {
+	lr := newTestResolver()
+	ctx := testCtx("zone-a", cert.ZoneTypeLocal)
+
+	// Set limits
+	lr.HandleSetLimit(ctx, SetLimitRequest{
+		ConsumptionLimit: intPtr(5000000),
+		ProductionLimit:  intPtr(3000000),
+	})
+
+	var calls []zoneMyChangeCall
+	lr.OnZoneMyChange = func(zoneID string, changes map[uint16]any) {
+		calls = append(calls, zoneMyChangeCall{zoneID, changes})
+	}
+
+	lr.ClearZone("zone-a")
+
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 callback call, got %d", len(calls))
+	}
+	if calls[0].zoneID != "zone-a" {
+		t.Fatalf("expected zoneID 'zone-a', got %q", calls[0].zoneID)
+	}
+	if v, ok := calls[0].changes[EnergyControlAttrMyConsumptionLimit]; !ok || v != nil {
+		t.Fatalf("expected myConsumptionLimit=nil, got %v (ok=%v)", v, ok)
+	}
+	if v, ok := calls[0].changes[EnergyControlAttrMyProductionLimit]; !ok || v != nil {
+		t.Fatalf("expected myProductionLimit=nil, got %v (ok=%v)", v, ok)
+	}
+}
+
+func TestLimitResolver_NoNotifyWhenNoCallback(t *testing.T) {
+	lr := newTestResolver()
+	ctx := testCtx("zone-a", cert.ZoneTypeLocal)
+
+	// OnZoneMyChange is NOT set -- should not panic
+	lr.HandleSetLimit(ctx, SetLimitRequest{
+		ConsumptionLimit: intPtr(6000000),
+	})
+
+	_ = lr.HandleClearLimit(ctx, nil)
+
+	lr.ClearZone("zone-a")
+	// If we reach here without panic, the test passes
+}
