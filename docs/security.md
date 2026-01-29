@@ -505,3 +505,40 @@ To prevent information leakage about authentication progress:
 2. If timer expires before CERT_ACK, device MUST close connection
 3. Timer does not reset on message receipt
 4. Individual phase timeouts still apply
+
+### 11.6 Commissioning Window Duration (DEC-048)
+
+Short commissioning windows reduce attack surface. See [Transport](transport.md) Section 12.
+
+**Security Benefits:**
+
+| Duration | Attack Window | Brute-Force Attempts |
+|----------|---------------|---------------------|
+| 3 hours (old) | Long | ~10,800 at 1/sec |
+| 15 minutes (new) | Short | ~900 at 1/sec |
+
+With PASE attempt tracking (Section 11.2), actual attempts are much lower due to
+exponential backoff, but shorter windows still reduce total exposure.
+
+**Window Duration Parameters:**
+
+| Parameter | Value | Security Implication |
+|-----------|-------|---------------------|
+| Default | 15 minutes | Balances usability and security |
+| Minimum | 3 minutes | Floor for any configuration |
+| Maximum | 3 hours | Ceiling even for professional installers |
+
+**Pairing Request Security:**
+
+The `_mashp._udp` pairing request mechanism requires knowledge of the device
+discriminator (12-bit value from QR code). This provides:
+
+1. **Authorization:** Only users with physical access to QR code can re-trigger
+2. **Rate limiting:** Device can track pairing request frequency
+3. **Auditability:** Each re-trigger is a visible network event
+
+**Device Requirements:**
+1. Device MUST close commissioning window after successful commissioning
+2. Device MUST close commissioning window after default duration expires
+3. Device SHOULD allow pairing request to re-trigger window
+4. Device SHOULD implement minimum interval between window re-triggers (60s)

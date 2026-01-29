@@ -1,0 +1,295 @@
+# Test Suite: Commissioning Window Timing Tests
+# Verifies DEC-048: Commissioning Window Duration Alignment
+#
+# Key changes from Matter alignment:
+# - Default: 15 minutes (was 3 hours)
+# - Minimum: 3 minutes (was 1 hour)
+# - Maximum: 3 hours (was 24 hours)
+#
+# Rationale:
+# - Pairing request (_mashp._udp) provides on-demand re-triggering
+# - Shorter windows reduce attack surface
+# - Aligns with Matter 5.4.2.3.1
+
+---
+# TC-COMM-WINDOW-001: Default Commissioning Window Duration
+id: TC-COMM-WINDOW-001
+name: Default Commissioning Window Duration
+description: |
+  Verifies device uses 15-minute default commissioning window.
+  Device should stop advertising as commissionable after 15 minutes
+  if not commissioned.
+
+  This aligns with Matter specification 5.4.2.3.1 which recommends
+  a maximum of 15 minutes for commissionable announcements.
+
+pics_requirements:
+  - MASH.S.COMM                        # Device supports commissioning
+  - MASH.S.COMM.WINDOW_DEFAULT: 900    # Default is 15 minutes (900 seconds)
+
+preconditions:
+  - device_uncommissioned: true
+  - commissioning_window_closed: true
+
+steps:
+  - name: Enter commissioning mode
+    action: enter_commissioning_mode
+    expect:
+      commissioning_mode: true
+
+  - name: Verify commissionable advertisement
+    action: verify_mdns_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      advertising: true
+
+  - name: Wait 14 minutes
+    action: wait
+    params:
+      duration_seconds: 840
+    note: Window should still be open
+
+  - name: Verify still advertising at 14 minutes
+    action: verify_mdns_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      advertising: true
+
+  - name: Wait 2 more minutes (total 16 minutes)
+    action: wait
+    params:
+      duration_seconds: 120
+    note: Window should now be expired
+
+  - name: Verify no longer advertising
+    action: verify_mdns_not_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      not_advertising: true
+
+postconditions:
+  - commissioning_window_expired: true
+  - device_not_advertising_commissionable: true
+
+timeout: "20m"
+tags:
+  - commissioning
+  - timing
+  - DEC-048
+
+---
+# TC-COMM-WINDOW-002: Pairing Request Re-triggers Window
+id: TC-COMM-WINDOW-002
+name: Pairing Request Re-triggers Window
+description: |
+  Verifies that pairing request (_mashp._udp) can re-open the commissioning
+  window after it has expired.
+
+  This is the key mechanism that allows MASH to use shorter default windows
+  while still supporting deferred commissioning scenarios.
+
+pics_requirements:
+  - MASH.S.COMM                        # Device supports commissioning
+  - MASH.S.COMM.PAIRING_REQUEST        # Device responds to pairing requests
+  - MASH.S.COMM.WINDOW_DEFAULT: 900    # Default is 15 minutes
+
+preconditions:
+  - device_uncommissioned: true
+  - pairing_request_listening: true
+
+steps:
+  - name: Enter commissioning mode
+    action: enter_commissioning_mode
+    expect:
+      commissioning_mode: true
+
+  - name: Wait for window to expire (15+ minutes)
+    action: wait
+    params:
+      duration_seconds: 920
+    note: Wait slightly longer than 15 minutes to ensure expiry
+
+  - name: Verify window closed
+    action: verify_mdns_not_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      not_advertising: true
+
+  - name: Send pairing request with matching discriminator
+    action: announce_pairing_request
+    params:
+      service_type: "_mashp._udp"
+      discriminator: "${device_discriminator}"
+      controller_id: "${controller_id}"
+    expect:
+      announcement_sent: true
+
+  - name: Wait for device to detect pairing request
+    action: wait
+    params:
+      duration_seconds: 5
+
+  - name: Verify window re-opened
+    action: verify_mdns_advertising
+    params:
+      service_type: "_mashc._udp"
+      timeout_ms: 5000
+    expect:
+      advertising: true
+      txt_records:
+        disc: "${device_discriminator}"
+
+postconditions:
+  - commissioning_window_reopened: true
+
+timeout: "20m"
+tags:
+  - commissioning
+  - pairing-request
+  - timing
+  - DEC-048
+
+---
+# TC-COMM-WINDOW-003: Minimum Window Duration Enforcement
+id: TC-COMM-WINDOW-003
+name: Minimum Window Duration Enforcement
+description: |
+  Verifies device enforces minimum 3-minute commissioning window.
+  Attempts to set shorter duration should be rejected or clamped to minimum.
+
+  This prevents misconfiguration that would make commissioning impractical.
+
+pics_requirements:
+  - MASH.S.COMM                            # Device supports commissioning
+  - MASH.S.COMM.WINDOW_CONFIGURABLE        # Device supports configurable duration
+  - MASH.S.COMM.WINDOW_MIN: 180            # Minimum is 3 minutes (180 seconds)
+
+preconditions:
+  - device_idle: true
+
+steps:
+  - name: Attempt to set 1-minute window (below minimum)
+    action: set_commissioning_window_duration
+    params:
+      duration_seconds: 60
+    expect:
+      # Implementation should either reject or clamp to minimum
+      result: "clamped_or_rejected"
+
+  - name: Verify effective duration is at least 3 minutes
+    action: get_commissioning_window_duration
+    expect:
+      duration_seconds_min: 180
+
+postconditions:
+  - minimum_enforced: true
+
+timeout: "1m"
+tags:
+  - commissioning
+  - timing
+  - validation
+  - DEC-048
+
+---
+# TC-COMM-WINDOW-004: Maximum Window Duration Enforcement
+id: TC-COMM-WINDOW-004
+name: Maximum Window Duration Enforcement
+description: |
+  Verifies device enforces maximum 3-hour commissioning window.
+  Attempts to set longer duration should be rejected or clamped to maximum.
+
+  MASH allows up to 3 hours (vs Matter's 15 min max) for professional
+  installer scenarios, but beyond that is excessive.
+
+pics_requirements:
+  - MASH.S.COMM                            # Device supports commissioning
+  - MASH.S.COMM.WINDOW_CONFIGURABLE        # Device supports configurable duration
+  - MASH.S.COMM.WINDOW_MAX: 10800          # Maximum is 3 hours (10800 seconds)
+
+preconditions:
+  - device_idle: true
+
+steps:
+  - name: Attempt to set 4-hour window (above maximum)
+    action: set_commissioning_window_duration
+    params:
+      duration_seconds: 14400
+    expect:
+      # Implementation should either reject or clamp to maximum
+      result: "clamped_or_rejected"
+
+  - name: Verify effective duration is at most 3 hours
+    action: get_commissioning_window_duration
+    expect:
+      duration_seconds_max: 10800
+
+postconditions:
+  - maximum_enforced: true
+
+timeout: "1m"
+tags:
+  - commissioning
+  - timing
+  - validation
+  - DEC-048
+
+---
+# TC-COMM-WINDOW-005: Window Closes on Successful Commission
+id: TC-COMM-WINDOW-005
+name: Window Closes on Successful Commission
+description: |
+  Verifies that commissioning window closes immediately after successful
+  commissioning, regardless of remaining time.
+
+  This is a security requirement - once commissioned, the device should
+  not remain in commissionable state.
+
+pics_requirements:
+  - MASH.S.COMM                        # Device supports commissioning
+
+preconditions:
+  - device_uncommissioned: true
+
+steps:
+  - name: Enter commissioning mode
+    action: enter_commissioning_mode
+    expect:
+      commissioning_mode: true
+
+  - name: Verify commissionable advertisement
+    action: verify_mdns_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      advertising: true
+
+  - name: Commission device successfully
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+      zone_type: "LOCAL"
+    expect:
+      commission_success: true
+
+  - name: Verify window closed immediately
+    action: verify_mdns_not_advertising
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      not_advertising: true
+
+postconditions:
+  - device_commissioned: true
+  - commissioning_window_closed: true
+
+timeout: "5m"
+tags:
+  - commissioning
+  - timing
+  - security
+  - DEC-048

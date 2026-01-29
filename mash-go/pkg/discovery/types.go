@@ -54,15 +54,20 @@ const (
 // Timing constants.
 const (
 	// CommissioningWindowDuration is how long commissioning mode stays open.
-	// Default is 3 hours to accommodate installation scenarios (EVSE, heat pumps, etc.)
-	// where pairing may not happen immediately after power-on.
-	CommissioningWindowDuration = 3 * time.Hour
+	// Default is 15 minutes, aligned with Matter specification 5.4.2.3.1.
+	// Pairing requests (_mashp._udp) can re-trigger the window if it expires.
+	// See DEC-048 for rationale.
+	CommissioningWindowDuration = 15 * time.Minute
 
 	// MinCommissioningWindowDuration is the minimum configurable window duration.
-	MinCommissioningWindowDuration = 1 * time.Hour
+	// Aligned with Matter specification 5.4.2.3.1 (3 minutes minimum).
+	MinCommissioningWindowDuration = 3 * time.Minute
 
 	// MaxCommissioningWindowDuration is the maximum configurable window duration.
-	MaxCommissioningWindowDuration = 24 * time.Hour
+	// MASH allows up to 3 hours for professional installer scenarios.
+	// Matter uses 15 min max, but MASH's pairing request mechanism allows re-triggering.
+	// See DEC-048 for rationale.
+	MaxCommissioningWindowDuration = 3 * time.Hour
 
 	// BrowseTimeout is the default timeout for mDNS browsing.
 	BrowseTimeout = 10 * time.Second

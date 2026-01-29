@@ -383,3 +383,70 @@ Wait for acknowledgment or 5-second timeout, then close TCP.
 - No SHIP state machine complexity
 - Deterministic connection ownership
 - Binary format for efficiency
+
+---
+
+## 12. Commissioning Window Timing (DEC-048)
+
+### 12.1 Duration Parameters
+
+Commissioning window timing is aligned with Matter specification 5.4.2.3.1:
+
+| Parameter | Value | Matter Spec |
+|-----------|-------|-------------|
+| Default duration | 15 minutes | 15 minutes max |
+| Minimum configurable | 3 minutes | 3 minutes min |
+| Maximum configurable | 3 hours | 15 minutes max |
+
+**Note:** MASH allows longer maximum (3 hours vs Matter's 15 min) for professional
+installer scenarios. The pairing request mechanism provides re-triggering when needed.
+
+### 12.2 Window Lifecycle
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Power On / Factory Reset                                        │
+│     │                                                            │
+│     ▼                                                            │
+│  ┌────────────────────────┐                                      │
+│  │  Commissioning Mode    │◄─── Pairing Request (_mashp._udp)    │
+│  │  (15 min default)      │                                      │
+│  └────────────┬───────────┘                                      │
+│               │                                                  │
+│    ┌──────────┼──────────┐                                       │
+│    ▼          ▼          ▼                                       │
+│  Success   Timeout    Explicit Close                             │
+│    │          │          │                                       │
+│    ▼          ▼          ▼                                       │
+│  ┌────────────────────────┐                                      │
+│  │  Operational Mode      │                                      │
+│  │  (no mDNS _mash-comm)  │                                      │
+│  └────────────────────────┘                                      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 12.3 Re-triggering via Pairing Request
+
+When the commissioning window expires, controllers can re-trigger it using the
+pairing request mechanism (`_mashp._udp`):
+
+1. Controller advertises `_mashp._udp.local` with matching discriminator
+2. Device detects pairing request (browsing `_mashp._udp`)
+3. Device opens new commissioning window (15 min default)
+4. Device advertises `_mash-comm._tcp`
+
+**Security:** Pairing request requires knowledge of the device discriminator
+(from QR code or manual entry). This prevents unauthorized re-triggering.
+
+### 12.4 Rationale
+
+**Why 15 minutes default (not 3 hours):**
+- Sufficient for typical commissioning workflow
+- Reduces mDNS advertisement pollution on shared spectrum
+- Smaller attack window for PASE brute-force attempts
+- Pairing request provides on-demand re-triggering
+
+**Why 3 hours maximum (not Matter's 15 min):**
+- Professional installer scenarios may require longer setup
+- No harm in allowing longer windows when explicitly configured
+- Pairing request mechanism eliminates need for very long defaults

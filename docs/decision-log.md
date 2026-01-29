@@ -2727,6 +2727,51 @@ commissioning window when the device is most vulnerable.
 
 ---
 
+### DEC-048: Commissioning Window Duration Alignment
+
+**Status:** Accepted
+**Date:** 2026-01-29
+
+**Context:**
+
+MASH originally used a 3-hour default commissioning window. Matter specification 5.4.2.3.1
+uses 15 minutes maximum with 3 minutes minimum. With MASH's pairing request mechanism
+(`_mashp._udp`), controllers can re-trigger commissioning on demand, making long windows
+unnecessary.
+
+**Decision:**
+
+Align commissioning window default with Matter, with MASH-specific maximum:
+
+| Parameter | Before | After | Matter |
+|-----------|--------|-------|--------|
+| Default | 3 hours | 15 minutes | 15 minutes |
+| Minimum | 1 hour | 3 minutes | 3 minutes |
+| Maximum | 24 hours | 3 hours | 15 minutes |
+
+**Rationale:**
+1. **Pairing request provides re-trigger**: `_mashp._udp` allows controllers to request
+   commissioning window re-open at any time, eliminating need for long default windows
+2. **Reduced attack surface**: Shorter window = less time for PASE brute-force attempts
+3. **Spectrum conservation**: Reduces mDNS advertisement pollution on shared spectrum
+4. **Matter alignment**: 15 minutes is well-researched for user experience balance
+5. **Professional installer support**: 3-hour maximum (vs Matter's 15 min) allows longer
+   setup workflows when explicitly configured
+
+**Why MASH allows 3-hour max (vs Matter's 15 min):**
+- Professional installer scenarios may require longer setup times
+- Pairing request mechanism provides re-triggering if window expires
+- No harm in allowing longer windows when explicitly requested
+
+**Consequences:**
+- Existing deployments with long setup workflows should use pairing requests
+- Test cases using hardcoded 3-hour assumptions need updating
+- Default user experience unchanged (pairing request handles window expiry)
+
+**Related:** DEC-047 (Commissioning Security Hardening)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -2846,3 +2891,4 @@ Key learnings:
 | 2026-01-28 | Added DEC-044: Message correlation via MessageID, 32-bit ID rationale, 10-second request timeout. Documents implicit ACK/NACK model (response status = ack) and MessageID wraparound behavior. |
 | 2026-01-28 | Added DEC-045: Transport-layer heartbeat sufficient for failsafe. No application-layer heartbeats needed. Analyzes EEBUS LPC/LPP redundant heartbeat design, Matter's approach, and why command arrival itself proves controller liveness. |
 | 2026-01-29 | Added DEC-047: Commissioning security hardening. Zone-based connection model, PASE attempt backoff, nonce binding for renewal, generic error responses, handshake timeout. |
+| 2026-01-29 | Added DEC-048: Commissioning window duration alignment. Default 15 minutes (was 3 hours), min 3 minutes (was 1 hour), max 3 hours (was 24 hours). Aligns with Matter 5.4.2.3.1. |

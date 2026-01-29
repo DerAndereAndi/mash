@@ -83,6 +83,15 @@ items:
   # Zone configuration (existing, but needed for connection model)
   MASH.S.ZONE.MAX: 2                       # Maximum zones (GRID + LOCAL)
 
+  # ==========================================================================
+  # Commissioning Window Timing (DEC-048)
+  # ==========================================================================
+
+  MASH.S.COMM.WINDOW_DEFAULT: 900          # Default window duration (seconds) - 15 minutes
+  MASH.S.COMM.WINDOW_MIN: 180              # Minimum configurable window (seconds) - 3 minutes
+  MASH.S.COMM.WINDOW_MAX: 10800            # Maximum configurable window (seconds) - 3 hours
+  MASH.S.COMM.WINDOW_CONFIGURABLE: true    # Device supports configurable window duration
+
 # =============================================================================
 # Test Case to PICS Mapping
 # =============================================================================
@@ -196,3 +205,21 @@ items:
 #   - MASH.S.COMM.GENERIC_ERRORS: true
 #   - MASH.S.COMM.ERROR_DELAY_MIN: 100
 #   - MASH.S.COMM.ERROR_DELAY_MAX: 500
+#
+# =============================================================================
+# Commissioning Window Timing Tests (DEC-048)
+# =============================================================================
+#
+# TC-COMM-WINDOW-001 (Default Commissioning Window Duration):
+#   - MASH.S.COMM: true
+#   - MASH.S.COMM.WINDOW_DEFAULT: 900
+#
+# TC-COMM-WINDOW-002 (Pairing Request Re-triggers Window):
+#   - MASH.S.COMM: true
+#   - MASH.S.COMM.PAIRING_REQUEST: true
+#   - MASH.S.COMM.WINDOW_DEFAULT: 900
+#
+# TC-COMM-WINDOW-003 (Minimum Window Duration Enforcement):
+#   - MASH.S.COMM: true
+#   - MASH.S.COMM.WINDOW_CONFIGURABLE: true
+#   - MASH.S.COMM.WINDOW_MIN: 180

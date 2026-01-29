@@ -255,7 +255,7 @@ func DefaultDeviceConfig() DeviceConfig {
 		MaxZones:                    2, // 1 GRID + 1 LOCAL
 		FailsafeTimeout:             2 * time.Hour,
 		HeartbeatInterval:           30 * time.Second,
-		CommissioningWindowDuration: 3 * time.Hour,
+		CommissioningWindowDuration: 15 * time.Minute, // DEC-048: Aligned with Matter
 		EnableAutoReconnect:         true,
 		ReconnectBackoff: BackoffConfig{
 			InitialInterval: 1 * time.Second,

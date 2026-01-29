@@ -13,6 +13,37 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
 
+// =============================================================================
+// Commissioning Window Timing Constants (DEC-048)
+// =============================================================================
+// These tests verify the service-level defaults align with DEC-048.
+
+// TestServiceDefaultCommissioningWindow verifies that DefaultDeviceConfig uses
+// the correct commissioning window duration per DEC-048.
+func TestServiceDefaultCommissioningWindow(t *testing.T) {
+	config := DefaultDeviceConfig()
+
+	// DEC-048: Default config should use 15-minute window
+	// (aligned with discovery.CommissioningWindowDuration)
+	want := 15 * time.Minute
+	if config.CommissioningWindowDuration != want {
+		t.Errorf("DefaultDeviceConfig().CommissioningWindowDuration = %v, want %v",
+			config.CommissioningWindowDuration, want)
+	}
+}
+
+// TestCommissioningWindowDurationAlignedWithDiscovery verifies that the service
+// default matches the discovery package constant.
+func TestCommissioningWindowDurationAlignedWithDiscovery(t *testing.T) {
+	config := DefaultDeviceConfig()
+
+	// Service default should match discovery constant
+	if config.CommissioningWindowDuration != discovery.CommissioningWindowDuration {
+		t.Errorf("Service default (%v) does not match discovery constant (%v)",
+			config.CommissioningWindowDuration, discovery.CommissioningWindowDuration)
+	}
+}
+
 // TestCommissioningWindowTimeoutEmitsEvent verifies that when the commissioning
 // window expires, an EventCommissioningClosed event is emitted with Reason "timeout".
 func TestCommissioningWindowTimeoutEmitsEvent(t *testing.T) {

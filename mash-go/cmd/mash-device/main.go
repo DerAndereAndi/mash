@@ -527,7 +527,7 @@ func handleEvent(event service.Event) {
 
 	case service.EventCommissioningClosed:
 		if event.Reason == "timeout" {
-			log.Println("[EVENT] Commissioning window EXPIRED (120s timeout)")
+			log.Println("[EVENT] Commissioning window EXPIRED (15m default timeout)")
 		} else if event.Reason == "commissioned" {
 			log.Println("[EVENT] Commissioning window closed (device commissioned)")
 		} else {

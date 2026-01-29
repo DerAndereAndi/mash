@@ -2,7 +2,51 @@ package discovery
 
 import (
 	"testing"
+	"time"
 )
+
+// =============================================================================
+// Commissioning Window Timing Constants (DEC-048)
+// =============================================================================
+// These tests verify the commissioning window duration constants align with
+// Matter specification 5.4.2.3.1 and DEC-048 requirements.
+
+func TestDefaultCommissioningWindowDuration(t *testing.T) {
+	// DEC-048: Default should be 15 minutes (aligned with Matter)
+	want := 15 * time.Minute
+	if CommissioningWindowDuration != want {
+		t.Errorf("CommissioningWindowDuration = %v, want %v", CommissioningWindowDuration, want)
+	}
+}
+
+func TestMinCommissioningWindowDuration(t *testing.T) {
+	// DEC-048: Minimum should be 3 minutes (aligned with Matter)
+	want := 3 * time.Minute
+	if MinCommissioningWindowDuration != want {
+		t.Errorf("MinCommissioningWindowDuration = %v, want %v", MinCommissioningWindowDuration, want)
+	}
+}
+
+func TestMaxCommissioningWindowDuration(t *testing.T) {
+	// DEC-048: Maximum should be 3 hours (MASH-specific; Matter uses 15 min)
+	// MASH allows longer for professional installer scenarios
+	want := 3 * time.Hour
+	if MaxCommissioningWindowDuration != want {
+		t.Errorf("MaxCommissioningWindowDuration = %v, want %v", MaxCommissioningWindowDuration, want)
+	}
+}
+
+func TestCommissioningWindowDurationWithinBounds(t *testing.T) {
+	// Verify default is within min/max bounds
+	if CommissioningWindowDuration < MinCommissioningWindowDuration {
+		t.Errorf("CommissioningWindowDuration (%v) < MinCommissioningWindowDuration (%v)",
+			CommissioningWindowDuration, MinCommissioningWindowDuration)
+	}
+	if CommissioningWindowDuration > MaxCommissioningWindowDuration {
+		t.Errorf("CommissioningWindowDuration (%v) > MaxCommissioningWindowDuration (%v)",
+			CommissioningWindowDuration, MaxCommissioningWindowDuration)
+	}
+}
 
 // PairingRequestInfo validation tests
 
