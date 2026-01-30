@@ -684,7 +684,6 @@ steps:
 |----------|-------------|
 | [Conformance Rules](../conformance/README.md) | Attribute conformance |
 | [Testing README](README.md) | Test approach overview |
-| [Testability Analysis](../testability-analysis.md) | Gap analysis |
 | [Pairing/Connection PICS Registry](pics/pairing-connection-registry.md) | PICS codes for pairing and connection layer |
 
 ### Example PICS Files

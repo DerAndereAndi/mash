@@ -60,7 +60,7 @@ For each behavior that needs specification:
 
 ### Step 1: Identify the Ambiguity
 
-From testability-analysis.md or new discovery.
+From behavior spec review or new discovery.
 
 Example: "What happens when a zone clears its limit?"
 
@@ -458,22 +458,6 @@ For each feature, in order:
 | TC-STAT | 6 | Status feature and fault management |
 | TC-CONN | 5 | Connection establishment |
 | TC-ERR | 6 | Error handling |
-
-### Gaps Remaining (from testability-analysis.md)
-
-| Area | Original | Addressed | Remaining |
-|------|----------|-----------|-----------|
-| State Machines | 4 | 4 | 0 |
-| Multi-Zone Resolution | 6 | 6 | 0 |
-| Timing/Ordering | 8 | 8 | 0 |
-| Feature Dependencies | 3 | 3 | 0 |
-| Protocol Encoding | 5 | 5 | 0 |
-| Security | 4 | 4 | 0 |
-| Feature Interaction | 5 | 5 | 0 |
-| Error Handling | 3 | 3 | 0 |
-| Discovery | 3 | 3 | 0 |
-
-**Note:** Feature dependencies and interactions are now covered by the feature-specific behavior specs (electrical, measurement, energycontrol, chargingsession, status) and `feature-interactions.md`.
 
 ---
 

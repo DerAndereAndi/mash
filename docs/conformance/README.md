@@ -354,4 +354,3 @@ Each conformance rule maps to a PICS code. See [pics-format.md](../testing/pics-
 | [Discovery](../discovery.md) | Feature map and capability discovery |
 | [Features README](../features/README.md) | Feature definitions |
 | [PICS Format](../testing/pics-format.md) | PICS specification format |
-| [Testability Analysis](../testability-analysis.md) | Gap analysis |

@@ -143,7 +143,7 @@ Protocol takes inspiration from Matter for:
 
 ### Specification Work
 1. Read existing specifications in `docs/`
-2. Identify gaps via `docs/testability-analysis.md`
+2. Review behavior specs in `docs/testing/behavior/`
 3. Add design decisions to `docs/decision-log.md`
 4. Create/update feature specs in `docs/features/`
 
