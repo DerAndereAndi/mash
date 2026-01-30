@@ -978,7 +978,6 @@ graph TD
 
 | ID | Name | Type | Description |
 |----|------|------|-------------|
-| 0xFFFD | clusterRevision | uint16 | Feature implementation version |
 | 0xFFFC | featureMap | uint32 | Capability bitmap |
 | 0xFFFB | attributeList | array | Supported attribute IDs |
 | 0xFFFA | commandList | array | Supported command IDs |

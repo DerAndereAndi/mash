@@ -49,7 +49,7 @@ DeviceInfo Feature:
   // VERSIONS
   10: softwareVersion,       // string: firmware version
   11: hardwareVersion,       // string?: hardware revision
-  12: specVersion,           // string: MASH spec version ("1.0")
+  12: specVersion,           // string: MASH protocol version, major.minor (e.g., "1.0")
 
   // DEVICE STRUCTURE
   20: endpoints,             // EndpointInfo[]: complete device structure

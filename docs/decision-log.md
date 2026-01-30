@@ -1740,7 +1740,7 @@ EMS --> SetSignal(COMBINED) --> EVSE --> SA_ScheduleTuple --> EV
 ### DEC-035: Matter-Style Capability Discovery
 
 **Date:** 2025-01-25
-**Status:** Accepted
+**Status:** Accepted (updated by DEC-050)
 
 **Context:** MASH has multiple features (EnergyControl, Measurement, Signals, Tariff, Plan, etc.) with many optional attributes. Controllers need to know:
 - Which features a device implements
@@ -1760,12 +1760,13 @@ EMS --> SetSignal(COMBINED) --> EVSE --> SA_ScheduleTuple --> EV
 
 | Attribute | ID | Type | Description |
 |-----------|-----|------|-------------|
-| `clusterRevision` | 0xFFFD | uint16 | MASH spec version |
 | `featureMap` | 0xFFFC | bitmap32 | Supported optional features |
 | `attributeList` | 0xFFFB | array[uint16] | Implemented attribute IDs |
 | `acceptedCommandList` | 0xFFFA | array[uint8] | Accepted command IDs |
 | `generatedCommandList` | 0xFFF9 | array[uint8] | Response command IDs |
 | `eventList` | 0xFFF8 | array[uint8] | Supported event IDs |
+
+> **Note:** `clusterRevision` (0xFFFD) was originally included here but removed by DEC-050. Protocol versioning is handled by a single `specVersion` attribute in DeviceInfo (major.minor format) and ALPN negotiation. Per-feature revisions are tracked in the spec as a version manifest per release, not on the wire.
 
 **FeatureMap Bits:**
 
@@ -1785,15 +1786,16 @@ bit 10 (0x0400): V2X       - Vehicle-to-grid/home
 
 **Discovery Flow:**
 1. Read endpoint list to discover device structure
-2. For each endpoint, read `featureMap` for quick capability check
-3. Read `attributeList` for fine-grained attribute discovery
-4. Read `acceptedCommandList` to know which commands work
+2. Read `specVersion` from DeviceInfo (endpoint 0) for protocol version
+3. For each endpoint, read `featureMap` for quick capability check
+4. Read `attributeList` for fine-grained attribute discovery
+5. Read `acceptedCommandList` to know which commands work
 
 **Rationale:**
 
 *Why Matter-style:*
 - Self-describing: Controller knows exactly what's available without trial/error
-- Version-safe: `clusterRevision` enables graceful protocol evolution
+- Version-safe: `specVersion` in DeviceInfo provides protocol version; `attributeList` handles capability discovery (see DEC-050)
 - Fine-grained: `attributeList` gives exact attribute availability
 - Compact: Bitmap `featureMap` is efficient for quick checks
 - Predictable: No implicit assumptions about device type implications
@@ -2850,6 +2852,111 @@ Supporting the EEBUS LPC (Limitation of Power Consumption) and LPP (Limitation o
 
 ---
 
+### DEC-050: Protocol Versioning Strategy
+
+**Date:** 2026-01-30
+**Status:** Accepted
+
+**Context:** OPEN-004 identified version negotiation as an unresolved gap. SPINE's lack of version negotiation causes real interoperability problems. MASH needs a clear versioning strategy that covers:
+- How to negotiate the protocol version between controller and device
+- How to handle differences in feature capabilities
+- How to evolve the protocol without breaking existing deployments
+
+The original design (DEC-035) adopted Matter-style `clusterRevision` as a per-feature global attribute. This works well for Matter, which has hundreds of clusters across independent domains evolving on separate timelines. MASH has 6 tightly coupled features in a single energy domain, making per-feature version tracking unnecessarily complex.
+
+**Options Evaluated:**
+
+1. **Per-feature clusterRevision (Matter-style):** Each feature advertises its own revision number as a global attribute (0xFFFD). Controllers check each feature's revision independently.
+2. **Single protocol version only:** One version number (e.g., "1.1") covers all features. No per-feature revision on the wire.
+3. **Protocol version on the wire, feature revisions in the spec:** A single protocol version is advertised on the wire. The spec internally tracks per-feature revisions and defines which feature revisions are bundled into each protocol release.
+
+**Decision:** Option 3 - Single protocol version on the wire with per-feature revisions in the spec.
+
+**Protocol Version Format:** `major.minor` (e.g., "1.0", "1.1", "2.0")
+- **Major version:** Breaking changes (removing fields, changing semantics). Carried in ALPN string (`mash/1`, `mash/2`).
+- **Minor version:** Additive, non-breaking changes (new optional fields, new enum values, new features). Carried in `specVersion` attribute of DeviceInfo.
+
+**Version Manifest (spec-side):**
+
+Each protocol release defines exactly which feature revisions it includes:
+
+```
+MASH 1.0:
+  DeviceInfo       rev 1
+  Electrical       rev 1
+  Measurement      rev 1
+  EnergyControl    rev 1
+  Status           rev 1
+  ChargingSession  rev 1
+```
+
+Future releases update specific features:
+
+```
+MASH 1.1 (example):
+  DeviceInfo       rev 1    (unchanged)
+  Electrical       rev 2    (added asymmetric phase config)
+  Measurement      rev 1    (unchanged)
+  EnergyControl    rev 2    (new control mode)
+  Status           rev 1    (unchanged)
+  ChargingSession  rev 1    (unchanged)
+```
+
+**Wire Protocol Changes (relative to DEC-035):**
+
+| Attribute | Before | After |
+|-----------|--------|-------|
+| `clusterRevision` (0xFFFD) | Per-feature global attribute | **Removed** |
+| `featureMap` (0xFFFC) | Per-feature global attribute | Unchanged |
+| `attributeList` (0xFFFB) | Per-feature global attribute | Unchanged |
+| `acceptedCommandList` (0xFFFA) | Per-feature global attribute | Unchanged |
+| `generatedCommandList` (0xFFF9) | Per-feature global attribute | Unchanged |
+| `eventList` (0xFFF8) | Per-feature global attribute | Unchanged |
+| `specVersion` (DeviceInfo attr 12) | Device spec version | **Becomes the single protocol version** |
+
+**Version Negotiation Flow:**
+
+1. **Connection:** Controller offers ALPN strings for all major versions it supports (e.g., `["mash/2", "mash/1"]`). Device selects the highest mutually supported major version. If no overlap, connection fails.
+2. **Discovery:** After connection, controller reads `specVersion` from DeviceInfo (endpoint 0) to learn the exact major.minor version.
+3. **Capability check:** Controller uses `featureMap` and `attributeList` to discover the device's actual capabilities. This is more precise than version comparison and handles partial implementations.
+
+**Compatibility Rules:**
+
+- **Same major, higher minor on device:** Controller uses `attributeList` to discover new attributes. Unknown attributes are ignored (forward-compat rules from DEC-035 apply).
+- **Same major, lower minor on device:** Controller checks `attributeList` to confirm required attributes exist. Degrades gracefully if newer attributes are absent.
+- **Different major:** Handled at ALPN level. No connection if incompatible.
+
+**Rationale:**
+
+*Why not per-feature clusterRevision (Option 1):*
+- MASH has 6 features in one domain, not hundreds across independent domains like Matter
+- Features are tightly coupled (EnergyControl references Electrical's topology, Measurement depends on Electrical's config)
+- Per-feature revisions create a combinatorial compatibility matrix (does EnergyControl rev 2 work with Measurement rev 1?)
+- Adds a global attribute to every feature endpoint that constrained devices must serve
+- `attributeList` already answers "what do you support?" more precisely than a revision number
+
+*Why not a single version with no feature tracking (Option 2):*
+- Feature revisions in the spec help spec authors reason about what changed per feature
+- The version manifest makes release notes unambiguous
+- Feature-level tracking aids conformance testing
+
+*Why Option 3:*
+- One number on the wire: simple for devices, simple for controllers
+- No combinatorial explosion: the spec defines valid combinations
+- Features still evolve independently in the spec authoring process
+- `attributeList` + `featureMap` handle the actual capability discovery
+- Aligns with how platform SDKs version (Android API levels, Go releases)
+
+**Declined Alternatives:**
+
+- **ProtocolHello message after TLS:** Adds a roundtrip to every connection. ALPN + `specVersion` in DeviceInfo achieves the same with existing mechanisms.
+- **Version field in every message:** Overhead on constrained devices. Protocol version is a session property, not a per-message property.
+- **Capability negotiation at connection time:** Adds connection complexity. Better to connect first, discover capabilities through standard attribute reads.
+
+**Related:** DEC-035 (capability discovery - updated by this decision), DEC-002 (simplicity over flexibility), OPEN-004 (resolved)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -2893,7 +3000,9 @@ Supporting the EEBUS LPC (Limitation of Power Consumption) and LPP (Limitation o
 
 ---
 
-### OPEN-004: Version Negotiation
+### OPEN-004: Version Negotiation (RESOLVED)
+
+**Resolution:** Addressed by DEC-050 (Protocol Versioning Strategy).
 
 **Context:** SPINE lacks version negotiation, causing interop issues.
 
@@ -2970,3 +3079,4 @@ Key learnings:
 | 2026-01-28 | Added DEC-045: Transport-layer heartbeat sufficient for failsafe. No application-layer heartbeats needed. Analyzes EEBUS LPC/LPP redundant heartbeat design, Matter's approach, and why command arrival itself proves controller liveness. |
 | 2026-01-29 | Added DEC-047: Commissioning security hardening. Zone-based connection model, PASE attempt backoff, nonce binding for renewal, generic error responses, handshake timeout. |
 | 2026-01-29 | Added DEC-048: Commissioning window duration alignment. Default 15 minutes (was 3 hours), min 3 minutes (was 1 hour), max 3 hours (was 24 hours). Aligns with Matter 5.4.2.3.1. |
+| 2026-01-30 | Added DEC-050: Protocol versioning strategy. Single protocol version (major.minor) on the wire via ALPN + specVersion. Removes per-feature clusterRevision. Feature revisions tracked in spec as version manifest per release. Resolves OPEN-004. |

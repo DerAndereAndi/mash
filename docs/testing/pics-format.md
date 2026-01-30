@@ -173,7 +173,7 @@ MASH.S.CTRL.C09.Rsp=1   # Pause
 |-----------|-------------|--------|
 | MASH.S | Device implements MASH server | 1 |
 | MASH.C | Controller implements MASH client | 1 |
-| MASH.S.VERSION | Protocol version supported | 1 |
+| MASH.S.VERSION | Protocol version (major.minor from specVersion) | 1.0 |
 | MASH.S.ENDPOINTS | Number of endpoints | 1-255 |
 
 ### 4.2 Electrical Feature (ELEC)
@@ -414,7 +414,7 @@ MASH.S.CTRL.C09.Rsp=1   # Pause
 
 # Protocol Support
 MASH.S=1
-MASH.S.VERSION=1
+MASH.S.VERSION=1.0
 MASH.S.ENDPOINTS=2
 
 # Features
@@ -485,7 +485,7 @@ MASH.S.CTRL.B_DURATION_EXPIRY="clear"
 
 # Protocol Support
 MASH.S=1
-MASH.S.VERSION=1
+MASH.S.VERSION=1.0
 MASH.S.ENDPOINTS=2
 
 # Features

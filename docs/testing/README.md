@@ -145,7 +145,7 @@ MASH.<Side>.<Feature>.<Type><ID>[.<Qualifier>]
 ```
 # Protocol support
 MASH.S=1                        # Device implements MASH protocol
-MASH.S.VERSION=1                # Protocol version 1
+MASH.S.VERSION=1.0              # Protocol version (major.minor)
 
 # Feature presence
 MASH.S.CTRL=1                   # EnergyControl feature present

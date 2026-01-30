@@ -391,13 +391,24 @@ Control messages use string keys for the `type` field to distinguish from data m
 
 ### 9.1 Version Negotiation
 
-MASH uses ALPN (Application-Layer Protocol Negotiation) in TLS:
+MASH uses a two-level versioning strategy (DEC-050):
+
+**Major version** via ALPN (Application-Layer Protocol Negotiation) in TLS:
 
 | ALPN String | Meaning |
 |-------------|---------|
-| "mash/1" | MASH protocol version 1 |
+| "mash/1" | MASH major version 1 |
 
-Future versions: "mash/2", etc.
+Future major versions: "mash/2", etc. Controllers offer all supported major versions; the device selects the highest mutually supported one.
+
+**Minor version** via `specVersion` attribute in DeviceInfo (endpoint 0):
+
+| specVersion | Meaning |
+|-------------|---------|
+| "1.0" | MASH 1.0 (initial release) |
+| "1.1" | MASH 1.1 (additive changes within major version 1) |
+
+After connecting, the controller reads `specVersion` to determine the exact protocol version. Capability discovery via `featureMap` and `attributeList` handles the actual attribute-level differences between minor versions.
 
 ### 9.2 Forward Compatibility Rules
 

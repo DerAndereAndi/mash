@@ -412,17 +412,17 @@ Every endpoint MUST implement these global attributes (reserved IDs 0xFFF0-0xFFF
 
 | Attribute | ID | Type | Description |
 |-----------|-----|------|-------------|
-| `clusterRevision` | 0xFFFD | uint16 | MASH protocol version this endpoint implements |
 | `featureMap` | 0xFFFC | bitmap32 | Bit flags indicating supported optional features |
 | `attributeList` | 0xFFFB | array[uint16] | IDs of all implemented attributes |
 | `acceptedCommandList` | 0xFFFA | array[uint8] | Command IDs the endpoint accepts |
 | `generatedCommandList` | 0xFFF9 | array[uint8] | Command IDs the endpoint generates (responses) |
 | `eventList` | 0xFFF8 | array[uint8] | Event IDs the endpoint can emit |
 
+> **Protocol version** is not a per-feature attribute. It is provided once via `specVersion` in DeviceInfo (endpoint 0) using major.minor format (e.g., "1.0"). See DEC-050.
+
 ```cbor
 // Example: Reading global attributes from an EVSE endpoint
 {
-  0xFFFD: 1,                           // clusterRevision: v1
   0xFFFC: 0x001B,                      // featureMap: CORE|FLEX|EMOB|SIGNALS
   0xFFFB: [1, 2, 3, 10, 11, 14, 20, 21, 60, ...],  // attributeList
   0xFFFA: [1, 2, 5, 6, 10, 11],        // acceptedCommandList
@@ -472,19 +472,21 @@ When a controller connects to a device:
 1. Read endpoint list (discover device structure)
    → Get: [{id: 0, type: DEVICE_ROOT}, {id: 1, type: EV_CHARGER}, ...]
 
-2. For each endpoint, read global attributes:
+2. Read specVersion from DeviceInfo (endpoint 0):
+   → Protocol version (e.g., "1.0") for compatibility check
+
+3. For each endpoint, read global attributes:
    a. featureMap       → Which feature sets are supported
    b. attributeList    → Which specific attributes are implemented
    c. acceptedCommandList → Which commands can be invoked
-   d. clusterRevision  → Protocol version for compatibility
 
-3. Based on featureMap, controller knows:
+4. Based on featureMap, controller knows:
    - If EMOB (0x0008) is set → ChargingSession attributes available
    - If BATTERY (0x0004) is set → Battery attributes available
    - If PROCESS (0x0080) is set → OHPCF-style scheduling available
    - etc.
 
-4. attributeList provides exact attribute IDs for fine-grained discovery
+5. attributeList provides exact attribute IDs for fine-grained discovery
 ```
 
 #### 3.7.4 Example Configurations
@@ -493,7 +495,7 @@ When a controller connects to a device:
 ```cbor
 {
   featureMap: 0x0009,        // CORE | EMOB
-  attributeList: [1, 2, 3, 10, 11, 14, 20, 21, 0xFFF8, 0xFFF9, 0xFFFA, 0xFFFB, 0xFFFC, 0xFFFD],
+  attributeList: [1, 2, 3, 10, 11, 14, 20, 21, 0xFFF8, 0xFFF9, 0xFFFA, 0xFFFB, 0xFFFC],
   acceptedCommandList: [1, 2, 5, 6],     // SetLimit, ClearLimit, SetCurrentLimits, ClearCurrentLimits
   generatedCommandList: [1, 2, 5, 6]
 }
@@ -503,7 +505,7 @@ When a controller connects to a device:
 ```cbor
 {
   featureMap: 0x060B,        // CORE | FLEX | EMOB | ASYMMETRIC | V2X
-  attributeList: [1, 2, 3, 10-16, 20-23, 30-33, 40-43, 50-53, 60, 0xFFF8-0xFFFD],
+  attributeList: [1, 2, 3, 10-16, 20-23, 30-33, 40-43, 50-53, 60, 0xFFF8-0xFFFC],
   acceptedCommandList: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],  // All limit/setpoint commands + Pause/Resume
   generatedCommandList: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 }
@@ -513,7 +515,7 @@ When a controller connects to a device:
 ```cbor
 {
   featureMap: 0x0083,        // CORE | FLEX | PROCESS
-  attributeList: [1, 2, 3, 10, 14, 16, 20, 21, 60, 70-72, 80, 81, 0xFFF8-0xFFFD],
+  attributeList: [1, 2, 3, 10, 14, 16, 20, 21, 60, 70-72, 80, 81, 0xFFF8-0xFFFC],
   acceptedCommandList: [1, 2, 9, 10, 11, 12, 13],  // SetLimit, ClearLimit, Pause, Resume, Stop, ScheduleProcess, CancelProcess
   generatedCommandList: [1, 2, 9, 10, 11, 12, 13]
 }
@@ -523,7 +525,7 @@ When a controller connects to a device:
 ```cbor
 {
   featureMap: 0x0107,        // CORE | FLEX | BATTERY | FORECAST
-  attributeList: [1, 2, 3, 10-16, 20-23, 40-43, 50-53, 60, 61, 70-72, 0xFFF8-0xFFFD],
+  attributeList: [1, 2, 3, 10-16, 20-23, 40-43, 50-53, 60, 61, 70-72, 0xFFF8-0xFFFC],
   acceptedCommandList: [1, 2, 3, 4, 7, 8, 9, 10],  // Limits + Setpoints + Pause/Resume
   generatedCommandList: [1, 2, 3, 4, 7, 8, 9, 10]
 }
@@ -532,7 +534,7 @@ When a controller connects to a device:
 #### 3.7.5 Benefits
 
 1. **Self-describing**: Controller knows exactly what's available without trial/error
-2. **Version-safe**: `clusterRevision` enables graceful protocol evolution
+2. **Version-safe**: `specVersion` in DeviceInfo provides protocol version; `attributeList` handles capability discovery (DEC-050)
 3. **Fine-grained**: `attributeList` gives exact attribute availability
 4. **Compact**: Bitmap `featureMap` is efficient for quick capability checks
 5. **Predictable**: No implicit assumptions about what "EVSE" means
