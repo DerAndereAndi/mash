@@ -1,0 +1,183 @@
+version: "1.0"
+description: "MASH Protocol Specification v1.0 – Initial release"
+
+features:
+  DeviceInfo:
+    id: 0x01
+    revision: 1
+    mandatory: true
+    attributes:
+      mandatory:
+        - { id: 1,  name: deviceId }
+        - { id: 2,  name: vendorName }
+        - { id: 3,  name: productName }
+        - { id: 4,  name: serialNumber }
+        - { id: 10, name: softwareVersion }
+        - { id: 12, name: specVersion }
+        - { id: 20, name: endpoints }
+      optional:
+        - { id: 5,  name: vendorId }
+        - { id: 6,  name: productId }
+        - { id: 11, name: hardwareVersion }
+        - { id: 30, name: location }
+        - { id: 31, name: label }
+    commands:
+      mandatory:
+        - { id: 0x10, name: removeZone }
+
+  Status:
+    id: 0x02
+    revision: 1
+    mandatory: false
+    attributes:
+      mandatory:
+        - { id: 1, name: operatingState }
+      optional:
+        - { id: 2, name: stateDetail }
+        - { id: 3, name: faultCode }
+        - { id: 4, name: faultMessage }
+
+  Electrical:
+    id: 0x03
+    revision: 1
+    mandatory: false
+    attributes:
+      mandatory:
+        - { id: 1,  name: phaseCount }
+        - { id: 5,  name: supportedDirections }
+        - { id: 10, name: nominalMaxConsumption }
+      optional:
+        - { id: 2,  name: phaseMapping }
+        - { id: 3,  name: nominalVoltage }
+        - { id: 4,  name: nominalFrequency }
+        - { id: 11, name: nominalMaxProduction }
+        - { id: 12, name: nominalMinPower }
+        - { id: 13, name: maxCurrentPerPhase }
+        - { id: 14, name: minCurrentPerPhase }
+        - { id: 15, name: supportsAsymmetric }
+        - { id: 20, name: energyCapacity }
+
+  Measurement:
+    id: 0x04
+    revision: 1
+    mandatory: false
+    attributes:
+      mandatory:
+        - { id: 1, name: acActivePower }
+      optional:
+        - { id: 2,  name: acReactivePower }
+        - { id: 3,  name: acApparentPower }
+        - { id: 10, name: acActivePowerPerPhase }
+        - { id: 11, name: acReactivePowerPerPhase }
+        - { id: 12, name: acApparentPowerPerPhase }
+        - { id: 20, name: acCurrentPerPhase }
+        - { id: 21, name: acVoltagePerPhase }
+        - { id: 22, name: acVoltagePhaseToPhasePair }
+        - { id: 23, name: acFrequency }
+        - { id: 24, name: powerFactor }
+        - { id: 30, name: acEnergyConsumed }
+        - { id: 31, name: acEnergyProduced }
+        - { id: 40, name: dcPower }
+        - { id: 41, name: dcCurrent }
+        - { id: 42, name: dcVoltage }
+        - { id: 43, name: dcEnergyIn }
+        - { id: 44, name: dcEnergyOut }
+        - { id: 50, name: stateOfCharge }
+        - { id: 51, name: stateOfHealth }
+        - { id: 52, name: stateOfEnergy }
+        - { id: 53, name: useableCapacity }
+        - { id: 54, name: cycleCount }
+        - { id: 60, name: temperature }
+
+  EnergyControl:
+    id: 0x05
+    revision: 1
+    mandatory: false
+    attributes:
+      mandatory:
+        - { id: 1,  name: deviceType }
+        - { id: 2,  name: controlState }
+        - { id: 10, name: acceptsLimits }
+        - { id: 72, name: failsafeDuration }
+      optional:
+        - { id: 3,  name: optOutState }
+        - { id: 11, name: acceptsCurrentLimits }
+        - { id: 12, name: acceptsSetpoints }
+        - { id: 13, name: acceptsCurrentSetpoints }
+        - { id: 14, name: isPausable }
+        - { id: 15, name: isShiftable }
+        - { id: 16, name: isStoppable }
+        - { id: 20, name: effectiveConsumptionLimit }
+        - { id: 21, name: myConsumptionLimit }
+        - { id: 22, name: effectiveProductionLimit }
+        - { id: 23, name: myProductionLimit }
+        - { id: 30, name: effectiveCurrentLimitsConsumption }
+        - { id: 31, name: myCurrentLimitsConsumption }
+        - { id: 32, name: effectiveCurrentLimitsProduction }
+        - { id: 33, name: myCurrentLimitsProduction }
+        - { id: 40, name: effectiveConsumptionSetpoint }
+        - { id: 41, name: myConsumptionSetpoint }
+        - { id: 42, name: effectiveProductionSetpoint }
+        - { id: 43, name: myProductionSetpoint }
+        - { id: 50, name: effectiveCurrentSetpointsConsumption }
+        - { id: 51, name: myCurrentSetpointsConsumption }
+        - { id: 52, name: effectiveCurrentSetpointsProduction }
+        - { id: 53, name: myCurrentSetpointsProduction }
+        - { id: 70, name: failsafeConsumptionLimit }
+        - { id: 71, name: failsafeProductionLimit }
+        - { id: 73, name: contractualConsumptionMax }
+        - { id: 74, name: contractualProductionMax }
+        - { id: 75, name: overrideReason }
+        - { id: 76, name: overrideDirection }
+        - { id: 80, name: processState }
+        - { id: 81, name: optionalProcess }
+    commands:
+      mandatory:
+        - { id: 1, name: setLimit }
+        - { id: 2, name: clearLimit }
+      optional:
+        - { id: 3,  name: setCurrentLimits }
+        - { id: 4,  name: clearCurrentLimits }
+        - { id: 5,  name: setSetpoint }
+        - { id: 6,  name: clearSetpoint }
+        - { id: 7,  name: setCurrentSetpoints }
+        - { id: 8,  name: clearCurrentSetpoints }
+        - { id: 9,  name: pause }
+        - { id: 10, name: resume }
+        - { id: 11, name: stop }
+
+  ChargingSession:
+    id: 0x06
+    revision: 1
+    mandatory: false
+    attributes:
+      mandatory:
+        - { id: 1, name: state }
+        - { id: 2, name: sessionId }
+      optional:
+        - { id: 3,  name: sessionStartTime }
+        - { id: 4,  name: sessionEndTime }
+        - { id: 10, name: sessionEnergyCharged }
+        - { id: 11, name: sessionEnergyDischarged }
+        - { id: 20, name: evIdentifications }
+        - { id: 30, name: evStateOfCharge }
+        - { id: 31, name: evBatteryCapacity }
+        - { id: 40, name: evDemandMode }
+        - { id: 41, name: evMinEnergyRequest }
+        - { id: 42, name: evMaxEnergyRequest }
+        - { id: 43, name: evTargetEnergyRequest }
+        - { id: 44, name: evDepartureTime }
+        - { id: 50, name: evMinDischargingRequest }
+        - { id: 51, name: evMaxDischargingRequest }
+        - { id: 52, name: evDischargeBelowTargetPermitted }
+        - { id: 60, name: estimatedTimeToMinSoC }
+        - { id: 61, name: estimatedTimeToTargetSoC }
+        - { id: 62, name: estimatedTimeToFullSoC }
+        - { id: 70, name: chargingMode }
+        - { id: 71, name: supportedChargingModes }
+        - { id: 72, name: surplusThreshold }
+        - { id: 80, name: startDelay }
+        - { id: 81, name: stopDelay }
+    commands:
+      mandatory:
+        - { id: 1, name: setChargingMode }
