@@ -41,9 +41,6 @@ const (
 
 // Global attribute IDs (present on all features).
 const (
-	// AttrIDClusterRevision is the feature revision number.
-	AttrIDClusterRevision uint16 = 0xFFFD
-
 	// AttrIDFeatureMap is the feature capability bitmap.
 	AttrIDFeatureMap uint16 = 0xFFFC
 

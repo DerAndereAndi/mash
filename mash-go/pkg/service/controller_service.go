@@ -467,6 +467,18 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 	// Start message loop in background to receive responses/notifications
 	go s.runDeviceMessageLoop(deviceID, framedConn, deviceSession)
 
+	// Check protocol version compatibility (DEC-050)
+	if err := s.checkDeviceVersion(ctx, deviceSession); err != nil {
+		// Incompatible version -- tear down
+		s.mu.Lock()
+		delete(s.connectedDevices, device.ID)
+		delete(s.deviceSessions, device.ID)
+		s.mu.Unlock()
+		deviceSession.Close()
+		conn.Close()
+		return nil, fmt.Errorf("%w: %v", ErrCommissionFailed, err)
+	}
+
 	// Persist state immediately after commissioning
 	_ = s.SaveState()
 
@@ -1079,6 +1091,24 @@ func (s *ControllerService) attemptReconnection(ctx context.Context, svc *discov
 	s.mu.Lock()
 	s.deviceSessions[svc.DeviceID] = session
 	s.mu.Unlock()
+
+	// Check protocol version compatibility (DEC-050)
+	if err := s.checkDeviceVersion(ctx, session); err != nil {
+		s.mu.Lock()
+		delete(s.deviceSessions, svc.DeviceID)
+		if device, ok := s.connectedDevices[svc.DeviceID]; ok {
+			device.Connected = false
+		}
+		s.mu.Unlock()
+		session.Close()
+		conn.Close()
+		s.emitEvent(Event{
+			Type:     EventReconnectionFailed,
+			DeviceID: svc.DeviceID,
+			Error:    err,
+		})
+		return
+	}
 
 	// Emit reconnected event
 	s.emitEvent(Event{

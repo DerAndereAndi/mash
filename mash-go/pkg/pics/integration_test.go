@@ -31,8 +31,8 @@ func TestParseRealPICSFile(t *testing.T) {
 		t.Errorf("expected Side=S, got %v", pics.Side)
 	}
 
-	if pics.Version != 1 {
-		t.Errorf("expected Version=1, got %d", pics.Version)
+	if pics.Version != "1.0" {
+		t.Errorf("expected Version=1.0, got %s", pics.Version)
 	}
 
 	// Check transport features

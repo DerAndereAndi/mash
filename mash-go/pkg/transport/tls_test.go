@@ -8,8 +8,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"math/big"
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/mash-protocol/mash-go/pkg/version"
 )
 
 // generateTestCertificate creates a self-signed certificate for testing.
@@ -71,9 +74,10 @@ func TestNewServerTLSConfig(t *testing.T) {
 		t.Errorf("MinVersion = %d, want TLS 1.3 (%d)", tlsConfig.MinVersion, tls.VersionTLS13)
 	}
 
-	// Check ALPN
-	if len(tlsConfig.NextProtos) != 1 || tlsConfig.NextProtos[0] != ALPNProtocol {
-		t.Errorf("NextProtos = %v, want [%s]", tlsConfig.NextProtos, ALPNProtocol)
+	// Check ALPN uses version.SupportedALPNProtocols()
+	wantProtos := version.SupportedALPNProtocols()
+	if !slices.Equal(tlsConfig.NextProtos, wantProtos) {
+		t.Errorf("NextProtos = %v, want %v", tlsConfig.NextProtos, wantProtos)
 	}
 
 	// Check client auth
@@ -113,9 +117,10 @@ func TestNewClientTLSConfig(t *testing.T) {
 		t.Errorf("MinVersion = %d, want TLS 1.3 (%d)", tlsConfig.MinVersion, tls.VersionTLS13)
 	}
 
-	// Check ALPN
-	if len(tlsConfig.NextProtos) != 1 || tlsConfig.NextProtos[0] != ALPNProtocol {
-		t.Errorf("NextProtos = %v, want [%s]", tlsConfig.NextProtos, ALPNProtocol)
+	// Check ALPN uses version.SupportedALPNProtocols()
+	wantProtos := version.SupportedALPNProtocols()
+	if !slices.Equal(tlsConfig.NextProtos, wantProtos) {
+		t.Errorf("NextProtos = %v, want %v", tlsConfig.NextProtos, wantProtos)
 	}
 
 	// Check certificate is set
@@ -141,9 +146,10 @@ func TestNewCommissioningTLSConfig(t *testing.T) {
 		t.Errorf("MinVersion = %d, want TLS 1.3 (%d)", tlsConfig.MinVersion, tls.VersionTLS13)
 	}
 
-	// Check ALPN
-	if len(tlsConfig.NextProtos) != 1 || tlsConfig.NextProtos[0] != ALPNProtocol {
-		t.Errorf("NextProtos = %v, want [%s]", tlsConfig.NextProtos, ALPNProtocol)
+	// Check ALPN uses version.SupportedALPNProtocols()
+	wantProtos := version.SupportedALPNProtocols()
+	if !slices.Equal(tlsConfig.NextProtos, wantProtos) {
+		t.Errorf("NextProtos = %v, want %v", tlsConfig.NextProtos, wantProtos)
 	}
 
 	// Commissioning mode skips verification
@@ -224,6 +230,41 @@ func TestDefaultPort(t *testing.T) {
 func TestALPNProtocol(t *testing.T) {
 	if ALPNProtocol != "mash/1" {
 		t.Errorf("ALPNProtocol = %s, want mash/1", ALPNProtocol)
+	}
+}
+
+func TestSupportedALPNProtocols(t *testing.T) {
+	protos := version.SupportedALPNProtocols()
+	if len(protos) != 1 || protos[0] != "mash/1" {
+		t.Errorf("SupportedALPNProtocols() = %v, want [mash/1]", protos)
+	}
+}
+
+func TestVerifyALPN_AcceptsCurrentVersion(t *testing.T) {
+	state := tls.ConnectionState{NegotiatedProtocol: "mash/1"}
+	if err := VerifyALPN(state); err != nil {
+		t.Errorf("VerifyALPN should accept mash/1: %v", err)
+	}
+}
+
+func TestVerifyALPN_RejectsUnknownProtocol(t *testing.T) {
+	state := tls.ConnectionState{NegotiatedProtocol: "http/1.1"}
+	if err := VerifyALPN(state); err == nil {
+		t.Error("VerifyALPN should reject http/1.1")
+	}
+}
+
+func TestVerifyALPN_RejectsEmptyProtocol(t *testing.T) {
+	state := tls.ConnectionState{NegotiatedProtocol: ""}
+	if err := VerifyALPN(state); err == nil {
+		t.Error("VerifyALPN should reject empty protocol")
+	}
+}
+
+func TestVerifyALPN_RejectsMalformed(t *testing.T) {
+	state := tls.ConnectionState{NegotiatedProtocol: "mash/"}
+	if err := VerifyALPN(state); err == nil {
+		t.Error("VerifyALPN should reject malformed mash/")
 	}
 }
 
@@ -361,9 +402,10 @@ func TestOperationalClientTLSConfigProperties(t *testing.T) {
 		t.Errorf("MaxVersion = 0x%x, want TLS 1.3 (0x0304)", tlsConfig.MaxVersion)
 	}
 
-	// Must use MASH ALPN
-	if len(tlsConfig.NextProtos) != 1 || tlsConfig.NextProtos[0] != ALPNProtocol {
-		t.Errorf("NextProtos = %v, want [%s]", tlsConfig.NextProtos, ALPNProtocol)
+	// Must use MASH ALPN from version package
+	wantProtos := version.SupportedALPNProtocols()
+	if !slices.Equal(tlsConfig.NextProtos, wantProtos) {
+		t.Errorf("NextProtos = %v, want %v", tlsConfig.NextProtos, wantProtos)
 	}
 
 	// Operational connections use InsecureSkipVerify=true because we handle

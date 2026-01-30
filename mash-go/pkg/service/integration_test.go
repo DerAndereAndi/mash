@@ -465,7 +465,7 @@ func TestE2E_OperationalRead(t *testing.T) {
 
 	t.Logf("Read %d attributes from DeviceInfo", len(attrs))
 
-	// Should have at least global attributes (clusterRevision, featureMap, etc.)
+	// Should have at least global attributes (featureMap, attributeList, etc.)
 	if len(attrs) == 0 {
 		t.Error("Expected at least some attributes")
 	}

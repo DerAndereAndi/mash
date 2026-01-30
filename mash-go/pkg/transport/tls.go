@@ -4,7 +4,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"slices"
 	"time"
+
+	"github.com/mash-protocol/mash-go/pkg/version"
 )
 
 // TLS constants for MASH protocol.
@@ -66,7 +69,7 @@ func NewServerTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
 		ClientCAs: cfg.ClientCAs,
 
 		// ALPN protocol
-		NextProtos: []string{ALPNProtocol},
+		NextProtos: version.SupportedALPNProtocols(),
 
 		// Cipher suites (TLS 1.3 uses different config, but we set preferences)
 		// Go's TLS 1.3 implementation automatically uses the right ciphers
@@ -118,7 +121,7 @@ func NewClientTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
 		ServerName: cfg.ServerName,
 
 		// ALPN protocol
-		NextProtos: []string{ALPNProtocol},
+		NextProtos: version.SupportedALPNProtocols(),
 
 		// Curve preferences for key exchange
 		CurvePreferences: []tls.CurveID{
@@ -153,7 +156,7 @@ func NewCommissioningTLSConfig() *tls.Config {
 		InsecureSkipVerify: true,
 
 		// ALPN protocol
-		NextProtos: []string{ALPNProtocol},
+		NextProtos: version.SupportedALPNProtocols(),
 
 		// Curve preferences
 		CurvePreferences: []tls.CurveID{
@@ -174,10 +177,11 @@ func VerifyTLS13(state tls.ConnectionState) error {
 	return nil
 }
 
-// VerifyALPN checks that the negotiated ALPN protocol is correct.
+// VerifyALPN checks that the negotiated ALPN protocol is a supported MASH version.
 func VerifyALPN(state tls.ConnectionState) error {
-	if state.NegotiatedProtocol != ALPNProtocol {
-		return fmt.Errorf("ALPN protocol %q is not %q", state.NegotiatedProtocol, ALPNProtocol)
+	if !slices.Contains(version.SupportedALPNProtocols(), state.NegotiatedProtocol) {
+		return fmt.Errorf("ALPN protocol %q is not a supported MASH version %v",
+			state.NegotiatedProtocol, version.SupportedALPNProtocols())
 	}
 	return nil
 }

@@ -227,7 +227,6 @@ func TestResolveGlobalAttributes(t *testing.T) {
 		name     string
 		expected uint16
 	}{
-		{"clusterRevision", 0xFFFD},
 		{"featureMap", 0xFFFC},
 		{"attributeList", 0xFFFB},
 	}

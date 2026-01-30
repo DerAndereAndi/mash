@@ -68,17 +68,6 @@ func NewFeature(featureType FeatureType, revision uint16) *Feature {
 
 // addGlobalAttributes adds the standard global attributes.
 func (f *Feature) addGlobalAttributes() {
-	// clusterRevision
-	f.attributes[AttrIDClusterRevision] = NewAttribute(&AttributeMetadata{
-		ID:          AttrIDClusterRevision,
-		Name:        "clusterRevision",
-		Type:        DataTypeUint16,
-		Access:      AccessReadOnly,
-		Description: "Feature implementation revision",
-		Default:     f.revision,
-	})
-	f.attributes[AttrIDClusterRevision].SetValueInternal(f.revision)
-
 	// featureMap
 	f.attributes[AttrIDFeatureMap] = NewAttribute(&AttributeMetadata{
 		ID:          AttrIDFeatureMap,

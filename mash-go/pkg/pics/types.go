@@ -169,8 +169,8 @@ type PICS struct {
 	// Side is the primary side (S or C) of this PICS.
 	Side Side
 
-	// Version is the protocol version.
-	Version int
+	// Version is the protocol version (e.g., "1.0").
+	Version string
 
 	// Features lists all features that are enabled.
 	Features []string

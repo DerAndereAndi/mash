@@ -9,7 +9,7 @@ func TestParseSimplePICS(t *testing.T) {
 	input := `
 # Device PICS
 MASH.S=1
-MASH.S.VERSION=1
+MASH.S.VERSION=1.0
 MASH.S.CTRL=1
 MASH.S.ELEC=1
 `
@@ -27,8 +27,8 @@ MASH.S.ELEC=1
 		t.Errorf("expected Side=S, got %v", pics.Side)
 	}
 
-	if pics.Version != 1 {
-		t.Errorf("expected Version=1, got %d", pics.Version)
+	if pics.Version != "1.0" {
+		t.Errorf("expected Version=1.0, got %s", pics.Version)
 	}
 
 	if !pics.HasFeature("CTRL") {
@@ -37,6 +37,32 @@ MASH.S.ELEC=1
 
 	if !pics.HasFeature("ELEC") {
 		t.Error("expected ELEC feature to be present")
+	}
+}
+
+func TestParseVersion_MajorMinor(t *testing.T) {
+	input := `MASH.S=1
+MASH.S.VERSION=1.0
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+	if pics.Version != "1.0" {
+		t.Errorf("expected Version=1.0, got %s", pics.Version)
+	}
+}
+
+func TestParseVersion_IntegerBackwardCompat(t *testing.T) {
+	input := `MASH.S=1
+MASH.S.VERSION=1
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+	if pics.Version != "1" {
+		t.Errorf("expected Version=1, got %s", pics.Version)
 	}
 }
 

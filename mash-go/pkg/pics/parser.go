@@ -180,7 +180,7 @@ func (p *Parser) parseKeyValue(data []byte) (*PICS, error) {
 
 		// Track version
 		if entry.Code.Raw == "MASH.S.VERSION" || entry.Code.Raw == "MASH.C.VERSION" {
-			pics.Version = int(entry.Value.Int)
+			pics.Version = entry.Value.Raw
 		}
 
 		// Track features

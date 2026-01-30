@@ -119,8 +119,8 @@ func convertToKeyValue(p *pics.PICS, defaultSide string) string {
 	if p.Has("MASH.C") || p.Side == pics.SideClient {
 		sb.WriteString("MASH.C=1\n")
 	}
-	if p.Version > 0 {
-		sb.WriteString(fmt.Sprintf("MASH.%s.VERSION=%d\n", side, p.Version))
+	if p.Version != "" {
+		sb.WriteString(fmt.Sprintf("MASH.%s.VERSION=%s\n", side, p.Version))
 	}
 	sb.WriteString("\n")
 

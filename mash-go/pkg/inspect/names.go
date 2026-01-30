@@ -44,10 +44,9 @@ var (
 func initNameTables() {
 	// Global attributes (present on all features)
 	globalAttrs := map[string]uint16{
-		"clusterrevision": model.AttrIDClusterRevision,
-		"featuremap":      model.AttrIDFeatureMap,
-		"attributelist":   model.AttrIDAttributeList,
-		"commandlist":     model.AttrIDCommandList,
+		"featuremap":    model.AttrIDFeatureMap,
+		"attributelist": model.AttrIDAttributeList,
+		"commandlist":   model.AttrIDCommandList,
 	}
 
 	// Measurement attributes

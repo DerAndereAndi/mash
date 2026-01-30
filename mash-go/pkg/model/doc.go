@@ -36,7 +36,7 @@
 // Each feature has:
 //   - Attributes: Data values with metadata (type, access, constraints)
 //   - Commands: Invokable operations with parameters
-//   - Global attributes: clusterRevision, featureMap, attributeList
+//   - Global attributes: featureMap, attributeList, commandList
 //
 // # Addressing
 //

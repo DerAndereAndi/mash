@@ -288,13 +288,15 @@ func TestFeature(t *testing.T) {
 	})
 
 	t.Run("GlobalAttributes", func(t *testing.T) {
-		// ClusterRevision should be present
-		rev, err := feature.ReadAttribute(AttrIDClusterRevision)
-		if err != nil {
-			t.Fatalf("failed to read clusterRevision: %v", err)
+		// clusterRevision (0xFFFD) is no longer a wire attribute (DEC-050)
+		_, err := feature.ReadAttribute(0xFFFD)
+		if err != ErrAttributeNotFound {
+			t.Errorf("expected ErrAttributeNotFound for 0xFFFD, got %v", err)
 		}
-		if rev != uint16(1) {
-			t.Errorf("expected revision 1, got %v", rev)
+
+		// Revision() internal getter should still work
+		if feature.Revision() != 1 {
+			t.Errorf("expected Revision() = 1, got %d", feature.Revision())
 		}
 
 		// AttributeList should be present
@@ -361,7 +363,7 @@ func TestFeature(t *testing.T) {
 	})
 
 	t.Run("WriteGlobalAttributeFails", func(t *testing.T) {
-		err := feature.WriteAttribute(AttrIDClusterRevision, uint16(99))
+		err := feature.WriteAttribute(AttrIDFeatureMap, uint32(99))
 		if err != ErrFeatureReadOnly {
 			t.Errorf("expected ErrFeatureReadOnly, got %v", err)
 		}

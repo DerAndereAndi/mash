@@ -25,7 +25,7 @@ type ShowOutput struct {
 	File     string                 `json:"file,omitempty" yaml:"file,omitempty"`
 	Format   string                 `json:"format,omitempty" yaml:"format,omitempty"`
 	Side     string                 `json:"side,omitempty" yaml:"side,omitempty"`
-	Version  int                    `json:"version,omitempty" yaml:"version,omitempty"`
+	Version  string                 `json:"version,omitempty" yaml:"version,omitempty"`
 	Device   *DeviceOutput          `json:"device,omitempty" yaml:"device,omitempty"`
 	Features []string               `json:"features,omitempty" yaml:"features,omitempty"`
 	Entries  []EntryOutput          `json:"entries,omitempty" yaml:"entries,omitempty"`
@@ -163,8 +163,8 @@ func printShowText(w io.Writer, output ShowOutput, opts ShowOptions) {
 	fmt.Fprintf(w, "File: %s\n", output.File)
 	fmt.Fprintf(w, "Format: %s\n", output.Format)
 	fmt.Fprintf(w, "Side: %s\n", output.Side)
-	if output.Version > 0 {
-		fmt.Fprintf(w, "Version: %d\n", output.Version)
+	if output.Version != "" {
+		fmt.Fprintf(w, "Version: %s\n", output.Version)
 	}
 
 	// Device info
