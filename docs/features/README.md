@@ -90,6 +90,49 @@ FeatureMap bits indicate **high-level categories**. Detailed capability informat
 
 ---
 
+## YAML Definitions and Code Generation
+
+Each feature has two representations:
+- **`.md` files** -- Human-readable specifications with design rationale and examples
+- **`<feature>/1.0.yaml` files** -- Machine-readable definitions used for Go code generation
+
+The YAML files are the **source of truth** for attribute IDs, enum values, CBOR keys, data types, and command definitions. The `mash-featgen` tool in `mash-go/cmd/mash-featgen/` reads these YAML files and generates `*_gen.go` files in `pkg/features/` and `pkg/model/`.
+
+### Directory Layout
+
+```
+features/
+├── _shared/1.0.yaml              # Shared types (enums, structs used across features)
+├── protocol-versions.yaml        # Feature type and endpoint type registries
+├── device-info/1.0.yaml          # DeviceInfo feature definition
+├── device-info.md                # DeviceInfo human-readable spec
+├── electrical/1.0.yaml
+├── electrical.md
+├── measurement/1.0.yaml
+├── measurement.md
+├── energy-control/1.0.yaml
+├── energy-control.md
+├── status/1.0.yaml
+├── status.md
+├── charging-session/1.0.yaml
+├── charging-session.md
+├── signals.md                    # Not yet YAML-defined
+├── tariff.md                     # Not yet YAML-defined
+└── plan.md                       # Not yet YAML-defined
+```
+
+### Regenerating Code
+
+After editing any YAML file:
+
+```bash
+cd mash-go
+make features    # Regenerate feature and model code
+make generate    # Regenerate everything (features + use cases + mocks)
+```
+
+---
+
 ## Common Patterns
 
 ### Attribute Numbering Convention

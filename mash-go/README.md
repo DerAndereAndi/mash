@@ -44,6 +44,25 @@ make test-integration
 make test
 ```
 
+### Code Generation
+
+Feature implementations and model types are generated from YAML definitions in `docs/features/`. Use case definitions are generated from `docs/usecases/`.
+
+```bash
+# Generate all code (features, use cases, mocks)
+make generate
+
+# Generate feature code from YAML definitions
+make features
+# Generates: pkg/features/*_gen.go, pkg/model/*_gen.go, pkg/version/specs/1.0.yaml
+
+# Generate use case definitions from YAML
+make usecases
+# Generates: pkg/usecase/definitions_gen.go
+```
+
+**Important:** Never edit `*_gen.go` files directly. Edit the YAML source files or the generator templates in `cmd/mash-featgen/` and re-run `make generate`.
+
 ### Mock Generation
 
 Mocks are generated using [mockery v2](https://github.com/vektra/mockery).
@@ -179,6 +198,68 @@ mash-test -target localhost:8443 -insecure
 | `-junit` | Output results as JUnit XML | `false` |
 | `-insecure` | Skip TLS certificate verification | `false` |
 
+### mash-featgen
+
+Code generator that produces Go source from YAML feature definitions. Drives the feature implementation layer and model-layer constants.
+
+```bash
+# Typically run via Makefile:
+make features
+
+# Direct usage:
+go run ./cmd/mash-featgen \
+  -features ../docs/features \
+  -shared ../docs/features/_shared/1.0.yaml \
+  -protocol ../docs/features/protocol-versions.yaml \
+  -version 1.0 \
+  -output pkg/features/ \
+  -model-output pkg/model/ \
+  -spec-output pkg/version/specs/1.0.yaml
+```
+
+**Flags:**
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-features` | Base directory for feature YAMLs | *required* |
+| `-shared` | Path to shared types YAML | *required* |
+| `-protocol` | Path to protocol-versions.yaml | - |
+| `-version` | Protocol version to generate | `1.0` |
+| `-output` | Output directory for feature `_gen.go` files | *required* |
+| `-model-output` | Output directory for model type `_gen.go` files | - |
+| `-spec-output` | Output path for derived spec manifest | - |
+
+### mash-ucgen
+
+Generates Go use case definitions from YAML files. Reads YAML use case definitions, resolves feature/attribute/command names against the spec manifest, and writes a Go source file with a pre-resolved Registry map.
+
+```bash
+# Typically run via Makefile:
+make usecases
+
+# Direct usage:
+go run ./cmd/mash-ucgen -input ../docs/usecases/1.0 -output pkg/usecase/definitions_gen.go -version 1.0
+```
+
+### mash-log
+
+Protocol log analyzer for viewing, filtering, and exporting `.mlog` files created by `mash-device`, `mash-controller`, or `mash-test` with the `-protocol-log` flag.
+
+```bash
+mash-log view device.mlog           # View all events
+mash-log export -format json log.mlog
+mash-log filter -type read log.mlog
+mash-log stats log.mlog
+```
+
+### mash-pics
+
+PICS (Protocol Implementation Conformance Statement) validation, linting, and conversion tool.
+
+```bash
+mash-pics validate testdata/pics/ev-charger.yaml
+mash-pics lint testdata/pics/
+```
+
 ## Project Structure
 
 ```
@@ -186,7 +267,11 @@ mash-go/
 ├── cmd/                    # Command-line applications
 │   ├── mash-device/        # Device reference implementation
 │   ├── mash-controller/    # Controller reference implementation
-│   └── mash-test/          # Conformance test runner
+│   ├── mash-test/          # Conformance test runner
+│   ├── mash-featgen/       # Feature code generator (YAML -> Go)
+│   ├── mash-ucgen/         # Use case code generator (YAML -> Go)
+│   ├── mash-log/           # Protocol log analyzer
+│   └── mash-pics/          # PICS validation/linting
 ├── pkg/                    # Public packages
 │   ├── wire/               # CBOR message encoding
 │   ├── transport/          # TLS server/client, framing
@@ -196,8 +281,9 @@ mash-go/
 │   ├── failsafe/           # Failsafe timer and state
 │   ├── zone/               # Multi-zone coordination
 │   ├── service/            # Device/controller service orchestration
-│   ├── model/              # Device model (endpoints, features)
-│   ├── features/           # Feature implementations
+│   ├── model/              # Device model (*_gen.go for types)
+│   ├── features/           # Feature implementations (*_gen.go from YAML)
+│   ├── usecase/            # Use case definitions (definitions_gen.go)
 │   └── ...
 ├── internal/               # Private packages
 │   └── testharness/        # Test infrastructure
@@ -337,7 +423,7 @@ emsControllerSvc.Start(ctx)
 
 ## Test Coverage
 
-352 tests covering:
+1000+ tests covering:
 - Wire format encoding/decoding
 - TLS server/client
 - mDNS discovery
@@ -345,6 +431,8 @@ emsControllerSvc.Start(ctx)
 - Subscription management
 - Failsafe behavior
 - Multi-zone coordination
+- Feature code generation (YAML parsing, Go output, validation)
+- Use case code generation
 - Test harness infrastructure
 
 Run with coverage:

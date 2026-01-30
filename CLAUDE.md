@@ -15,26 +15,41 @@ MASH (Minimal Application-layer Smart Home Protocol) is a lightweight protocol d
 
 ```
 mash/
-├── docs/                   # Protocol specification
-│   ├── protocol-overview.md  # Canonical architecture guide
-│   ├── decision-log.md
+├── docs/                        # Protocol specification
+│   ├── protocol-overview.md       # Canonical architecture guide
+│   ├── decision-log.md            # Design decisions (DEC-XXX)
 │   ├── transport.md
 │   ├── security.md
 │   ├── discovery.md
 │   ├── interaction-model.md
-│   ├── multi-zone.md        # Multi-zone architecture
-│   ├── features/           # Feature specifications
-│   └── testing/            # Test specifications
-└── mash-go/                # Go reference implementation
-    ├── cmd/                # CLI tools (mash-device, mash-controller, mash-test)
-    ├── pkg/                # Public packages
-    ├── internal/           # Private packages (test harness)
-    └── testdata/           # Test cases and PICS files
+│   ├── multi-zone.md              # Multi-zone architecture
+│   ├── stack-architecture.md
+│   ├── features/                  # Feature specifications
+│   │   ├── README.md                # Feature registry, numbering, composition
+│   │   ├── <feature>/1.0.yaml      # Machine-readable definitions (code gen source)
+│   │   ├── <feature>.md            # Human-readable specs
+│   │   └── protocol-versions.yaml  # Feature/endpoint type registries
+│   ├── usecases/                  # Use case definitions
+│   │   └── 1.0/                     # YAML use case files (LPC, LPP, MPC, etc.)
+│   ├── testing/                   # Test specifications
+│   └── design/                    # Design documents
+└── mash-go/                     # Go reference implementation
+    ├── cmd/                       # CLI tools
+    │   ├── mash-device/             # Reference device (EVSE, inverter, battery)
+    │   ├── mash-controller/         # Reference controller (EMS)
+    │   ├── mash-test/               # Conformance test runner
+    │   ├── mash-featgen/            # Feature code generator (YAML -> Go)
+    │   ├── mash-ucgen/              # Use case code generator (YAML -> Go)
+    │   ├── mash-log/                # Protocol log analyzer
+    │   └── mash-pics/               # PICS file tools
+    ├── pkg/                       # Public packages
+    ├── internal/                   # Private packages (test harness)
+    └── testdata/                   # Test cases and PICS files
 ```
 
 ## Go Implementation
 
-See [mash-go/README.md](mash-go/README.md) for detailed documentation.
+See [mash-go/README.md](mash-go/README.md) for detailed documentation (commands, flags, examples).
 
 ### Quick Reference
 
@@ -45,11 +60,14 @@ cd mash-go
 go build ./...
 go test ./...
 
-# Run conformance tests against a device
-go run ./cmd/mash-test -target localhost:8443 -verbose
+# Generate all code (features, use cases, mocks)
+make generate
 
-# Run with PICS filtering
-go run ./cmd/mash-test -target localhost:8443 -pics testdata/pics/ev-charger.yaml
+# Generate feature code from YAML definitions
+make features
+
+# Generate use case definitions from YAML
+make usecases
 ```
 
 ### Key Packages
@@ -61,7 +79,23 @@ go run ./cmd/mash-test -target localhost:8443 -pics testdata/pics/ev-charger.yam
 | `pkg/discovery` | mDNS advertising and browsing |
 | `pkg/commissioning` | PASE (SPAKE2+) session establishment |
 | `pkg/service` | Device/controller service orchestration |
+| `pkg/model` | Device model types (endpoints, features) -- partially generated |
+| `pkg/features` | Feature implementations -- partially generated from YAML |
+| `pkg/usecase` | Use case definitions -- generated from YAML |
 | `internal/testharness` | Test infrastructure for conformance testing |
+
+### Code Generation Pipeline
+
+Feature and model code is generated from YAML definitions in `docs/features/`:
+
+```
+docs/features/<feature>/1.0.yaml   -->  mash-featgen  -->  pkg/features/<feature>_gen.go
+docs/features/protocol-versions.yaml  -->  mash-featgen  -->  pkg/model/*_gen.go
+docs/features/_shared/1.0.yaml    -->  mash-featgen  -->  pkg/features/shared_gen.go
+docs/usecases/1.0/*.yaml          -->  mash-ucgen    -->  pkg/usecase/definitions_gen.go
+```
+
+**Important:** `*_gen.go` files are generated -- edit the YAML source or generator templates, not the generated files. Hand-written helpers coexist alongside generated code in the same packages.
 
 ## Key Concepts
 
@@ -71,54 +105,32 @@ go run ./cmd/mash-test -target localhost:8443 -pics testdata/pics/ev-charger.yam
 - Endpoint 1+: Functional endpoints (EV_CHARGER, INVERTER, BATTERY, PV_STRING, etc.)
 
 ### Core Features
-| Feature | Purpose | Key Decisions |
-|---------|---------|---------------|
+
+See [docs/features/README.md](docs/features/README.md) for the full registry, numbering conventions, and device composition examples.
+
+| Feature | Question | Key Decisions |
+|---------|----------|---------------|
 | Electrical | "What CAN it do?" | Static config, phase mapping |
 | Measurement | "What IS it doing?" | AC/DC telemetry |
 | EnergyControl | "What SHOULD it do?" | Limits/setpoints, ControlStateEnum |
 | Status | "Is it working?" | OperatingStateEnum, faults |
+| ChargingSession | "What's the EV doing?" | Session lifecycle, SoC |
+| Tariff / Signals / Plan | Price/forecast input/output | See feature specs |
 
 ### Multi-Zone Architecture
 - Devices support up to 5 zones (controllers)
 - Zone types: GRID_OPERATOR > BUILDING_MANAGER > HOME_MANAGER > USER_APP
 - Limits: Most restrictive wins (safety)
 - Setpoints: Highest priority wins
+- Details: [docs/multi-zone.md](docs/multi-zone.md)
 
 ### State Machines
 - **ControlStateEnum**: AUTONOMOUS, CONTROLLED, LIMITED, FAILSAFE, OVERRIDE
 - **ProcessStateEnum**: NONE, AVAILABLE, SCHEDULED, RUNNING, PAUSED, COMPLETED, ABORTED
-- These are orthogonal - process continues during FAILSAFE
+- These are orthogonal -- process continues during FAILSAFE
 
 ### Certificate Renewal
-Controllers can renew device certificates without disconnecting the TLS session:
-
-**Protocol Flow:**
-1. Controller sends `CertRenewalRequest` (MsgType 30) with 32-byte nonce
-2. Device generates new key pair and responds with `CertRenewalCSR` (MsgType 31)
-3. Controller signs CSR with Zone CA, sends `CertRenewalInstall` (MsgType 32)
-4. Device installs new cert atomically, responds with `CertRenewalAck` (MsgType 33)
-
-**Key Design Points:**
-- Renewal happens in-session (no TLS reconnection required)
-- Subscriptions and session state are preserved
-- Controller-initiated, typically 30 days before expiry
-- Device generates new key pair for each renewal (not reused)
-
-**CLI Commands (mash-controller):**
-```
-renew <device-id>    # Renew specific device certificate
-renew --all          # Renew all devices needing renewal
-renew --status       # Show certificate expiry status
-```
-
-**Key Files:**
-| File | Purpose |
-|------|---------|
-| `pkg/commissioning/renewal_messages.go` | Wire protocol messages (30-33) |
-| `pkg/service/renewal_tracker.go` | Expiry tracking |
-| `pkg/service/device_renewal.go` | Device-side handler |
-| `pkg/service/controller_renewal.go` | Controller-side handler |
-| `cmd/mash-controller/interactive/cmd_renew.go` | CLI command |
+Controllers renew device certificates in-session (no TLS reconnection). MsgTypes 30-33. Key files: `pkg/commissioning/renewal_messages.go`, `pkg/service/renewal_tracker.go`, `pkg/service/device_renewal.go`, `pkg/service/controller_renewal.go`. Details: [docs/security.md](docs/security.md)
 
 ## Documentation Conventions
 
@@ -126,11 +138,7 @@ renew --status       # Show certificate expiry status
 Design decisions are tracked in `docs/decision-log.md` as DEC-XXX (e.g., DEC-026 for EnergyControl design).
 
 ### EEBUS Comparison
-Documentation frequently references EEBUS use cases being replaced:
-- LPC/LPP (power limits) → EnergyControl
-- MPC/MGCP (monitoring) → Measurement
-- CEVC/OSCEV (EV charging) → ChargingSession + Signals + Plan
-- OHPCF (heat pump) → EnergyControl with ProcessStateEnum
+See [docs/features/README.md](docs/features/README.md) for the full EEBUS use case mapping table. Key replacements: LPC/LPP -> EnergyControl, MPC/MGCP -> Measurement, CEVC/OSCEV -> ChargingSession + Signals + Plan, OHPCF -> EnergyControl with ProcessStateEnum.
 
 ### Matter Alignment
 Protocol takes inspiration from Matter for:
@@ -143,15 +151,17 @@ Protocol takes inspiration from Matter for:
 
 ### Specification Work
 1. Read existing specifications in `docs/`
-2. Review behavior specs in `docs/testing/behavior/`
+2. Feature definitions: human-readable `.md` + machine-readable `.yaml` in `docs/features/`
 3. Add design decisions to `docs/decision-log.md`
-4. Create/update feature specs in `docs/features/`
+4. When changing feature attributes/enums, update the YAML source and run `make features`
 
 ### Implementation Work
 1. Follow TDD: write tests first in `*_test.go`
-2. Use `go test ./... -v` to run all tests
-3. Use `mash-test` CLI to run conformance tests
-4. Add YAML test cases in `mash-go/testdata/cases/`
+2. Use `go test ./...` to run all tests
+3. Never edit `*_gen.go` files directly -- edit YAML or generator templates
+4. After YAML changes: `cd mash-go && make generate`
+5. Use `mash-test` CLI to run conformance tests
+6. Add YAML test cases in `mash-go/testdata/cases/`
 
 ### CBOR Serialization
 The protocol uses CBOR with integer keys for compactness:
