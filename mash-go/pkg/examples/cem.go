@@ -8,6 +8,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/usecase"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -74,6 +75,9 @@ type ConnectedDevice struct {
 	NominalMaxProduction      *int64 // From Electrical
 	ContractualConsumptionMax *int64 // From EnergyControl (EMS only)
 	ContractualProductionMax  *int64 // From EnergyControl (EMS only)
+
+	// Use case discovery results
+	UseCases *usecase.DeviceUseCases
 
 	// Active subscriptions
 	SubscriptionIDs []uint32
@@ -205,6 +209,18 @@ func (c *CEM) ConnectedDeviceIDs() []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// SetDeviceUseCases stores use case discovery results for a connected device.
+func (c *CEM) SetDeviceUseCases(deviceID string, useCases *usecase.DeviceUseCases) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	device, exists := c.connectedDevices[deviceID]
+	if !exists {
+		return
+	}
+	device.UseCases = useCases
 }
 
 // ReadDeviceInfo reads and caches device information from a connected device.

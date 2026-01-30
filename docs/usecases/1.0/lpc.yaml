@@ -1,0 +1,47 @@
+name: LPC
+fullName: Limit Power Consumption
+specVersion: "1.0"
+description: >
+  Controller limits active power consumption of a device.
+  Replaces EEBUS LPC use case.
+
+endpointTypes:
+  - INVERTER
+  - EV_CHARGER
+  - BATTERY
+  - HEAT_PUMP
+  - WATER_HEATER
+  - HVAC
+  - APPLIANCE
+
+features:
+  - feature: EnergyControl
+    required: true
+    attributes:
+      - name: acceptsLimits
+        requiredValue: true
+    commands:
+      - setLimit
+      - clearLimit
+    subscriptions:
+      - controlState
+      - effectiveConsumptionLimit
+      - overrideReason
+      - overrideDirection
+
+  - feature: Electrical
+    required: true
+    attributes:
+      - name: nominalMaxConsumption
+
+  - feature: Measurement
+    required: false
+    subscriptions:
+      - acActivePower
+
+commands:
+  - limit
+  - clear
+  - capacity
+  - override
+  - lpc-demo

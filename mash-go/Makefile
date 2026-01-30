@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration generate mocks install-mockery lint clean help
+.PHONY: build test test-unit test-integration generate mocks usecases install-mockery lint clean help
 
 # Build all packages
 build:
@@ -23,8 +23,12 @@ test-verbose:
 test-integration-verbose:
 	go test -v -tags=integration ./...
 
-# Generate all code (mocks, etc.)
-generate: mocks
+# Generate all code (mocks, use case definitions, etc.)
+generate: mocks usecases
+
+# Generate use case definitions from YAML
+usecases:
+	go run ./cmd/mash-ucgen -input ../docs/usecases/1.0 -output pkg/usecase/definitions_gen.go -version 1.0
 
 # Generate mocks using mockery
 mocks:

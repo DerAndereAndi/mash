@@ -144,6 +144,9 @@ func (c *Controller) Run(ctx context.Context, cancel context.CancelFunc) {
 		case "resume":
 			c.cmdResume(ctx, args)
 
+		case "capabilities", "caps":
+			c.cmdCapabilities(args)
+
 		case "capacity", "cap":
 			c.cmdCapacity(ctx, args)
 
@@ -190,6 +193,9 @@ MASH Controller Commands:
     inspect <device-id> [path]        - Inspect a connected device
     read <device-id>/<path>           - Read an attribute value
     write <device-id>/<path> <value>  - Write an attribute value
+
+  Use Cases:
+    capabilities <device-id>              - Show matched use cases and capabilities
 
   Control:
     limit <device-id> <kw> [cause] [duration-sec] - Set power limit
@@ -262,6 +268,19 @@ func (c *Controller) cmdDevices() {
 		fmt.Fprintf(c.rl.Stdout(),"      Type: %s\n", d.DeviceType)
 		fmt.Fprintf(c.rl.Stdout(),"      Status: %s\n", status)
 		fmt.Fprintf(c.rl.Stdout(),"      Last seen: %s\n", d.LastSeen.Format("15:04:05"))
+
+		// Show matched use cases if available
+		if dev := c.cem.GetDevice(d.ID); dev != nil && dev.UseCases != nil {
+			matched := dev.UseCases.MatchedUseCases()
+			if len(matched) > 0 {
+				names := make([]string, len(matched))
+				for i, n := range matched {
+					names[i] = string(n)
+				}
+				fmt.Fprintf(c.rl.Stdout(),"      Use cases: %s\n", strings.Join(names, ", "))
+			}
+		}
+
 		fmt.Fprintln(c.rl.Stdout(),)
 	}
 }
@@ -566,6 +585,12 @@ func (c *Controller) cmdLimit(ctx context.Context, args []string) {
 		return
 	}
 
+	// Guard: check if device supports LPC
+	if !c.deviceSupportsCommand(deviceID, "limit") {
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support LPC (limit command unavailable)")
+		return
+	}
+
 	powerKW, err := strconv.ParseFloat(args[1], 64)
 	if err != nil {
 		fmt.Fprintf(c.rl.Stdout(), "Invalid power: %v\n", err)
@@ -650,6 +675,11 @@ func (c *Controller) cmdClear(ctx context.Context, args []string) {
 		return
 	}
 
+	if !c.deviceSupportsCommand(deviceID, "clear") {
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support LPC (clear command unavailable)")
+		return
+	}
+
 	fmt.Fprintf(c.rl.Stdout(),"Clearing power limit on %s...\n", deviceID)
 
 	if err := c.cem.ClearPowerLimit(ctx, deviceID, 1); err != nil {
@@ -673,6 +703,11 @@ func (c *Controller) cmdPause(ctx context.Context, args []string) {
 		return
 	}
 
+	if !c.deviceSupportsCommand(deviceID, "limit") {
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support LPC (pause command unavailable)")
+		return
+	}
+
 	fmt.Fprintf(c.rl.Stdout(),"Pausing device %s...\n", deviceID)
 
 	if err := c.cem.PauseDevice(ctx, deviceID, 1); err != nil {
@@ -693,6 +728,11 @@ func (c *Controller) cmdResume(ctx context.Context, args []string) {
 	deviceID := c.resolveDeviceID(args[0])
 	if deviceID == "" {
 		fmt.Fprintf(c.rl.Stdout(),"Device not found: %s\n", args[0])
+		return
+	}
+
+	if !c.deviceSupportsCommand(deviceID, "limit") {
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support LPC (resume command unavailable)")
 		return
 	}
 
@@ -806,6 +846,61 @@ func (c *Controller) cmdOverride(ctx context.Context, args []string) {
 	}
 }
 
+// cmdCapabilities shows matched use cases for a device.
+func (c *Controller) cmdCapabilities(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintln(c.rl.Stdout(), "Usage: capabilities <device-id>")
+		return
+	}
+
+	deviceID := c.resolveDeviceID(args[0])
+	if deviceID == "" {
+		fmt.Fprintf(c.rl.Stdout(), "Device not found: %s\n", args[0])
+		return
+	}
+
+	device := c.cem.GetDevice(deviceID)
+	if device == nil {
+		fmt.Fprintf(c.rl.Stdout(), "Device not connected in CEM: %s\n", deviceID)
+		return
+	}
+
+	if device.UseCases == nil {
+		fmt.Fprintf(c.rl.Stdout(), "No capability data for %s (discovery not completed)\n", deviceID)
+		return
+	}
+
+	fmt.Fprintf(c.rl.Stdout(), "\nCapabilities for %s:\n", deviceID)
+	fmt.Fprintln(c.rl.Stdout(), "-------------------------------------------")
+
+	for _, m := range device.UseCases.Matches {
+		status := "not supported"
+		if m.Matched {
+			status = fmt.Sprintf("supported (endpoint %d)", m.EndpointID)
+		}
+		fmt.Fprintf(c.rl.Stdout(), "  %-5s %s\n", string(m.UseCase)+":", status)
+
+		if !m.Matched && len(m.MissingRequired) > 0 {
+			fmt.Fprintf(c.rl.Stdout(), "         Missing: %s\n", strings.Join(m.MissingRequired, ", "))
+		}
+		if m.Matched && len(m.OptionalMissing) > 0 {
+			fmt.Fprintf(c.rl.Stdout(), "         Optional missing: %s\n", strings.Join(m.OptionalMissing, ", "))
+		}
+	}
+
+	cmds := device.UseCases.SupportedCommands()
+	if len(cmds) > 0 {
+		cmdList := make([]string, 0, len(cmds))
+		for cmd := range cmds {
+			cmdList = append(cmdList, cmd)
+		}
+		fmt.Fprintf(c.rl.Stdout(), "\n  Available commands: %s\n", strings.Join(cmdList, ", "))
+	} else {
+		fmt.Fprintln(c.rl.Stdout(), "\n  No interactive commands available (monitoring only)")
+	}
+	fmt.Fprintln(c.rl.Stdout())
+}
+
 // cmdLpcDemo runs an automated LPC/LPP demonstration sequence.
 func (c *Controller) cmdLpcDemo(ctx context.Context, args []string) {
 	if len(args) < 1 {
@@ -817,6 +912,11 @@ func (c *Controller) cmdLpcDemo(ctx context.Context, args []string) {
 	deviceID := c.resolveDeviceID(args[0])
 	if deviceID == "" {
 		fmt.Fprintf(c.rl.Stdout(), "Device not found: %s\n", args[0])
+		return
+	}
+
+	if !c.deviceSupportsCommand(deviceID, "lpc-demo") {
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support LPC (lpc-demo command unavailable)")
 		return
 	}
 
@@ -995,6 +1095,16 @@ func (c *Controller) cmdReconnect(ctx context.Context) {
 	}
 
 	fmt.Fprintln(c.rl.Stdout(), "Operational discovery started - waiting for devices to appear")
+}
+
+// deviceSupportsCommand checks if a device supports a given interactive command.
+// Returns true if no use case data is available (permissive fallback).
+func (c *Controller) deviceSupportsCommand(deviceID string, command string) bool {
+	dev := c.cem.GetDevice(deviceID)
+	if dev == nil || dev.UseCases == nil {
+		return true // No discovery data = allow (backward compatible)
+	}
+	return dev.UseCases.SupportedCommands()[command]
 }
 
 // resolveDeviceID resolves a partial device ID to a full device ID.

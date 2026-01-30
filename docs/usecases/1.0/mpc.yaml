@@ -1,0 +1,16 @@
+name: MPC
+fullName: Monitor Power Consumption
+specVersion: "1.0"
+description: >
+  Controller monitors active power consumption of a device.
+  Replaces EEBUS MPC use case. Read-only, no commands.
+
+endpointTypes: []
+
+features:
+  - feature: Measurement
+    required: true
+    subscriptions:
+      - acActivePower
+
+commands: []

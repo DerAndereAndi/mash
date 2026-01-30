@@ -73,6 +73,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/persistence"
 	"github.com/mash-protocol/mash-go/pkg/service"
+	"github.com/mash-protocol/mash-go/pkg/usecase"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -442,14 +443,69 @@ func setupDeviceMonitoring(deviceID string) {
 		}
 	})
 
-	// Subscribe to Measurement on endpoint 1 (functional endpoint)
+	// Discover device capabilities and match use cases
+	profile, err := usecase.DiscoverDevice(ctx, session, deviceID)
+	if err != nil {
+		log.Printf("[MONITOR] Discovery failed, falling back to blind subscription: %v", err)
+		blindSubscribe(ctx, deviceID)
+		return
+	}
+
+	matches := usecase.MatchAll(profile, usecase.Registry)
+	cem.SetDeviceUseCases(deviceID, matches)
+
+	matched := matches.MatchedUseCases()
+	if len(matched) > 0 {
+		names := make([]string, len(matched))
+		for i, n := range matched {
+			names[i] = string(n)
+		}
+		log.Printf("[MONITOR] Device %s supports: [%s]", deviceID[:8], strings.Join(names, " "))
+	} else {
+		log.Printf("[MONITOR] Device %s: no use cases matched", deviceID[:8])
+	}
+
+	// Subscribe based on matched use cases
+	for _, m := range matches.Matches {
+		if !m.Matched {
+			continue
+		}
+		def := usecase.Registry[m.UseCase]
+		for _, freq := range def.Features {
+			if len(freq.Subscriptions) == 0 {
+				continue
+			}
+			attrIDs := make([]uint16, len(freq.Subscriptions))
+			for i, sub := range freq.Subscriptions {
+				attrIDs[i] = sub.AttrID
+			}
+			subID, values, subErr := session.Subscribe(ctx, m.EndpointID, freq.FeatureID, nil)
+			if subErr != nil {
+				log.Printf("[MONITOR] Failed to subscribe to %s/%s on ep %d: %v",
+					string(m.UseCase), freq.FeatureName, m.EndpointID, subErr)
+				continue
+			}
+			// Route priming report through CEM
+			if values != nil {
+				cem.HandleNotification(deviceID, m.EndpointID, freq.FeatureID, values)
+			}
+			// Track subscription
+			dev := cem.GetDevice(deviceID)
+			if dev != nil {
+				dev.SubscriptionIDs = append(dev.SubscriptionIDs, subID)
+			}
+		}
+	}
+}
+
+// blindSubscribe is the fallback when discovery fails.
+func blindSubscribe(ctx context.Context, deviceID string) {
 	if err := cem.SubscribeToMeasurement(ctx, deviceID, 1); err != nil {
 		log.Printf("[MONITOR] Failed to subscribe to measurement: %v", err)
 	} else {
 		log.Printf("[MONITOR] Subscribed to measurements for device %s", deviceID)
 	}
 
-	// Subscribe to EnergyControl on endpoint 1
 	if err := cem.SubscribeToEnergyControl(ctx, deviceID, 1); err != nil {
 		log.Printf("[MONITOR] Failed to subscribe to energy control: %v", err)
 	} else {

@@ -1,0 +1,42 @@
+name: LPP
+fullName: Limit Power Production
+specVersion: "1.0"
+description: >
+  Controller limits active power production (feed-in) of a device.
+  Replaces EEBUS LPP use case. Only applies to bidirectional devices.
+
+endpointTypes:
+  - INVERTER
+  - BATTERY
+
+features:
+  - feature: EnergyControl
+    required: true
+    attributes:
+      - name: acceptsLimits
+        requiredValue: true
+    commands:
+      - setLimit
+      - clearLimit
+    subscriptions:
+      - controlState
+      - effectiveProductionLimit
+      - overrideReason
+      - overrideDirection
+
+  - feature: Electrical
+    required: true
+    attributes:
+      - name: nominalMaxProduction
+
+  - feature: Measurement
+    required: false
+    subscriptions:
+      - acActivePower
+
+commands:
+  - limit
+  - clear
+  - capacity
+  - override
+  - lpc-demo
