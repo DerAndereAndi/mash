@@ -12,6 +12,7 @@
 | Document | Description |
 |----------|-------------|
 | [Protocol Overview](protocol-overview.md) | Vision, architecture, device model |
+| [Multi-Zone](multi-zone.md) | Zone types, roles, priority resolution |
 | [Transport](transport.md) | TLS configuration |
 | [Discovery](discovery.md) | mDNS, QR codes |
 | [Matter Comparison](matter-comparison.md) | PKI model comparison with Matter |

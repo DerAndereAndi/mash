@@ -201,6 +201,36 @@ Response:
 }
 ```
 
+### CEVC Combined Signal (Prices + Limits + PV Forecast)
+
+An EMS can send a combined signal containing prices, power limits, and PV forecast in a single structure. This is the key input for CEVC-style coordinated EV charging:
+
+```cbor
+{
+  signalId: 4001,
+  type: COMBINED,
+  source: LOCAL_EMS,
+  priority: 3,
+  startTime: 1706194800,             // 18:00
+  slots: [
+    { duration: 7200, price: 3500, maxPower: 11000000, forecastPower: 0 },
+    // 18-20: 0.35/kWh, max 11kW, no PV
+    { duration: 7200, price: 1500, maxPower: 11000000, forecastPower: 0 },
+    // 20-22: 0.15/kWh (cheap!), max 11kW, no PV
+    { duration: 7200, price: 1200, maxPower: 11000000, forecastPower: 0 },
+    // 22-00: 0.12/kWh (cheapest), max 11kW, no PV
+    { duration: 7200, price: 1500, maxPower: 11000000, forecastPower: 0 },
+    // 00-02: 0.15/kWh, max 11kW, no PV
+    { duration: 7200, price: 2000, maxPower: 11000000, forecastPower: 0 },
+    // 02-04: 0.20/kWh, max 11kW, no PV
+    { duration: 7200, price: 2500, maxPower: 11000000, forecastPower: 3000000 },
+    // 04-06: 0.25/kWh, max 11kW, 3kW PV expected
+  ]
+}
+```
+
+The device uses this combined signal to optimize its charging plan -- shifting load to the cheapest slots while respecting power limits and factoring in expected PV surplus.
+
 ---
 
 ## EEBUS Use Case Coverage

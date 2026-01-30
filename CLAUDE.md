@@ -16,13 +16,13 @@ MASH (Minimal Application-layer Smart Home Protocol) is a lightweight protocol d
 ```
 mash/
 ├── docs/                   # Protocol specification
-│   ├── protocol-overview.md
-│   ├── protocol-design.md
+│   ├── protocol-overview.md  # Canonical architecture guide
 │   ├── decision-log.md
 │   ├── transport.md
 │   ├── security.md
 │   ├── discovery.md
 │   ├── interaction-model.md
+│   ├── multi-zone.md        # Multi-zone architecture
 │   ├── features/           # Feature specifications
 │   └── testing/            # Test specifications
 └── mash-go/                # Go reference implementation

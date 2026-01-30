@@ -165,6 +165,63 @@ If device consumes 5kW for 1 hour:
 }
 ```
 
+### German Household Consumption Tariff (Detailed)
+
+A realistic German tariff with all component types and power tiers:
+
+```cbor
+{
+  tariffId: 1,
+  tariffName: "Stadtwerke Berlin Flex",
+  currency: "EUR",
+  priceUnit: PER_KWH,
+  components: [
+    { componentId: 1, type: ENERGY, name: "Energy", price: 0 },               // variable via Signals
+    { componentId: 2, type: GRID_FEE, name: "Grid fee", price: 800 },         // 0.08 EUR fixed
+    { componentId: 3, type: RENEWABLE_LEVY, name: "EEG surcharge", price: 350 }, // 0.035 EUR
+    { componentId: 4, type: RENEWABLE_LEVY, name: "KWKG levy", price: 50 },   // 0.005 EUR
+    { componentId: 5, type: TAX, name: "Electricity tax", price: 205 },        // 0.0205 EUR
+    { componentId: 6, type: TAX, name: "VAT 19%", price: 0 }                  // calculated
+  ],
+  powerTiers: [
+    { tierId: 1, minPower: 0,       maxPower: 6000000,  price: 0 },    // 0-6kW: standard rate
+    { tierId: 2, minPower: 6000000, maxPower: 22000000, price: 625 }   // >6kW: +0.0625 EUR premium
+  ]
+}
+```
+
+### Feed-in Tariff (PV Surplus)
+
+```cbor
+{
+  tariffId: 2,
+  tariffName: "Feed-in Compensation",
+  currency: "EUR",
+  priceUnit: PER_KWH,
+  components: [
+    { componentId: 1, type: ENERGY, name: "Feed-in rate", price: 820 }  // 0.082 EUR/kWh
+  ]
+  // No power tiers - flat rate for all production
+}
+```
+
+### Nordic Spot-Based Tariff
+
+```cbor
+{
+  tariffId: 3,
+  tariffName: "Nordpool Spot",
+  currency: "SEK",
+  priceUnit: PER_KWH,
+  components: [
+    { componentId: 1, type: ENERGY, name: "Spot price", price: 0 },             // 100% variable
+    { componentId: 2, type: GRID_FEE, name: "Network fee", price: 4500 },       // 0.45 SEK fixed
+    { componentId: 3, type: TAX, name: "Energy tax", price: 3600 },             // 0.36 SEK
+    { componentId: 4, type: TAX, name: "VAT 25%", price: 0 }                    // calculated
+  ]
+}
+```
+
 ---
 
 ## Price Calculation

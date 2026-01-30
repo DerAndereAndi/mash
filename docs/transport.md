@@ -13,6 +13,7 @@
 |----------|-------------|
 | [Protocol Overview](protocol-overview.md) | Vision, architecture, device model |
 | [Security](security.md) | TLS certificates, commissioning |
+| [Multi-Zone](multi-zone.md) | Zone types, roles, connection model |
 | [Interaction Model](interaction-model.md) | Message semantics |
 
 ---

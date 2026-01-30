@@ -4,9 +4,9 @@
 >
 > A lightweight, streamlined replacement for EEBUS SHIP/SPINE
 
-**Status:** Draft - Initial Exploration
+**Status:** Active
 **Created:** 2025-01-24
-**Last Updated:** 2025-01-25
+**Last Updated:** 2026-01-30
 
 ---
 
@@ -18,6 +18,7 @@
 | [Security](security.md) | Certificates, commissioning, zones, pairing |
 | [Discovery](discovery.md) | mDNS, capability discovery, QR codes |
 | [Interaction Model](interaction-model.md) | Read/Write/Subscribe/Invoke semantics |
+| [Multi-Zone](multi-zone.md) | Zone types, roles, priority resolution |
 | [Features](features/README.md) | Feature definitions and registry |
 | [Decision Log](decision-log.md) | Design decisions and rationale |
 
@@ -177,9 +178,295 @@ evse-001  / 1           / Measurement / acActivePower
 
 ---
 
-## 4. Use Case Coverage
+## 4. Interaction Model
 
-### 4.1 Initial Target Use Cases
+MASH uses 4 operations inspired by Matter (replacing SPINE's 7 RFE modes):
+
+| Operation | Description | Example |
+|-----------|-------------|---------|
+| **Read** | Get current attribute values | Read power measurement |
+| **Write** | Set attribute value (full replace) | Write power limit |
+| **Subscribe** | Register for change notifications | Subscribe to power changes |
+| **Invoke** | Execute command with parameters | StartCharging(targetSoC: 80) |
+
+### 4.1 CBOR Serialization
+
+All messages use CBOR (RFC 8949) with integer keys for compactness. Typical messages are under 2 KB (vs 4 KB+ in EEBUS SPINE with JSON).
+
+```cbor
+// Request
+{
+  1: messageId,        // uint32
+  2: operation,        // uint8: 1=Read, 2=Write, 3=Subscribe, 4=Invoke
+  3: endpointId,       // uint8
+  4: featureId,        // uint8
+  5: payload           // operation-specific data
+}
+```
+
+### 4.2 Connection Model
+
+- **Client initiates** -- controller connects to device (no race conditions)
+- **One connection per device pair** -- persistent, with automatic reconnect
+- **Bidirectional** -- both sides can send requests over the same TLS connection
+
+### 4.3 Subscription Behavior
+
+Subscriptions deliver an initial priming report (all current values) followed by delta notifications (only changed attributes). Interval parameters control notification frequency:
+
+| Parameter | Purpose |
+|-----------|---------|
+| minInterval | Minimum time between notifications (coalescing) |
+| maxInterval | Maximum time without notification (heartbeat) |
+
+Subscriptions are lost on disconnect. Clients must re-subscribe after reconnection.
+
+> **Full specification:** [Interaction Model](interaction-model.md)
+
+---
+
+## 5. Security Model
+
+MASH uses binary trust (paired or not paired) with certificate-based identity. No EEBUS-style trust levels 0-100.
+
+### 5.1 Certificate Hierarchy
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Zone CA (controller-generated, 20yr)                   │
+│    ├── Controller Operational Cert (1yr)                │
+│    └── Device Operational Certs (1yr each)              │
+└─────────────────────────────────────────────────────────┘
+```
+
+Controller and device operational certificates are **siblings** -- both signed by the Zone CA, independently issued and renewed.
+
+### 5.2 Certificate Lifecycle
+
+| Certificate | Validity | Renewal | Revocation |
+|-------------|----------|---------|------------|
+| Device Operational | 1 year | Auto by controller (30 days before expiry) | RemoveZone command |
+| Controller Operational | 1 year | Auto (self-renewal) | Zone CA rotation |
+| Zone CA | 20 years | Manual | Zone dissolution |
+
+### 5.3 Operational Sessions
+
+After commissioning, devices use mutual TLS authentication:
+
+```
+Controller                         Device
+     │                               │
+     │── TLS with Operational Cert ─►│  Mutual authentication
+     │◄── Verify same Zone ──────────┤
+     │                               │
+     │◄── Encrypted Session ────────►│  Read/Write/Subscribe/Invoke
+```
+
+Both sides present operational certificates and verify they are signed by the same Zone CA. All subsequent communication is encrypted with TLS 1.3.
+
+> **Full specification:** [Security](security.md)
+
+---
+
+## 6. Discovery
+
+MASH uses mDNS/DNS-SD for network discovery with four service types:
+
+| Service Type | Purpose | Advertised By |
+|--------------|---------|---------------|
+| `_mashc._udp` | Commissionable device | Device in commissioning mode |
+| `_mash._tcp` | Operational device | Commissioned device |
+| `_mashd._udp` | Commissioner/controller | Zone controller |
+| `_mashp._udp` | Pairing request | Controller seeking specific device |
+
+### 6.1 QR Code Format
+
+```
+MASH:<version>:<discriminator>:<setupcode>:<vendorid>:<productid>
+Example: MASH:1:1234:12345678:0x1234:0x5678
+```
+
+The QR code carries an 8-digit setup code (~27 bits entropy) used for SPAKE2+ during commissioning.
+
+### 6.2 Capability Discovery
+
+After connecting, controllers discover device capabilities through global attributes:
+
+1. **Read endpoint list** -- discover device structure
+2. **Read `specVersion`** from DeviceInfo (endpoint 0) -- protocol compatibility check
+3. **Read global attributes** per endpoint:
+   - `featureMap` (bitmap32) -- which feature sets are supported
+   - `attributeList` -- which specific attributes are implemented
+   - `acceptedCommandList` -- which commands can be invoked
+
+This enables self-describing devices: controllers know exactly what is available without trial and error.
+
+> **Full specification:** [Discovery](discovery.md)
+
+---
+
+## 7. Multi-Zone Model
+
+Devices support up to 5 concurrent controller zones. Each zone has independent certificates and priority.
+
+### 7.1 Zone Types and Priority
+
+| Zone Type | Priority | Typical Owner |
+|-----------|----------|---------------|
+| GRID_OPERATOR | 1 (highest) | DSO, SMGW, utility |
+| BUILDING_MANAGER | 2 | Building EMS |
+| HOME_MANAGER | 3 | Residential EMS |
+| USER_APP | 4 (lowest) | Phone apps |
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Device (EVSE)                           │
+├─────────────────────────────────────────────────────────────┤
+│  Zone 1: GRID_OPERATOR                                       │
+│    └── Operational Cert from SMGW (priority 1)               │
+│                                                              │
+│  Zone 2: HOME_MANAGER                                        │
+│    └── Operational Cert from EMS (priority 3)                │
+│                                                              │
+│  Max Zones: 5                                                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 7.2 Zone Roles
+
+| Role | Capabilities | Typical Entity |
+|------|-------------|----------------|
+| Zone Owner | Has Zone CA, issues certs | EMS, SMGW |
+| Zone Admin | Can commission devices (forwards CSRs to owner) | Phone App |
+| Zone Member | Normal participant with operational cert | Devices |
+
+**Key principle:** Apps are admins, NOT owners. Losing a phone does not break zone operations.
+
+### 7.3 Priority Resolution
+
+Priority resolution is **per-feature**, not global:
+
+```
+LIMITS:    Most restrictive wins (all zones constrain together)
+SETPOINTS: Highest priority zone wins (only one controller active)
+```
+
+**Example:**
+```
+SMGW sets consumptionLimit = 6000W (priority 1)
+EMS sets consumptionLimit = 8000W (priority 3)
+→ Effective limit: 6000W (SMGW wins -- most restrictive)
+→ EMS is notified that its limit was overridden
+```
+
+### 7.4 Connection Model
+
+- One persistent TCP/TLS connection per zone
+- Maximum simultaneous connections: `max_zones + 1` (operational + commissioning)
+- User physical override (button on device) is always possible
+
+> **Full specification:** [Multi-Zone](multi-zone.md)
+
+---
+
+## 8. Commissioning
+
+Commissioning establishes trust between a controller and a device using SPAKE2+ (same as Matter).
+
+### 8.1 High-Level Flow
+
+```
+Controller                         Device
+     │                               │
+     │◄── mDNS: _mashc._udp ────────┤  Device advertising
+     │                               │
+     │── TCP Connect ───────────────►│
+     │                               │
+     │◄── SPAKE2+ (setup code) ─────►│  From QR code (8 digits)
+     │                               │
+     │── Request CSR ───────────────►│
+     │◄── CSR with new key pair ─────┤
+     │                               │
+     │── Install Operational Cert ──►│  Signed by Zone CA
+     │                               │
+     │── Commissioning Complete ────►│
+```
+
+### 8.2 Admin Authorization
+
+Phone apps act as zone admins, not owners. The EMS generates a temporary QR code; the app scans it, completes SPAKE2+, and receives an admin token. The app can then commission devices on behalf of the EMS by forwarding CSRs for signing.
+
+### 8.3 Delegated Commissioning
+
+For grid operator zones, commissioning is delegated through a backend:
+
+```
+User           Phone App       DSO Backend       SMGW          Device
+ │                 │               │               │              │
+ │── Scan QR ─────►│── Upload ────►│── Forward ───►│              │
+ │                 │               │               │── SPAKE2+ ──►│
+ │                 │               │               │◄── Accept ───┤
+```
+
+The user scans the device QR code with an app, which uploads the setup info to the DSO backend. The backend provisions the SMGW, which commissions the device directly.
+
+> **Full specification:** [Security](security.md) (Sections 4, 8, 9)
+
+---
+
+## 9. Feature Catalog
+
+Features are organized by concern, separating static configuration from dynamic telemetry and control:
+
+| Feature | Question | Update Frequency |
+|---------|----------|------------------|
+| **Electrical** | "What CAN this do?" | Rarely (hardware/installation) |
+| **Measurement** | "What IS it doing?" | Constantly (telemetry) |
+| **EnergyControl** | "What SHOULD it do?" | On command (control) |
+| **Status** | "Is it working?" | On state change |
+
+### 9.1 Feature Registry
+
+| ID | Name | Description |
+|----|------|-------------|
+| 0x0001 | DeviceInfo | Device identity and structure |
+| 0x0002 | Status | Operating state, faults |
+| 0x0003 | Electrical | Dynamic electrical configuration |
+| 0x0004 | Measurement | Power, energy, voltage, current telemetry |
+| 0x0005 | EnergyControl | Limits, setpoints, control commands |
+| 0x0006 | ChargingSession | EV charging session data |
+| 0x0007 | Tariff | Price structure, components, power tiers |
+| 0x0008 | Signals | Time-slotted prices, limits, forecasts |
+| 0x0009 | Plan | Device's intended behavior |
+| 0x0100+ | (vendor) | Vendor-specific features |
+
+### 9.2 Feature Map
+
+The `featureMap` global attribute is a 32-bit bitmap for quick capability discovery:
+
+```
+bit 0  (0x0001): CORE       - EnergyCore basics (always set)
+bit 1  (0x0002): FLEX       - Flexible power adjustment
+bit 2  (0x0004): BATTERY    - Battery-specific (SoC, SoH)
+bit 3  (0x0008): EMOB       - E-Mobility/EVSE
+bit 4  (0x0010): SIGNALS    - Incentive signals
+bit 5  (0x0020): TARIFF     - Tariff data
+bit 6  (0x0040): PLAN       - Power plan
+bit 7  (0x0080): PROCESS    - Process lifecycle (OHPCF)
+bit 8  (0x0100): FORECAST   - Power forecasting
+bit 9  (0x0200): ASYMMETRIC - Per-phase asymmetric control
+bit 10 (0x0400): V2X        - Vehicle-to-grid/home
+```
+
+**Discovery pattern:** Read `featureMap` for quick filtering ("show me all V2X devices"), then read feature attributes for details ("can it do asymmetric V2G?").
+
+> **Full specification:** [Features](features/README.md)
+
+---
+
+## 10. Use Case Coverage
+
+### 10.1 Initial Target Use Cases
 
 | Use Case | EEBUS Equivalent | Status |
 |----------|------------------|--------|
@@ -190,7 +477,7 @@ evse-001  / 1           / Measurement / acActivePower
 | Heat Pump Flexibility | OHPCF | Defined |
 | Device Monitoring | MPC, MGCP, MOB, MOI, MPS | Defined |
 
-### 4.2 Future Use Cases
+### 10.2 Future Use Cases
 
 - HVAC Control
 - Smart Appliances (washing machine, dishwasher)
@@ -199,15 +486,15 @@ evse-001  / 1           / Measurement / acActivePower
 
 ---
 
-## 5. References
+## 11. References
 
-### 5.1 EEBUS Analysis Documents
+### 11.1 EEBUS Analysis Documents
 
 - [SHIP Analysis](../analysis/) - Transport layer issues
 - [SPINE Analysis](../analysis/) - Data model issues
 - [Use Case Analysis](../analysis/) - Use case coverage gaps
 
-### 5.2 Matter Protocol Resources
+### 11.2 Matter Protocol Resources
 
 - [Matter Specification](https://csa-iot.org/developer-resource/specifications-download-request/)
 - [Matter SDK](https://github.com/project-chip/connectedhomeip)

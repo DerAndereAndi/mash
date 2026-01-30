@@ -289,6 +289,29 @@ Can discharge = (evMinDischargingRequest < 0)
 }
 ```
 
+### ISO 15118-2 Smart Charger
+
+```cbor
+{
+  state: PLUGGED_IN_CHARGING,
+  sessionId: 12346,
+  sessionStartTime: 1706180400,
+  sessionEnergyCharged: 12000000,     // 12 kWh
+  sessionEnergyDischarged: 0,
+  evIdentifications: [
+    { type: RFID, value: "04E57CD2A1B3" },
+    { type: MAC_EUI48, value: "AA:BB:CC:DD:EE:FF" }
+  ],
+  evStateOfCharge: 65,                // 65%
+  evBatteryCapacity: 75000000,        // 75 kWh
+  evDemandMode: SCHEDULED,
+  evMinEnergyRequest: -18750000,      // -18.75 kWh (can discharge to 40%)
+  evMaxEnergyRequest: 26250000,       // 26.25 kWh (to full)
+  evTargetEnergyRequest: 11250000,    // 11.25 kWh (to 80% target)
+  evDepartureTime: 1706223600         // tomorrow 8am
+}
+```
+
 ### ISO 15118-20 V2G Bidirectional
 
 ```cbor
@@ -340,6 +363,23 @@ Can discharge = (evMinDischargingRequest < 0)
 // Note: EV charging constraints (min/max power) are in the Electrical feature,
 // which updates dynamically when EV connects
 ```
+
+### Dual-Port EVSE (Two Endpoints)
+
+A dual-port EVSE uses separate endpoints for each port, each with its own ChargingSession:
+
+```
+Endpoint 1 (Port 1): ChargingSession
+  state: PLUGGED_IN_CHARGING
+  sessionId: 1001
+  evStateOfCharge: 45%
+
+Endpoint 2 (Port 2): ChargingSession
+  state: NOT_PLUGGED_IN
+  sessionId: 0 (no active session)
+```
+
+Each port operates independently with its own session state, energy accounting, and EV demands. The Electrical feature on each endpoint reflects the dynamic power envelope for that specific port.
 
 ---
 

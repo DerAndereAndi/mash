@@ -636,6 +636,28 @@ effectiveConsumptionSetpoint = 7000000 mW (7 kW requested)
 Device targets: min(7000000, 5000000) = 5000000 mW (limit caps setpoint)
 ```
 
+### V2H Phase Balancing Worked Example
+
+```
+Scenario: House consumption L1=20A, L2=5A, L3=12A at 230V
+          Grid limit 25A per phase
+          EMS wants EV to discharge asymmetrically to balance
+
+1. Grid operator sets limit:
+   SetCurrentLimits({A: 25000, B: 25000, C: 25000}, PRODUCTION)
+
+2. Home EMS sets asymmetric discharge setpoint:
+   SetCurrentSetpoints({A: 10000, B: 2000, C: 5000}, PRODUCTION)
+   cause: PHASE_BALANCING
+
+3. V2H EV receives:
+   effectiveCurrentLimitsProduction = {A: 25000, B: 25000, C: 25000}
+   effectiveCurrentSetpointsProduction = {A: 10000, B: 2000, C: 5000}
+
+4. EV discharges: 10A on L1, 2A on L2, 5A on L3
+   Result: Net house import = L1: 10A, L2: 3A, L3: 7A (balanced)
+```
+
 ---
 
 ## Validation Rules
@@ -770,6 +792,23 @@ When in OVERRIDE state, `overrideDirection` indicates which direction triggered 
 | OHPCF (Heat Pump) | OptionalProcess + ProcessStateEnum + ScheduleProcess |
 | POEN (Power Envelope) | Repeated SetLimit |
 
+### Explicit State Reporting Improvements over EEBUS
+
+| EEBUS Approach | MASH Improvement |
+|----------------|------------------|
+| LPC heartbeat-based state inference | `controlState` explicitly reported by device |
+| LPC implicit failsafe detection | Device reports `controlState=FAILSAFE` directly |
+| OHPCF implicit process status | `processState` explicitly tracks task lifecycle |
+| No unified control state across use cases | Same `ControlStateEnum` for LPC, COB, EVSE, OHPCF |
+
+### MASH Extends Beyond EEBUS
+
+| New Capability | MASH Coverage | Use Case |
+|----------------|---------------|----------|
+| Asymmetric V2H discharge | SetCurrentSetpoints(phases, PRODUCTION) | Phase balancing |
+| Per-phase production limits | SetCurrentLimits(phases, PRODUCTION) | Grid feed-in per phase |
+| Bidirectional per-phase setpoints | SetCurrentSetpoints(phases, BIDIRECTIONAL) | Full V2H optimization |
+
 ### LPC/LPP Data Point Mapping
 
 | EEBUS Data Point | Ref | MASH Equivalent | Notes |
@@ -796,3 +835,4 @@ When in OVERRIDE state, `overrideDirection` indicates which direction triggered 
 | [Status](status.md) | Reports operating state (orthogonal to control state) |
 | [Signals](signals.md) | Provides time-slotted control inputs |
 | [Plan](plan.md) | Device reports its intended response to control |
+| [Multi-Zone](../multi-zone.md) | Zone types, priority, multi-zone architecture |
