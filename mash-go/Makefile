@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration generate mocks usecases install-mockery lint clean help
+.PHONY: build test test-unit test-integration generate mocks usecases features install-mockery lint clean help
 
 # Build all packages
 build:
@@ -23,8 +23,19 @@ test-verbose:
 test-integration-verbose:
 	go test -v -tags=integration ./...
 
-# Generate all code (mocks, use case definitions, etc.)
-generate: mocks usecases
+# Generate all code (mocks, features, use case definitions, etc.)
+generate: mocks features usecases
+
+# Generate feature code from YAML definitions
+features:
+	go run ./cmd/mash-featgen \
+		-features ../docs/features \
+		-shared ../docs/features/_shared/1.0.yaml \
+		-protocol ../docs/features/protocol-versions.yaml \
+		-version 1.0 \
+		-output pkg/features/ \
+		-model-output pkg/model/ \
+		-spec-output pkg/version/specs/1.0.yaml
 
 # Generate use case definitions from YAML
 usecases:

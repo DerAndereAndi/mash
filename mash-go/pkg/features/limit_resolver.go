@@ -96,7 +96,7 @@ func (lr *LimitResolver) Register() {
 }
 
 // HandleSetLimit handles a SetLimit command from a zone.
-func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest) SetLimitResponse {
+func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest) (SetLimitResponse, error) {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
 
@@ -106,12 +106,12 @@ func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest
 		zoneID = lr.ZoneIDFromContext(ctx)
 	}
 	if zoneID == "" {
-		reason := LimitRejectInvalidValue
+		reason := LimitRejectReasonInvalidValue
 		return SetLimitResponse{
 			Applied:      false,
 			RejectReason: &reason,
 			ControlState: lr.ec.ControlState(),
-		}
+		}, nil
 	}
 
 	var zoneType cert.ZoneType
@@ -121,30 +121,30 @@ func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest
 
 	// Validate negative values
 	if req.ConsumptionLimit != nil && *req.ConsumptionLimit < 0 {
-		reason := LimitRejectInvalidValue
+		reason := LimitRejectReasonInvalidValue
 		return SetLimitResponse{
 			Applied:      false,
 			RejectReason: &reason,
 			ControlState: lr.ec.ControlState(),
-		}
+		}, nil
 	}
 	if req.ProductionLimit != nil && *req.ProductionLimit < 0 {
-		reason := LimitRejectInvalidValue
+		reason := LimitRejectReasonInvalidValue
 		return SetLimitResponse{
 			Applied:      false,
 			RejectReason: &reason,
 			ControlState: lr.ec.ControlState(),
-		}
+		}, nil
 	}
 
 	// Check override state
 	if lr.ec.IsOverride() {
-		reason := LimitRejectDeviceOverride
+		reason := LimitRejectReasonDeviceOverride
 		return SetLimitResponse{
 			Applied:      false,
 			RejectReason: &reason,
 			ControlState: ControlStateOverride,
-		}
+		}, nil
 	}
 
 	// Both nil = deactivate this zone's limits
@@ -160,7 +160,7 @@ func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest
 		return SetLimitResponse{
 			Applied:      true,
 			ControlState: lr.ec.ControlState(),
-		}
+		}, nil
 	}
 
 	// Ensure zone has an index for duration timers
@@ -219,11 +219,11 @@ func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest
 		log.Printf("[LIMIT] Zone %s set limit with duration: %ds", zoneID, *req.Duration)
 	}
 
-	return resp
+	return resp, nil
 }
 
 // HandleClearLimit handles a ClearLimit command from a zone.
-func (lr *LimitResolver) HandleClearLimit(ctx context.Context, direction *Direction) error {
+func (lr *LimitResolver) HandleClearLimit(ctx context.Context, req ClearLimitRequest) error {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
 
@@ -237,7 +237,7 @@ func (lr *LimitResolver) HandleClearLimit(ctx context.Context, direction *Direct
 
 	zoneIdx, hasIdx := lr.zoneIndexMap[zoneID]
 
-	if direction == nil {
+	if req.Direction == nil {
 		// Clear both directions
 		lr.consumptionLimits.Clear(zoneID)
 		lr.productionLimits.Clear(zoneID)
@@ -245,12 +245,12 @@ func (lr *LimitResolver) HandleClearLimit(ctx context.Context, direction *Direct
 			_ = lr.timers.CancelTimer(zoneIdx, duration.CmdLimitConsumption)
 			_ = lr.timers.CancelTimer(zoneIdx, duration.CmdLimitProduction)
 		}
-	} else if *direction == DirectionConsumption {
+	} else if *req.Direction == DirectionConsumption {
 		lr.consumptionLimits.Clear(zoneID)
 		if hasIdx {
 			_ = lr.timers.CancelTimer(zoneIdx, duration.CmdLimitConsumption)
 		}
-	} else if *direction == DirectionProduction {
+	} else if *req.Direction == DirectionProduction {
 		lr.productionLimits.Clear(zoneID)
 		if hasIdx {
 			_ = lr.timers.CancelTimer(zoneIdx, duration.CmdLimitProduction)
@@ -261,10 +261,10 @@ func (lr *LimitResolver) HandleClearLimit(ctx context.Context, direction *Direct
 
 	if lr.OnZoneMyChange != nil {
 		changes := make(map[uint16]any)
-		if direction == nil || *direction == DirectionConsumption {
+		if req.Direction == nil || *req.Direction == DirectionConsumption {
 			changes[EnergyControlAttrMyConsumptionLimit] = nil
 		}
-		if direction == nil || *direction == DirectionProduction {
+		if req.Direction == nil || *req.Direction == DirectionProduction {
 			changes[EnergyControlAttrMyProductionLimit] = nil
 		}
 		lr.OnZoneMyChange(zoneID, changes)
@@ -338,8 +338,8 @@ func (lr *LimitResolver) resolveAndApply() {
 	effConsumption, _ := lr.consumptionLimits.ResolveLimits()
 	effProduction, _ := lr.productionLimits.ResolveLimits()
 
-	_ = lr.ec.SetEffectiveConsumptionLimit(effConsumption)
-	_ = lr.ec.SetEffectiveProductionLimit(effProduction)
+	_ = lr.ec.SetEffectiveConsumptionLimitPtr(effConsumption)
+	_ = lr.ec.SetEffectiveProductionLimitPtr(effProduction)
 
 	// Update control state
 	if effConsumption != nil || effProduction != nil {

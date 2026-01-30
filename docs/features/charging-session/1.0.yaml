@@ -1,0 +1,275 @@
+name: ChargingSession
+id: 0x06
+revision: 1
+mandatory: false
+description: "EV charging session management, demands, and optimization."
+
+enums:
+  - name: ChargingState
+    type: uint8
+    description: "EV charging state"
+    values:
+      - { name: NOT_PLUGGED_IN, value: 0x00 }
+      - { name: PLUGGED_IN_NO_DEMAND, value: 0x01 }
+      - { name: PLUGGED_IN_DEMAND, value: 0x02 }
+      - { name: PLUGGED_IN_CHARGING, value: 0x03 }
+      - { name: PLUGGED_IN_DISCHARGING, value: 0x04 }
+      - { name: SESSION_COMPLETE, value: 0x05 }
+      - { name: FAULT, value: 0x06 }
+
+  - name: EVDemandMode
+    type: uint8
+    description: "EV demand information mode"
+    values:
+      - { name: NONE, value: 0x00 }
+      - { name: SINGLE_DEMAND, value: 0x01 }
+      - { name: SCHEDULED, value: 0x02 }
+      - { name: DYNAMIC, value: 0x03 }
+      - { name: DYNAMIC_BIDIRECTIONAL, value: 0x04 }
+
+  - name: EVIDType
+    type: uint8
+    description: "Type of EV identification"
+    values:
+      - { name: PCID, value: 0x00 }
+      - { name: MAC_EUI48, value: 0x01 }
+      - { name: MAC_EUI64, value: 0x02 }
+      - { name: RFID, value: 0x03 }
+      - { name: VIN, value: 0x04 }
+      - { name: CONTRACT_ID, value: 0x05 }
+      - { name: EVCC_ID, value: 0x06 }
+      - { name: OTHER, value: 0xFF }
+
+  - name: ChargingMode
+    type: uint8
+    description: "Charging optimization strategy"
+    values:
+      - { name: OFF, value: 0x00 }
+      - { name: PV_SURPLUS_ONLY, value: 0x01 }
+      - { name: PV_SURPLUS_THRESHOLD, value: 0x02 }
+      - { name: PRICE_OPTIMIZED, value: 0x03 }
+      - { name: SCHEDULED, value: 0x04 }
+
+attributes:
+  # Session state (1-9)
+  - id: 1
+    name: state
+    type: uint8
+    enum: ChargingState
+    access: readOnly
+    mandatory: true
+    default: NOT_PLUGGED_IN
+    description: "Current charging state"
+
+  - id: 2
+    name: sessionId
+    type: uint32
+    access: readOnly
+    mandatory: true
+    default: 0
+    description: "Unique session identifier"
+
+  - id: 3
+    name: sessionStartTime
+    type: uint64
+    access: readOnly
+    nullable: true
+    description: "Timestamp when EV connected"
+
+  - id: 4
+    name: sessionEndTime
+    type: uint64
+    access: readOnly
+    nullable: true
+    description: "Timestamp when session ended"
+
+  # Session energy (10-19)
+  - id: 10
+    name: sessionEnergyCharged
+    type: uint64
+    access: readOnly
+    default: 0
+    unit: "mWh"
+    description: "Energy delivered to EV this session"
+
+  - id: 11
+    name: sessionEnergyDischarged
+    type: uint64
+    access: readOnly
+    default: 0
+    unit: "mWh"
+    description: "Energy returned from EV (V2G) this session"
+
+  # EV identifications (20-29)
+  - id: 20
+    name: evIdentifications
+    type: array
+    items:
+      type: object
+      structName: EVIdentification
+      fields:
+        - { name: type, type: uint8, enum: EVIDType }
+        - { name: value, type: string }
+    access: readOnly
+    nullable: true
+    description: "List of EV identifiers"
+
+  # EV battery state (30-39)
+  - id: 30
+    name: evStateOfCharge
+    type: uint8
+    access: readOnly
+    nullable: true
+    unit: "%"
+    description: "Current EV state of charge"
+
+  - id: 31
+    name: evBatteryCapacity
+    type: uint64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "EV battery capacity"
+
+  # EV energy demands (40-49)
+  - id: 40
+    name: evDemandMode
+    type: uint8
+    enum: EVDemandMode
+    access: readOnly
+    default: NONE
+    description: "EV demand information mode"
+
+  - id: 41
+    name: evMinEnergyRequest
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Energy to minimum SoC (negative=can discharge)"
+
+  - id: 42
+    name: evMaxEnergyRequest
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Energy to full charge"
+
+  - id: 43
+    name: evTargetEnergyRequest
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Energy to target SoC"
+
+  - id: 44
+    name: evDepartureTime
+    type: uint64
+    access: readOnly
+    nullable: true
+    description: "Timestamp when EV needs to leave"
+
+  # V2G discharge constraints (50-59)
+  - id: 50
+    name: evMinDischargingRequest
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Minimum discharge limit (must be <0)"
+
+  - id: 51
+    name: evMaxDischargingRequest
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Maximum discharge limit (must be >=0)"
+
+  - id: 52
+    name: evDischargeBelowTargetPermitted
+    type: bool
+    access: readOnly
+    nullable: true
+    description: "Allow V2G below target SoC"
+
+  # Estimated times (60-69)
+  - id: 60
+    name: estimatedTimeToMinSoC
+    type: uint32
+    access: readOnly
+    nullable: true
+    unit: "s"
+    description: "Estimated time to reach minimum SoC"
+
+  - id: 61
+    name: estimatedTimeToTargetSoC
+    type: uint32
+    access: readOnly
+    nullable: true
+    unit: "s"
+    description: "Estimated time to reach target SoC"
+
+  - id: 62
+    name: estimatedTimeToFullSoC
+    type: uint32
+    access: readOnly
+    nullable: true
+    unit: "s"
+    description: "Estimated time to full charge"
+
+  # Charging mode (70-79)
+  - id: 70
+    name: chargingMode
+    type: uint8
+    enum: ChargingMode
+    access: readOnly
+    default: OFF
+    description: "Active optimization strategy"
+
+  - id: 71
+    name: supportedChargingModes
+    type: array
+    items:
+      type: uint8
+      enum: ChargingMode
+    access: readOnly
+    description: "Optimization modes EVSE supports"
+
+  - id: 72
+    name: surplusThreshold
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mW"
+    description: "Threshold for PV_SURPLUS_THRESHOLD mode"
+
+  # Start/stop delays (80-89)
+  - id: 80
+    name: startDelay
+    type: uint32
+    access: readOnly
+    default: 0
+    unit: "s"
+    description: "Delay before (re)starting charge"
+
+  - id: 81
+    name: stopDelay
+    type: uint32
+    access: readOnly
+    default: 0
+    unit: "s"
+    description: "Delay before pausing charge"
+
+commands:
+  - id: 1
+    name: setChargingMode
+    mandatory: true
+    description: "Set the optimization strategy"
+    parameters:
+      - { name: mode, type: uint8, enum: ChargingMode, required: true }
+      - { name: surplusThreshold, type: int64, required: false }
+      - { name: startDelay, type: uint32, required: false }
+      - { name: stopDelay, type: uint32, required: false }

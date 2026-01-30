@@ -1,0 +1,113 @@
+name: Electrical
+id: 0x03
+revision: 1
+mandatory: false
+description: "Electrical characteristics and capability envelope of an endpoint."
+
+attributes:
+  # Phase configuration (1-9)
+  - id: 1
+    name: phaseCount
+    type: uint8
+    access: readOnly
+    mandatory: true
+    default: 1
+    min: 1
+    max: 3
+    description: "Number of phases (1, 2, or 3)"
+
+  - id: 2
+    name: phaseMapping
+    type: map
+    mapKeyType: Phase
+    mapValueType: GridPhase
+    access: readOnly
+    description: "Device phase to grid phase mapping"
+
+  # Voltage/frequency
+  - id: 3
+    name: nominalVoltage
+    type: uint16
+    access: readOnly
+    default: 230
+    unit: "V"
+    description: "Nominal voltage"
+
+  - id: 4
+    name: nominalFrequency
+    type: uint8
+    access: readOnly
+    default: 50
+    unit: "Hz"
+    description: "Nominal frequency"
+
+  # Direction capability
+  - id: 5
+    name: supportedDirections
+    type: uint8
+    enum: Direction
+    access: readOnly
+    mandatory: true
+    default: CONSUMPTION
+    description: "Power flow direction capability"
+
+  # Nameplate power ratings (10-19)
+  - id: 10
+    name: nominalMaxConsumption
+    type: int64
+    access: readOnly
+    mandatory: true
+    default: 0
+    unit: "mW"
+    description: "Maximum consumption power"
+
+  - id: 11
+    name: nominalMaxProduction
+    type: int64
+    access: readOnly
+    default: 0
+    unit: "mW"
+    description: "Maximum production power (0 if N/A)"
+
+  - id: 12
+    name: nominalMinPower
+    type: int64
+    access: readOnly
+    default: 0
+    unit: "mW"
+    description: "Minimum operating point"
+
+  # Nameplate current ratings
+  - id: 13
+    name: maxCurrentPerPhase
+    type: int64
+    access: readOnly
+    default: 0
+    unit: "mA"
+    description: "Maximum current per phase"
+
+  - id: 14
+    name: minCurrentPerPhase
+    type: int64
+    access: readOnly
+    default: 0
+    unit: "mA"
+    description: "Minimum current per phase"
+
+  # Per-phase capabilities
+  - id: 15
+    name: supportsAsymmetric
+    type: uint8
+    enum: AsymmetricSupport
+    access: readOnly
+    default: NONE
+    description: "Per-phase asymmetric control support"
+
+  # Storage (20-29)
+  - id: 20
+    name: energyCapacity
+    type: int64
+    access: readOnly
+    default: 0
+    unit: "mWh"
+    description: "Battery/storage capacity (0 if N/A)"

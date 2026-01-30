@@ -1,0 +1,42 @@
+version: "1.0"
+enums:
+  - name: Phase
+    type: uint8
+    description: "Device phase (internal)"
+    values:
+      - { name: A, value: 0x00 }
+      - { name: B, value: 0x01 }
+      - { name: C, value: 0x02 }
+
+  - name: GridPhase
+    type: uint8
+    description: "Grid phase"
+    values:
+      - { name: L1, value: 0x00 }
+      - { name: L2, value: 0x01 }
+      - { name: L3, value: 0x02 }
+
+  - name: PhasePair
+    type: uint8
+    description: "Phase pair for phase-to-phase voltage"
+    values:
+      - { name: AB, value: 0x00 }
+      - { name: BC, value: 0x01 }
+      - { name: CA, value: 0x02 }
+
+  - name: Direction
+    type: uint8
+    description: "Power flow direction capability"
+    values:
+      - { name: CONSUMPTION, value: 0x00 }
+      - { name: PRODUCTION, value: 0x01 }
+      - { name: BIDIRECTIONAL, value: 0x02 }
+
+  - name: AsymmetricSupport
+    type: uint8
+    description: "Per-phase asymmetric control capability"
+    values:
+      - { name: NONE, value: 0x00 }
+      - { name: CONSUMPTION, value: 0x01 }
+      - { name: PRODUCTION, value: 0x02 }
+      - { name: BIDIRECTIONAL, value: 0x03 }

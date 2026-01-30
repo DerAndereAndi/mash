@@ -1,0 +1,216 @@
+name: Measurement
+id: 0x04
+revision: 1
+mandatory: false
+description: "Real-time telemetry: power, energy, voltage, current readings."
+
+attributes:
+  # AC Power (1-9) - signed: + consumption, - production
+  - id: 1
+    name: acActivePower
+    type: int64
+    access: readOnly
+    mandatory: true
+    nullable: true
+    unit: "mW"
+    description: "Active/real power"
+
+  - id: 2
+    name: acReactivePower
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mVAR"
+    description: "Reactive power"
+
+  - id: 3
+    name: acApparentPower
+    type: uint64
+    access: readOnly
+    nullable: true
+    unit: "mVA"
+    description: "Apparent power (always positive)"
+
+  # Per-phase AC power (10-19)
+  - id: 10
+    name: acActivePowerPerPhase
+    type: map
+    mapKeyType: Phase
+    mapValueType: int64
+    access: readOnly
+    nullable: true
+    description: "Active power per phase (Phase -> mW)"
+
+  - id: 11
+    name: acReactivePowerPerPhase
+    type: map
+    mapKeyType: Phase
+    mapValueType: int64
+    access: readOnly
+    nullable: true
+    description: "Reactive power per phase (Phase -> mVAR)"
+
+  - id: 12
+    name: acApparentPowerPerPhase
+    type: map
+    mapKeyType: Phase
+    mapValueType: uint64
+    access: readOnly
+    nullable: true
+    description: "Apparent power per phase (Phase -> mVA)"
+
+  # AC Current & Voltage (20-29)
+  - id: 20
+    name: acCurrentPerPhase
+    type: map
+    mapKeyType: Phase
+    mapValueType: int64
+    access: readOnly
+    nullable: true
+    description: "Current per phase (Phase -> mA, signed)"
+
+  - id: 21
+    name: acVoltagePerPhase
+    type: map
+    mapKeyType: Phase
+    mapValueType: uint32
+    access: readOnly
+    nullable: true
+    description: "Phase-to-neutral voltage (Phase -> mV)"
+
+  - id: 22
+    name: acVoltagePhaseToPhasePair
+    type: map
+    mapKeyType: PhasePair
+    mapValueType: uint32
+    access: readOnly
+    nullable: true
+    description: "Phase-to-phase voltage (PhasePair -> mV)"
+
+  - id: 23
+    name: acFrequency
+    type: uint32
+    access: readOnly
+    nullable: true
+    unit: "mHz"
+    description: "Grid frequency (e.g., 50000 = 50.000 Hz)"
+
+  - id: 24
+    name: powerFactor
+    type: int16
+    access: readOnly
+    nullable: true
+    min: -1000
+    max: 1000
+    description: "Power factor (0.001 units, -1.0 to +1.0)"
+
+  # AC Energy (30-39)
+  - id: 30
+    name: acEnergyConsumed
+    type: uint64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Total energy consumed from grid"
+
+  - id: 31
+    name: acEnergyProduced
+    type: uint64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Total energy produced/fed-in to grid"
+
+  # DC Measurements (40-49)
+  - id: 40
+    name: dcPower
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mW"
+    description: "DC power (+ into device, - out)"
+
+  - id: 41
+    name: dcCurrent
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mA"
+    description: "DC current (+ into device, - out)"
+
+  - id: 42
+    name: dcVoltage
+    type: uint32
+    access: readOnly
+    nullable: true
+    unit: "mV"
+    description: "DC voltage"
+
+  - id: 43
+    name: dcEnergyIn
+    type: uint64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Energy into this component"
+
+  - id: 44
+    name: dcEnergyOut
+    type: uint64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Energy out of this component"
+
+  # Battery State (50-59)
+  - id: 50
+    name: stateOfCharge
+    type: uint8
+    access: readOnly
+    nullable: true
+    min: 0
+    max: 100
+    unit: "%"
+    description: "State of charge (0-100%)"
+
+  - id: 51
+    name: stateOfHealth
+    type: uint8
+    access: readOnly
+    nullable: true
+    min: 0
+    max: 100
+    unit: "%"
+    description: "State of health (0-100%, battery degradation)"
+
+  - id: 52
+    name: stateOfEnergy
+    type: uint64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Available energy at current SoC"
+
+  - id: 53
+    name: useableCapacity
+    type: uint64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Current useable capacity"
+
+  - id: 54
+    name: cycleCount
+    type: uint32
+    access: readOnly
+    nullable: true
+    description: "Charge/discharge cycles"
+
+  # Temperature (60-69)
+  - id: 60
+    name: temperature
+    type: int16
+    access: readOnly
+    nullable: true
+    unit: "centi-C"
+    description: "Temperature (e.g., 2500 = 25.00C)"

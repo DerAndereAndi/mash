@@ -1,0 +1,105 @@
+name: DeviceInfo
+id: 0x01
+revision: 1
+mandatory: true
+description: "Device identification, versioning, and endpoint structure."
+
+attributes:
+  # Identification attributes (1-9)
+  - id: 1
+    name: deviceId
+    type: string
+    access: readOnly
+    mandatory: true
+    description: "Globally unique device identifier"
+
+  - id: 2
+    name: vendorName
+    type: string
+    access: readOnly
+    mandatory: true
+    description: "Manufacturer name"
+
+  - id: 3
+    name: productName
+    type: string
+    access: readOnly
+    mandatory: true
+    description: "Product name"
+
+  - id: 4
+    name: serialNumber
+    type: string
+    access: readOnly
+    mandatory: true
+    description: "Device serial number"
+
+  - id: 5
+    name: vendorId
+    type: uint32
+    access: readOnly
+    nullable: true
+    description: "IANA Private Enterprise Number"
+
+  - id: 6
+    name: productId
+    type: uint16
+    access: readOnly
+    nullable: true
+    description: "Vendor's product ID"
+
+  # Version attributes (10-19)
+  - id: 10
+    name: softwareVersion
+    type: string
+    access: readOnly
+    mandatory: true
+    description: "Firmware/software version"
+
+  - id: 11
+    name: hardwareVersion
+    type: string
+    access: readOnly
+    nullable: true
+    description: "Hardware revision"
+
+  - id: 12
+    name: specVersion
+    type: string
+    access: readOnly
+    mandatory: true
+    default: "1.0"
+    description: "MASH specification version"
+
+  # Device structure (20-29)
+  - id: 20
+    name: endpoints
+    type: array
+    access: readOnly
+    mandatory: true
+    description: "Complete device endpoint structure"
+
+  # Optional metadata (30-39)
+  - id: 30
+    name: location
+    type: string
+    access: readWrite
+    nullable: true
+    description: "Installation location"
+
+  - id: 31
+    name: label
+    type: string
+    access: readWrite
+    nullable: true
+    description: "User-assigned name"
+
+commands:
+  - id: 0x10
+    name: removeZone
+    mandatory: true
+    description: "Remove a zone from this device"
+    parameters:
+      - { name: zoneId, type: string, required: true }
+    response:
+      - { name: removed, type: bool, required: true }

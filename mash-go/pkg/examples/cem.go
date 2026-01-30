@@ -90,7 +90,7 @@ type CEMConfig struct {
 	ProductName  string
 	SerialNumber string
 	VendorID     uint32
-	ProductID    uint32
+	ProductID    uint16
 }
 
 // SetLimitResult contains the enhanced SetLimit response.

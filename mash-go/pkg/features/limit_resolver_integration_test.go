@@ -46,10 +46,10 @@ func TestLimitResolver_Integration_TwoZonePerZoneReads(t *testing.T) {
 		ctxLocal := testCtx("zone-LOCAL", cert.ZoneTypeLocal)
 
 		// Step 1: Zone GRID sets consumptionLimit = 6 kW
-		lr.HandleSetLimit(ctxGrid, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
+		_, _ = lr.HandleSetLimit(ctxGrid, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
 
 		// Step 2: Zone LOCAL sets consumptionLimit = 5 kW (more restrictive)
-		lr.HandleSetLimit(ctxLocal, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+		_, _ = lr.HandleSetLimit(ctxLocal, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
 
 		// Step 3: Zone GRID reads
 		valMy := readAsZone(t, lr.ec, "zone-GRID", cert.ZoneTypeGrid, EnergyControlAttrMyConsumptionLimit)
@@ -66,7 +66,7 @@ func TestLimitResolver_Integration_TwoZonePerZoneReads(t *testing.T) {
 		assertInt64(t, "LOCAL effectiveConsumptionLimit", valEff, 5000000)
 
 		// Step 5: Zone GRID clears its limit
-		_ = lr.HandleClearLimit(ctxGrid, nil)
+		_ = lr.HandleClearLimit(ctxGrid, ClearLimitRequest{})
 
 		valMy = readAsZone(t, lr.ec, "zone-GRID", cert.ZoneTypeGrid, EnergyControlAttrMyConsumptionLimit)
 		assertNil(t, "GRID myConsumptionLimit after clear", valMy)
@@ -81,7 +81,7 @@ func TestLimitResolver_Integration_TwoZonePerZoneReads(t *testing.T) {
 		assertInt64(t, "LOCAL effectiveConsumptionLimit after GRID clear", valEff, 5000000)
 
 		// Step 6: Zone LOCAL clears its limit -- everything should be nil
-		_ = lr.HandleClearLimit(ctxLocal, nil)
+		_ = lr.HandleClearLimit(ctxLocal, ClearLimitRequest{})
 
 		valMy = readAsZone(t, lr.ec, "zone-GRID", cert.ZoneTypeGrid, EnergyControlAttrMyConsumptionLimit)
 		assertNil(t, "GRID myConsumptionLimit after all clear", valMy)
@@ -102,10 +102,10 @@ func TestLimitResolver_Integration_TwoZonePerZoneReads(t *testing.T) {
 		ctxLocal := testCtx("zone-LOCAL", cert.ZoneTypeLocal)
 
 		// Zone GRID sets productionLimit = 4 kW
-		lr.HandleSetLimit(ctxGrid, SetLimitRequest{ProductionLimit: intPtr(4000000)})
+		_, _ = lr.HandleSetLimit(ctxGrid, SetLimitRequest{ProductionLimit: intPtr(4000000)})
 
 		// Zone LOCAL sets productionLimit = 3 kW (more restrictive)
-		lr.HandleSetLimit(ctxLocal, SetLimitRequest{ProductionLimit: intPtr(3000000)})
+		_, _ = lr.HandleSetLimit(ctxLocal, SetLimitRequest{ProductionLimit: intPtr(3000000)})
 
 		// Zone GRID reads its own production limit
 		valMy := readAsZone(t, lr.ec, "zone-GRID", cert.ZoneTypeGrid, EnergyControlAttrMyProductionLimit)
@@ -122,7 +122,7 @@ func TestLimitResolver_Integration_TwoZonePerZoneReads(t *testing.T) {
 		assertInt64(t, "LOCAL effectiveProductionLimit", valEff, 3000000)
 
 		// Zone GRID clears its limit
-		_ = lr.HandleClearLimit(ctxGrid, nil)
+		_ = lr.HandleClearLimit(ctxGrid, ClearLimitRequest{})
 
 		valMy = readAsZone(t, lr.ec, "zone-GRID", cert.ZoneTypeGrid, EnergyControlAttrMyProductionLimit)
 		assertNil(t, "GRID myProductionLimit after clear", valMy)
@@ -131,7 +131,7 @@ func TestLimitResolver_Integration_TwoZonePerZoneReads(t *testing.T) {
 		assertInt64(t, "GRID effectiveProductionLimit after GRID clear", valEff, 3000000)
 
 		// Zone LOCAL clears its limit
-		_ = lr.HandleClearLimit(ctxLocal, nil)
+		_ = lr.HandleClearLimit(ctxLocal, ClearLimitRequest{})
 
 		valMy = readAsZone(t, lr.ec, "zone-LOCAL", cert.ZoneTypeLocal, EnergyControlAttrMyProductionLimit)
 		assertNil(t, "LOCAL myProductionLimit after all clear", valMy)
@@ -146,8 +146,8 @@ func TestLimitResolver_Integration_TwoZonePerZoneReads(t *testing.T) {
 		ctxLocal := testCtx("zone-LOCAL", cert.ZoneTypeLocal)
 
 		// Both zones set consumption limits
-		lr.HandleSetLimit(ctxGrid, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
-		lr.HandleSetLimit(ctxLocal, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+		_, _ = lr.HandleSetLimit(ctxGrid, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
+		_, _ = lr.HandleSetLimit(ctxLocal, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
 
 		// ReadAllAttributesWithContext as Zone GRID
 		allGrid := lr.ec.ReadAllAttributesWithContext(ctxGrid)

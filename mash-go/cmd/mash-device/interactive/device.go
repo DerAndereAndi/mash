@@ -785,8 +785,8 @@ func (d *Device) cmdOverride(args []string) {
 
 	if args[0] == "clear" {
 		_ = ec.SetControlState(features.ControlStateControlled)
-		_ = ec.SetOverrideReason(nil)
-		_ = ec.SetOverrideDirection(nil)
+		_ = ec.SetOverrideReasonPtr(nil)
+		_ = ec.SetOverrideDirectionPtr(nil)
 		fmt.Fprintln(d.rl.Stdout(), "Override cleared, state: CONTROLLED")
 		return
 	}
@@ -798,8 +798,8 @@ func (d *Device) cmdOverride(args []string) {
 	}
 
 	_ = ec.SetControlState(features.ControlStateOverride)
-	_ = ec.SetOverrideReason(&reason)
-	_ = ec.SetOverrideDirection(&direction)
+	_ = ec.SetOverrideReasonPtr(&reason)
+	_ = ec.SetOverrideDirectionPtr(&direction)
 
 	fmt.Fprintf(d.rl.Stdout(), "Override set: %s (%s)\n", reason, direction)
 }
@@ -836,8 +836,8 @@ func (d *Device) cmdContractual(args []string) {
 	}
 
 	if args[0] == "clear" {
-		_ = ec.SetContractualConsumptionMax(nil)
-		_ = ec.SetContractualProductionMax(nil)
+		_ = ec.SetContractualConsumptionMaxPtr(nil)
+		_ = ec.SetContractualProductionMaxPtr(nil)
 		fmt.Fprintln(d.rl.Stdout(), "Contractual limits cleared")
 		return
 	}
@@ -848,7 +848,7 @@ func (d *Device) cmdContractual(args []string) {
 		return
 	}
 	consumptionMW := int64(consumptionKW * 1000000)
-	_ = ec.SetContractualConsumptionMax(&consumptionMW)
+	_ = ec.SetContractualConsumptionMaxPtr(&consumptionMW)
 
 	if len(args) >= 2 {
 		productionKW, err := strconv.ParseFloat(args[1], 64)
@@ -857,7 +857,7 @@ func (d *Device) cmdContractual(args []string) {
 			return
 		}
 		productionMW := int64(productionKW * 1000000)
-		_ = ec.SetContractualProductionMax(&productionMW)
+		_ = ec.SetContractualProductionMaxPtr(&productionMW)
 		fmt.Fprintf(d.rl.Stdout(), "Contractual limits set: consumption=%.1f kW, production=%.1f kW\n",
 			consumptionKW, productionKW)
 	} else {
@@ -892,10 +892,10 @@ func (d *Device) cmdLimitStatus() {
 
 	// Override info
 	if ec.IsOverride() {
-		if reason, ok := ec.GetOverrideReason(); ok {
+		if reason, ok := ec.OverrideReason(); ok {
 			fmt.Fprintf(d.rl.Stdout(), "  Override Reason: %s\n", reason)
 		}
-		if dir, ok := ec.GetOverrideDirection(); ok {
+		if dir, ok := ec.OverrideDirection(); ok {
 			fmt.Fprintf(d.rl.Stdout(), "  Override Direction: %s\n", dir)
 		}
 	}

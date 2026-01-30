@@ -55,7 +55,7 @@ func TestLimitResolver_SingleZoneSetClear(t *testing.T) {
 	ctx := testCtx("zone-A", cert.ZoneTypeLocal)
 
 	// Set consumption limit
-	resp := lr.HandleSetLimit(ctx, SetLimitRequest{
+	resp, _ := lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: intPtr(5000000),
 	})
 	if !resp.Applied {
@@ -69,7 +69,7 @@ func TestLimitResolver_SingleZoneSetClear(t *testing.T) {
 	}
 
 	// Clear limit
-	err := lr.HandleClearLimit(ctx, nil)
+	err := lr.HandleClearLimit(ctx, ClearLimitRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -87,12 +87,12 @@ func TestLimitResolver_TwoZonesMostRestrictiveWins(t *testing.T) {
 	ctxLocal := testCtx("zone-LOCAL", cert.ZoneTypeLocal)
 
 	// GRID sets 6 kW
-	lr.HandleSetLimit(ctxGrid, SetLimitRequest{
+	_, _ = lr.HandleSetLimit(ctxGrid, SetLimitRequest{
 		ConsumptionLimit: intPtr(6000000),
 	})
 
 	// LOCAL sets 5 kW (more restrictive)
-	resp := lr.HandleSetLimit(ctxLocal, SetLimitRequest{
+	resp, _ := lr.HandleSetLimit(ctxLocal, SetLimitRequest{
 		ConsumptionLimit: intPtr(5000000),
 	})
 
@@ -107,11 +107,11 @@ func TestLimitResolver_ClearPromotesRemaining(t *testing.T) {
 	ctxLocal := testCtx("zone-LOCAL", cert.ZoneTypeLocal)
 
 	// GRID=6kW, LOCAL=5kW
-	lr.HandleSetLimit(ctxGrid, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
-	lr.HandleSetLimit(ctxLocal, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+	_, _ = lr.HandleSetLimit(ctxGrid, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
+	_, _ = lr.HandleSetLimit(ctxLocal, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
 
 	// Clear LOCAL -> effective should be GRID's 6kW
-	_ = lr.HandleClearLimit(ctxLocal, nil)
+	_ = lr.HandleClearLimit(ctxLocal, ClearLimitRequest{})
 
 	eff, ok := lr.ec.EffectiveConsumptionLimit()
 	if !ok || eff != 6000000 {
@@ -128,11 +128,11 @@ func TestLimitResolver_DurationExpiry(t *testing.T) {
 	ctxB := testCtx("zone-B", cert.ZoneTypeGrid)
 
 	// Zone B sets indefinite 6kW
-	lr.HandleSetLimit(ctxB, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
+	_, _ = lr.HandleSetLimit(ctxB, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
 
 	// Zone A sets 3kW with very short duration (1s is the minimum)
 	dur := uint32(1)
-	lr.HandleSetLimit(ctxA, SetLimitRequest{
+	_, _ = lr.HandleSetLimit(ctxA, SetLimitRequest{
 		ConsumptionLimit: intPtr(3000000),
 		Duration:         &dur,
 	})
@@ -158,7 +158,7 @@ func TestLimitResolver_BothDirectionsIndependent(t *testing.T) {
 	ctx := testCtx("zone-A", cert.ZoneTypeLocal)
 
 	// Set both directions
-	resp := lr.HandleSetLimit(ctx, SetLimitRequest{
+	resp, _ := lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: intPtr(5000000),
 		ProductionLimit:  intPtr(3000000),
 	})
@@ -181,14 +181,14 @@ func TestLimitResolver_ClearByDirection(t *testing.T) {
 	ctx := testCtx("zone-A", cert.ZoneTypeLocal)
 
 	// Set both
-	lr.HandleSetLimit(ctx, SetLimitRequest{
+	_, _ = lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: intPtr(5000000),
 		ProductionLimit:  intPtr(3000000),
 	})
 
 	// Clear only consumption
 	dirConsumption := DirectionConsumption
-	_ = lr.HandleClearLimit(ctx, &dirConsumption)
+	_ = lr.HandleClearLimit(ctx, ClearLimitRequest{Direction: &dirConsumption})
 
 	// Consumption should be nil, production should remain
 	if _, ok := lr.ec.EffectiveConsumptionLimit(); ok {
@@ -207,13 +207,13 @@ func TestLimitResolver_ValidationNegativeValue(t *testing.T) {
 	lr := newTestResolver()
 	ctx := testCtx("zone-A", cert.ZoneTypeLocal)
 
-	resp := lr.HandleSetLimit(ctx, SetLimitRequest{
+	resp, _ := lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: intPtr(-1000),
 	})
 	if resp.Applied {
 		t.Fatal("expected reject for negative value")
 	}
-	if resp.RejectReason == nil || *resp.RejectReason != LimitRejectInvalidValue {
+	if resp.RejectReason == nil || *resp.RejectReason != LimitRejectReasonInvalidValue {
 		t.Fatal("expected INVALID_VALUE reject reason")
 	}
 }
@@ -223,13 +223,13 @@ func TestLimitResolver_ValidationOverride(t *testing.T) {
 	_ = lr.ec.SetControlState(ControlStateOverride)
 	ctx := testCtx("zone-A", cert.ZoneTypeLocal)
 
-	resp := lr.HandleSetLimit(ctx, SetLimitRequest{
+	resp, _ := lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: intPtr(5000000),
 	})
 	if resp.Applied {
 		t.Fatal("expected reject in override state")
 	}
-	if resp.RejectReason == nil || *resp.RejectReason != LimitRejectDeviceOverride {
+	if resp.RejectReason == nil || *resp.RejectReason != LimitRejectReasonDeviceOverride {
 		t.Fatal("expected DEVICE_OVERRIDE reject reason")
 	}
 }
@@ -238,7 +238,7 @@ func TestLimitResolver_ValidationNoZoneID(t *testing.T) {
 	lr := newTestResolver()
 	ctx := context.Background() // no zone info
 
-	resp := lr.HandleSetLimit(ctx, SetLimitRequest{
+	resp, _ := lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: intPtr(5000000),
 	})
 	if resp.Applied {
@@ -256,13 +256,13 @@ func TestLimitResolver_ControlStateTransitions(t *testing.T) {
 	}
 
 	// Set limit -> LIMITED
-	lr.HandleSetLimit(ctx, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+	_, _ = lr.HandleSetLimit(ctx, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
 	if lr.ec.ControlState() != ControlStateLimited {
 		t.Fatalf("expected LIMITED, got %s", lr.ec.ControlState())
 	}
 
 	// Clear -> CONTROLLED
-	_ = lr.HandleClearLimit(ctx, nil)
+	_ = lr.HandleClearLimit(ctx, ClearLimitRequest{})
 	if lr.ec.ControlState() != ControlStateControlled {
 		t.Fatalf("expected CONTROLLED, got %s", lr.ec.ControlState())
 	}
@@ -273,10 +273,10 @@ func TestLimitResolver_NilLimitsDeactivate(t *testing.T) {
 	ctx := testCtx("zone-A", cert.ZoneTypeLocal)
 
 	// Set a limit first
-	lr.HandleSetLimit(ctx, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+	_, _ = lr.HandleSetLimit(ctx, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
 
 	// Send nil limits = deactivate this zone
-	resp := lr.HandleSetLimit(ctx, SetLimitRequest{
+	resp, _ := lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: nil,
 		ProductionLimit:  nil,
 	})
@@ -293,8 +293,8 @@ func TestLimitResolver_ClearZone(t *testing.T) {
 	ctxA := testCtx("zone-A", cert.ZoneTypeLocal)
 	ctxB := testCtx("zone-B", cert.ZoneTypeGrid)
 
-	lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(3000000)})
-	lr.HandleSetLimit(ctxB, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
+	_, _ = lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(3000000)})
+	_, _ = lr.HandleSetLimit(ctxB, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
 
 	// ClearZone removes all of zone A's limits
 	lr.ClearZone("zone-A")
@@ -319,10 +319,10 @@ func TestLimitResolver_ReadHook_MyConsumptionLimit(t *testing.T) {
 	ctxB := testCtx("zone-B", cert.ZoneTypeLocal)
 
 	// Zone A sets 6 kW consumption limit
-	lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
+	_, _ = lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
 
 	// Zone B sets 5 kW consumption limit
-	lr.HandleSetLimit(ctxB, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+	_, _ = lr.HandleSetLimit(ctxB, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
 
 	// Zone A reads myConsumptionLimit -> should see its own value (6 kW)
 	val, err := lr.ec.ReadAttributeWithContext(ctxA, EnergyControlAttrMyConsumptionLimit)
@@ -357,10 +357,10 @@ func TestLimitResolver_ReadHook_MyProductionLimit(t *testing.T) {
 	ctxB := testCtx("zone-B", cert.ZoneTypeLocal)
 
 	// Zone A sets 4 kW production limit
-	lr.HandleSetLimit(ctxA, SetLimitRequest{ProductionLimit: intPtr(4000000)})
+	_, _ = lr.HandleSetLimit(ctxA, SetLimitRequest{ProductionLimit: intPtr(4000000)})
 
 	// Zone B sets 2 kW production limit
-	lr.HandleSetLimit(ctxB, SetLimitRequest{ProductionLimit: intPtr(2000000)})
+	_, _ = lr.HandleSetLimit(ctxB, SetLimitRequest{ProductionLimit: intPtr(2000000)})
 
 	// Zone A reads myProductionLimit -> should see 4 kW
 	val, err := lr.ec.ReadAttributeWithContext(ctxA, EnergyControlAttrMyProductionLimit)
@@ -409,8 +409,8 @@ func TestLimitResolver_ReadHook_EffectiveUnchanged(t *testing.T) {
 	ctxB := testCtx("zone-B", cert.ZoneTypeLocal)
 
 	// Zone A sets 6 kW, Zone B sets 5 kW
-	lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
-	lr.HandleSetLimit(ctxB, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+	_, _ = lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(6000000)})
+	_, _ = lr.HandleSetLimit(ctxB, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
 
 	// effectiveConsumptionLimit (attr 20) should NOT be intercepted by hook.
 	// It should return the resolved minimum (5 kW), regardless of which zone reads it.
@@ -432,7 +432,7 @@ func TestLimitResolver_ReadHook_AfterClear(t *testing.T) {
 	ctx := testCtx("zone-A", cert.ZoneTypeLocal)
 
 	// Set a limit
-	lr.HandleSetLimit(ctx, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+	_, _ = lr.HandleSetLimit(ctx, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
 
 	// Verify it's readable
 	val, err := lr.ec.ReadAttributeWithContext(ctx, EnergyControlAttrMyConsumptionLimit)
@@ -444,7 +444,7 @@ func TestLimitResolver_ReadHook_AfterClear(t *testing.T) {
 	}
 
 	// Clear the limit
-	_ = lr.HandleClearLimit(ctx, nil)
+	_ = lr.HandleClearLimit(ctx, ClearLimitRequest{})
 
 	// After clear, myConsumptionLimit should be nil
 	val, err = lr.ec.ReadAttributeWithContext(ctx, EnergyControlAttrMyConsumptionLimit)
@@ -461,7 +461,7 @@ func TestLimitResolver_ReadHook_NoContext(t *testing.T) {
 
 	// Set a limit from zone-A
 	ctxA := testCtx("zone-A", cert.ZoneTypeLocal)
-	lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+	_, _ = lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
 
 	// Read with background context (no zone ID) -> expect nil
 	val, err := lr.ec.ReadAttributeWithContext(context.Background(), EnergyControlAttrMyConsumptionLimit)
@@ -492,7 +492,7 @@ func TestLimitResolver_NotifiesMyLimitOnSet(t *testing.T) {
 		calls = append(calls, zoneMyChangeCall{zoneID, changes})
 	}
 
-	lr.HandleSetLimit(ctx, SetLimitRequest{
+	_, _ = lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: intPtr(6000000),
 	})
 
@@ -515,7 +515,7 @@ func TestLimitResolver_NotifiesMyLimitOnClear(t *testing.T) {
 	ctx := testCtx("zone-a", cert.ZoneTypeLocal)
 
 	// Set a limit first
-	lr.HandleSetLimit(ctx, SetLimitRequest{
+	_, _ = lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: intPtr(5000000),
 	})
 
@@ -526,7 +526,7 @@ func TestLimitResolver_NotifiesMyLimitOnClear(t *testing.T) {
 
 	// Clear consumption only
 	dirConsumption := DirectionConsumption
-	_ = lr.HandleClearLimit(ctx, &dirConsumption)
+	_ = lr.HandleClearLimit(ctx, ClearLimitRequest{Direction: &dirConsumption})
 
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 callback call, got %d", len(calls))
@@ -548,7 +548,7 @@ func TestLimitResolver_NotifiesMyLimitOnDeactivate(t *testing.T) {
 	ctx := testCtx("zone-a", cert.ZoneTypeLocal)
 
 	// Set a limit first
-	lr.HandleSetLimit(ctx, SetLimitRequest{
+	_, _ = lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: intPtr(5000000),
 	})
 
@@ -558,7 +558,7 @@ func TestLimitResolver_NotifiesMyLimitOnDeactivate(t *testing.T) {
 	}
 
 	// Deactivate: both nil
-	lr.HandleSetLimit(ctx, SetLimitRequest{
+	_, _ = lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: nil,
 		ProductionLimit:  nil,
 	})
@@ -583,7 +583,7 @@ func TestLimitResolver_NotifiesMyLimitOnClearZone(t *testing.T) {
 	ctx := testCtx("zone-a", cert.ZoneTypeLocal)
 
 	// Set limits
-	lr.HandleSetLimit(ctx, SetLimitRequest{
+	_, _ = lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: intPtr(5000000),
 		ProductionLimit:  intPtr(3000000),
 	})
@@ -614,11 +614,11 @@ func TestLimitResolver_NoNotifyWhenNoCallback(t *testing.T) {
 	ctx := testCtx("zone-a", cert.ZoneTypeLocal)
 
 	// OnZoneMyChange is NOT set -- should not panic
-	lr.HandleSetLimit(ctx, SetLimitRequest{
+	_, _ = lr.HandleSetLimit(ctx, SetLimitRequest{
 		ConsumptionLimit: intPtr(6000000),
 	})
 
-	_ = lr.HandleClearLimit(ctx, nil)
+	_ = lr.HandleClearLimit(ctx, ClearLimitRequest{})
 
 	lr.ClearZone("zone-a")
 	// If we reach here without panic, the test passes

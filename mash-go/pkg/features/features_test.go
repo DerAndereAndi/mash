@@ -48,11 +48,11 @@ func TestDeviceInfo(t *testing.T) {
 		if di.SerialNumber() != "WB-2024-001234" {
 			t.Errorf("expected serialNumber WB-2024-001234, got %s", di.SerialNumber())
 		}
-		if di.VendorID() != 12345 {
-			t.Errorf("expected vendorId 12345, got %d", di.VendorID())
+		if v, ok := di.VendorID(); !ok || v != 12345 {
+			t.Errorf("expected vendorId 12345, got %d (ok=%v)", v, ok)
 		}
-		if di.ProductID() != 100 {
-			t.Errorf("expected productId 100, got %d", di.ProductID())
+		if v, ok := di.ProductID(); !ok || v != 100 {
+			t.Errorf("expected productId 100, got %d (ok=%v)", v, ok)
 		}
 	})
 
@@ -75,16 +75,16 @@ func TestDeviceInfo(t *testing.T) {
 		if err != nil {
 			t.Errorf("SetLocation failed: %v", err)
 		}
-		if di.Location() != "Garage" {
-			t.Errorf("expected location Garage, got %s", di.Location())
+		if loc, ok := di.Location(); !ok || loc != "Garage" {
+			t.Errorf("expected location Garage, got %s (ok=%v)", loc, ok)
 		}
 
 		err = di.SetLabel("Main Charger")
 		if err != nil {
 			t.Errorf("SetLabel failed: %v", err)
 		}
-		if di.Label() != "Main Charger" {
-			t.Errorf("expected label Main Charger, got %s", di.Label())
+		if lbl, ok := di.Label(); !ok || lbl != "Main Charger" {
+			t.Errorf("expected label Main Charger, got %s (ok=%v)", lbl, ok)
 		}
 	})
 
@@ -150,8 +150,8 @@ func TestElectrical(t *testing.T) {
 			t.Errorf("expected phaseCount 3, got %d", elec.PhaseCount())
 		}
 
-		mapping := elec.PhaseMapping()
-		if mapping == nil || len(mapping) != 3 {
+		mapping, mapOk := elec.PhaseMapping()
+		if !mapOk || mapping == nil || len(mapping) != 3 {
 			t.Error("expected 3-phase mapping")
 		}
 	})
@@ -183,7 +183,7 @@ func TestElectrical(t *testing.T) {
 
 	t.Run("BidirectionalSupport", func(t *testing.T) {
 		_ = elec.SetSupportedDirections(DirectionBidirectional)
-		_ = elec.SetSupportsAsymmetric(AsymmetricConsumption)
+		_ = elec.SetSupportsAsymmetric(AsymmetricSupportConsumption)
 
 		if !elec.IsBidirectional() {
 			t.Error("expected bidirectional support")
@@ -194,7 +194,7 @@ func TestElectrical(t *testing.T) {
 		if !elec.CanProduce() {
 			t.Error("expected production capability")
 		}
-		if elec.SupportsAsymmetric() != AsymmetricConsumption {
+		if elec.SupportsAsymmetric() != AsymmetricSupportConsumption {
 			t.Errorf("expected asymmetric CONSUMPTION, got %v", elec.SupportsAsymmetric())
 		}
 	})
@@ -391,10 +391,10 @@ func TestEnums(t *testing.T) {
 			a    AsymmetricSupport
 			want string
 		}{
-			{AsymmetricNone, "NONE"},
-			{AsymmetricConsumption, "CONSUMPTION"},
-			{AsymmetricProduction, "PRODUCTION"},
-			{AsymmetricBidirectional, "BIDIRECTIONAL"},
+			{AsymmetricSupportNone, "NONE"},
+			{AsymmetricSupportConsumption, "CONSUMPTION"},
+			{AsymmetricSupportProduction, "PRODUCTION"},
+			{AsymmetricSupportBidirectional, "BIDIRECTIONAL"},
 		}
 		for _, tt := range tests {
 			if got := tt.a.String(); got != tt.want {
@@ -598,9 +598,9 @@ func TestStatus(t *testing.T) {
 			t.Errorf("expected fault code 1001, got %d (ok=%v)", code, ok)
 		}
 
-		msg := status.FaultMessage()
-		if msg != "Overcurrent detected" {
-			t.Errorf("expected fault message 'Overcurrent detected', got '%s'", msg)
+		msg, msgOk := status.FaultMessage()
+		if !msgOk || msg != "Overcurrent detected" {
+			t.Errorf("expected fault message 'Overcurrent detected', got '%s' (ok=%v)", msg, msgOk)
 		}
 	})
 
@@ -617,9 +617,9 @@ func TestStatus(t *testing.T) {
 			t.Error("expected fault code to be cleared")
 		}
 
-		msg := status.FaultMessage()
-		if msg != "" {
-			t.Errorf("expected empty fault message, got '%s'", msg)
+		_, msgOk := status.FaultMessage()
+		if msgOk {
+			t.Error("expected fault message to be cleared")
 		}
 	})
 
@@ -780,9 +780,9 @@ func TestEnergyControl(t *testing.T) {
 
 	t.Run("SetEffectiveLimits", func(t *testing.T) {
 		limit := int64(11_000_000) // 11 kW
-		err := ec.SetEffectiveConsumptionLimit(&limit)
+		err := ec.SetEffectiveConsumptionLimitPtr(&limit)
 		if err != nil {
-			t.Fatalf("SetEffectiveConsumptionLimit failed: %v", err)
+			t.Fatalf("SetEffectiveConsumptionLimitPtr failed: %v", err)
 		}
 
 		readLimit, ok := ec.EffectiveConsumptionLimit()
@@ -791,7 +791,7 @@ func TestEnergyControl(t *testing.T) {
 		}
 
 		// Clear limit
-		err = ec.SetEffectiveConsumptionLimit(nil)
+		err = ec.SetEffectiveConsumptionLimitPtr(nil)
 		if err != nil {
 			t.Fatalf("SetEffectiveConsumptionLimit(nil) failed: %v", err)
 		}
@@ -831,8 +831,8 @@ func TestChargingSession(t *testing.T) {
 		if cs.EVDemandMode() != EVDemandModeNone {
 			t.Errorf("expected default demand mode NONE, got %v", cs.EVDemandMode())
 		}
-		if cs.CurrentChargingMode() != ChargingModeOff {
-			t.Errorf("expected default charging mode OFF, got %v", cs.CurrentChargingMode())
+		if cs.ChargingMode() != ChargingModeOff {
+			t.Errorf("expected default charging mode OFF, got %v", cs.ChargingMode())
 		}
 	})
 
@@ -1060,8 +1060,8 @@ func TestChargingSession(t *testing.T) {
 			t.Fatalf("SetChargingMode failed: %v", err)
 		}
 
-		if cs.CurrentChargingMode() != ChargingModePVSurplusThreshold {
-			t.Errorf("expected PV_SURPLUS_THRESHOLD, got %v", cs.CurrentChargingMode())
+		if cs.ChargingMode() != ChargingModePVSurplusThreshold {
+			t.Errorf("expected PV_SURPLUS_THRESHOLD, got %v", cs.ChargingMode())
 		}
 
 		err = cs.SetSurplusThreshold(1_400_000) // 1.4 kW
@@ -1135,11 +1135,11 @@ func TestEnergyControlEnums(t *testing.T) {
 	})
 
 	t.Run("OptOutState", func(t *testing.T) {
-		if OptOutNone != 0 {
-			t.Error("OptOutNone should be 0")
+		if OptOutStateNone != 0 {
+			t.Error("OptOutStateNone should be 0")
 		}
-		if OptOutAll != 3 {
-			t.Error("OptOutAll should be 3")
+		if OptOutStateAll != 3 {
+			t.Error("OptOutStateAll should be 3")
 		}
 	})
 }
@@ -1178,11 +1178,11 @@ func TestLimitRejectReason(t *testing.T) {
 		value  uint8
 		name   string
 	}{
-		{LimitRejectBelowMinimum, 0x00, "BELOW_MINIMUM"},
-		{LimitRejectAboveContractual, 0x01, "ABOVE_CONTRACTUAL"},
-		{LimitRejectInvalidValue, 0x02, "INVALID_VALUE"},
-		{LimitRejectDeviceOverride, 0x03, "DEVICE_OVERRIDE"},
-		{LimitRejectNotSupported, 0x04, "NOT_SUPPORTED"},
+		{LimitRejectReasonBelowMinimum, 0x00, "BELOW_MINIMUM"},
+		{LimitRejectReasonAboveContractual, 0x01, "ABOVE_CONTRACTUAL"},
+		{LimitRejectReasonInvalidValue, 0x02, "INVALID_VALUE"},
+		{LimitRejectReasonDeviceOverride, 0x03, "DEVICE_OVERRIDE"},
+		{LimitRejectReasonNotSupported, 0x04, "NOT_SUPPORTED"},
 	}
 	for _, tc := range tests {
 		if uint8(tc.reason) != tc.value {
@@ -1273,7 +1273,7 @@ func TestEnergyControlSetContractualLimits(t *testing.T) {
 
 	t.Run("SetAndGetContractualConsumptionMax", func(t *testing.T) {
 		limit := int64(43_000_000) // 43 kW
-		err := ec.SetContractualConsumptionMax(&limit)
+		err := ec.SetContractualConsumptionMaxPtr(&limit)
 		if err != nil {
 			t.Fatalf("SetContractualConsumptionMax failed: %v", err)
 		}
@@ -1286,9 +1286,9 @@ func TestEnergyControlSetContractualLimits(t *testing.T) {
 
 	t.Run("ClearContractualConsumptionMax", func(t *testing.T) {
 		limit := int64(43_000_000)
-		_ = ec.SetContractualConsumptionMax(&limit)
+		_ = ec.SetContractualConsumptionMaxPtr(&limit)
 
-		err := ec.SetContractualConsumptionMax(nil)
+		err := ec.SetContractualConsumptionMaxPtr(nil)
 		if err != nil {
 			t.Fatalf("SetContractualConsumptionMax(nil) failed: %v", err)
 		}
@@ -1301,7 +1301,7 @@ func TestEnergyControlSetContractualLimits(t *testing.T) {
 
 	t.Run("SetAndGetContractualProductionMax", func(t *testing.T) {
 		limit := int64(30_000_000) // 30 kW
-		err := ec.SetContractualProductionMax(&limit)
+		err := ec.SetContractualProductionMaxPtr(&limit)
 		if err != nil {
 			t.Fatalf("SetContractualProductionMax failed: %v", err)
 		}
@@ -1314,9 +1314,9 @@ func TestEnergyControlSetContractualLimits(t *testing.T) {
 
 	t.Run("ClearContractualProductionMax", func(t *testing.T) {
 		limit := int64(30_000_000)
-		_ = ec.SetContractualProductionMax(&limit)
+		_ = ec.SetContractualProductionMaxPtr(&limit)
 
-		err := ec.SetContractualProductionMax(nil)
+		err := ec.SetContractualProductionMaxPtr(nil)
 		if err != nil {
 			t.Fatalf("SetContractualProductionMax(nil) failed: %v", err)
 		}
@@ -1333,12 +1333,12 @@ func TestEnergyControlSetOverrideReason(t *testing.T) {
 
 	t.Run("SetAndGetOverrideReason", func(t *testing.T) {
 		reason := OverrideReasonSelfProtection
-		err := ec.SetOverrideReason(&reason)
+		err := ec.SetOverrideReasonPtr(&reason)
 		if err != nil {
 			t.Fatalf("SetOverrideReason failed: %v", err)
 		}
 
-		val, ok := ec.GetOverrideReason()
+		val, ok := ec.OverrideReason()
 		if !ok || val != reason {
 			t.Errorf("expected %v, got %v (ok=%v)", reason, val, ok)
 		}
@@ -1346,14 +1346,14 @@ func TestEnergyControlSetOverrideReason(t *testing.T) {
 
 	t.Run("ClearOverrideReason", func(t *testing.T) {
 		reason := OverrideReasonSafety
-		_ = ec.SetOverrideReason(&reason)
+		_ = ec.SetOverrideReasonPtr(&reason)
 
-		err := ec.SetOverrideReason(nil)
+		err := ec.SetOverrideReasonPtr(nil)
 		if err != nil {
 			t.Fatalf("SetOverrideReason(nil) failed: %v", err)
 		}
 
-		_, ok := ec.GetOverrideReason()
+		_, ok := ec.OverrideReason()
 		if ok {
 			t.Error("expected nil after clear")
 		}
@@ -1369,11 +1369,11 @@ func TestEnergyControlSetOverrideReason(t *testing.T) {
 		}
 		for _, reason := range reasons {
 			r := reason
-			err := ec.SetOverrideReason(&r)
+			err := ec.SetOverrideReasonPtr(&r)
 			if err != nil {
 				t.Fatalf("SetOverrideReason(%v) failed: %v", reason, err)
 			}
-			val, ok := ec.GetOverrideReason()
+			val, ok := ec.OverrideReason()
 			if !ok || val != reason {
 				t.Errorf("expected %v, got %v", reason, val)
 			}
@@ -1386,12 +1386,12 @@ func TestEnergyControlSetOverrideDirection(t *testing.T) {
 
 	t.Run("SetAndGetOverrideDirection", func(t *testing.T) {
 		dir := DirectionConsumption
-		err := ec.SetOverrideDirection(&dir)
+		err := ec.SetOverrideDirectionPtr(&dir)
 		if err != nil {
 			t.Fatalf("SetOverrideDirection failed: %v", err)
 		}
 
-		val, ok := ec.GetOverrideDirection()
+		val, ok := ec.OverrideDirection()
 		if !ok || val != dir {
 			t.Errorf("expected %v, got %v (ok=%v)", dir, val, ok)
 		}
@@ -1399,14 +1399,14 @@ func TestEnergyControlSetOverrideDirection(t *testing.T) {
 
 	t.Run("ClearOverrideDirection", func(t *testing.T) {
 		dir := DirectionProduction
-		_ = ec.SetOverrideDirection(&dir)
+		_ = ec.SetOverrideDirectionPtr(&dir)
 
-		err := ec.SetOverrideDirection(nil)
+		err := ec.SetOverrideDirectionPtr(nil)
 		if err != nil {
 			t.Fatalf("SetOverrideDirection(nil) failed: %v", err)
 		}
 
-		_, ok := ec.GetOverrideDirection()
+		_, ok := ec.OverrideDirection()
 		if ok {
 			t.Error("expected nil after clear")
 		}
@@ -1419,14 +1419,14 @@ func TestSetLimitEnhancedResponse(t *testing.T) {
 
 	t.Run("EnhancedHandlerApplied", func(t *testing.T) {
 		// Handler that returns enhanced response
-		ec.OnSetLimitEnhanced(func(ctx context.Context, req SetLimitRequest) SetLimitResponse {
+		ec.OnSetLimit(func(ctx context.Context, req SetLimitRequest) (SetLimitResponse, error) {
 			return SetLimitResponse{
 				Applied:                   true,
 				EffectiveConsumptionLimit: req.ConsumptionLimit,
 				EffectiveProductionLimit:  nil,
 				RejectReason:              nil,
 				ControlState:              ControlStateLimited,
-			}
+			}, nil
 		})
 
 		// Invoke via command
@@ -1452,12 +1452,12 @@ func TestSetLimitEnhancedResponse(t *testing.T) {
 
 	t.Run("EnhancedHandlerWithProductionLimit", func(t *testing.T) {
 		prodLimit := int64(5_000_000)
-		ec.OnSetLimitEnhanced(func(ctx context.Context, req SetLimitRequest) SetLimitResponse {
+		ec.OnSetLimit(func(ctx context.Context, req SetLimitRequest) (SetLimitResponse, error) {
 			return SetLimitResponse{
 				Applied:                  true,
 				EffectiveProductionLimit: &prodLimit,
 				ControlState:             ControlStateLimited,
-			}
+			}, nil
 		})
 
 		result, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[string]any{
@@ -1478,17 +1478,17 @@ func TestSetLimitRejectsNegativeValue(t *testing.T) {
 	ec := NewEnergyControl()
 	ec.SetCapabilities(true, false, false, false, false, false, false)
 
-	ec.OnSetLimitEnhanced(func(ctx context.Context, req SetLimitRequest) SetLimitResponse {
+	ec.OnSetLimit(func(ctx context.Context, req SetLimitRequest) (SetLimitResponse, error) {
 		// Validate negative values
 		if req.ConsumptionLimit != nil && *req.ConsumptionLimit < 0 {
-			reason := LimitRejectInvalidValue
+			reason := LimitRejectReasonInvalidValue
 			return SetLimitResponse{
 				Applied:      false,
 				RejectReason: &reason,
 				ControlState: ControlStateControlled,
-			}
+			}, nil
 		}
-		return SetLimitResponse{Applied: true, ControlState: ControlStateLimited}
+		return SetLimitResponse{Applied: true, ControlState: ControlStateLimited}, nil
 	})
 
 	result, err := ec.InvokeCommand(context.Background(), EnergyControlCmdSetLimit, map[string]any{
@@ -1502,7 +1502,7 @@ func TestSetLimitRejectsNegativeValue(t *testing.T) {
 	if applied, ok := result["applied"].(bool); ok && applied {
 		t.Error("expected applied=false for negative value")
 	}
-	if reason, ok := result["rejectReason"].(uint8); !ok || LimitRejectReason(reason) != LimitRejectInvalidValue {
+	if reason, ok := result["rejectReason"].(uint8); !ok || LimitRejectReason(reason) != LimitRejectReasonInvalidValue {
 		t.Errorf("expected rejectReason=INVALID_VALUE, got %v", result["rejectReason"])
 	}
 	if cs, ok := result["controlState"].(uint8); !ok || ControlState(cs) != ControlStateControlled {
@@ -1515,9 +1515,9 @@ func TestSetLimitRequestParsing(t *testing.T) {
 	ec.SetCapabilities(true, false, false, false, false, false, false)
 
 	var capturedReq SetLimitRequest
-	ec.OnSetLimitEnhanced(func(ctx context.Context, req SetLimitRequest) SetLimitResponse {
+	ec.OnSetLimit(func(ctx context.Context, req SetLimitRequest) (SetLimitResponse, error) {
 		capturedReq = req
-		return SetLimitResponse{Applied: true, ControlState: ControlStateLimited}
+		return SetLimitResponse{Applied: true, ControlState: ControlStateLimited}, nil
 	})
 
 	t.Run("AllFieldsParsed", func(t *testing.T) {

@@ -1,0 +1,33 @@
+versions:
+  "1.0":
+    description: "MASH Protocol v1.0 - Initial release"
+    features:
+      DeviceInfo: "1.0"
+      Status: "1.0"
+      Electrical: "1.0"
+      Measurement: "1.0"
+      EnergyControl: "1.0"
+      ChargingSession: "1.0"
+    shared: "1.0"
+    feature_types:
+      - { name: DeviceInfo, id: 0x01, description: "Device identity and structure" }
+      - { name: Status, id: 0x02, description: "Operating state and fault information" }
+      - { name: Electrical, id: 0x03, description: "Static electrical configuration" }
+      - { name: Measurement, id: 0x04, description: "Power, energy, voltage, current telemetry" }
+      - { name: EnergyControl, id: 0x05, description: "Limits, setpoints, and control commands" }
+      - { name: ChargingSession, id: 0x06, description: "EV charging session data" }
+      - { name: Tariff, id: 0x07, description: "Price structure and power tiers" }
+      - { name: Signals, id: 0x08, description: "Time-slotted prices, limits, and forecasts" }
+      - { name: Plan, id: 0x09, description: "Device intended behavior/schedule" }
+    endpoint_types:
+      - { name: DEVICE_ROOT, id: 0x00, description: "Device-level metadata (always endpoint 0)" }
+      - { name: GRID_CONNECTION, id: 0x01, description: "AC grid connection point" }
+      - { name: INVERTER, id: 0x02, description: "Inverter AC side" }
+      - { name: PV_STRING, id: 0x03, description: "PV string / solar input (DC)" }
+      - { name: BATTERY, id: 0x04, description: "Battery storage (DC)" }
+      - { name: EV_CHARGER, id: 0x05, description: "EVSE / wallbox" }
+      - { name: HEAT_PUMP, id: 0x06, description: "Heat pump" }
+      - { name: WATER_HEATER, id: 0x07, description: "Water heater / boiler" }
+      - { name: HVAC, id: 0x08, description: "HVAC system" }
+      - { name: APPLIANCE, id: 0x09, description: "Generic controllable appliance" }
+      - { name: SUB_METER, id: 0x0A, description: "Sub-meter / circuit monitor" }

@@ -1,0 +1,469 @@
+name: EnergyControl
+id: 0x05
+revision: 1
+mandatory: false
+description: "Energy management: limits, setpoints, process control."
+
+enums:
+  - name: DeviceType
+    type: uint8
+    description: "Type of controllable device"
+    values:
+      - { name: EVSE, value: 0x00, description: "Electric vehicle supply equipment" }
+      - { name: HEAT_PUMP, value: 0x01, description: "Heat pump" }
+      - { name: WATER_HEATER, value: 0x02, description: "Water heater" }
+      - { name: BATTERY, value: 0x03, description: "Battery storage" }
+      - { name: INVERTER, value: 0x04, description: "Solar/hybrid inverter" }
+      - { name: FLEXIBLE_LOAD, value: 0x05, description: "Generic flexible load" }
+      - { name: OTHER, value: 0xFF, description: "Other device type" }
+
+  - name: ControlState
+    type: uint8
+    description: "Control relationship state"
+    values:
+      - { name: AUTONOMOUS, value: 0x00, description: "Not under external control" }
+      - { name: CONTROLLED, value: 0x01, description: "Under controller authority, no active limit" }
+      - { name: LIMITED, value: 0x02, description: "Active power limit being applied" }
+      - { name: FAILSAFE, value: 0x03, description: "Connection lost, using failsafe limits" }
+      - { name: OVERRIDE, value: 0x04, description: "Device overriding limits (safety/legal)" }
+
+  - name: ProcessState
+    type: uint8
+    description: "Optional task lifecycle state"
+    values:
+      - { name: NONE, value: 0x00 }
+      - { name: AVAILABLE, value: 0x01 }
+      - { name: SCHEDULED, value: 0x02 }
+      - { name: RUNNING, value: 0x03 }
+      - { name: PAUSED, value: 0x04 }
+      - { name: COMPLETED, value: 0x05 }
+      - { name: ABORTED, value: 0x06 }
+
+  - name: OptOutState
+    type: uint8
+    description: "Opt-out state for external control"
+    values:
+      - { name: NONE, value: 0x00 }
+      - { name: LOCAL, value: 0x01 }
+      - { name: GRID, value: 0x02 }
+      - { name: ALL, value: 0x03 }
+
+  - name: LimitCause
+    type: uint8
+    description: "Cause/reason for a limit"
+    values:
+      - { name: GRID_EMERGENCY, value: 0x00 }
+      - { name: GRID_OPTIMIZATION, value: 0x01 }
+      - { name: LOCAL_PROTECTION, value: 0x02 }
+      - { name: LOCAL_OPTIMIZATION, value: 0x03 }
+      - { name: USER_PREFERENCE, value: 0x04 }
+
+  - name: SetpointCause
+    type: uint8
+    description: "Cause/reason for a setpoint"
+    values:
+      - { name: GRID_REQUEST, value: 0x00 }
+      - { name: SELF_CONSUMPTION, value: 0x01 }
+      - { name: PRICE_OPTIMIZATION, value: 0x02 }
+      - { name: PHASE_BALANCING, value: 0x03 }
+      - { name: USER_PREFERENCE, value: 0x04 }
+
+  - name: OverrideReason
+    type: uint8
+    description: "Why device is exceeding limits"
+    values:
+      - { name: SELF_PROTECTION, value: 0x00 }
+      - { name: SAFETY, value: 0x01 }
+      - { name: LEGAL_REQUIREMENT, value: 0x02 }
+      - { name: UNCONTROLLED_LOAD, value: 0x03 }
+      - { name: UNCONTROLLED_PRODUCER, value: 0x04 }
+
+  - name: LimitRejectReason
+    type: uint8
+    description: "Why a SetLimit was not applied"
+    values:
+      - { name: BELOW_MINIMUM, value: 0x00 }
+      - { name: ABOVE_CONTRACTUAL, value: 0x01 }
+      - { name: INVALID_VALUE, value: 0x02 }
+      - { name: DEVICE_OVERRIDE, value: 0x03 }
+      - { name: NOT_SUPPORTED, value: 0x04 }
+
+attributes:
+  # Device type and control state (1-9)
+  - id: 1
+    name: deviceType
+    type: uint8
+    enum: DeviceType
+    access: readOnly
+    mandatory: true
+    default: OTHER
+    description: "Type of controllable device"
+
+  - id: 2
+    name: controlState
+    type: uint8
+    enum: ControlState
+    access: readOnly
+    mandatory: true
+    default: AUTONOMOUS
+    description: "Control relationship state"
+
+  - id: 3
+    name: optOutState
+    type: uint8
+    enum: OptOutState
+    access: readWrite
+    default: NONE
+    description: "Opt-out state for external control"
+
+  # Control capabilities (10-19)
+  - id: 10
+    name: acceptsLimits
+    type: bool
+    access: readOnly
+    mandatory: true
+    default: false
+    description: "Accepts SetLimit command"
+
+  - id: 11
+    name: acceptsCurrentLimits
+    type: bool
+    access: readOnly
+    default: false
+    description: "Accepts SetCurrentLimits command"
+
+  - id: 12
+    name: acceptsSetpoints
+    type: bool
+    access: readOnly
+    default: false
+    description: "Accepts SetSetpoint command"
+
+  - id: 13
+    name: acceptsCurrentSetpoints
+    type: bool
+    access: readOnly
+    default: false
+    description: "Accepts SetCurrentSetpoints command"
+
+  - id: 14
+    name: isPausable
+    type: bool
+    access: readOnly
+    default: false
+    description: "Accepts Pause/Resume commands"
+
+  - id: 15
+    name: isShiftable
+    type: bool
+    access: readOnly
+    default: false
+    description: "Accepts AdjustStartTime command"
+
+  - id: 16
+    name: isStoppable
+    type: bool
+    access: readOnly
+    default: false
+    description: "Accepts Stop command"
+
+  # Power limits (20-29)
+  - id: 20
+    name: effectiveConsumptionLimit
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mW"
+    description: "Effective consumption limit (min of all zones)"
+
+  - id: 21
+    name: myConsumptionLimit
+    type: int64
+    access: readWrite
+    nullable: true
+    unit: "mW"
+    description: "This zone's consumption limit"
+
+  - id: 22
+    name: effectiveProductionLimit
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mW"
+    description: "Effective production limit (min of all zones)"
+
+  - id: 23
+    name: myProductionLimit
+    type: int64
+    access: readWrite
+    nullable: true
+    unit: "mW"
+    description: "This zone's production limit"
+
+  # Phase current limits - consumption (30-39)
+  - id: 30
+    name: effectiveCurrentLimitsConsumption
+    type: map
+    mapKeyType: Phase
+    mapValueType: int64
+    access: readOnly
+    nullable: true
+    description: "Effective per-phase current limits (consumption)"
+
+  - id: 31
+    name: myCurrentLimitsConsumption
+    type: map
+    mapKeyType: Phase
+    mapValueType: int64
+    access: readOnly
+    nullable: true
+    description: "This zone's per-phase current limits (consumption)"
+
+  # Phase current limits - production
+  - id: 32
+    name: effectiveCurrentLimitsProduction
+    type: map
+    mapKeyType: Phase
+    mapValueType: int64
+    access: readOnly
+    nullable: true
+    description: "Effective per-phase current limits (production)"
+
+  - id: 33
+    name: myCurrentLimitsProduction
+    type: map
+    mapKeyType: Phase
+    mapValueType: int64
+    access: readOnly
+    nullable: true
+    description: "This zone's per-phase current limits (production)"
+
+  # Power setpoints (40-49)
+  - id: 40
+    name: effectiveConsumptionSetpoint
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mW"
+    description: "Effective consumption setpoint"
+
+  - id: 41
+    name: myConsumptionSetpoint
+    type: int64
+    access: readWrite
+    nullable: true
+    unit: "mW"
+    description: "This zone's consumption setpoint"
+
+  - id: 42
+    name: effectiveProductionSetpoint
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mW"
+    description: "Effective production setpoint"
+
+  - id: 43
+    name: myProductionSetpoint
+    type: int64
+    access: readWrite
+    nullable: true
+    unit: "mW"
+    description: "This zone's production setpoint"
+
+  # Phase current setpoints - consumption (50-59)
+  - id: 50
+    name: effectiveCurrentSetpointsConsumption
+    type: map
+    mapKeyType: Phase
+    mapValueType: int64
+    access: readOnly
+    nullable: true
+    description: "Effective per-phase current setpoints (consumption)"
+
+  - id: 51
+    name: myCurrentSetpointsConsumption
+    type: map
+    mapKeyType: Phase
+    mapValueType: int64
+    access: readOnly
+    nullable: true
+    description: "This zone's per-phase current setpoints (consumption)"
+
+  # Phase current setpoints - production
+  - id: 52
+    name: effectiveCurrentSetpointsProduction
+    type: map
+    mapKeyType: Phase
+    mapValueType: int64
+    access: readOnly
+    nullable: true
+    description: "Effective per-phase current setpoints (production)"
+
+  - id: 53
+    name: myCurrentSetpointsProduction
+    type: map
+    mapKeyType: Phase
+    mapValueType: int64
+    access: readOnly
+    nullable: true
+    description: "This zone's per-phase current setpoints (production)"
+
+  # Failsafe configuration (70-79)
+  - id: 70
+    name: failsafeConsumptionLimit
+    type: int64
+    access: readWrite
+    nullable: true
+    unit: "mW"
+    description: "Limit to apply in FAILSAFE state"
+
+  - id: 71
+    name: failsafeProductionLimit
+    type: int64
+    access: readWrite
+    nullable: true
+    unit: "mW"
+    description: "Production limit in FAILSAFE state"
+
+  - id: 72
+    name: failsafeDuration
+    type: uint32
+    access: readWrite
+    mandatory: true
+    default: 7200
+    unit: "s"
+    description: "Time in FAILSAFE before returning to AUTONOMOUS (2-24h)"
+
+  # Contractual limits (73-74) - EMS/CEM only
+  - id: 73
+    name: contractualConsumptionMax
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mW"
+    description: "Building's max allowed consumption (EMS only)"
+
+  - id: 74
+    name: contractualProductionMax
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mW"
+    description: "Building's max allowed feed-in (EMS only)"
+
+  # Override tracking (75-76)
+  - id: 75
+    name: overrideReason
+    type: uint8
+    enum: OverrideReason
+    access: readOnly
+    nullable: true
+    description: "Why device is in OVERRIDE state"
+
+  - id: 76
+    name: overrideDirection
+    type: uint8
+    enum: Direction
+    access: readOnly
+    nullable: true
+    description: "Which direction triggered override"
+
+  # Process management (80-89)
+  - id: 80
+    name: processState
+    type: uint8
+    enum: ProcessState
+    access: readOnly
+    default: NONE
+    description: "Current process lifecycle state"
+
+  - id: 81
+    name: optionalProcess
+    type: bool
+    access: readOnly
+    default: false
+    description: "Whether the process is optional (can be deferred)"
+
+commands:
+  - id: 1
+    name: setLimit
+    mandatory: true
+    description: "Set power limits for this zone"
+    parameters:
+      - { name: consumptionLimit, type: int64, required: false }
+      - { name: productionLimit, type: int64, required: false }
+      - { name: duration, type: uint32, required: false }
+      - { name: cause, type: uint8, enum: LimitCause, required: true }
+    response:
+      - { name: applied, type: bool, required: true }
+      - { name: controlState, type: uint8, enum: ControlState, required: true }
+      - { name: effectiveConsumptionLimit, type: int64, required: false }
+      - { name: effectiveProductionLimit, type: int64, required: false }
+      - { name: rejectReason, type: uint8, enum: LimitRejectReason, required: false }
+
+  - id: 2
+    name: clearLimit
+    mandatory: true
+    description: "Remove this zone's power limits"
+    parameters:
+      - { name: direction, type: uint8, enum: Direction, required: false }
+
+  - id: 3
+    name: setCurrentLimits
+    description: "Set per-phase current limits"
+    parameters:
+      - { name: phases, type: map, required: true }
+      - { name: direction, type: uint8, enum: Direction, required: true }
+      - { name: duration, type: uint32, required: false }
+      - { name: cause, type: uint8, enum: LimitCause, required: true }
+
+  - id: 4
+    name: clearCurrentLimits
+    description: "Remove this zone's per-phase current limits"
+    parameters:
+      - { name: direction, type: uint8, enum: Direction, required: false }
+
+  - id: 5
+    name: setSetpoint
+    description: "Set power setpoint for this zone"
+    parameters:
+      - { name: consumptionSetpoint, type: int64, required: false }
+      - { name: productionSetpoint, type: int64, required: false }
+      - { name: duration, type: uint32, required: false }
+      - { name: cause, type: uint8, enum: SetpointCause, required: true }
+
+  - id: 6
+    name: clearSetpoint
+    description: "Remove this zone's power setpoints"
+    parameters:
+      - { name: direction, type: uint8, enum: Direction, required: false }
+
+  - id: 7
+    name: setCurrentSetpoints
+    description: "Set per-phase current setpoints"
+    parameters:
+      - { name: phases, type: map, required: true }
+      - { name: direction, type: uint8, enum: Direction, required: true }
+      - { name: duration, type: uint32, required: false }
+      - { name: cause, type: uint8, enum: SetpointCause, required: true }
+
+  - id: 8
+    name: clearCurrentSetpoints
+    description: "Remove this zone's per-phase current setpoints"
+    parameters:
+      - { name: direction, type: uint8, enum: Direction, required: false }
+
+  - id: 9
+    name: pause
+    description: "Temporarily pause device operation"
+    parameters:
+      - { name: duration, type: uint32, required: false }
+
+  - id: 10
+    name: resume
+    description: "Resume paused operation"
+
+  - id: 11
+    name: stop
+    description: "Abort task completely"

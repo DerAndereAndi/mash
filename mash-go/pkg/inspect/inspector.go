@@ -35,7 +35,7 @@ func (i *Inspector) Device() *model.Device {
 type DeviceTree struct {
 	DeviceID  string
 	VendorID  uint32
-	ProductID uint32
+	ProductID uint16
 	Endpoints []EndpointInfo
 }
 

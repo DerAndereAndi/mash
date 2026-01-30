@@ -44,7 +44,7 @@ type EVSEConfig struct {
 	ProductName  string
 	SerialNumber string
 	VendorID     uint32
-	ProductID    uint32
+	ProductID    uint16
 
 	// Electrical capabilities
 	PhaseCount            uint8
@@ -168,7 +168,7 @@ func (e *EVSE) setupCommandHandlers() {
 	e.limitResolver.Register()
 
 	// Pause handler
-	e.energyControl.OnPause(func(ctx context.Context, duration *uint32) error {
+	e.energyControl.OnPause(func(ctx context.Context, req features.PauseRequest) error {
 		e.mu.Lock()
 		defer e.mu.Unlock()
 
@@ -206,24 +206,24 @@ func (e *EVSE) setupCommandHandlers() {
 	})
 
 	// SetChargingMode handler
-	e.chargingSession.OnSetChargingMode(func(ctx context.Context, mode features.ChargingMode, surplusThreshold *int64, startDelay, stopDelay *uint32) (features.ChargingMode, string, error) {
+	e.chargingSession.OnSetChargingMode(func(ctx context.Context, req features.SetChargingModeRequest) error {
 		// Check if mode is supported
-		if !e.chargingSession.SupportsMode(mode) {
-			return e.chargingSession.CurrentChargingMode(), "unsupported mode", nil
+		if !e.chargingSession.SupportsMode(req.Mode) {
+			return nil
 		}
 
-		_ = e.chargingSession.SetChargingMode(mode)
-		if surplusThreshold != nil {
-			_ = e.chargingSession.SetSurplusThreshold(*surplusThreshold)
+		_ = e.chargingSession.SetChargingMode(req.Mode)
+		if req.SurplusThreshold != nil {
+			_ = e.chargingSession.SetSurplusThreshold(*req.SurplusThreshold)
 		}
-		if startDelay != nil {
-			_ = e.chargingSession.SetStartDelay(*startDelay)
+		if req.StartDelay != nil {
+			_ = e.chargingSession.SetStartDelay(*req.StartDelay)
 		}
-		if stopDelay != nil {
-			_ = e.chargingSession.SetStopDelay(*stopDelay)
+		if req.StopDelay != nil {
+			_ = e.chargingSession.SetStopDelay(*req.StopDelay)
 		}
 
-		return mode, "", nil
+		return nil
 	})
 }
 

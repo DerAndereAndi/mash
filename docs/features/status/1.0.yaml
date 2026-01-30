@@ -1,0 +1,51 @@
+name: Status
+id: 0x02
+revision: 1
+mandatory: false
+description: "Per-endpoint operating state and health information."
+
+enums:
+  - name: OperatingState
+    type: uint8
+    description: "Operating state of a device/endpoint"
+    values:
+      - { name: UNKNOWN, value: 0x00, description: "State not known" }
+      - { name: OFFLINE, value: 0x01, description: "Not connected / not available" }
+      - { name: STANDBY, value: 0x02, description: "Ready but not active" }
+      - { name: STARTING, value: 0x03, description: "Powering up / initializing" }
+      - { name: RUNNING, value: 0x04, description: "Actively operating" }
+      - { name: PAUSED, value: 0x05, description: "Temporarily paused (can resume)" }
+      - { name: SHUTTING_DOWN, value: 0x06, description: "Powering down" }
+      - { name: FAULT, value: 0x07, description: "Error condition (check faultCode)" }
+      - { name: MAINTENANCE, value: 0x08, description: "Under maintenance / firmware update" }
+
+attributes:
+  - id: 1
+    name: operatingState
+    type: uint8
+    enum: OperatingState
+    access: readOnly
+    mandatory: true
+    default: UNKNOWN
+    description: "Current operating state"
+
+  - id: 2
+    name: stateDetail
+    type: uint32
+    access: readOnly
+    nullable: true
+    description: "Vendor-specific state detail code"
+
+  - id: 3
+    name: faultCode
+    type: uint32
+    access: readOnly
+    nullable: true
+    description: "Fault/error code when state=FAULT"
+
+  - id: 4
+    name: faultMessage
+    type: string
+    access: readOnly
+    nullable: true
+    description: "Human-readable fault description"

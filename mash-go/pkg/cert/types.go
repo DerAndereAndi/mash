@@ -146,7 +146,7 @@ type DeviceIdentity struct {
 	VendorID uint32
 
 	// ProductID identifies the device product within the vendor.
-	ProductID uint32
+	ProductID uint16
 
 	// SerialNumber is the device serial number (optional).
 	SerialNumber string
