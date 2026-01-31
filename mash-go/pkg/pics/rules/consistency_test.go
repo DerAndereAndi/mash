@@ -243,18 +243,64 @@ MASH.S.E01.CHRG.C01.Rsp=1`)
 	}
 }
 
+func TestCMD010_PLANRequiresRequestPlan(t *testing.T) {
+	rule := NewCMD010()
+
+	// PLAN without command - violation
+	p, _ := pics.ParseString(`MASH.S=1
+MASH.S.E01=HEAT_PUMP
+MASH.S.E01.PLAN=1`)
+	violations := rule.Check(p)
+	if len(violations) == 0 {
+		t.Error("Expected violation for PLAN without C01")
+	}
+
+	// PLAN with command - no violation
+	p, _ = pics.ParseString(`MASH.S=1
+MASH.S.E01=HEAT_PUMP
+MASH.S.E01.PLAN=1
+MASH.S.E01.PLAN.C01.Rsp=1`)
+	violations = rule.Check(p)
+	if len(violations) > 0 {
+		t.Errorf("Expected no violation, got: %v", violations)
+	}
+}
+
+func TestCMD011_TARRequiresSetTariff(t *testing.T) {
+	rule := NewCMD011()
+
+	// TAR without command - violation
+	p, _ := pics.ParseString(`MASH.S=1
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.TAR=1`)
+	violations := rule.Check(p)
+	if len(violations) == 0 {
+		t.Error("Expected violation for TAR without C01")
+	}
+
+	// TAR with command - no violation
+	p, _ = pics.ParseString(`MASH.S=1
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.TAR=1
+MASH.S.E01.TAR.C01.Rsp=1`)
+	violations = rule.Check(p)
+	if len(violations) > 0 {
+		t.Errorf("Expected no violation, got: %v", violations)
+	}
+}
+
 func TestRegisterConsistencyRules(t *testing.T) {
 	registry := pics.NewRuleRegistry()
 	RegisterConsistencyRules(registry)
 
 	rules := registry.RulesByCategory("consistency")
-	if len(rules) != 9 {
-		t.Errorf("Expected 9 consistency rules, got %d", len(rules))
+	if len(rules) != 11 {
+		t.Errorf("Expected 11 consistency rules, got %d", len(rules))
 	}
 
 	expectedIDs := []string{
 		"CMD-001", "CMD-002", "CMD-003", "CMD-004", "CMD-005",
-		"CMD-006", "CMD-007", "CMD-008", "CMD-009",
+		"CMD-006", "CMD-007", "CMD-008", "CMD-009", "CMD-010", "CMD-011",
 	}
 
 	for _, id := range expectedIDs {

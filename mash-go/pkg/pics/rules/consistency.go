@@ -18,6 +18,8 @@ func RegisterConsistencyRules(registry *pics.RuleRegistry) {
 	registry.Register(NewCMD007())
 	registry.Register(NewCMD008())
 	registry.Register(NewCMD009())
+	registry.Register(NewCMD010())
+	registry.Register(NewCMD011())
 }
 
 // CMD001 checks that acceptsLimits (A0A) requires SetLimit (C01) and ClearLimit (C02) per endpoint.
@@ -398,6 +400,72 @@ func (r *CMD009) Check(p *pics.PICS) []pics.Violation {
 				RuleID:     r.ID(),
 				Severity:   r.DefaultSeverity(),
 				Message:    fmt.Sprintf("Endpoint %d (%s): CHRG feature requires SetChargingMode command (C01.Rsp)", ep.ID, ep.Type),
+				PICSCodes:  []string{featureCode, c01Code},
+				Suggestion: fmt.Sprintf("Add %s=1", c01Code),
+			})
+		}
+	}
+
+	return violations
+}
+
+// CMD010 checks that PLAN feature requires RequestPlan (C01) per endpoint.
+type CMD010 struct {
+	*pics.BaseRule
+}
+
+func NewCMD010() *CMD010 {
+	return &CMD010{
+		BaseRule: pics.NewBaseRule("CMD-010", "PLAN requires RequestPlan command", "consistency", pics.SeverityError),
+	}
+}
+
+func (r *CMD010) Check(p *pics.PICS) []pics.Violation {
+	side := string(p.Side)
+	var violations []pics.Violation
+
+	for _, ep := range p.EndpointsWithFeature("PLAN") {
+		c01Code := epCode(side, ep.ID, "PLAN.C01.Rsp")
+
+		if !p.Has(c01Code) {
+			featureCode := epCode(side, ep.ID, "PLAN")
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): PLAN feature requires RequestPlan command (C01.Rsp)", ep.ID, ep.Type),
+				PICSCodes:  []string{featureCode, c01Code},
+				Suggestion: fmt.Sprintf("Add %s=1", c01Code),
+			})
+		}
+	}
+
+	return violations
+}
+
+// CMD011 checks that TAR feature requires SetTariff (C01) per endpoint.
+type CMD011 struct {
+	*pics.BaseRule
+}
+
+func NewCMD011() *CMD011 {
+	return &CMD011{
+		BaseRule: pics.NewBaseRule("CMD-011", "TAR requires SetTariff command", "consistency", pics.SeverityError),
+	}
+}
+
+func (r *CMD011) Check(p *pics.PICS) []pics.Violation {
+	side := string(p.Side)
+	var violations []pics.Violation
+
+	for _, ep := range p.EndpointsWithFeature("TAR") {
+		c01Code := epCode(side, ep.ID, "TAR.C01.Rsp")
+
+		if !p.Has(c01Code) {
+			featureCode := epCode(side, ep.ID, "TAR")
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): TAR feature requires SetTariff command (C01.Rsp)", ep.ID, ep.Type),
 				PICSCodes:  []string{featureCode, c01Code},
 				Suggestion: fmt.Sprintf("Add %s=1", c01Code),
 			})

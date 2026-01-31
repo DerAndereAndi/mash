@@ -635,6 +635,10 @@ A valid PICS file MUST satisfy:
 4. **Flag dependencies**: Feature flag dependencies must be satisfied per endpoint (e.g., V2X requires EMOB)
 5. **Command consistency**: If attribute `acceptsFoo=true`, corresponding `SetFoo` command must be declared on that endpoint
 6. **Endpoint type conformance** (EPT-001): Each endpoint's attributes must satisfy the mandatory/recommended requirements from `endpoint-conformance.yaml` (DEC-053)
+7. **Use case commands** (UC-001): Required feature commands for each declared use case must be declared on at least one endpoint with the feature
+8. **Use case attributes** (UC-001): Required feature attributes (presence-only or value-checked) for each declared use case must be declared
+9. **Use case endpoint types** (UC-001): Features for a use case must appear on an allowed endpoint type (warning)
+10. **PLAN/TAR command consistency** (CMD-010, CMD-011): PLAN feature requires RequestPlan (C01.Rsp); TAR feature requires SetTariff (C01.Rsp)
 
 ### 6.2 Validation Algorithm
 
