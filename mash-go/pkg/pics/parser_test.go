@@ -915,6 +915,179 @@ func TestParseFile_YAML(t *testing.T) {
 	}
 }
 
+func TestParseUCCodes_KeyValue(t *testing.T) {
+	input := `
+MASH.S=1
+MASH.S.UC.LPC=1
+MASH.S.UC.MPD=1
+MASH.S.UC.EVC=0
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	// UC.LPC should be present and true
+	if !pics.Has("MASH.S.UC.LPC") {
+		t.Error("expected MASH.S.UC.LPC to be present and true")
+	}
+
+	// UC.MPD should be present and true
+	if !pics.Has("MASH.S.UC.MPD") {
+		t.Error("expected MASH.S.UC.MPD to be present and true")
+	}
+
+	// UC.EVC should be present but false (value=0)
+	if pics.Has("MASH.S.UC.EVC") {
+		t.Error("expected MASH.S.UC.EVC to NOT be true (value=0)")
+	}
+	if _, ok := pics.Get("MASH.S.UC.EVC"); !ok {
+		t.Error("expected MASH.S.UC.EVC to be present in ByCode")
+	}
+
+	// UC codes should appear in device-level Features
+	foundUCLPC := false
+	for _, f := range pics.Features {
+		if f == "UC.LPC" {
+			foundUCLPC = true
+			break
+		}
+	}
+	if !foundUCLPC {
+		t.Errorf("expected UC.LPC in device-level Features, got %v", pics.Features)
+	}
+}
+
+func TestParseUCCodes_YAML(t *testing.T) {
+	input := `device:
+  vendor: "Test"
+items:
+  MASH.C: 1
+  MASH.C.UC.LPC: true
+  MASH.C.UC.LPP: true
+  MASH.C.UC.MPD: true
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	if pics.Side != SideClient {
+		t.Errorf("expected Side=C, got %v", pics.Side)
+	}
+
+	if !pics.Has("MASH.C.UC.LPC") {
+		t.Error("expected MASH.C.UC.LPC to be present and true")
+	}
+
+	if !pics.Has("MASH.C.UC.LPP") {
+		t.Error("expected MASH.C.UC.LPP to be present and true")
+	}
+
+	if !pics.Has("MASH.C.UC.MPD") {
+		t.Error("expected MASH.C.UC.MPD to be present and true")
+	}
+}
+
+func TestParseUCCodes_ParsedCode(t *testing.T) {
+	input := `MASH.S=1
+MASH.S.UC.LPC=1
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	entry, ok := pics.ByCode["MASH.S.UC.LPC"]
+	if !ok {
+		t.Fatal("expected MASH.S.UC.LPC in ByCode")
+	}
+
+	if entry.Code.Side != SideServer {
+		t.Errorf("Side = %s, want S", entry.Code.Side)
+	}
+	if entry.Code.EndpointID != 0 {
+		t.Errorf("EndpointID = %d, want 0 (device-level)", entry.Code.EndpointID)
+	}
+	if entry.Code.Feature != "UC.LPC" {
+		t.Errorf("Feature = %s, want UC.LPC", entry.Code.Feature)
+	}
+}
+
+func TestPICS_HasUseCase(t *testing.T) {
+	input := `
+MASH.S=1
+MASH.S.UC.LPC=1
+MASH.S.UC.MPD=1
+MASH.S.UC.EVC=0
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	if !pics.HasUseCase("LPC") {
+		t.Error("expected HasUseCase(LPC) to return true")
+	}
+
+	if !pics.HasUseCase("MPD") {
+		t.Error("expected HasUseCase(MPD) to return true")
+	}
+
+	if pics.HasUseCase("EVC") {
+		t.Error("expected HasUseCase(EVC) to return false (value=0)")
+	}
+
+	if pics.HasUseCase("NONEXISTENT") {
+		t.Error("expected HasUseCase(NONEXISTENT) to return false")
+	}
+}
+
+func TestPICS_HasUseCase_Controller(t *testing.T) {
+	input := `
+MASH.C=1
+MASH.C.UC.LPC=1
+MASH.C.UC.LPP=1
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	if !pics.HasUseCase("LPC") {
+		t.Error("expected HasUseCase(LPC) to return true for controller")
+	}
+
+	if !pics.HasUseCase("LPP") {
+		t.Error("expected HasUseCase(LPP) to return true for controller")
+	}
+}
+
+func TestPICS_UseCases(t *testing.T) {
+	input := `
+MASH.S=1
+MASH.S.UC.LPC=1
+MASH.S.UC.MPD=1
+MASH.S.UC.EVC=0
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	ucs := pics.UseCases()
+
+	// Only true UC codes should be returned
+	if len(ucs) != 2 {
+		t.Fatalf("expected 2 use cases, got %d: %v", len(ucs), ucs)
+	}
+
+	// Should be sorted
+	if ucs[0] != "LPC" || ucs[1] != "MPD" {
+		t.Errorf("UseCases() = %v, want [LPC MPD]", ucs)
+	}
+}
+
 func BenchmarkParsePICS(b *testing.B) {
 	// A realistic PICS file content
 	input := strings.Repeat(`

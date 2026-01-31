@@ -19,6 +19,7 @@ description: |
   rejectReason, and controlState fields per DEC-049.
 
 pics_requirements:
+  - MASH.S.UC.LPC                  # Use case declaration
   - MASH.S.CTRL
   - MASH.S.CTRL.B_APPLIED
   - MASH.S.CTRL.B_CTRLSTATE
@@ -75,6 +76,7 @@ description: |
   INVALID_VALUE reason per LPC spec requirement.
 
 pics_requirements:
+  - MASH.S.UC.LPC                  # Use case declaration
   - MASH.S.CTRL
   - MASH.S.CTRL.B_VALIDATE_NEG
   - MASH.S.CTRL.B_REJECT
@@ -581,6 +583,7 @@ description: |
   LPP (Limitation of Power Production) use case.
 
 pics_requirements:
+  - MASH.S.UC.LPP                  # Use case declaration
   - MASH.S.CTRL
   - MASH.S.CTRL.A16              # effectiveProductionLimit
   - MASH.S.CTRL.B_APPLIED

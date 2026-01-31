@@ -146,6 +146,14 @@ func (c *CEM) setupDeviceInfo(cfg CEMConfig) {
 		endpoints = append(endpoints, ep.Info())
 	}
 	_ = c.deviceInfo.SetEndpoints(endpoints)
+
+	// Declare controller-side use case support
+	c.updateUseCaseInfo()
+}
+
+func (c *CEM) updateUseCaseInfo() {
+	decls := usecase.EvaluateController(usecase.Registry)
+	_ = c.deviceInfo.SetUseCases(decls)
 }
 
 // Device returns the underlying MASH device.

@@ -1,0 +1,31 @@
+# PICS (Protocol Implementation Conformance Statement)
+# CEM Controller (Client-Side)
+#
+# This PICS file describes a Customer Energy Manager (CEM) controller
+# that acts as a client for multiple use cases. Controllers declare
+# which use cases they support via MASH.C.UC.<name> codes.
+
+# Device Identification
+device:
+  vendor: "Reference"
+  product: "CEM Controller"
+  model: "CEM-001"
+  version: "1.0.0"
+
+# PICS Items
+items:
+  # Protocol declaration
+  MASH.C: 1
+
+  # Use case declarations (client-side)
+  MASH.C.UC.LPC: true            # Limit Power Consumption
+  MASH.C.UC.LPP: true            # Limit Power Production
+  MASH.C.UC.MPD: true            # Monitor Power Device
+  MASH.C.UC.EVC: true            # EV Charging
+  MASH.C.UC.COB: true            # Control of Battery
+  MASH.C.UC.FLOA: true           # Flexible Load
+  MASH.C.UC.OHPCF: true          # Heat Pump Compressor Flexibility
+  MASH.C.UC.ITPCM: true          # Incentive Table Power Consumption Management
+  MASH.C.UC.TOUT: true           # Time of Use Tariff
+  MASH.C.UC.POEN: true           # Power Envelope
+  MASH.C.UC.PODF: true           # Power Demand Forecast

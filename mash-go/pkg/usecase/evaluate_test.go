@@ -83,6 +83,73 @@ func TestEvaluateDevice_MeasurementOnly(t *testing.T) {
 	}
 }
 
+func TestEvaluateController_AllRegistered(t *testing.T) {
+	decls := EvaluateController(Registry)
+
+	if len(decls) != len(Registry) {
+		t.Fatalf("expected %d declarations, got %d", len(Registry), len(decls))
+	}
+
+	// Build lookup
+	declMap := make(map[string]*model.UseCaseDecl)
+	for _, d := range decls {
+		declMap[d.Name] = d
+	}
+
+	// Verify all registry entries are present with correct versions
+	for name, def := range Registry {
+		d, ok := declMap[string(name)]
+		if !ok {
+			t.Errorf("missing declaration for %s", name)
+			continue
+		}
+		if d.Major != def.Major {
+			t.Errorf("%s: Major = %d, want %d", name, d.Major, def.Major)
+		}
+		if d.Minor != def.Minor {
+			t.Errorf("%s: Minor = %d, want %d", name, d.Minor, def.Minor)
+		}
+	}
+}
+
+func TestEvaluateController_EndpointIDZero(t *testing.T) {
+	decls := EvaluateController(Registry)
+
+	for _, d := range decls {
+		if d.EndpointID != 0 {
+			t.Errorf("%s: EndpointID = %d, want 0", d.Name, d.EndpointID)
+		}
+	}
+}
+
+func TestEvaluateController_SubsetRegistry(t *testing.T) {
+	// Custom smaller registry
+	subset := map[UseCaseName]*UseCaseDef{
+		"LPC": Registry["LPC"],
+		"MPD": Registry["MPD"],
+	}
+
+	decls := EvaluateController(subset)
+
+	if len(decls) != 2 {
+		t.Fatalf("expected 2 declarations, got %d", len(decls))
+	}
+
+	// Should be sorted by name: LPC, MPD
+	if decls[0].Name != "LPC" {
+		t.Errorf("decls[0].Name = %s, want LPC", decls[0].Name)
+	}
+	if decls[1].Name != "MPD" {
+		t.Errorf("decls[1].Name = %s, want MPD", decls[1].Name)
+	}
+
+	for _, d := range decls {
+		if d.EndpointID != 0 {
+			t.Errorf("%s: EndpointID = %d, want 0", d.Name, d.EndpointID)
+		}
+	}
+}
+
 func TestEvaluateDevice_CorrectVersions(t *testing.T) {
 	// Verify versions come from the registry
 	ec := features.NewEnergyControl()

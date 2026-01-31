@@ -8,6 +8,7 @@ func RegisterAllRules(registry *pics.RuleRegistry) {
 	RegisterMandatoryRules(registry)
 	RegisterConsistencyRules(registry)
 	RegisterConformanceRules(registry)
+	RegisterUseCaseRules(registry)
 }
 
 // NewDefaultRegistry creates a new registry with all rules registered.

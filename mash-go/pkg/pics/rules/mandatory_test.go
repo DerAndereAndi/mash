@@ -82,6 +82,24 @@ MASH.S.E01.CTRL.A48=1`)
 		t.Errorf("Expected no violation with all mandatory attrs, got: %v", violations)
 	}
 
+	// With mandatory attributes declared as false (=0) -- still satisfies mandatory check
+	// because the attribute is present on the device; it just has a false runtime value.
+	p, _ = pics.ParseString(`MASH.S=1
+MASH.S.E01=GRID_CONNECTION
+MASH.S.E01.CTRL=1
+MASH.S.E01.CTRL.A01=1
+MASH.S.E01.CTRL.A02=1
+MASH.S.E01.CTRL.A0A=1
+MASH.S.E01.CTRL.A0B=0
+MASH.S.E01.CTRL.A0C=0
+MASH.S.E01.CTRL.A0E=0
+MASH.S.E01.CTRL.A46=1
+MASH.S.E01.CTRL.A48=1`)
+	violations = rule.Check(p)
+	if len(violations) > 0 {
+		t.Errorf("Expected no violation when mandatory attrs are declared false, got: %v", violations)
+	}
+
 	// Multi-endpoint: one valid, one missing attrs
 	p, _ = pics.ParseString(`MASH.S=1
 MASH.S.E01=EV_CHARGER

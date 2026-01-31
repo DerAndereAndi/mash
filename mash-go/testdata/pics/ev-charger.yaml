@@ -1,6 +1,6 @@
 # PICS (Protocol Implementation Conformance Statement)
 # EV Charger Device Profile
-
+#
 # This file describes the capabilities of an EV charger device
 # for filtering applicable test cases.
 
@@ -12,7 +12,7 @@ device:
   version: "1.0.0"
 
 # PICS Items
-# Format: MASH.{S|C}[.E<xx>].FEATURE.ITEM: value
+# Format: MASH.{S|C}[.E<xx>].FEATURE[.TYPE_ID][.Qualifier]: value
 items:
   # Protocol declaration
   MASH.S: 1                       # Server/device side
@@ -23,38 +23,103 @@ items:
   MASH.S.TRANS.MDNS: true         # mDNS discovery supported
   MASH.S.TRANS.TLS13: true        # TLS 1.3 supported
 
+  # Use case declarations (from DeviceInfo.useCases)
+  MASH.S.UC.LPC: true             # Limit Power Consumption
+  MASH.S.UC.MPD: true             # Monitor Power Device
+  MASH.S.UC.EVC: true             # EV Charging
+
   # Endpoint declaration
-  MASH.S.E01: EV_CHARGER          # Endpoint 1: EV Charger
+  MASH.S.E01: EV_CHARGER           # Endpoint 1: EV Charger
 
-  # Device Information (endpoint-level)
-  MASH.S.E01.INFO.BASIC: true     # Basic device info supported
-  MASH.S.E01.INFO.LOCATION: false # Location info not supported
+  # ==========================================================================
+  # Feature Presence (endpoint-level)
+  # ==========================================================================
 
-  # Electrical Configuration (endpoint-level)
-  MASH.S.E01.ELEC.AC: true       # AC charging supported
-  MASH.S.E01.ELEC.DC: false      # DC charging not supported
-  MASH.S.E01.ELEC.PHASES: 3      # Three-phase support
-  MASH.S.E01.ELEC.MAX_CURRENT: 32  # Maximum current in amps
-  MASH.S.E01.ELEC.MAX_POWER: 22000 # Maximum power in watts
+  MASH.S.E01.CTRL: true            # EnergyControl
+  MASH.S.E01.ELEC: true            # Electrical
+  MASH.S.E01.MEAS: true            # Measurement
+  MASH.S.E01.CHRG: true            # ChargingSession
 
-  # Measurement capabilities (endpoint-level)
-  MASH.S.E01.MEAS.POWER: true    # Power measurement supported
-  MASH.S.E01.MEAS.ENERGY: true   # Energy measurement supported
-  MASH.S.E01.MEAS.VOLTAGE: true  # Voltage measurement supported
-  MASH.S.E01.MEAS.CURRENT: true  # Current measurement supported
-  MASH.S.E01.MEAS.FREQUENCY: false  # Frequency not measured
+  # ==========================================================================
+  # EnergyControl (CTRL) Attributes
+  # ==========================================================================
 
-  # Control capabilities (endpoint-level)
-  MASH.S.E01.CTRL.LIMIT: true    # Power limiting supported
-  MASH.S.E01.CTRL.SETPOINT: true # Setpoint control supported
-  MASH.S.E01.CTRL.SCHEDULE: false  # Schedule not supported locally
+  # Device type & state (mandatory)
+  MASH.S.E01.CTRL.A01: true        # deviceType
+  MASH.S.E01.CTRL.A02: true        # controlState
 
-  # Charging Session (endpoint-level)
-  MASH.S.E01.CHRG.SESSION: true   # Session tracking supported
-  MASH.S.E01.CHRG.ISO15118: false # ISO 15118 not supported
-  MASH.S.E01.CHRG.PLUG_LOCK: true  # Cable lock supported
+  # Control capabilities (mandatory)
+  MASH.S.E01.CTRL.A0A: true        # acceptsLimits
+  MASH.S.E01.CTRL.A0B: true        # acceptsCurrentLimits
+  MASH.S.E01.CTRL.A0C: true        # acceptsSetpoints
+  MASH.S.E01.CTRL.A0E: true        # isPausable
 
+  # Failsafe (mandatory)
+  MASH.S.E01.CTRL.A46: true        # failsafeConsumptionLimit
+  MASH.S.E01.CTRL.A48: true        # failsafeDuration
+
+  # Power limit tracking
+  MASH.S.E01.CTRL.A14: true        # effectiveConsumptionLimit
+  MASH.S.E01.CTRL.A15: true        # myConsumptionLimit
+
+  # EnergyControl commands
+  MASH.S.E01.CTRL.C01.Rsp: true    # SetLimit
+  MASH.S.E01.CTRL.C02.Rsp: true    # ClearLimit
+  MASH.S.E01.CTRL.C03.Rsp: true    # SetSetpoint
+  MASH.S.E01.CTRL.C04.Rsp: true    # ClearSetpoint
+  MASH.S.E01.CTRL.C05.Rsp: true    # SetCurrentLimits
+  MASH.S.E01.CTRL.C06.Rsp: true    # ClearCurrentLimits
+  MASH.S.E01.CTRL.C09.Rsp: true    # Pause
+  MASH.S.E01.CTRL.C0A.Rsp: true    # Resume
+
+  # ==========================================================================
+  # Electrical (ELEC) Attributes
+  # ==========================================================================
+
+  # Mandatory
+  MASH.S.E01.ELEC.A01: true        # phaseCount (3-phase)
+  MASH.S.E01.ELEC.A02: true        # phaseMapping
+  MASH.S.E01.ELEC.A03: true        # nominalVoltage
+  MASH.S.E01.ELEC.A04: true        # nominalFrequency
+  MASH.S.E01.ELEC.A05: true        # supportedDirections
+  MASH.S.E01.ELEC.A0A: true        # nominalMaxConsumption (22 kW)
+  MASH.S.E01.ELEC.A0D: true        # maxCurrentPerPhase (32 A)
+
+  # Recommended
+  MASH.S.E01.ELEC.A0E: true        # minCurrentPerPhase (6 A)
+
+  # ==========================================================================
+  # Measurement (MEAS) Attributes
+  # ==========================================================================
+
+  # Mandatory
+  MASH.S.E01.MEAS.A01: true        # acActivePower
+
+  # Recommended
+  MASH.S.E01.MEAS.A14: true        # acCurrentPerPhase
+  MASH.S.E01.MEAS.A15: true        # acVoltagePerPhase
+  MASH.S.E01.MEAS.A1E: true        # acEnergyConsumed
+
+  # ==========================================================================
+  # ChargingSession (CHRG) Attributes
+  # ==========================================================================
+
+  # Mandatory
+  MASH.S.E01.CHRG.A01: true        # state
+  MASH.S.E01.CHRG.A02: true        # sessionId
+  MASH.S.E01.CHRG.A03: true        # sessionStartTime
+  MASH.S.E01.CHRG.A0A: true        # sessionEnergyCharged
+  MASH.S.E01.CHRG.A28: true        # evDemandMode
+  MASH.S.E01.CHRG.A46: true        # chargingMode
+  MASH.S.E01.CHRG.A47: true        # supportedChargingModes
+
+  # ChargingSession commands
+  MASH.S.E01.CHRG.C01.Rsp: true    # SetChargingMode
+
+  # ==========================================================================
   # Multi-zone support (device-level)
-  MASH.S.ZONE.MAX: 3             # Maximum 3 zones supported
-  MASH.S.ZONE.GRID: true         # Grid zone supported (external/regulatory)
-  MASH.S.ZONE.LOCAL: true        # Local zone supported (local energy management)
+  # ==========================================================================
+
+  MASH.S.ZONE.MAX: 3               # Maximum 3 zones supported
+  MASH.S.ZONE.GRID: true           # Grid zone supported (external/regulatory)
+  MASH.S.ZONE.LOCAL: true          # Local zone supported (local energy management)

@@ -3299,6 +3299,49 @@ minor: 0
 
 ---
 
+### DEC-056: Controller-Side Use Case Declarations
+
+**Date:** 2026-01-31
+**Status:** Accepted
+
+**Context:** DEC-055 added device-side `useCases` declarations to DeviceInfo so that devices explicitly declare which use cases they support. Controllers are also MASH devices with DeviceInfo. They should declare which use cases they support as a client.
+
+**Decision:** Controllers populate `useCases` with `EndpointID: 0` to indicate client-side support. Same `UseCaseDecl` wire format. Version comes from the use case registry.
+
+Example for a CEM supporting all 11 use cases:
+```cbor
+useCases: [
+  {1: 0, 2: "COB",   3: 1, 4: 0},
+  {1: 0, 2: "EVC",   3: 1, 4: 0},
+  {1: 0, 2: "LPC",   3: 1, 4: 0},
+  {1: 0, 2: "LPP",   3: 1, 4: 0},
+  {1: 0, 2: "MPD",   3: 1, 4: 0},
+  ...
+]
+```
+
+**Rationale:**
+
+- **Symmetric:** Both sides of the protocol are explicit. Devices declare what they implement; controllers declare what they can control.
+- **Testable:** Enables controller conformance testing. A test harness can read the controller's `useCases` to determine which test suites to run.
+- **Discoverable:** A device can read the controller's capabilities during connection setup, enabling smarter negotiation.
+- **No new types:** Reuses `UseCaseDecl` exactly as defined in DEC-055. No wire format changes.
+
+**Declined Alternatives:**
+
+- **Separate attribute for controller capabilities:** Adds unnecessary complexity. The `EndpointID: 0` convention naturally distinguishes client-side from server-side declarations.
+- **Implicit from feature probing:** The same problem DEC-055 solved for devices applies to controllers -- inference is fragile and costly.
+
+**Impact:**
+
+- `EvaluateController()` function added to `pkg/usecase/evaluate.go`
+- CEM example populates `useCases` in its DeviceInfo
+- No changes to wire format, ucgen generator, or discovery code
+
+**Related:** DEC-055 (use cases on the wire)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)

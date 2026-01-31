@@ -107,6 +107,50 @@ func TestEVSECreation(t *testing.T) {
 	}
 }
 
+func TestCEMUseCases(t *testing.T) {
+	cem := NewCEM(CEMConfig{
+		DeviceID:     "PEN67890.CEM-001",
+		VendorName:   "Test Vendor",
+		ProductName:  "Test CEM",
+		SerialNumber: "SN-CEM-001",
+		VendorID:     67890,
+		ProductID:    200,
+	})
+
+	ucs := cem.deviceInfo.UseCases()
+	if len(ucs) == 0 {
+		t.Fatal("expected CEM to declare use cases")
+	}
+
+	// Build lookup
+	ucMap := make(map[string]*model.UseCaseDecl)
+	for _, uc := range ucs {
+		ucMap[uc.Name] = uc
+	}
+
+	// CEM should declare at least LPC, LPP, MPD, EVC, COB
+	for _, name := range []string{"LPC", "LPP", "MPD", "EVC", "COB"} {
+		uc, ok := ucMap[name]
+		if !ok {
+			t.Errorf("expected use case %s to be declared", name)
+			continue
+		}
+		if uc.EndpointID != 0 {
+			t.Errorf("%s: EndpointID = %d, want 0", name, uc.EndpointID)
+		}
+		if uc.Major != 1 {
+			t.Errorf("%s: Major = %d, want 1", name, uc.Major)
+		}
+	}
+
+	// All declarations should have EndpointID 0
+	for _, uc := range ucs {
+		if uc.EndpointID != 0 {
+			t.Errorf("%s: EndpointID = %d, want 0 (controller-side)", uc.Name, uc.EndpointID)
+		}
+	}
+}
+
 func TestCEMCreation(t *testing.T) {
 	cem := NewCEM(CEMConfig{
 		DeviceID:     "PEN67890.CEM-001",

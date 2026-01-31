@@ -46,6 +46,9 @@ func (r *MAN001) Check(p *pics.PICS) []pics.Violation {
 
 // checkMandatoryPerEndpoint is a helper that checks mandatory attributes for a feature
 // across all endpoints that have that feature.
+// Mandatory means the attribute must be declared in PICS. A declaration of false
+// (e.g., acceptsCurrentLimits=false) still satisfies the mandatory check because
+// the attribute is present on the device -- it just has a false runtime value.
 func checkMandatoryPerEndpoint(p *pics.PICS, ruleID string, severity pics.Severity, feature string, featureLabel string, mandatory []struct{ id, name string }) []pics.Violation {
 	eps := p.EndpointsWithFeature(feature)
 	if len(eps) == 0 {
@@ -60,7 +63,7 @@ func checkMandatoryPerEndpoint(p *pics.PICS, ruleID string, severity pics.Severi
 		var codes []string
 		for _, attr := range mandatory {
 			code := fmt.Sprintf("MASH.%s.E%02X.%s.A%s", side, ep.ID, feature, attr.id)
-			if !p.Has(code) {
+			if _, ok := p.Get(code); !ok {
 				missing = append(missing, fmt.Sprintf("%s (A%s)", attr.name, attr.id))
 				codes = append(codes, code)
 			}

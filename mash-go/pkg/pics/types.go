@@ -316,6 +316,27 @@ func (p *PICS) EndpointIDs() []uint8 {
 	return ids
 }
 
+// HasUseCase returns true if the given use case is declared.
+// For devices: checks MASH.S.UC.<name>. For controllers: checks MASH.C.UC.<name>.
+func (p *PICS) HasUseCase(name string) bool {
+	code := fmt.Sprintf("MASH.%s.UC.%s", p.Side, name)
+	return p.Has(code)
+}
+
+// UseCases returns all declared use case names (those with true values), sorted.
+func (p *PICS) UseCases() []string {
+	prefix := fmt.Sprintf("MASH.%s.UC.", p.Side)
+	var names []string
+	for code, entry := range p.ByCode {
+		if strings.HasPrefix(code, prefix) && entry.Value.IsTrue() {
+			name := strings.TrimPrefix(code, prefix)
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // EndpointsWithFeature returns all endpoints that have the given feature enabled.
 func (p *PICS) EndpointsWithFeature(feature string) []*EndpointPICS {
 	var result []*EndpointPICS

@@ -208,6 +208,48 @@ Existing `pkg/usecase/` discovery code remains as verification/fallback.
 
 3. **Independent use case releases?** No. All use case versions are bundled into spec releases. The version on the wire is a contract declaration, not an independent release identifier.
 
+## Controller-Side Declarations (DEC-056)
+
+Controllers are also MASH devices with DeviceInfo on endpoint 0. They use the same `useCases` attribute to declare which use cases they support as a client.
+
+### Convention: EndpointID 0
+
+For device-side declarations, `endpointId` identifies which functional endpoint implements the use case (e.g., endpoint 1 for an EV_CHARGER). For controller-side declarations, `endpointId: 0` means "I support this as a client." This works because endpoint 0 is always DEVICE_ROOT -- it has no functional features, so the value is unambiguous.
+
+### Controller Example
+
+A CEM (Central Energy Manager) that supports all use cases as a client:
+
+```cbor
+useCases: [
+  {1: 0, 2: "COB",   3: 1, 4: 0},
+  {1: 0, 2: "EVC",   3: 1, 4: 0},
+  {1: 0, 2: "FLOA",  3: 1, 4: 0},
+  {1: 0, 2: "ITPCM", 3: 1, 4: 0},
+  {1: 0, 2: "LPC",   3: 1, 4: 0},
+  {1: 0, 2: "LPP",   3: 1, 4: 0},
+  {1: 0, 2: "MPD",   3: 1, 4: 0},
+  {1: 0, 2: "OHPCF", 3: 1, 4: 0},
+  {1: 0, 2: "PODF",  3: 1, 4: 0},
+  {1: 0, 2: "POEN",  3: 1, 4: 0},
+  {1: 0, 2: "TOUT",  3: 1, 4: 0}
+]
+```
+
+### Reading Controller Capabilities
+
+A device (or another controller) can read the controller's capabilities:
+
+1. Read `useCases` from the controller's DeviceInfo (endpoint 0)
+2. Filter for entries with `endpointId: 0` to get client-side capabilities
+3. Match against its own declared use cases to determine common ground
+
+This enables a device to know what its controller supports, which can inform behavior (e.g., whether to generate plans, or whether the controller can handle V2G coordination).
+
+### Implementation
+
+Unlike `EvaluateDevice` (which probes features on endpoints), `EvaluateController` simply declares all registered use cases from the registry. The controller asserts client-side support for every use case in the spec version it implements.
+
 ## Open Questions
 
 1. **Behavioral spec format.** How to define use case business logic: prose in markdown, structured YAML state machines, or both? Structured YAML enables test auto-generation but adds spec authoring complexity.

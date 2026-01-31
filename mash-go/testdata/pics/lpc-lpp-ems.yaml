@@ -22,6 +22,10 @@ items:
   # Protocol declaration
   MASH.S: 1
 
+  # Use case declarations
+  MASH.S.UC.LPC: true            # Limit Power Consumption
+  MASH.S.UC.LPP: true            # Limit Power Production
+
   # Endpoint declaration
   MASH.S.E01: GRID_CONNECTION      # EMS endpoint represents grid connection
 
@@ -30,6 +34,21 @@ items:
   # ==========================================================================
 
   MASH.S.E01.CTRL: true            # EnergyControl feature present
+  MASH.S.E01.ELEC: true            # Electrical feature present
+
+  # ==========================================================================
+  # Electrical (ELEC) Attributes - Grid Connection
+  # ==========================================================================
+  # Grid connection represents the building's utility connection,
+  # not an individual device.
+
+  MASH.S.E01.ELEC.A01: true        # phaseCount (3-phase building connection)
+  MASH.S.E01.ELEC.A02: true        # phaseMapping
+  MASH.S.E01.ELEC.A03: true        # nominalVoltage
+  MASH.S.E01.ELEC.A04: true        # nominalFrequency
+  MASH.S.E01.ELEC.A05: true        # supportedDirections (bidirectional)
+  MASH.S.E01.ELEC.A0A: true        # nominalMaxConsumption (contractual limit)
+  MASH.S.E01.ELEC.A0D: true        # maxCurrentPerPhase
 
   # ==========================================================================
   # Feature Flags
@@ -50,12 +69,12 @@ items:
   # ==========================================================================
 
   MASH.S.E01.CTRL.A0A: true        # acceptsLimits
-  MASH.S.E01.CTRL.A0B: false       # acceptsCurrentLimits (not at building level)
-  MASH.S.E01.CTRL.A0C: false       # acceptsSetpoints (EMS only accepts limits)
-  MASH.S.E01.CTRL.A0D: false       # acceptsCurrentSetpoints
-  MASH.S.E01.CTRL.A0E: false       # isPausable (EMS cannot be paused)
-  MASH.S.E01.CTRL.A0F: false       # isShiftable
-  MASH.S.E01.CTRL.A10: false       # isStoppable
+  MASH.S.E01.CTRL.A0B: false       # acceptsCurrentLimits (declared but not supported)
+  MASH.S.E01.CTRL.A0C: false       # acceptsSetpoints (declared but not supported)
+  MASH.S.E01.CTRL.A0D: false       # acceptsCurrentSetpoints (declared but not supported)
+  MASH.S.E01.CTRL.A0E: false       # isPausable (declared but not supported)
+  MASH.S.E01.CTRL.A0F: false       # isShiftable (declared but not supported)
+  MASH.S.E01.CTRL.A10: false       # isStoppable (declared but not supported)
 
   # ==========================================================================
   # Power Limit Attributes - EMS uses both consumption and production

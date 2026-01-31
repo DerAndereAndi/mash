@@ -1,6 +1,8 @@
 package usecase
 
 import (
+	"sort"
+
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
 
@@ -38,6 +40,25 @@ func EvaluateDevice(device DeviceEvaluator, registry map[UseCaseName]*UseCaseDef
 		})
 	}
 
+	return decls
+}
+
+// EvaluateController returns use case declarations for a controller.
+// Controllers declare all registered use cases with EndpointID 0,
+// indicating client-side support. Results are sorted by name for determinism.
+func EvaluateController(registry map[UseCaseName]*UseCaseDef) []*model.UseCaseDecl {
+	decls := make([]*model.UseCaseDecl, 0, len(registry))
+	for name, def := range registry {
+		decls = append(decls, &model.UseCaseDecl{
+			EndpointID: 0,
+			Name:       string(name),
+			Major:      def.Major,
+			Minor:      def.Minor,
+		})
+	}
+	sort.Slice(decls, func(i, j int) bool {
+		return decls[i].Name < decls[j].Name
+	})
 	return decls
 }
 
