@@ -96,118 +96,127 @@ func (v *Validator) checkProtocolDeclaration(pics *PICS, result *ValidationResul
 	}
 }
 
-// checkFeatureFlagDependencies verifies feature flag dependencies.
+// checkFeatureFlagDependencies verifies feature flag dependencies per endpoint.
 func (v *Validator) checkFeatureFlagDependencies(pics *PICS, result *ValidationResult) {
 	side := string(pics.Side)
 
-	// V2X (F0A) requires EMOB (F03)
-	if pics.Has(fmt.Sprintf("MASH.%s.CTRL.F0A", side)) {
-		if !pics.Has(fmt.Sprintf("MASH.%s.CTRL.F03", side)) {
-			result.AddError("DEPENDENCY", "V2X (F0A) requires EMOB (F03)", 0)
-		}
-	}
+	for _, ep := range pics.EndpointsWithFeature("CTRL") {
+		epPrefix := fmt.Sprintf("MASH.%s.E%02X", side, ep.ID)
 
-	// ASYMMETRIC (F09) requires phaseCount > 1 (from Electrical feature)
-	// This is a soft check since we don't have the actual phaseCount value
-	if pics.Has(fmt.Sprintf("MASH.%s.CTRL.F09", side)) {
-		if !pics.HasFeature("ELEC") {
-			result.AddWarning("DEPENDENCY", "ASYMMETRIC (F09) typically requires Electrical feature", 0)
+		// V2X (F0A) requires EMOB (F03)
+		if pics.Has(epPrefix + ".CTRL.F0A") {
+			if !pics.Has(epPrefix + ".CTRL.F03") {
+				result.AddError("DEPENDENCY", fmt.Sprintf("Endpoint %d (%s): V2X (F0A) requires EMOB (F03)", ep.ID, ep.Type), 0)
+			}
 		}
-	}
 
-	// SIGNALS (F04) should have Signals feature
-	if pics.Has(fmt.Sprintf("MASH.%s.CTRL.F04", side)) {
-		if !pics.HasFeature("SIG") {
-			result.AddWarning("DEPENDENCY", "SIGNALS flag (F04) should have Signals feature enabled", 0)
+		// ASYMMETRIC (F09) requires Electrical feature on same endpoint
+		if pics.Has(epPrefix + ".CTRL.F09") {
+			if !pics.Has(epPrefix + ".ELEC") {
+				result.AddWarning("DEPENDENCY", fmt.Sprintf("Endpoint %d (%s): ASYMMETRIC (F09) typically requires Electrical feature", ep.ID, ep.Type), 0)
+			}
 		}
-	}
 
-	// PLAN (F06) should have Plan feature
-	if pics.Has(fmt.Sprintf("MASH.%s.CTRL.F06", side)) {
-		if !pics.HasFeature("PLAN") {
-			result.AddWarning("DEPENDENCY", "PLAN flag (F06) should have Plan feature enabled", 0)
+		// SIGNALS (F04) should have Signals feature on same endpoint
+		if pics.Has(epPrefix + ".CTRL.F04") {
+			if !pics.Has(epPrefix + ".SIG") {
+				result.AddWarning("DEPENDENCY", fmt.Sprintf("Endpoint %d (%s): SIGNALS flag (F04) should have Signals feature enabled", ep.ID, ep.Type), 0)
+			}
+		}
+
+		// PLAN (F06) should have Plan feature on same endpoint
+		if pics.Has(epPrefix + ".CTRL.F06") {
+			if !pics.Has(epPrefix + ".PLAN") {
+				result.AddWarning("DEPENDENCY", fmt.Sprintf("Endpoint %d (%s): PLAN flag (F06) should have Plan feature enabled", ep.ID, ep.Type), 0)
+			}
 		}
 	}
 }
 
-// checkCommandConsistency verifies command-attribute consistency.
+// checkCommandConsistency verifies command-attribute consistency per endpoint.
 func (v *Validator) checkCommandConsistency(pics *PICS, result *ValidationResult) {
 	side := string(pics.Side)
 
-	// If acceptsLimits (A0A), must support SetLimit (C01)
-	if pics.Has(fmt.Sprintf("MASH.%s.CTRL.A0A", side)) {
-		if !pics.Has(fmt.Sprintf("MASH.%s.CTRL.C01.Rsp", side)) {
-			result.AddError("CONSISTENCY", "acceptsLimits (A0A) requires SetLimit command (C01.Rsp)", 0)
-		}
-	}
+	for _, ep := range pics.EndpointsWithFeature("CTRL") {
+		epPrefix := fmt.Sprintf("MASH.%s.E%02X", side, ep.ID)
 
-	// If acceptsCurrentLimits (A0B), must support SetCurrentLimits (C05)
-	if pics.Has(fmt.Sprintf("MASH.%s.CTRL.A0B", side)) {
-		if !pics.Has(fmt.Sprintf("MASH.%s.CTRL.C05.Rsp", side)) {
-			result.AddError("CONSISTENCY", "acceptsCurrentLimits (A0B) requires SetCurrentLimits command (C05.Rsp)", 0)
+		// If acceptsLimits (A0A), must support SetLimit (C01)
+		if pics.Has(epPrefix + ".CTRL.A0A") {
+			if !pics.Has(epPrefix + ".CTRL.C01.Rsp") {
+				result.AddError("CONSISTENCY", fmt.Sprintf("Endpoint %d (%s): acceptsLimits (A0A) requires SetLimit command (C01.Rsp)", ep.ID, ep.Type), 0)
+			}
 		}
-	}
 
-	// If acceptsSetpoints (A0C), must support SetSetpoint (C03)
-	if pics.Has(fmt.Sprintf("MASH.%s.CTRL.A0C", side)) {
-		if !pics.Has(fmt.Sprintf("MASH.%s.CTRL.C03.Rsp", side)) {
-			result.AddWarning("CONSISTENCY", "acceptsSetpoints (A0C) typically requires SetSetpoint command", 0)
+		// If acceptsCurrentLimits (A0B), must support SetCurrentLimits (C05)
+		if pics.Has(epPrefix + ".CTRL.A0B") {
+			if !pics.Has(epPrefix + ".CTRL.C05.Rsp") {
+				result.AddError("CONSISTENCY", fmt.Sprintf("Endpoint %d (%s): acceptsCurrentLimits (A0B) requires SetCurrentLimits command (C05.Rsp)", ep.ID, ep.Type), 0)
+			}
 		}
-	}
 
-	// If isPausable (A0E), must support Pause (C09) and Resume (C0A)
-	if pics.Has(fmt.Sprintf("MASH.%s.CTRL.A0E", side)) {
-		if !pics.Has(fmt.Sprintf("MASH.%s.CTRL.C09.Rsp", side)) {
-			result.AddWarning("CONSISTENCY", "isPausable (A0E) typically requires Pause command (C09.Rsp)", 0)
+		// If acceptsSetpoints (A0C), must support SetSetpoint (C03)
+		if pics.Has(epPrefix + ".CTRL.A0C") {
+			if !pics.Has(epPrefix + ".CTRL.C03.Rsp") {
+				result.AddWarning("CONSISTENCY", fmt.Sprintf("Endpoint %d (%s): acceptsSetpoints (A0C) typically requires SetSetpoint command", ep.ID, ep.Type), 0)
+			}
 		}
-		if !pics.Has(fmt.Sprintf("MASH.%s.CTRL.C0A.Rsp", side)) {
-			result.AddWarning("CONSISTENCY", "isPausable (A0E) typically requires Resume command (C0A.Rsp)", 0)
+
+		// If isPausable (A0E), must support Pause (C09) and Resume (C0A)
+		if pics.Has(epPrefix + ".CTRL.A0E") {
+			if !pics.Has(epPrefix + ".CTRL.C09.Rsp") {
+				result.AddWarning("CONSISTENCY", fmt.Sprintf("Endpoint %d (%s): isPausable (A0E) typically requires Pause command (C09.Rsp)", ep.ID, ep.Type), 0)
+			}
+			if !pics.Has(epPrefix + ".CTRL.C0A.Rsp") {
+				result.AddWarning("CONSISTENCY", fmt.Sprintf("Endpoint %d (%s): isPausable (A0E) typically requires Resume command (C0A.Rsp)", ep.ID, ep.Type), 0)
+			}
 		}
 	}
 }
 
-// checkMandatoryAttributes verifies mandatory attributes are present.
+// checkMandatoryAttributes verifies mandatory attributes are present per endpoint.
 func (v *Validator) checkMandatoryAttributes(pics *PICS, result *ValidationResult) {
 	side := string(pics.Side)
 
-	// EnergyControl mandatory attributes
-	if pics.HasFeature("CTRL") {
-		mandatory := []struct {
-			id   string
-			name string
-		}{
-			{"01", "deviceType"},
-			{"02", "controlState"},
-			{"0A", "acceptsLimits"},
-			{"0B", "acceptsCurrentLimits"},
-			{"0C", "acceptsSetpoints"},
-			{"0E", "isPausable"},
-			{"46", "failsafeConsumptionLimit"},
-			{"48", "failsafeDuration"},
-		}
+	ctrlMandatory := []struct {
+		id   string
+		name string
+	}{
+		{"01", "deviceType"},
+		{"02", "controlState"},
+		{"0A", "acceptsLimits"},
+		{"0B", "acceptsCurrentLimits"},
+		{"0C", "acceptsSetpoints"},
+		{"0E", "isPausable"},
+		{"46", "failsafeConsumptionLimit"},
+		{"48", "failsafeDuration"},
+	}
 
-		for _, attr := range mandatory {
-			code := fmt.Sprintf("MASH.%s.CTRL.A%s", side, attr.id)
+	elecMandatory := []struct {
+		id   string
+		name string
+	}{
+		{"01", "phaseCount"},
+		{"05", "supportedDirections"},
+	}
+
+	// EnergyControl mandatory attributes per endpoint
+	for _, ep := range pics.EndpointsWithFeature("CTRL") {
+		epPrefix := fmt.Sprintf("MASH.%s.E%02X", side, ep.ID)
+		for _, attr := range ctrlMandatory {
+			code := epPrefix + ".CTRL.A" + attr.id
 			if !pics.Has(code) {
-				result.AddError("MANDATORY", fmt.Sprintf("EnergyControl requires %s (A%s)", attr.name, attr.id), 0)
+				result.AddError("MANDATORY", fmt.Sprintf("Endpoint %d (%s): EnergyControl requires %s (A%s)", ep.ID, ep.Type, attr.name, attr.id), 0)
 			}
 		}
 	}
 
-	// Electrical mandatory attributes
-	if pics.HasFeature("ELEC") {
-		mandatory := []struct {
-			id   string
-			name string
-		}{
-			{"01", "phaseCount"},
-			{"05", "supportedDirections"},
-		}
-
-		for _, attr := range mandatory {
-			code := fmt.Sprintf("MASH.%s.ELEC.A%s", side, attr.id)
+	// Electrical mandatory attributes per endpoint
+	for _, ep := range pics.EndpointsWithFeature("ELEC") {
+		epPrefix := fmt.Sprintf("MASH.%s.E%02X", side, ep.ID)
+		for _, attr := range elecMandatory {
+			code := epPrefix + ".ELEC.A" + attr.id
 			if !pics.Has(code) {
-				result.AddError("MANDATORY", fmt.Sprintf("Electrical requires %s (A%s)", attr.name, attr.id), 0)
+				result.AddError("MANDATORY", fmt.Sprintf("Endpoint %d (%s): Electrical requires %s (A%s)", ep.ID, ep.Type, attr.name, attr.id), 0)
 			}
 		}
 	}

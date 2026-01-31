@@ -3132,6 +3132,83 @@ PV_STRING:
 
 ---
 
+### DEC-054: Endpoint-Aware PICS Format
+
+**Date:** 2026-01-31
+**Status:** Accepted
+
+**Context:** The original PICS code format used device-level feature codes (`MASH.S.CTRL.A01=1`), which is ambiguous for multi-endpoint devices. A hybrid inverter with INVERTER on endpoint 1 and BATTERY on endpoint 2 cannot express per-endpoint conformance. The endpoint type conformance registry (DEC-053) further requires knowing which endpoint type each feature belongs to.
+
+**Options Evaluated:**
+
+1. **Keep device-level codes:** Application features remain at device level. Conformance validation must infer endpoint mapping from device type. Simple but unable to express multi-endpoint devices.
+2. **Endpoint-level codes with endpoint type declarations:** PICS codes include an endpoint identifier (`MASH.S.E01.CTRL.A01=1`), with endpoint type declarations (`MASH.S.E01=INVERTER`). Enables per-endpoint conformance validation.
+3. **Separate PICS files per endpoint:** One PICS file per endpoint. Clean separation but complicates tooling and loses the single-document overview.
+
+**Decision:** Option 2 - Endpoint-level codes with endpoint type declarations.
+
+**Format:**
+
+```
+MASH.<Side>[.E<hex><hex>][.<Feature>][.<Type><ID>][.<Qualifier>]
+```
+
+- Endpoint IDs are two hex digits: `E01`, `E02`, ..., `EFF`
+- Endpoint type declarations: `MASH.S.E01=INVERTER`
+- Application feature codes are endpoint-scoped: `MASH.S.E01.CTRL.A01=1`
+- Transport/pairing codes remain device-level: `MASH.S.TRANS=1`, `MASH.S.COMM=1`
+- `MASH.S.ENDPOINTS` is derived from the count of `MASH.S.E<xx>=<type>` declarations
+
+**Application features (must be endpoint-scoped):**
+ELEC, MEAS, CTRL, STAT, INFO, CHRG, SIG, TAR, PLAN
+
+**Pairing/connection features (remain device-level):**
+TRANS, COMM, CERT, ZONE, CONN, FAILSAFE, SUB, DURATION, DISC
+
+**Example (multi-endpoint device):**
+
+```
+MASH.S=1
+
+# Endpoint declarations
+MASH.S.E01=INVERTER
+MASH.S.E02=BATTERY
+
+# Endpoint 1: Inverter with Measurement + EnergyControl
+MASH.S.E01.MEAS.A01=1       # acActivePower
+MASH.S.E01.CTRL.A01=1       # deviceType
+MASH.S.E01.CTRL.A02=1       # controlState
+
+# Endpoint 2: Battery with Measurement + EnergyControl
+MASH.S.E02.MEAS.A28=1       # dcPower
+MASH.S.E02.MEAS.A32=1       # stateOfCharge
+MASH.S.E02.CTRL.A01=1       # deviceType
+MASH.S.E02.CTRL.A02=1       # controlState
+```
+
+**Rationale:**
+
+- **Precise per-endpoint conformance:** Enables EPT-001 rule to validate mandatory attributes per endpoint type against DEC-053 registry.
+- **Multi-endpoint expressible:** A hybrid inverter/battery can declare both endpoint types with distinct feature sets.
+- **Backward compatible in practice:** Transport/pairing codes are unchanged. The new endpoint segment only affects application features.
+- **Consistent with device model:** MASH uses Device > Endpoint > Feature hierarchy. PICS codes now mirror this structure.
+
+**Declined Alternatives:**
+
+- **Device-level codes (Option 1):** Cannot express multi-endpoint devices. Conformance validation would require guessing endpoint mappings.
+- **Separate files (Option 3):** Overcomplicates tooling. Most devices have 1-2 endpoints; a single file with clear endpoint prefixes is sufficient.
+
+**Impact:**
+
+- All PICS test data files updated to endpoint format
+- Parser updated to extract endpoint ID from codes
+- All validation rules (MAN, DEP, CMD, EPT) iterate per endpoint
+- PICS `Code` struct gains `EndpointID` field; `PICS` struct gains `Endpoints` map
+
+**Related:** DEC-053 (endpoint type conformance registry), DEC-051 (static attributeList), DEC-052 (feature-level subscriptions)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -3256,5 +3333,6 @@ Key learnings:
 | 2026-01-29 | Added DEC-048: Commissioning window duration alignment. Default 15 minutes (was 3 hours), min 3 minutes (was 1 hour), max 3 hours (was 24 hours). Aligns with Matter 5.4.2.3.1. |
 | 2026-01-30 | Added DEC-050: Protocol versioning strategy. Single protocol version (major.minor) on the wire via ALPN + specVersion. Removes per-feature clusterRevision. Feature revisions tracked in spec as version manifest per release. Resolves OPEN-004. |
 | 2026-01-31 | Added DEC-051: Static attributeList immutability. attributeList is immutable for connection lifetime. Unavailable data uses null values, not structural changes. |
-| 2026-01-31 | Added DEC-052: Feature-level subscription model. Use cases default to subscribe-all for features. Replaces incomplete per-attribute subscription lists. |
+| 2026-01-31 | Added DEC-052: Feature-level subscription model. Use cases default to subscribe-all for features. Replaces incomplete per-attribute subscription lists.
+| 2026-01-31 | Added DEC-054: Endpoint-aware PICS format. Application feature codes scoped to endpoints (`MASH.S.E01.CTRL.A01`). Transport/pairing codes unchanged. Enables per-endpoint conformance validation. |
 | 2026-01-31 | Added DEC-053: Endpoint type conformance registry. Two-layer model: feature YAML defines superset, endpoint type registry defines per-type mandatory/recommended attributes. |

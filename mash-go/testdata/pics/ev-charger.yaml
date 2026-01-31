@@ -12,46 +12,49 @@ device:
   version: "1.0.0"
 
 # PICS Items
-# Format: MASH.{S|C}.FEATURE.ITEM: value
+# Format: MASH.{S|C}[.E<xx>].FEATURE.ITEM: value
 items:
   # Protocol declaration
   MASH.S: 1                       # Server/device side
 
-  # Communication capabilities
+  # Communication capabilities (device-level)
   MASH.S.TRANS.SC: true           # Secure connection supported
   MASH.S.TRANS.PASE: true         # PASE commissioning supported
   MASH.S.TRANS.MDNS: true         # mDNS discovery supported
   MASH.S.TRANS.TLS13: true        # TLS 1.3 supported
 
-  # Device Information
-  MASH.S.INFO.BASIC: true         # Basic device info supported
-  MASH.S.INFO.LOCATION: false     # Location info not supported
+  # Endpoint declaration
+  MASH.S.E01: EV_CHARGER          # Endpoint 1: EV Charger
 
-  # Electrical Configuration
-  MASH.S.ELEC.AC: true            # AC charging supported
-  MASH.S.ELEC.DC: false           # DC charging not supported
-  MASH.S.ELEC.PHASES: 3           # Three-phase support
-  MASH.S.ELEC.MAX_CURRENT: 32     # Maximum current in amps
-  MASH.S.ELEC.MAX_POWER: 22000    # Maximum power in watts
+  # Device Information (endpoint-level)
+  MASH.S.E01.INFO.BASIC: true     # Basic device info supported
+  MASH.S.E01.INFO.LOCATION: false # Location info not supported
 
-  # Measurement capabilities
-  MASH.S.MEAS.POWER: true         # Power measurement supported
-  MASH.S.MEAS.ENERGY: true        # Energy measurement supported
-  MASH.S.MEAS.VOLTAGE: true       # Voltage measurement supported
-  MASH.S.MEAS.CURRENT: true       # Current measurement supported
-  MASH.S.MEAS.FREQUENCY: false    # Frequency not measured
+  # Electrical Configuration (endpoint-level)
+  MASH.S.E01.ELEC.AC: true       # AC charging supported
+  MASH.S.E01.ELEC.DC: false      # DC charging not supported
+  MASH.S.E01.ELEC.PHASES: 3      # Three-phase support
+  MASH.S.E01.ELEC.MAX_CURRENT: 32  # Maximum current in amps
+  MASH.S.E01.ELEC.MAX_POWER: 22000 # Maximum power in watts
 
-  # Control capabilities
-  MASH.S.CTRL.LIMIT: true         # Power limiting supported
-  MASH.S.CTRL.SETPOINT: true      # Setpoint control supported
-  MASH.S.CTRL.SCHEDULE: false     # Schedule not supported locally
+  # Measurement capabilities (endpoint-level)
+  MASH.S.E01.MEAS.POWER: true    # Power measurement supported
+  MASH.S.E01.MEAS.ENERGY: true   # Energy measurement supported
+  MASH.S.E01.MEAS.VOLTAGE: true  # Voltage measurement supported
+  MASH.S.E01.MEAS.CURRENT: true  # Current measurement supported
+  MASH.S.E01.MEAS.FREQUENCY: false  # Frequency not measured
 
-  # Charging Session
-  MASH.S.CHRG.SESSION: true       # Session tracking supported
-  MASH.S.CHRG.ISO15118: false     # ISO 15118 not supported
-  MASH.S.CHRG.PLUG_LOCK: true     # Cable lock supported
+  # Control capabilities (endpoint-level)
+  MASH.S.E01.CTRL.LIMIT: true    # Power limiting supported
+  MASH.S.E01.CTRL.SETPOINT: true # Setpoint control supported
+  MASH.S.E01.CTRL.SCHEDULE: false  # Schedule not supported locally
 
-  # Multi-zone support
-  MASH.S.ZONE.MAX: 3              # Maximum 3 zones supported
-  MASH.S.ZONE.GRID: true          # Grid zone supported (external/regulatory)
-  MASH.S.ZONE.LOCAL: true         # Local zone supported (local energy management)
+  # Charging Session (endpoint-level)
+  MASH.S.E01.CHRG.SESSION: true   # Session tracking supported
+  MASH.S.E01.CHRG.ISO15118: false # ISO 15118 not supported
+  MASH.S.E01.CHRG.PLUG_LOCK: true  # Cable lock supported
+
+  # Multi-zone support (device-level)
+  MASH.S.ZONE.MAX: 3             # Maximum 3 zones supported
+  MASH.S.ZONE.GRID: true         # Grid zone supported (external/regulatory)
+  MASH.S.ZONE.LOCAL: true        # Local zone supported (local energy management)

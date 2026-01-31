@@ -22,54 +22,57 @@ items:
   # Protocol declaration
   MASH.S: 1
 
+  # Endpoint declaration
+  MASH.S.E01: GRID_CONNECTION      # EMS endpoint represents grid connection
+
   # ==========================================================================
   # Feature Presence
   # ==========================================================================
 
-  MASH.S.CTRL: true               # EnergyControl feature present
+  MASH.S.E01.CTRL: true            # EnergyControl feature present
 
   # ==========================================================================
   # Feature Flags
   # ==========================================================================
 
-  MASH.S.CTRL.F00: true           # CORE - Always required
+  MASH.S.E01.CTRL.F00: true        # CORE - Always required
 
   # ==========================================================================
   # Device Type & State Attributes
   # ==========================================================================
 
-  MASH.S.CTRL.A01: true           # deviceType (will be OTHER for EMS)
-  MASH.S.CTRL.A02: true           # controlState
-  MASH.S.CTRL.A03: true           # optOutState
+  MASH.S.E01.CTRL.A01: true        # deviceType (will be OTHER for EMS)
+  MASH.S.E01.CTRL.A02: true        # controlState
+  MASH.S.E01.CTRL.A03: true        # optOutState
 
   # ==========================================================================
   # Control Capabilities
   # ==========================================================================
 
-  MASH.S.CTRL.A0A: true           # acceptsLimits
-  MASH.S.CTRL.A0B: false          # acceptsCurrentLimits (not at building level)
-  MASH.S.CTRL.A0C: false          # acceptsSetpoints (EMS only accepts limits)
-  MASH.S.CTRL.A0D: false          # acceptsCurrentSetpoints
-  MASH.S.CTRL.A0E: false          # isPausable (EMS cannot be paused)
-  MASH.S.CTRL.A0F: false          # isShiftable
-  MASH.S.CTRL.A10: false          # isStoppable
+  MASH.S.E01.CTRL.A0A: true        # acceptsLimits
+  MASH.S.E01.CTRL.A0B: false       # acceptsCurrentLimits (not at building level)
+  MASH.S.E01.CTRL.A0C: false       # acceptsSetpoints (EMS only accepts limits)
+  MASH.S.E01.CTRL.A0D: false       # acceptsCurrentSetpoints
+  MASH.S.E01.CTRL.A0E: false       # isPausable (EMS cannot be paused)
+  MASH.S.E01.CTRL.A0F: false       # isShiftable
+  MASH.S.E01.CTRL.A10: false       # isStoppable
 
   # ==========================================================================
   # Power Limit Attributes - EMS uses both consumption and production
   # ==========================================================================
 
-  MASH.S.CTRL.A14: true           # effectiveConsumptionLimit
-  MASH.S.CTRL.A15: true           # myConsumptionLimit
-  MASH.S.CTRL.A16: true           # effectiveProductionLimit (bidirectional building)
-  MASH.S.CTRL.A17: true           # myProductionLimit
+  MASH.S.E01.CTRL.A14: true        # effectiveConsumptionLimit
+  MASH.S.E01.CTRL.A15: true        # myConsumptionLimit
+  MASH.S.E01.CTRL.A16: true        # effectiveProductionLimit (bidirectional building)
+  MASH.S.E01.CTRL.A17: true        # myProductionLimit
 
   # ==========================================================================
   # Failsafe Attributes
   # ==========================================================================
 
-  MASH.S.CTRL.A46: true           # failsafeConsumptionLimit
-  MASH.S.CTRL.A47: true           # failsafeProductionLimit (bidirectional)
-  MASH.S.CTRL.A48: true           # failsafeDuration
+  MASH.S.E01.CTRL.A46: true        # failsafeConsumptionLimit
+  MASH.S.E01.CTRL.A47: true        # failsafeProductionLimit (bidirectional)
+  MASH.S.E01.CTRL.A48: true        # failsafeDuration
 
   # ==========================================================================
   # Contractual Limits (EMS-specific - LPC/LPP)
@@ -77,63 +80,42 @@ items:
   # These represent the building's contractual grid connection limits,
   # NOT the nominal power of any single device.
 
-  MASH.S.CTRL.A49: true           # contractualConsumptionMax
-  MASH.S.CTRL.A4A: true           # contractualProductionMax
+  MASH.S.E01.CTRL.A49: true        # contractualConsumptionMax
+  MASH.S.E01.CTRL.A4A: true        # contractualProductionMax
 
   # ==========================================================================
   # Override Tracking (LPC/LPP)
   # ==========================================================================
 
-  MASH.S.CTRL.A4B: true           # overrideReason
-  MASH.S.CTRL.A4C: true           # overrideDirection
+  MASH.S.E01.CTRL.A4B: true        # overrideReason
+  MASH.S.E01.CTRL.A4C: true        # overrideDirection
 
   # ==========================================================================
   # Commands
   # ==========================================================================
 
-  MASH.S.CTRL.C01.Rsp: true       # SetLimit
-  MASH.S.CTRL.C02.Rsp: true       # ClearLimit
-  MASH.S.CTRL.C03.Rsp: false      # SetSetpoint (not supported)
-  MASH.S.CTRL.C04.Rsp: false      # ClearSetpoint (not supported)
-  MASH.S.CTRL.C09.Rsp: false      # Pause (not supported)
-  MASH.S.CTRL.C0A.Rsp: false      # Resume (not supported)
+  MASH.S.E01.CTRL.C01.Rsp: true    # SetLimit
+  MASH.S.E01.CTRL.C02.Rsp: true    # ClearLimit
+  MASH.S.E01.CTRL.C03.Rsp: false   # SetSetpoint (not supported)
+  MASH.S.E01.CTRL.C04.Rsp: false   # ClearSetpoint (not supported)
+  MASH.S.E01.CTRL.C09.Rsp: false   # Pause (not supported)
+  MASH.S.E01.CTRL.C0A.Rsp: false   # Resume (not supported)
 
   # ==========================================================================
   # Behavioral Capabilities
   # ==========================================================================
 
-  MASH.S.CTRL.B_MULTIZONE: true   # Multi-zone value resolution
-  MASH.S.CTRL.B_DURATION: true    # Duration-based expiry
-  MASH.S.CTRL.B_EFFECTIVE: true   # Effective/own value split
-  MASH.S.CTRL.B_OPTOUT: true      # OptOut state filtering
+  MASH.S.E01.CTRL.B_MULTIZONE: true  # Multi-zone value resolution
+  MASH.S.E01.CTRL.B_DURATION: true # Duration-based expiry
+  MASH.S.E01.CTRL.B_EFFECTIVE: true  # Effective/own value split
+  MASH.S.E01.CTRL.B_OPTOUT: true   # OptOut state filtering
 
   # ==========================================================================
   # LPC/LPP Behavioral Capabilities
   # ==========================================================================
 
-  MASH.S.CTRL.B_APPLIED: true     # SetLimit returns 'applied' field
-  MASH.S.CTRL.B_REJECT: true      # SetLimit returns 'rejectReason' field
-  MASH.S.CTRL.B_CTRLSTATE: true   # SetLimit returns 'controlState' field
-  MASH.S.CTRL.B_VALIDATE_NEG: true    # Rejects negative limit values
-  MASH.S.CTRL.B_VALIDATE_MIN: false   # No minimum power for EMS (aggregate)
-
-# =============================================================================
-# LPC/LPP Use Case Notes
-# =============================================================================
-#
-# LPC (Limitation of Power Consumption):
-# - Grid operator sends consumption limit to EMS
-# - EMS distributes limit across managed devices
-# - Uses contractualConsumptionMax as upper bound
-#
-# LPP (Limitation of Power Production):
-# - Grid operator sends production/feed-in limit to EMS
-# - EMS curtails PV/battery export accordingly
-# - Uses contractualProductionMax as upper bound
-#
-# Key behaviors:
-# - SetLimit returns 'applied' boolean (was limit accepted?)
-# - SetLimit returns 'rejectReason' if not applied
-# - SetLimit returns 'controlState' showing resulting state
-# - Negative limit values are rejected with INVALID_VALUE
-# - Limits above contractual max rejected with ABOVE_CONTRACTUAL
+  MASH.S.E01.CTRL.B_APPLIED: true  # SetLimit returns 'applied' field
+  MASH.S.E01.CTRL.B_REJECT: true   # SetLimit returns 'rejectReason' field
+  MASH.S.E01.CTRL.B_CTRLSTATE: true  # SetLimit returns 'controlState' field
+  MASH.S.E01.CTRL.B_VALIDATE_NEG: true  # Rejects negative limit values
+  MASH.S.E01.CTRL.B_VALIDATE_MIN: false  # No minimum power for EMS (aggregate)

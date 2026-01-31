@@ -16,100 +16,35 @@ items:
   # Protocol declaration
   MASH.S: 1
 
+  # Endpoint declaration
+  MASH.S.E01: EV_CHARGER           # Reference endpoint for status
+
   # ==========================================================================
   # Feature Presence
   # ==========================================================================
 
-  MASH.S.STAT: true               # Status feature present
+  MASH.S.E01.STAT: true            # Status feature present
 
   # ==========================================================================
   # Status Attributes (Read-Only)
   # ==========================================================================
 
-  MASH.S.STAT.A01: true           # operatingState (OperatingState enum)
-  MASH.S.STAT.A02: true           # stateDetail (uint32, nullable, vendor-specific)
-  MASH.S.STAT.A03: true           # faultCode (uint32, nullable)
-  MASH.S.STAT.A04: true           # faultMessage (string, nullable)
+  MASH.S.E01.STAT.A01: true        # operatingState (OperatingState enum)
+  MASH.S.E01.STAT.A02: true        # stateDetail (uint32, nullable, vendor-specific)
+  MASH.S.E01.STAT.A03: true        # faultCode (uint32, nullable)
+  MASH.S.E01.STAT.A04: true        # faultMessage (string, nullable)
 
   # ==========================================================================
   # Commands
   # ==========================================================================
 
-  # Note: SetFault and ClearFault are internal device operations, not
-  # externally invokable commands. They're exposed here for test validation.
-  MASH.S.STAT.C01: true           # SetFault (sets FAULT state + code + message)
-  MASH.S.STAT.C02: true           # ClearFault (clears fault, returns to prior state)
+  MASH.S.E01.STAT.C01: true        # SetFault (sets FAULT state + code + message)
+  MASH.S.E01.STAT.C02: true        # ClearFault (clears fault, returns to prior state)
 
   # ==========================================================================
   # Behavioral Capabilities
   # ==========================================================================
 
-  # State transition validation
-  MASH.S.STAT.B_TRANSITIONS: true # Operating state transitions
-
-  # Helper methods: IsFaulted, IsRunning, IsReady, IsOffline
-  MASH.S.STAT.B_HELPERS: true     # State helper methods
-
-  # FAULT state requires fault code
-  MASH.S.STAT.B_FAULT_CODE: true  # Fault code validation
-
-# =============================================================================
-# OperatingState Enum Values
-# =============================================================================
-# UNKNOWN (0x00)      - State not determined
-# OFFLINE (0x01)      - Not connected/available
-# STANDBY (0x02)      - Ready but not active
-# STARTING (0x03)     - Powering up/initializing
-# RUNNING (0x04)      - Actively operating
-# PAUSED (0x05)       - Temporarily paused
-# SHUTTING_DOWN (0x06) - Powering down
-# FAULT (0x07)        - Error condition (requires fault code)
-# MAINTENANCE (0x08)  - Under maintenance/firmware update
-
-# =============================================================================
-# State Transition Rules
-# =============================================================================
-# Most transitions are allowed except:
-# - Cannot transition from FAULT without ClearFault
-# - MAINTENANCE typically requires external trigger
-# - UNKNOWN should only be initial state
-#
-# Common transitions:
-# UNKNOWN -> OFFLINE -> STANDBY -> STARTING -> RUNNING
-# RUNNING -> PAUSED -> RUNNING
-# RUNNING -> SHUTTING_DOWN -> OFFLINE
-# Any state -> FAULT (on error)
-# FAULT -> previous state (after ClearFault)
-
-# =============================================================================
-# Helper Method Definitions
-# =============================================================================
-# IsFaulted()  - Returns true when operatingState == FAULT
-# IsRunning()  - Returns true when operatingState == RUNNING
-# IsReady()    - Returns true when operatingState in (STANDBY, RUNNING)
-# IsOffline()  - Returns true when operatingState == OFFLINE
-
-# =============================================================================
-# Test Case to PICS Mapping
-# =============================================================================
-#
-# TC-STAT-001 (Operating state transitions):
-#   - MASH.S.STAT.A01: true
-#   - MASH.S.STAT.B_TRANSITIONS: true
-#
-# TC-STAT-002 (SetFault sets state + code + message):
-#   - MASH.S.STAT.C01: true
-#   - MASH.S.STAT.A03: true
-#   - MASH.S.STAT.A04: true
-#
-# TC-STAT-003 (ClearFault clears all fault fields):
-#   - MASH.S.STAT.C02: true
-#
-# TC-STAT-004 (IsFaulted helper method):
-#   - MASH.S.STAT.B_HELPERS: true
-#
-# TC-STAT-005 (IsRunning helper method):
-#   - MASH.S.STAT.B_HELPERS: true
-#
-# TC-STAT-006 (FAULT state requires fault code):
-#   - MASH.S.STAT.B_FAULT_CODE: true
+  MASH.S.E01.STAT.B_TRANSITIONS: true  # Operating state transitions
+  MASH.S.E01.STAT.B_HELPERS: true  # State helper methods
+  MASH.S.E01.STAT.B_FAULT_CODE: true  # Fault code validation

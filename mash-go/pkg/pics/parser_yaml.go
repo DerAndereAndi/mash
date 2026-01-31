@@ -81,7 +81,7 @@ func (p *Parser) parseYAML(data []byte) (*PICS, error) {
 		pics.ByCode[entry.Code.String()] = entry
 
 		// Track side
-		if entry.Code.Feature == "" {
+		if entry.Code.Feature == "" && entry.Code.EndpointID == 0 {
 			switch entry.Code.Side {
 			case SideServer:
 				pics.Side = SideServer
@@ -90,10 +90,8 @@ func (p *Parser) parseYAML(data []byte) (*PICS, error) {
 			}
 		}
 
-		// Track features
-		if entry.Code.Feature != "" && entry.Code.Type == "" && entry.Value.IsTrue() {
-			pics.Features = append(pics.Features, entry.Code.Feature)
-		}
+		// Populate endpoints
+		p.trackEndpoint(pics, entry)
 	}
 
 	return pics, nil

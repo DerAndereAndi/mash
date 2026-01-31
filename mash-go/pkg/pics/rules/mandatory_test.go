@@ -25,8 +25,9 @@ func TestMAN001_ProtocolDeclaration(t *testing.T) {
 			expectViolate: false,
 		},
 		{
-			name:          "missing both",
-			input:         "MASH.S.CTRL=1",
+			name: "missing both",
+			input: `MASH.S.E01=EV_CHARGER
+MASH.S.E01.CTRL=1`,
 			expectViolate: true,
 		},
 	}
@@ -48,35 +49,56 @@ func TestMAN001_ProtocolDeclaration(t *testing.T) {
 func TestMAN002_CTRLMandatoryAttributes(t *testing.T) {
 	rule := NewMAN002()
 
-	// Without CTRL - not applicable
+	// Without CTRL on any endpoint - not applicable
 	p, _ := pics.ParseString("MASH.S=1")
 	violations := rule.Check(p)
 	if len(violations) > 0 {
 		t.Error("Expected no violation without CTRL feature")
 	}
 
-	// With CTRL but missing mandatory attrs
+	// With CTRL on endpoint but missing mandatory attrs
 	p, _ = pics.ParseString(`MASH.S=1
-MASH.S.CTRL=1`)
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.CTRL=1`)
 	violations = rule.Check(p)
 	if len(violations) == 0 {
 		t.Error("Expected violation for missing mandatory attributes")
 	}
 
-	// With all mandatory attributes
+	// With all mandatory attributes on endpoint
 	p, _ = pics.ParseString(`MASH.S=1
-MASH.S.CTRL=1
-MASH.S.CTRL.A01=1
-MASH.S.CTRL.A02=1
-MASH.S.CTRL.A0A=1
-MASH.S.CTRL.A0B=1
-MASH.S.CTRL.A0C=1
-MASH.S.CTRL.A0E=1
-MASH.S.CTRL.A46=1
-MASH.S.CTRL.A48=1`)
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.CTRL=1
+MASH.S.E01.CTRL.A01=1
+MASH.S.E01.CTRL.A02=1
+MASH.S.E01.CTRL.A0A=1
+MASH.S.E01.CTRL.A0B=1
+MASH.S.E01.CTRL.A0C=1
+MASH.S.E01.CTRL.A0E=1
+MASH.S.E01.CTRL.A46=1
+MASH.S.E01.CTRL.A48=1`)
 	violations = rule.Check(p)
 	if len(violations) > 0 {
 		t.Errorf("Expected no violation with all mandatory attrs, got: %v", violations)
+	}
+
+	// Multi-endpoint: one valid, one missing attrs
+	p, _ = pics.ParseString(`MASH.S=1
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.CTRL=1
+MASH.S.E01.CTRL.A01=1
+MASH.S.E01.CTRL.A02=1
+MASH.S.E01.CTRL.A0A=1
+MASH.S.E01.CTRL.A0B=1
+MASH.S.E01.CTRL.A0C=1
+MASH.S.E01.CTRL.A0E=1
+MASH.S.E01.CTRL.A46=1
+MASH.S.E01.CTRL.A48=1
+MASH.S.E02=BATTERY
+MASH.S.E02.CTRL=1`)
+	violations = rule.Check(p)
+	if len(violations) == 0 {
+		t.Error("Expected violation for endpoint 2 missing mandatory attrs")
 	}
 }
 
@@ -90,23 +112,25 @@ func TestMAN003_ELECMandatoryAttributes(t *testing.T) {
 		t.Error("Expected no violation without ELEC feature")
 	}
 
-	// With ELEC but missing mandatory attrs
+	// With ELEC on endpoint but missing mandatory attrs
 	p, _ = pics.ParseString(`MASH.S=1
-MASH.S.ELEC=1`)
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.ELEC=1`)
 	violations = rule.Check(p)
 	if len(violations) == 0 {
 		t.Error("Expected violation for missing mandatory attributes")
 	}
 
-	// With all mandatory attributes
+	// With all mandatory attributes on endpoint
 	p, _ = pics.ParseString(`MASH.S=1
-MASH.S.ELEC=1
-MASH.S.ELEC.A01=1
-MASH.S.ELEC.A02=1
-MASH.S.ELEC.A03=1
-MASH.S.ELEC.A04=1
-MASH.S.ELEC.A05=1
-MASH.S.ELEC.A0D=1`)
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.ELEC=1
+MASH.S.E01.ELEC.A01=1
+MASH.S.E01.ELEC.A02=1
+MASH.S.E01.ELEC.A03=1
+MASH.S.E01.ELEC.A04=1
+MASH.S.E01.ELEC.A05=1
+MASH.S.E01.ELEC.A0D=1`)
 	violations = rule.Check(p)
 	if len(violations) > 0 {
 		t.Errorf("Expected no violation with all mandatory attrs, got: %v", violations)
@@ -123,9 +147,10 @@ func TestMAN004_CHRGMandatoryAttributes(t *testing.T) {
 		t.Error("Expected no violation without CHRG feature")
 	}
 
-	// With CHRG but missing mandatory attrs
+	// With CHRG on endpoint but missing mandatory attrs
 	p, _ = pics.ParseString(`MASH.S=1
-MASH.S.CHRG=1`)
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.CHRG=1`)
 	violations = rule.Check(p)
 	if len(violations) == 0 {
 		t.Error("Expected violation for missing mandatory attributes")
@@ -142,9 +167,10 @@ func TestMAN005_SIGMandatoryAttributes(t *testing.T) {
 		t.Error("Expected no violation without SIG feature")
 	}
 
-	// With SIG but missing mandatory attrs
+	// With SIG on endpoint but missing mandatory attrs
 	p, _ = pics.ParseString(`MASH.S=1
-MASH.S.SIG=1`)
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.SIG=1`)
 	violations = rule.Check(p)
 	if len(violations) == 0 {
 		t.Error("Expected violation for missing mandatory attributes")
@@ -161,18 +187,20 @@ func TestMAN006_STATMandatoryAttributes(t *testing.T) {
 		t.Error("Expected no violation without STAT feature")
 	}
 
-	// With STAT but missing A01
+	// With STAT on endpoint but missing A01
 	p, _ = pics.ParseString(`MASH.S=1
-MASH.S.STAT=1`)
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.STAT=1`)
 	violations = rule.Check(p)
 	if len(violations) == 0 {
 		t.Error("Expected violation for missing A01")
 	}
 
-	// With STAT and A01
+	// With STAT and A01 on endpoint
 	p, _ = pics.ParseString(`MASH.S=1
-MASH.S.STAT=1
-MASH.S.STAT.A01=1`)
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.STAT=1
+MASH.S.E01.STAT.A01=1`)
 	violations = rule.Check(p)
 	if len(violations) > 0 {
 		t.Errorf("Expected no violation with A01, got: %v", violations)
@@ -189,30 +217,72 @@ func TestMAN007_MEASMandatoryAttributes(t *testing.T) {
 		t.Error("Expected no violation without MEAS feature")
 	}
 
-	// With MEAS but no AC or DC power
+	// EV_CHARGER endpoint with MEAS but no power attribute
 	p, _ = pics.ParseString(`MASH.S=1
-MASH.S.MEAS=1`)
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.MEAS=1`)
 	violations = rule.Check(p)
 	if len(violations) == 0 {
-		t.Error("Expected violation for missing A01 or A28")
+		t.Error("Expected violation for EV_CHARGER missing acActivePower")
 	}
 
-	// With AC power
+	// EV_CHARGER with AC power - ok
 	p, _ = pics.ParseString(`MASH.S=1
-MASH.S.MEAS=1
-MASH.S.MEAS.A01=1`)
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.MEAS=1
+MASH.S.E01.MEAS.A01=1`)
 	violations = rule.Check(p)
 	if len(violations) > 0 {
-		t.Errorf("Expected no violation with A01, got: %v", violations)
+		t.Errorf("Expected no violation with acActivePower, got: %v", violations)
 	}
 
-	// With DC power
+	// BATTERY endpoint requires dcPower + stateOfCharge
 	p, _ = pics.ParseString(`MASH.S=1
-MASH.S.MEAS=1
-MASH.S.MEAS.A28=1`)
+MASH.S.E01=BATTERY
+MASH.S.E01.MEAS=1
+MASH.S.E01.MEAS.A28=1`)
+	violations = rule.Check(p)
+	if len(violations) == 0 {
+		t.Error("Expected violation for BATTERY missing stateOfCharge")
+	}
+
+	// BATTERY with both dcPower and stateOfCharge - ok
+	p, _ = pics.ParseString(`MASH.S=1
+MASH.S.E01=BATTERY
+MASH.S.E01.MEAS=1
+MASH.S.E01.MEAS.A28=1
+MASH.S.E01.MEAS.A32=1`)
 	violations = rule.Check(p)
 	if len(violations) > 0 {
-		t.Errorf("Expected no violation with A28, got: %v", violations)
+		t.Errorf("Expected no violation for BATTERY with required attrs, got: %v", violations)
+	}
+
+	// PV_STRING requires dcPower
+	p, _ = pics.ParseString(`MASH.S=1
+MASH.S.E01=PV_STRING
+MASH.S.E01.MEAS=1`)
+	violations = rule.Check(p)
+	if len(violations) == 0 {
+		t.Error("Expected violation for PV_STRING missing dcPower")
+	}
+
+	// PV_STRING with dcPower - ok
+	p, _ = pics.ParseString(`MASH.S=1
+MASH.S.E01=PV_STRING
+MASH.S.E01.MEAS=1
+MASH.S.E01.MEAS.A28=1`)
+	violations = rule.Check(p)
+	if len(violations) > 0 {
+		t.Errorf("Expected no violation for PV_STRING with dcPower, got: %v", violations)
+	}
+
+	// Unknown endpoint type with MEAS - at least AC or DC required
+	p, _ = pics.ParseString(`MASH.S=1
+MASH.S.E01=CUSTOM_DEVICE
+MASH.S.E01.MEAS=1`)
+	violations = rule.Check(p)
+	if len(violations) == 0 {
+		t.Error("Expected violation for unknown endpoint type with no power attribute")
 	}
 }
 

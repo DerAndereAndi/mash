@@ -3,7 +3,7 @@
 > Formal specification of valid feature combinations and attribute requirements
 
 **Status:** Draft
-**Last Updated:** 2025-01-25
+**Last Updated:** 2026-01-31
 
 ---
 
@@ -321,25 +321,35 @@ function validateConformance(device):
 
 ### 5.2 Controller Validation
 
-Controllers SHOULD validate device conformance on connection:
+Controllers SHOULD validate device conformance on connection, using the endpoint-aware
+PICS format (DEC-054) where each application feature is scoped to an endpoint:
 
 ```
 function validateDeviceConformance(device):
-    // Read featureMap
-    featureMap = device.read(0xFFFC)
+    for each endpoint in device.endpoints:
+        // Read featureMap for this endpoint
+        featureMap = device.read(endpoint.id, 0xFFFC)
 
-    // Read attributeList
-    attributeList = device.read(0xFFFB)
+        // Read attributeList for this endpoint
+        attributeList = device.read(endpoint.id, 0xFFFB)
 
-    // Validate feature dependencies
-    if not validateFeatureDependencies(featureMap):
-        return CONFORMANCE_ERROR
+        // Validate feature dependencies per endpoint
+        if not validateFeatureDependencies(featureMap):
+            return CONFORMANCE_ERROR
 
-    // Validate attribute presence
-    for each attribute in CONFORMANCE_TABLE:
-        if attribute.isMandatory(featureMap):
-            if attribute.id not in attributeList:
-                return CONFORMANCE_ERROR
+        // Validate attribute presence per endpoint
+        for each attribute in CONFORMANCE_TABLE:
+            if attribute.isMandatory(featureMap):
+                if attribute.id not in attributeList:
+                    return CONFORMANCE_ERROR
+
+        // EPT-001: Validate endpoint type conformance (DEC-053)
+        conformance = ENDPOINT_CONFORMANCE[endpoint.type]
+        for each feature in endpoint.features:
+            if feature.name in conformance:
+                for each attr in conformance[feature.name].mandatory:
+                    if attr not in attributeList:
+                        return CONFORMANCE_ERROR
 
     return SUCCESS
 ```
@@ -348,15 +358,15 @@ function validateDeviceConformance(device):
 
 ## 6. PICS Mapping
 
-Each conformance rule maps to a PICS code. See [pics-format.md](../testing/pics-format.md) for the complete PICS specification.
+Each conformance rule maps to a PICS code. Application feature codes are endpoint-scoped (DEC-054). See [pics-format.md](../testing/pics-format.md) for the complete PICS specification.
 
 | Conformance Rule | PICS Code |
 |------------------|-----------|
-| CORE flag set | MASH.S.F00 |
-| EMOB flag set | MASH.S.F03 |
-| V2X flag set | MASH.S.F10 |
-| acceptsLimits attribute | MASH.S.CTRL.A10 |
-| SetLimit command | MASH.S.CTRL.C01.Rsp |
+| CORE flag set | MASH.S.E01.CTRL.F00 |
+| EMOB flag set | MASH.S.E01.CTRL.F03 |
+| V2X flag set | MASH.S.E01.CTRL.F0A |
+| acceptsLimits attribute | MASH.S.E01.CTRL.A0A |
+| SetLimit command | MASH.S.E01.CTRL.C01.Rsp |
 
 ---
 

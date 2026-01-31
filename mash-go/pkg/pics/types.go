@@ -2,6 +2,7 @@ package pics
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -79,6 +80,9 @@ type Code struct {
 	// Side is S (server/device) or C (client/controller).
 	Side Side
 
+	// EndpointID is the endpoint number (1-255). 0 means device-level.
+	EndpointID uint8
+
 	// Feature is the feature identifier (e.g., "CTRL", "ELEC").
 	Feature string
 
@@ -104,6 +108,10 @@ func (c Code) String() string {
 	sb.WriteString("MASH.")
 	sb.WriteString(string(c.Side))
 
+	if c.EndpointID > 0 {
+		sb.WriteString(fmt.Sprintf(".E%02X", c.EndpointID))
+	}
+
 	if c.Feature != "" {
 		sb.WriteString(".")
 		sb.WriteString(c.Feature)
@@ -121,6 +129,22 @@ func (c Code) String() string {
 	}
 
 	return sb.String()
+}
+
+// EndpointPICS tracks per-endpoint PICS data.
+type EndpointPICS struct {
+	// ID is the endpoint number (1-255).
+	ID uint8
+	// Type is the endpoint type (e.g., "EV_CHARGER", "INVERTER", "BATTERY").
+	Type string
+	// Features lists enabled features on this endpoint.
+	Features []string
+}
+
+// ApplicationFeatures lists features that must be on endpoints (not device-level).
+var ApplicationFeatures = map[string]bool{
+	"ELEC": true, "MEAS": true, "CTRL": true, "STAT": true,
+	"INFO": true, "CHRG": true, "SIG": true, "TAR": true, "PLAN": true,
 }
 
 // Value represents a PICS value.
@@ -172,8 +196,11 @@ type PICS struct {
 	// Version is the protocol version (e.g., "1.0").
 	Version string
 
-	// Features lists all features that are enabled.
+	// Features lists device-level features (transport/pairing: TRANS, COMM, CERT, etc.).
 	Features []string
+
+	// Endpoints maps endpoint ID to per-endpoint PICS data.
+	Endpoints map[uint8]*EndpointPICS
 
 	// Device contains optional device metadata (from YAML format).
 	Device *DeviceMetadata
@@ -188,8 +215,9 @@ type PICS struct {
 // NewPICS creates a new empty PICS.
 func NewPICS() *PICS {
 	return &PICS{
-		Entries: make([]Entry, 0),
-		ByCode:  make(map[string]Entry),
+		Entries:   make([]Entry, 0),
+		ByCode:    make(map[string]Entry),
+		Endpoints: make(map[uint8]*EndpointPICS),
 	}
 }
 
@@ -258,4 +286,47 @@ func (p *PICS) IsDevice() bool {
 // IsController returns true if this is a controller (client) PICS.
 func (p *PICS) IsController() bool {
 	return p.Side == SideClient
+}
+
+// EndpointHas returns true if the given PICS code exists and is true.
+func (p *PICS) EndpointHas(epID uint8, code string) bool {
+	entry, ok := p.ByCode[code]
+	if !ok {
+		return false
+	}
+	return entry.Code.EndpointID == epID && entry.Value.IsTrue()
+}
+
+// EndpointType returns the endpoint type for the given endpoint ID, or empty if not found.
+func (p *PICS) EndpointType(epID uint8) string {
+	ep, ok := p.Endpoints[epID]
+	if !ok {
+		return ""
+	}
+	return ep.Type
+}
+
+// EndpointIDs returns all endpoint IDs in sorted order.
+func (p *PICS) EndpointIDs() []uint8 {
+	ids := make([]uint8, 0, len(p.Endpoints))
+	for id := range p.Endpoints {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
+// EndpointsWithFeature returns all endpoints that have the given feature enabled.
+func (p *PICS) EndpointsWithFeature(feature string) []*EndpointPICS {
+	var result []*EndpointPICS
+	for _, id := range p.EndpointIDs() {
+		ep := p.Endpoints[id]
+		for _, f := range ep.Features {
+			if f == feature {
+				result = append(result, ep)
+				break
+			}
+		}
+	}
+	return result
 }

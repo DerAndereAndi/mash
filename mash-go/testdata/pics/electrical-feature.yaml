@@ -17,56 +17,59 @@ items:
   # Protocol declaration
   MASH.S: 1
 
+  # Endpoint declaration
+  MASH.S.E01: INVERTER             # Reference endpoint for electrical
+
   # ==========================================================================
   # Feature Presence
   # ==========================================================================
 
-  MASH.S.ELEC: true               # Electrical feature present
+  MASH.S.E01.ELEC: true            # Electrical feature present
 
   # ==========================================================================
   # Phase Configuration Attributes (Mandatory)
   # ==========================================================================
 
-  MASH.S.ELEC.A01: true           # phaseCount (uint8: 1-3)
-  MASH.S.ELEC.A02: true           # phaseMapping (map[Phase]GridPhase)
-  MASH.S.ELEC.A03: true           # nominalVoltage (uint16, V, default 230)
-  MASH.S.ELEC.A04: true           # nominalFrequency (uint8, Hz, default 50)
-  MASH.S.ELEC.A05: true           # supportedDirections (Direction enum)
+  MASH.S.E01.ELEC.A01: true        # phaseCount (uint8: 1-3)
+  MASH.S.E01.ELEC.A02: true        # phaseMapping (map[Phase]GridPhase)
+  MASH.S.E01.ELEC.A03: true        # nominalVoltage (uint16, V, default 230)
+  MASH.S.E01.ELEC.A04: true        # nominalFrequency (uint8, Hz, default 50)
+  MASH.S.E01.ELEC.A05: true        # supportedDirections (Direction enum)
 
   # ==========================================================================
   # Power Rating Attributes
   # ==========================================================================
 
-  MASH.S.ELEC.A0A: true           # nominalMaxConsumption (int64, mW)
-  MASH.S.ELEC.A0B: true           # nominalMaxProduction (int64, mW, 0=N/A)
-  MASH.S.ELEC.A0C: true           # nominalMinPower (int64, mW)
+  MASH.S.E01.ELEC.A0A: true        # nominalMaxConsumption (int64, mW)
+  MASH.S.E01.ELEC.A0B: true        # nominalMaxProduction (int64, mW, 0=N/A)
+  MASH.S.E01.ELEC.A0C: true        # nominalMinPower (int64, mW)
 
   # ==========================================================================
   # Current Rating Attributes
   # ==========================================================================
 
-  MASH.S.ELEC.A0D: true           # maxCurrentPerPhase (int64, mA)
-  MASH.S.ELEC.A0E: true           # minCurrentPerPhase (int64, mA)
-  MASH.S.ELEC.A0F: true           # supportsAsymmetric (AsymmetricSupport enum)
+  MASH.S.E01.ELEC.A0D: true        # maxCurrentPerPhase (int64, mA)
+  MASH.S.E01.ELEC.A0E: true        # minCurrentPerPhase (int64, mA)
+  MASH.S.E01.ELEC.A0F: true        # supportsAsymmetric (AsymmetricSupport enum)
 
   # ==========================================================================
   # Battery/Storage Attributes
   # ==========================================================================
 
-  MASH.S.ELEC.A14: true           # energyCapacity (int64, mWh, 0=N/A)
+  MASH.S.E01.ELEC.A14: true        # energyCapacity (int64, mWh, 0=N/A)
 
   # ==========================================================================
   # Behavioral Capabilities
   # ==========================================================================
 
   # IsBidirectional() helper: true when supportedDirections == BIDIRECTIONAL
-  MASH.S.ELEC.B_BIDIR: true       # Bidirectional capability detection
+  MASH.S.E01.ELEC.B_BIDIR: true    # Bidirectional capability detection
 
   # CanConsume()/CanProduce() helpers
-  MASH.S.ELEC.B_DIRECTION: true   # Direction capability methods
+  MASH.S.E01.ELEC.B_DIRECTION: true  # Direction capability methods
 
   # Phase mapping validation
-  MASH.S.ELEC.B_PHASE_MAP: true   # Phase mapping consistency
+  MASH.S.E01.ELEC.B_PHASE_MAP: true  # Phase mapping consistency
 
 # =============================================================================
 # Direction Enum Values
@@ -88,30 +91,30 @@ items:
 # =============================================================================
 #
 # TC-ELEC-001 (Read phase configuration):
-#   - MASH.S.ELEC: true
-#   - MASH.S.ELEC.A01: true
-#   - MASH.S.ELEC.A02: true
+#   - MASH.S.E01.ELEC: true
+#   - MASH.S.E01.ELEC.A01: true
+#   - MASH.S.E01.ELEC.A02: true
 #
 # TC-ELEC-002 (IsBidirectional returns correct value):
-#   - MASH.S.ELEC.B_BIDIR: true
+#   - MASH.S.E01.ELEC.B_BIDIR: true
 #
 # TC-ELEC-003 (CanConsume for consumption-only device):
-#   - MASH.S.ELEC.B_DIRECTION: true
+#   - MASH.S.E01.ELEC.B_DIRECTION: true
 #   - Requires supportedDirections == CONSUMPTION
 #
 # TC-ELEC-004 (CanProduce for production-only device):
-#   - MASH.S.ELEC.B_DIRECTION: true
+#   - MASH.S.E01.ELEC.B_DIRECTION: true
 #   - Requires supportedDirections == PRODUCTION
 #
 # TC-ELEC-005 (Phase mapping consistency):
-#   - MASH.S.ELEC.B_PHASE_MAP: true
+#   - MASH.S.E01.ELEC.B_PHASE_MAP: true
 #
 # TC-ELEC-006 (Power ratings validation):
-#   - MASH.S.ELEC.A0A: true
-#   - MASH.S.ELEC.A0B: true
+#   - MASH.S.E01.ELEC.A0A: true
+#   - MASH.S.E01.ELEC.A0B: true
 #
 # TC-ELEC-007 (Asymmetric support levels):
-#   - MASH.S.ELEC.A0F: true
+#   - MASH.S.E01.ELEC.A0F: true
 #
 # TC-ELEC-008 (Energy capacity for storage):
-#   - MASH.S.ELEC.A14: true
+#   - MASH.S.E01.ELEC.A14: true

@@ -169,7 +169,7 @@ func (p *Parser) parseKeyValue(data []byte) (*PICS, error) {
 		pics.ByCode[entry.Code.String()] = entry
 
 		// Track side and version
-		if entry.Code.Feature == "" {
+		if entry.Code.Feature == "" && entry.Code.EndpointID == 0 {
 			switch entry.Code.Side {
 			case SideServer:
 				pics.Side = SideServer
@@ -183,10 +183,8 @@ func (p *Parser) parseKeyValue(data []byte) (*PICS, error) {
 			pics.Version = entry.Value.Raw
 		}
 
-		// Track features
-		if entry.Code.Feature != "" && entry.Code.Type == "" && entry.Value.IsTrue() {
-			pics.Features = append(pics.Features, entry.Code.Feature)
-		}
+		// Populate endpoints
+		p.trackEndpoint(pics, entry)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -196,8 +194,9 @@ func (p *Parser) parseKeyValue(data []byte) (*PICS, error) {
 	return pics, nil
 }
 
-// picsCodeRegex matches PICS codes like MASH.S.CTRL.A01.Rsp
-var picsCodeRegex = regexp.MustCompile(`^MASH\.([SC])(?:\.([A-Z_]+))?(?:\.([ACFEB])([0-9A-Fa-f]+))?(?:\.(Rsp|Tx))?$`)
+// picsCodeRegex matches PICS codes like MASH.S.CTRL.A01.Rsp and MASH.S.E01.CTRL.A01.Rsp
+// Groups: 1=Side, 2=Endpoint(optional), 3=Feature(optional), 4=Type(optional), 5=ID(optional), 6=Qualifier(optional)
+var picsCodeRegex = regexp.MustCompile(`^MASH\.([SC])(?:\.(E[0-9A-Fa-f]{2}))?(?:\.([A-Z_]+))?(?:\.([ACFEB])([0-9A-Fa-f]+))?(?:\.(Rsp|Tx))?$`)
 
 // parseLine parses a single PICS line.
 func (p *Parser) parseLine(line string, lineNum int) (Entry, error) {
@@ -257,7 +256,8 @@ func (p *Parser) parseCode(s string) (Code, error) {
 		}, nil
 	}
 
-	// Handle behavior codes with string values (e.g., MASH.S.CTRL.B_LIMIT_DEFAULT)
+	// Handle behavior codes with string values (e.g., MASH.S.CTRL.B_LIMIT_DEFAULT
+	// and MASH.S.E01.CTRL.B_LIMIT_DEFAULT)
 	if strings.Contains(s, ".B_") {
 		parts := strings.Split(s, ".")
 		if len(parts) >= 4 && parts[0] == "MASH" {
@@ -265,33 +265,56 @@ func (p *Parser) parseCode(s string) (Code, error) {
 			if parts[1] == "C" {
 				side = SideClient
 			}
-			feature := parts[2]
-			// Everything after feature is the behavior name
-			behaviorName := strings.Join(parts[3:], ".")
-			return Code{
-				Raw:     s,
-				Side:    side,
-				Feature: feature,
-				Type:    CodeTypeBehavior,
-				ID:      behaviorName,
-			}, nil
+			idx := 2
+			var epID uint8
+			// Check for endpoint segment
+			if len(parts[idx]) == 3 && parts[idx][0] == 'E' {
+				id, err := strconv.ParseUint(parts[idx][1:], 16, 8)
+				if err == nil {
+					epID = uint8(id)
+					idx++
+				}
+			}
+			if idx < len(parts)-1 {
+				feature := parts[idx]
+				behaviorName := strings.Join(parts[idx+1:], ".")
+				return Code{
+					Raw:        s,
+					Side:       side,
+					EndpointID: epID,
+					Feature:    feature,
+					Type:       CodeTypeBehavior,
+					ID:         behaviorName,
+				}, nil
+			}
 		}
 	}
 
 	// Try regex match
 	matches := picsCodeRegex.FindStringSubmatch(s)
 	if matches == nil {
-		// Check for other patterns (e.g., MASH.S.ENDPOINTS)
+		// Check for other patterns (e.g., MASH.S.ENDPOINTS, MASH.S.CONN.MAX_CONNECTIONS)
 		parts := strings.Split(s, ".")
 		if len(parts) >= 3 && parts[0] == "MASH" {
 			side := SideServer
 			if parts[1] == "C" {
 				side = SideClient
 			}
+			idx := 2
+			var epID uint8
+			// Check for endpoint segment
+			if len(parts[idx]) == 3 && parts[idx][0] == 'E' {
+				id, err := strconv.ParseUint(parts[idx][1:], 16, 8)
+				if err == nil {
+					epID = uint8(id)
+					idx++
+				}
+			}
 			return Code{
-				Raw:     s,
-				Side:    side,
-				Feature: strings.Join(parts[2:], "."),
+				Raw:        s,
+				Side:       side,
+				EndpointID: epID,
+				Feature:    strings.Join(parts[idx:], "."),
 			}, nil
 		}
 		return Code{}, fmt.Errorf("invalid PICS code format: %s", s)
@@ -302,14 +325,62 @@ func (p *Parser) parseCode(s string) (Code, error) {
 		side = SideClient
 	}
 
+	var endpointID uint8
+	if matches[2] != "" {
+		// Parse endpoint hex (E01 -> 1)
+		id, err := strconv.ParseUint(matches[2][1:], 16, 8)
+		if err != nil {
+			return Code{}, fmt.Errorf("invalid endpoint ID in %s: %w", s, err)
+		}
+		endpointID = uint8(id)
+	}
+
 	return Code{
-		Raw:       s,
-		Side:      side,
-		Feature:   matches[2],
-		Type:      CodeType(matches[3]),
-		ID:        matches[4],
-		Qualifier: Qualifier(matches[5]),
+		Raw:        s,
+		Side:       side,
+		EndpointID: endpointID,
+		Feature:    matches[3],
+		Type:       CodeType(matches[4]),
+		ID:         matches[5],
+		Qualifier:  Qualifier(matches[6]),
 	}, nil
+}
+
+// trackEndpoint populates endpoint data from a parsed entry.
+func (p *Parser) trackEndpoint(pics *PICS, entry Entry) {
+	epID := entry.Code.EndpointID
+	if epID > 0 {
+		// Ensure endpoint exists in map
+		if pics.Endpoints[epID] == nil {
+			pics.Endpoints[epID] = &EndpointPICS{ID: epID}
+		}
+		ep := pics.Endpoints[epID]
+
+		// Endpoint type declaration: MASH.S.E01=INVERTER (Feature is empty, Type is empty)
+		if entry.Code.Feature == "" && entry.Code.Type == "" {
+			ep.Type = entry.Value.String
+		}
+
+		// Track per-endpoint features (feature presence code with no Type)
+		if entry.Code.Feature != "" && entry.Code.Type == "" && entry.Value.IsTrue() {
+			// Avoid duplicates
+			found := false
+			for _, f := range ep.Features {
+				if f == entry.Code.Feature {
+					found = true
+					break
+				}
+			}
+			if !found {
+				ep.Features = append(ep.Features, entry.Code.Feature)
+			}
+		}
+	} else {
+		// Device-level feature tracking (transport/pairing features)
+		if entry.Code.Feature != "" && entry.Code.Type == "" && entry.Value.IsTrue() {
+			pics.Features = append(pics.Features, entry.Code.Feature)
+		}
+	}
 }
 
 // parseValue parses a PICS value string.

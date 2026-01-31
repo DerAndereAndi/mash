@@ -66,22 +66,20 @@ func TestValidateFeatureFlagDependencies(t *testing.T) {
 	}{
 		{
 			name: "V2X without EMOB",
-			input: `
-MASH.S=1
-MASH.S.CTRL=1
-MASH.S.CTRL.F0A=1
-`,
+			input: `MASH.S=1
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.CTRL=1
+MASH.S.E01.CTRL.F0A=1`,
 			wantValid: false,
 			wantError: "DEPENDENCY",
 		},
 		{
 			name: "V2X with EMOB",
-			input: `
-MASH.S=1
-MASH.S.CTRL=1
-MASH.S.CTRL.F03=1
-MASH.S.CTRL.F0A=1
-`,
+			input: `MASH.S=1
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.CTRL=1
+MASH.S.E01.CTRL.F03=1
+MASH.S.E01.CTRL.F0A=1`,
 			wantValid: true,
 		},
 	}
@@ -116,11 +114,10 @@ MASH.S.CTRL.F0A=1
 
 func TestValidateStrictMode(t *testing.T) {
 	// PICS with acceptsLimits but missing SetLimit command
-	input := `
-MASH.S=1
-MASH.S.CTRL=1
-MASH.S.CTRL.A0A=1
-`
+	input := `MASH.S=1
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.CTRL=1
+MASH.S.E01.CTRL.A0A=1`
 
 	pics, err := ParseString(input)
 	if err != nil {
@@ -153,13 +150,12 @@ MASH.S.CTRL.A0A=1
 }
 
 func TestMeetsRequirements(t *testing.T) {
-	input := `
-MASH.S=1
-MASH.S.CTRL=1
-MASH.S.CTRL.A0A=1
-MASH.S.CTRL.C01.Rsp=1
-MASH.S.ELEC=1
-`
+	input := `MASH.S=1
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.CTRL=1
+MASH.S.E01.CTRL.A0A=1
+MASH.S.E01.CTRL.C01.Rsp=1
+MASH.S.E01.ELEC=1`
 
 	pics, err := ParseString(input)
 	if err != nil {
@@ -174,25 +170,25 @@ MASH.S.ELEC=1
 	}{
 		{
 			name:         "all present",
-			requirements: []string{"MASH.S", "MASH.S.CTRL", "MASH.S.CTRL.A0A"},
+			requirements: []string{"MASH.S", "MASH.S.E01.CTRL", "MASH.S.E01.CTRL.A0A"},
 			wantMeets:    true,
 			wantMissing:  0,
 		},
 		{
 			name:         "one missing",
-			requirements: []string{"MASH.S", "MASH.S.CTRL", "MASH.S.MEAS"},
+			requirements: []string{"MASH.S", "MASH.S.E01.CTRL", "MASH.S.E01.MEAS"},
 			wantMeets:    false,
 			wantMissing:  1,
 		},
 		{
 			name:         "negation - should not have",
-			requirements: []string{"MASH.S", "!MASH.S.CTRL.F0A"},
+			requirements: []string{"MASH.S", "!MASH.S.E01.CTRL.F0A"},
 			wantMeets:    true,
 			wantMissing:  0,
 		},
 		{
 			name:         "negation - has but should not",
-			requirements: []string{"MASH.S", "!MASH.S.CTRL"},
+			requirements: []string{"MASH.S", "!MASH.S.E01.CTRL"},
 			wantMeets:    false,
 			wantMissing:  1,
 		},
@@ -254,42 +250,41 @@ func TestValidationErrorString(t *testing.T) {
 }
 
 func TestValidateFullPICS(t *testing.T) {
-	// A complete, valid PICS file
-	input := `
-# Full-featured device PICS
+	// A complete, valid PICS file with endpoint format
+	input := `# Full-featured device PICS
 MASH.S=1
 MASH.S.VERSION=1
+MASH.S.E01=EV_CHARGER
 
 # Features
-MASH.S.CTRL=1
-MASH.S.ELEC=1
-MASH.S.MEAS=1
-MASH.S.STAT=1
+MASH.S.E01.CTRL=1
+MASH.S.E01.ELEC=1
+MASH.S.E01.MEAS=1
+MASH.S.E01.STAT=1
 
 # Feature flags
-MASH.S.CTRL.F00=1
-MASH.S.CTRL.F03=1
-MASH.S.CTRL.F0A=1
+MASH.S.E01.CTRL.F00=1
+MASH.S.E01.CTRL.F03=1
+MASH.S.E01.CTRL.F0A=1
 
 # Mandatory EnergyControl attributes
-MASH.S.CTRL.A01=1
-MASH.S.CTRL.A02=1
-MASH.S.CTRL.A0A=1
-MASH.S.CTRL.A0B=1
-MASH.S.CTRL.A0C=1
-MASH.S.CTRL.A0E=1
-MASH.S.CTRL.A46=1
-MASH.S.CTRL.A48=1
+MASH.S.E01.CTRL.A01=1
+MASH.S.E01.CTRL.A02=1
+MASH.S.E01.CTRL.A0A=1
+MASH.S.E01.CTRL.A0B=1
+MASH.S.E01.CTRL.A0C=1
+MASH.S.E01.CTRL.A0E=1
+MASH.S.E01.CTRL.A46=1
+MASH.S.E01.CTRL.A48=1
 
 # Commands
-MASH.S.CTRL.C01.Rsp=1
-MASH.S.CTRL.C02.Rsp=1
-MASH.S.CTRL.C05.Rsp=1
+MASH.S.E01.CTRL.C01.Rsp=1
+MASH.S.E01.CTRL.C02.Rsp=1
+MASH.S.E01.CTRL.C05.Rsp=1
 
 # Mandatory Electrical attributes
-MASH.S.ELEC.A01=1
-MASH.S.ELEC.A05=1
-`
+MASH.S.E01.ELEC.A01=1
+MASH.S.E01.ELEC.A05=1`
 
 	pics, err := ParseString(input)
 	if err != nil {

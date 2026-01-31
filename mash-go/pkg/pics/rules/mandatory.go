@@ -44,6 +44,42 @@ func (r *MAN001) Check(p *pics.PICS) []pics.Violation {
 	return nil
 }
 
+// checkMandatoryPerEndpoint is a helper that checks mandatory attributes for a feature
+// across all endpoints that have that feature.
+func checkMandatoryPerEndpoint(p *pics.PICS, ruleID string, severity pics.Severity, feature string, featureLabel string, mandatory []struct{ id, name string }) []pics.Violation {
+	eps := p.EndpointsWithFeature(feature)
+	if len(eps) == 0 {
+		return nil
+	}
+
+	side := string(p.Side)
+	var violations []pics.Violation
+
+	for _, ep := range eps {
+		var missing []string
+		var codes []string
+		for _, attr := range mandatory {
+			code := fmt.Sprintf("MASH.%s.E%02X.%s.A%s", side, ep.ID, feature, attr.id)
+			if !p.Has(code) {
+				missing = append(missing, fmt.Sprintf("%s (A%s)", attr.name, attr.id))
+				codes = append(codes, code)
+			}
+		}
+
+		if len(missing) > 0 {
+			violations = append(violations, pics.Violation{
+				RuleID:     ruleID,
+				Severity:   severity,
+				Message:    fmt.Sprintf("Endpoint %d (%s): %s missing mandatory attributes: %s", ep.ID, ep.Type, featureLabel, strings.Join(missing, ", ")),
+				PICSCodes:  codes,
+				Suggestion: "Add the missing mandatory attributes",
+			})
+		}
+	}
+
+	return violations
+}
+
 // MAN002 checks mandatory attributes for CTRL feature.
 type MAN002 struct {
 	*pics.BaseRule
@@ -56,17 +92,7 @@ func NewMAN002() *MAN002 {
 }
 
 func (r *MAN002) Check(p *pics.PICS) []pics.Violation {
-	side := string(p.Side)
-	featureCode := fmt.Sprintf("MASH.%s.CTRL", side)
-
-	if !p.Has(featureCode) {
-		return nil // Not applicable
-	}
-
-	mandatory := []struct {
-		id   string
-		name string
-	}{
+	mandatory := []struct{ id, name string }{
 		{"01", "deviceType"},
 		{"02", "controlState"},
 		{"0A", "acceptsLimits"},
@@ -76,27 +102,7 @@ func (r *MAN002) Check(p *pics.PICS) []pics.Violation {
 		{"46", "failsafeConsumptionLimit"},
 		{"48", "failsafeDuration"},
 	}
-
-	var missing []string
-	var codes []string
-	for _, attr := range mandatory {
-		code := fmt.Sprintf("MASH.%s.CTRL.A%s", side, attr.id)
-		if !p.Has(code) {
-			missing = append(missing, fmt.Sprintf("%s (A%s)", attr.name, attr.id))
-			codes = append(codes, code)
-		}
-	}
-
-	if len(missing) > 0 {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    fmt.Sprintf("EnergyControl missing mandatory attributes: %s", strings.Join(missing, ", ")),
-			PICSCodes:  codes,
-			Suggestion: "Add the missing mandatory attributes",
-		}}
-	}
-	return nil
+	return checkMandatoryPerEndpoint(p, r.ID(), r.DefaultSeverity(), "CTRL", "EnergyControl", mandatory)
 }
 
 // MAN003 checks mandatory attributes for ELEC feature.
@@ -111,17 +117,7 @@ func NewMAN003() *MAN003 {
 }
 
 func (r *MAN003) Check(p *pics.PICS) []pics.Violation {
-	side := string(p.Side)
-	featureCode := fmt.Sprintf("MASH.%s.ELEC", side)
-
-	if !p.Has(featureCode) {
-		return nil
-	}
-
-	mandatory := []struct {
-		id   string
-		name string
-	}{
+	mandatory := []struct{ id, name string }{
 		{"01", "phaseCount"},
 		{"02", "phaseMapping"},
 		{"03", "nominalVoltage"},
@@ -129,27 +125,7 @@ func (r *MAN003) Check(p *pics.PICS) []pics.Violation {
 		{"05", "supportedDirections"},
 		{"0D", "maxCurrentPerPhase"},
 	}
-
-	var missing []string
-	var codes []string
-	for _, attr := range mandatory {
-		code := fmt.Sprintf("MASH.%s.ELEC.A%s", side, attr.id)
-		if !p.Has(code) {
-			missing = append(missing, fmt.Sprintf("%s (A%s)", attr.name, attr.id))
-			codes = append(codes, code)
-		}
-	}
-
-	if len(missing) > 0 {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    fmt.Sprintf("Electrical missing mandatory attributes: %s", strings.Join(missing, ", ")),
-			PICSCodes:  codes,
-			Suggestion: "Add the missing mandatory attributes",
-		}}
-	}
-	return nil
+	return checkMandatoryPerEndpoint(p, r.ID(), r.DefaultSeverity(), "ELEC", "Electrical", mandatory)
 }
 
 // MAN004 checks mandatory attributes for CHRG feature.
@@ -164,17 +140,7 @@ func NewMAN004() *MAN004 {
 }
 
 func (r *MAN004) Check(p *pics.PICS) []pics.Violation {
-	side := string(p.Side)
-	featureCode := fmt.Sprintf("MASH.%s.CHRG", side)
-
-	if !p.Has(featureCode) {
-		return nil
-	}
-
-	mandatory := []struct {
-		id   string
-		name string
-	}{
+	mandatory := []struct{ id, name string }{
 		{"01", "state"},
 		{"02", "sessionId"},
 		{"03", "sessionStartTime"},
@@ -183,27 +149,7 @@ func (r *MAN004) Check(p *pics.PICS) []pics.Violation {
 		{"46", "chargingMode"},
 		{"47", "supportedChargingModes"},
 	}
-
-	var missing []string
-	var codes []string
-	for _, attr := range mandatory {
-		code := fmt.Sprintf("MASH.%s.CHRG.A%s", side, attr.id)
-		if !p.Has(code) {
-			missing = append(missing, fmt.Sprintf("%s (A%s)", attr.name, attr.id))
-			codes = append(codes, code)
-		}
-	}
-
-	if len(missing) > 0 {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    fmt.Sprintf("ChargingSession missing mandatory attributes: %s", strings.Join(missing, ", ")),
-			PICSCodes:  codes,
-			Suggestion: "Add the missing mandatory attributes",
-		}}
-	}
-	return nil
+	return checkMandatoryPerEndpoint(p, r.ID(), r.DefaultSeverity(), "CHRG", "ChargingSession", mandatory)
 }
 
 // MAN005 checks mandatory attributes for SIG feature.
@@ -218,43 +164,13 @@ func NewMAN005() *MAN005 {
 }
 
 func (r *MAN005) Check(p *pics.PICS) []pics.Violation {
-	side := string(p.Side)
-	featureCode := fmt.Sprintf("MASH.%s.SIG", side)
-
-	if !p.Has(featureCode) {
-		return nil
-	}
-
-	mandatory := []struct {
-		id   string
-		name string
-	}{
+	mandatory := []struct{ id, name string }{
 		{"01", "activeSignals"},
 		{"02", "signalCount"},
 		{"0A", "lastReceivedSignalId"},
 		{"0B", "signalStatus"},
 	}
-
-	var missing []string
-	var codes []string
-	for _, attr := range mandatory {
-		code := fmt.Sprintf("MASH.%s.SIG.A%s", side, attr.id)
-		if !p.Has(code) {
-			missing = append(missing, fmt.Sprintf("%s (A%s)", attr.name, attr.id))
-			codes = append(codes, code)
-		}
-	}
-
-	if len(missing) > 0 {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    fmt.Sprintf("Signals missing mandatory attributes: %s", strings.Join(missing, ", ")),
-			PICSCodes:  codes,
-			Suggestion: "Add the missing mandatory attributes",
-		}}
-	}
-	return nil
+	return checkMandatoryPerEndpoint(p, r.ID(), r.DefaultSeverity(), "SIG", "Signals", mandatory)
 }
 
 // MAN006 checks mandatory attributes for STAT feature.
@@ -269,35 +185,35 @@ func NewMAN006() *MAN006 {
 }
 
 func (r *MAN006) Check(p *pics.PICS) []pics.Violation {
-	side := string(p.Side)
-	featureCode := fmt.Sprintf("MASH.%s.STAT", side)
-
-	if !p.Has(featureCode) {
+	eps := p.EndpointsWithFeature("STAT")
+	if len(eps) == 0 {
 		return nil
 	}
 
-	a01Code := fmt.Sprintf("MASH.%s.STAT.A01", side)
-	if !p.Has(a01Code) {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    "Status feature requires operatingState (A01)",
-			PICSCodes:  []string{a01Code},
-			Suggestion: fmt.Sprintf("Add %s=1", a01Code),
-		}}
+	side := string(p.Side)
+	var violations []pics.Violation
+
+	for _, ep := range eps {
+		a01Code := fmt.Sprintf("MASH.%s.E%02X.STAT.A01", side, ep.ID)
+		if !p.Has(a01Code) {
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): Status feature requires operatingState (A01)", ep.ID, ep.Type),
+				PICSCodes:  []string{a01Code},
+				Suggestion: fmt.Sprintf("Add %s=1", a01Code),
+			})
+		}
 	}
-	return nil
+
+	return violations
 }
 
 // MAN007 checks mandatory attributes for MEAS feature.
-// Per DEC-053, specific mandatory attributes depend on endpoint type.
-// PICS is device-level, so this rule uses featureMap bits as a proxy:
-//   - BATTERY flag (F02) → dcPower (A28) and stateOfCharge (A32) required
-//   - No BATTERY flag → acActivePower (A01) required (AC device)
-//   - At minimum, either AC or DC power must be present
-//
-// Full endpoint-level conformance validation requires PICS format extension
-// (see docs/features/endpoint-conformance.yaml for the complete registry).
+// Uses endpoint type from EndpointPICS to determine mandatory attributes:
+//   - BATTERY/PV_STRING → dcPower (A28) required; BATTERY also requires stateOfCharge (A32)
+//   - AC endpoint types → acActivePower (A01) required
+//   - Unknown types → at least AC or DC power must be present
 type MAN007 struct {
 	*pics.BaseRule
 }
@@ -308,55 +224,72 @@ func NewMAN007() *MAN007 {
 	}
 }
 
-func (r *MAN007) Check(p *pics.PICS) []pics.Violation {
-	side := string(p.Side)
-	featureCode := fmt.Sprintf("MASH.%s.MEAS", side)
+// dcEndpointTypes are endpoint types that require DC measurement.
+var dcEndpointTypes = map[string]bool{
+	"BATTERY":   true,
+	"PV_STRING": true,
+}
 
-	if !p.Has(featureCode) {
+func (r *MAN007) Check(p *pics.PICS) []pics.Violation {
+	eps := p.EndpointsWithFeature("MEAS")
+	if len(eps) == 0 {
 		return nil
 	}
 
+	side := string(p.Side)
 	var violations []pics.Violation
 
-	a01Code := fmt.Sprintf("MASH.%s.MEAS.A01", side)
-	a28Code := fmt.Sprintf("MASH.%s.MEAS.A28", side)
-	a32Code := fmt.Sprintf("MASH.%s.MEAS.A32", side)
+	for _, ep := range eps {
+		a01Code := fmt.Sprintf("MASH.%s.E%02X.MEAS.A01", side, ep.ID) // acActivePower
+		a28Code := fmt.Sprintf("MASH.%s.E%02X.MEAS.A28", side, ep.ID) // dcPower
+		a32Code := fmt.Sprintf("MASH.%s.E%02X.MEAS.A32", side, ep.ID) // stateOfCharge
 
-	hasAC := p.Has(a01Code)
-	hasDC := p.Has(a28Code)
+		hasAC := p.Has(a01Code)
+		hasDC := p.Has(a28Code)
 
-	// Basic check: at least AC or DC power must be present
-	if !hasAC && !hasDC {
-		violations = append(violations, pics.Violation{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    "Measurement feature requires either acActivePower (A01) for AC or dcPower (A28) for DC",
-			PICSCodes:  []string{a01Code, a28Code},
-			Suggestion: "Add A01=1 for AC measurement or A28=1 for DC measurement",
-		})
-	}
-
-	// BATTERY flag (F02) → dcPower and stateOfCharge required
-	batteryFlag := fmt.Sprintf("MASH.%s.F02", side)
-	if p.Has(batteryFlag) {
-		var missing []string
-		var codes []string
-		if !hasDC {
-			missing = append(missing, "dcPower (A28)")
-			codes = append(codes, a28Code)
-		}
-		if !p.Has(a32Code) {
-			missing = append(missing, "stateOfCharge (A32)")
-			codes = append(codes, a32Code)
-		}
-		if len(missing) > 0 {
-			violations = append(violations, pics.Violation{
-				RuleID:     r.ID(),
-				Severity:   pics.SeverityError,
-				Message:    fmt.Sprintf("BATTERY flag set but Measurement missing: %s", strings.Join(missing, ", ")),
-				PICSCodes:  codes,
-				Suggestion: "Battery endpoints require dcPower and stateOfCharge (see endpoint-conformance.yaml)",
-			})
+		if dcEndpointTypes[ep.Type] {
+			// DC endpoint: dcPower required
+			var missing []string
+			var codes []string
+			if !hasDC {
+				missing = append(missing, "dcPower (A28)")
+				codes = append(codes, a28Code)
+			}
+			if ep.Type == "BATTERY" && !p.Has(a32Code) {
+				missing = append(missing, "stateOfCharge (A32)")
+				codes = append(codes, a32Code)
+			}
+			if len(missing) > 0 {
+				violations = append(violations, pics.Violation{
+					RuleID:     r.ID(),
+					Severity:   pics.SeverityError,
+					Message:    fmt.Sprintf("Endpoint %d (%s): Measurement missing: %s", ep.ID, ep.Type, strings.Join(missing, ", ")),
+					PICSCodes:  codes,
+					Suggestion: fmt.Sprintf("%s endpoints require DC measurement attributes (see endpoint-conformance.yaml)", ep.Type),
+				})
+			}
+		} else if ep.Type != "" && !dcEndpointTypes[ep.Type] {
+			// Known AC endpoint type: acActivePower required
+			if !hasAC {
+				violations = append(violations, pics.Violation{
+					RuleID:     r.ID(),
+					Severity:   r.DefaultSeverity(),
+					Message:    fmt.Sprintf("Endpoint %d (%s): Measurement requires acActivePower (A01)", ep.ID, ep.Type),
+					PICSCodes:  []string{a01Code},
+					Suggestion: fmt.Sprintf("Add %s=1 for AC power measurement", a01Code),
+				})
+			}
+		} else {
+			// Unknown endpoint type: at least AC or DC power must be present
+			if !hasAC && !hasDC {
+				violations = append(violations, pics.Violation{
+					RuleID:     r.ID(),
+					Severity:   r.DefaultSeverity(),
+					Message:    fmt.Sprintf("Endpoint %d (%s): Measurement requires either acActivePower (A01) or dcPower (A28)", ep.ID, ep.Type),
+					PICSCodes:  []string{a01Code, a28Code},
+					Suggestion: "Add A01=1 for AC measurement or A28=1 for DC measurement",
+				})
+			}
 		}
 	}
 

@@ -305,6 +305,192 @@ MASH.S.COMM.ATTESTATION=0
 	}
 }
 
+func TestParseEndpointTypeDeclaration(t *testing.T) {
+	input := `MASH.S=1
+MASH.S.E01=EV_CHARGER
+MASH.S.E02=INVERTER
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	// Endpoint 1
+	if pics.EndpointType(1) != "EV_CHARGER" {
+		t.Errorf("EndpointType(1) = %s, want EV_CHARGER", pics.EndpointType(1))
+	}
+	// Endpoint 2
+	if pics.EndpointType(2) != "INVERTER" {
+		t.Errorf("EndpointType(2) = %s, want INVERTER", pics.EndpointType(2))
+	}
+
+	ids := pics.EndpointIDs()
+	if len(ids) != 2 {
+		t.Fatalf("len(EndpointIDs()) = %d, want 2", len(ids))
+	}
+}
+
+func TestParseEndpointFeatureCodes(t *testing.T) {
+	input := `MASH.S=1
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.CTRL=1
+MASH.S.E01.MEAS=1
+MASH.S.E01.CTRL.A01=1
+MASH.S.E01.CTRL.A02=1
+MASH.S.E01.MEAS.A01=1
+MASH.S.E01.CTRL.C01.Rsp=1
+MASH.S.E01.CTRL.F03=1
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	// Verify endpoint was populated
+	ep := pics.Endpoints[1]
+	if ep == nil {
+		t.Fatal("expected endpoint 1 to exist")
+	}
+	if ep.Type != "EV_CHARGER" {
+		t.Errorf("endpoint 1 type = %s, want EV_CHARGER", ep.Type)
+	}
+
+	// Verify features tracked on endpoint
+	found := false
+	for _, f := range ep.Features {
+		if f == "CTRL" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected CTRL in endpoint features, got %v", ep.Features)
+	}
+
+	// Verify code parsing
+	entry, ok := pics.ByCode["MASH.S.E01.CTRL.A01"]
+	if !ok {
+		t.Fatal("expected MASH.S.E01.CTRL.A01 in ByCode")
+	}
+	if entry.Code.EndpointID != 1 {
+		t.Errorf("EndpointID = %d, want 1", entry.Code.EndpointID)
+	}
+	if entry.Code.Feature != "CTRL" {
+		t.Errorf("Feature = %s, want CTRL", entry.Code.Feature)
+	}
+	if entry.Code.Type != CodeTypeAttribute {
+		t.Errorf("Type = %s, want A", entry.Code.Type)
+	}
+	if entry.Code.ID != "01" {
+		t.Errorf("ID = %s, want 01", entry.Code.ID)
+	}
+
+	// Verify command with qualifier
+	entry, ok = pics.ByCode["MASH.S.E01.CTRL.C01.Rsp"]
+	if !ok {
+		t.Fatal("expected MASH.S.E01.CTRL.C01.Rsp in ByCode")
+	}
+	if entry.Code.EndpointID != 1 {
+		t.Errorf("command EndpointID = %d, want 1", entry.Code.EndpointID)
+	}
+	if entry.Code.Qualifier != QualifierResponse {
+		t.Errorf("Qualifier = %s, want Rsp", entry.Code.Qualifier)
+	}
+
+	// Verify feature flag
+	entry, ok = pics.ByCode["MASH.S.E01.CTRL.F03"]
+	if !ok {
+		t.Fatal("expected MASH.S.E01.CTRL.F03 in ByCode")
+	}
+	if entry.Code.EndpointID != 1 {
+		t.Errorf("flag EndpointID = %d, want 1", entry.Code.EndpointID)
+	}
+	if entry.Code.Type != CodeTypeFlag {
+		t.Errorf("flag Type = %s, want F", entry.Code.Type)
+	}
+}
+
+func TestParseEndpointWithDeviceLevelTransport(t *testing.T) {
+	input := `MASH.S=1
+MASH.S.VERSION=1.0
+MASH.S.TRANS=1
+MASH.S.COMM=1
+MASH.S.E01=EV_CHARGER
+MASH.S.E01.CTRL=1
+MASH.S.E01.MEAS=1
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	// Device-level features
+	if !pics.Has("MASH.S.TRANS") {
+		t.Error("expected MASH.S.TRANS to be present")
+	}
+	if !pics.Has("MASH.S.COMM") {
+		t.Error("expected MASH.S.COMM to be present")
+	}
+
+	// Transport should be in device-level Features
+	foundTrans := false
+	for _, f := range pics.Features {
+		if f == "TRANS" {
+			foundTrans = true
+			break
+		}
+	}
+	if !foundTrans {
+		t.Errorf("expected TRANS in device-level Features, got %v", pics.Features)
+	}
+
+	// Endpoint features
+	if !pics.Has("MASH.S.E01.CTRL") {
+		t.Error("expected MASH.S.E01.CTRL to be present")
+	}
+	if !pics.Has("MASH.S.E01.MEAS") {
+		t.Error("expected MASH.S.E01.MEAS to be present")
+	}
+
+	// Verify endpoint
+	if pics.EndpointType(1) != "EV_CHARGER" {
+		t.Errorf("EndpointType(1) = %s, want EV_CHARGER", pics.EndpointType(1))
+	}
+}
+
+func TestParseMultipleEndpoints(t *testing.T) {
+	input := `MASH.S=1
+MASH.S.E01=INVERTER
+MASH.S.E01.CTRL=1
+MASH.S.E01.MEAS=1
+MASH.S.E02=BATTERY
+MASH.S.E02.CTRL=1
+MASH.S.E02.MEAS=1
+MASH.S.E02.CTRL.F02=1
+`
+	pics, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("ParseString failed: %v", err)
+	}
+
+	ids := pics.EndpointIDs()
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 endpoints, got %d", len(ids))
+	}
+
+	if pics.EndpointType(1) != "INVERTER" {
+		t.Errorf("ep1 type = %s, want INVERTER", pics.EndpointType(1))
+	}
+	if pics.EndpointType(2) != "BATTERY" {
+		t.Errorf("ep2 type = %s, want BATTERY", pics.EndpointType(2))
+	}
+
+	// BATTERY flag on endpoint 2
+	if !pics.Has("MASH.S.E02.CTRL.F02") {
+		t.Error("expected MASH.S.E02.CTRL.F02 to be present")
+	}
+}
+
 func TestParseError(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -235,15 +235,15 @@ func TestLoadPICS_YAMLFile(t *testing.T) {
 		t.Errorf("Device product mismatch: expected 'Smart Charger Pro', got '%s'", pf.Device.Product)
 	}
 
-	// Check some PICS items (now using MASH.* format)
+	// Check some PICS items (now using MASH.* format with endpoints)
 	if v, ok := pf.Items["MASH.S.TRANS.SC"]; !ok || v != true {
 		t.Error("MASH.S.TRANS.SC should be true")
 	}
-	if v, ok := pf.Items["MASH.S.ELEC.PHASES"]; !ok || v != 3 {
-		t.Errorf("MASH.S.ELEC.PHASES should be 3, got %v", pf.Items["MASH.S.ELEC.PHASES"])
+	if v, ok := pf.Items["MASH.S.E01.ELEC.PHASES"]; !ok || v != 3 {
+		t.Errorf("MASH.S.E01.ELEC.PHASES should be 3, got %v", pf.Items["MASH.S.E01.ELEC.PHASES"])
 	}
-	if v, ok := pf.Items["MASH.S.ELEC.MAX_CURRENT"]; !ok || v != 32 {
-		t.Errorf("MASH.S.ELEC.MAX_CURRENT should be 32, got %v", pf.Items["MASH.S.ELEC.MAX_CURRENT"])
+	if v, ok := pf.Items["MASH.S.E01.ELEC.MAX_CURRENT"]; !ok || v != 32 {
+		t.Errorf("MASH.S.E01.ELEC.MAX_CURRENT should be 32, got %v", pf.Items["MASH.S.E01.ELEC.MAX_CURRENT"])
 	}
 }
 

@@ -20,7 +20,7 @@ func RegisterConsistencyRules(registry *pics.RuleRegistry) {
 	registry.Register(NewCMD009())
 }
 
-// CMD001 checks that acceptsLimits (A0A) requires SetLimit (C01) and ClearLimit (C02).
+// CMD001 checks that acceptsLimits (A0A) requires SetLimit (C01) and ClearLimit (C02) per endpoint.
 type CMD001 struct {
 	*pics.BaseRule
 }
@@ -33,36 +33,40 @@ func NewCMD001() *CMD001 {
 
 func (r *CMD001) Check(p *pics.PICS) []pics.Violation {
 	side := string(p.Side)
-	attrCode := fmt.Sprintf("MASH.%s.CTRL.A0A", side)
+	var violations []pics.Violation
 
-	if !p.Has(attrCode) {
-		return nil
+	for _, ep := range p.EndpointsWithFeature("CTRL") {
+		attrCode := epCode(side, ep.ID, "CTRL.A0A")
+		if !p.Has(attrCode) {
+			continue
+		}
+
+		c01Code := epCode(side, ep.ID, "CTRL.C01.Rsp")
+		c02Code := epCode(side, ep.ID, "CTRL.C02.Rsp")
+
+		var missing []string
+		if !p.Has(c01Code) {
+			missing = append(missing, "SetLimit (C01.Rsp)")
+		}
+		if !p.Has(c02Code) {
+			missing = append(missing, "ClearLimit (C02.Rsp)")
+		}
+
+		if len(missing) > 0 {
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): acceptsLimits (A0A) requires: %s", ep.ID, ep.Type, strings.Join(missing, ", ")),
+				PICSCodes:  []string{attrCode, c01Code, c02Code},
+				Suggestion: "Add the required command declarations",
+			})
+		}
 	}
 
-	c01Code := fmt.Sprintf("MASH.%s.CTRL.C01.Rsp", side)
-	c02Code := fmt.Sprintf("MASH.%s.CTRL.C02.Rsp", side)
-
-	var missing []string
-	if !p.Has(c01Code) {
-		missing = append(missing, "SetLimit (C01.Rsp)")
-	}
-	if !p.Has(c02Code) {
-		missing = append(missing, "ClearLimit (C02.Rsp)")
-	}
-
-	if len(missing) > 0 {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    fmt.Sprintf("acceptsLimits (A0A) requires: %s", strings.Join(missing, ", ")),
-			PICSCodes:  []string{attrCode, c01Code, c02Code},
-			Suggestion: "Add the required command declarations",
-		}}
-	}
-	return nil
+	return violations
 }
 
-// CMD002 checks that acceptsCurrentLimits (A0B) requires SetCurrentLimits (C05) and ClearCurrentLimits (C06).
+// CMD002 checks that acceptsCurrentLimits (A0B) requires SetCurrentLimits (C05) and ClearCurrentLimits (C06) per endpoint.
 type CMD002 struct {
 	*pics.BaseRule
 }
@@ -75,36 +79,40 @@ func NewCMD002() *CMD002 {
 
 func (r *CMD002) Check(p *pics.PICS) []pics.Violation {
 	side := string(p.Side)
-	attrCode := fmt.Sprintf("MASH.%s.CTRL.A0B", side)
+	var violations []pics.Violation
 
-	if !p.Has(attrCode) {
-		return nil
+	for _, ep := range p.EndpointsWithFeature("CTRL") {
+		attrCode := epCode(side, ep.ID, "CTRL.A0B")
+		if !p.Has(attrCode) {
+			continue
+		}
+
+		c05Code := epCode(side, ep.ID, "CTRL.C05.Rsp")
+		c06Code := epCode(side, ep.ID, "CTRL.C06.Rsp")
+
+		var missing []string
+		if !p.Has(c05Code) {
+			missing = append(missing, "SetCurrentLimits (C05.Rsp)")
+		}
+		if !p.Has(c06Code) {
+			missing = append(missing, "ClearCurrentLimits (C06.Rsp)")
+		}
+
+		if len(missing) > 0 {
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): acceptsCurrentLimits (A0B) requires: %s", ep.ID, ep.Type, strings.Join(missing, ", ")),
+				PICSCodes:  []string{attrCode, c05Code, c06Code},
+				Suggestion: "Add the required command declarations",
+			})
+		}
 	}
 
-	c05Code := fmt.Sprintf("MASH.%s.CTRL.C05.Rsp", side)
-	c06Code := fmt.Sprintf("MASH.%s.CTRL.C06.Rsp", side)
-
-	var missing []string
-	if !p.Has(c05Code) {
-		missing = append(missing, "SetCurrentLimits (C05.Rsp)")
-	}
-	if !p.Has(c06Code) {
-		missing = append(missing, "ClearCurrentLimits (C06.Rsp)")
-	}
-
-	if len(missing) > 0 {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    fmt.Sprintf("acceptsCurrentLimits (A0B) requires: %s", strings.Join(missing, ", ")),
-			PICSCodes:  []string{attrCode, c05Code, c06Code},
-			Suggestion: "Add the required command declarations",
-		}}
-	}
-	return nil
+	return violations
 }
 
-// CMD003 checks that acceptsSetpoints (A0C) requires SetSetpoint (C03) and ClearSetpoint (C04).
+// CMD003 checks that acceptsSetpoints (A0C) requires SetSetpoint (C03) and ClearSetpoint (C04) per endpoint.
 type CMD003 struct {
 	*pics.BaseRule
 }
@@ -117,36 +125,40 @@ func NewCMD003() *CMD003 {
 
 func (r *CMD003) Check(p *pics.PICS) []pics.Violation {
 	side := string(p.Side)
-	attrCode := fmt.Sprintf("MASH.%s.CTRL.A0C", side)
+	var violations []pics.Violation
 
-	if !p.Has(attrCode) {
-		return nil
+	for _, ep := range p.EndpointsWithFeature("CTRL") {
+		attrCode := epCode(side, ep.ID, "CTRL.A0C")
+		if !p.Has(attrCode) {
+			continue
+		}
+
+		c03Code := epCode(side, ep.ID, "CTRL.C03.Rsp")
+		c04Code := epCode(side, ep.ID, "CTRL.C04.Rsp")
+
+		var missing []string
+		if !p.Has(c03Code) {
+			missing = append(missing, "SetSetpoint (C03.Rsp)")
+		}
+		if !p.Has(c04Code) {
+			missing = append(missing, "ClearSetpoint (C04.Rsp)")
+		}
+
+		if len(missing) > 0 {
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): acceptsSetpoints (A0C) requires: %s", ep.ID, ep.Type, strings.Join(missing, ", ")),
+				PICSCodes:  []string{attrCode, c03Code, c04Code},
+				Suggestion: "Add the required command declarations",
+			})
+		}
 	}
 
-	c03Code := fmt.Sprintf("MASH.%s.CTRL.C03.Rsp", side)
-	c04Code := fmt.Sprintf("MASH.%s.CTRL.C04.Rsp", side)
-
-	var missing []string
-	if !p.Has(c03Code) {
-		missing = append(missing, "SetSetpoint (C03.Rsp)")
-	}
-	if !p.Has(c04Code) {
-		missing = append(missing, "ClearSetpoint (C04.Rsp)")
-	}
-
-	if len(missing) > 0 {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    fmt.Sprintf("acceptsSetpoints (A0C) requires: %s", strings.Join(missing, ", ")),
-			PICSCodes:  []string{attrCode, c03Code, c04Code},
-			Suggestion: "Add the required command declarations",
-		}}
-	}
-	return nil
+	return violations
 }
 
-// CMD004 checks that isPausable (A0E) requires Pause (C09) and Resume (C0A).
+// CMD004 checks that isPausable (A0E) requires Pause (C09) and Resume (C0A) per endpoint.
 type CMD004 struct {
 	*pics.BaseRule
 }
@@ -159,36 +171,40 @@ func NewCMD004() *CMD004 {
 
 func (r *CMD004) Check(p *pics.PICS) []pics.Violation {
 	side := string(p.Side)
-	attrCode := fmt.Sprintf("MASH.%s.CTRL.A0E", side)
+	var violations []pics.Violation
 
-	if !p.Has(attrCode) {
-		return nil
+	for _, ep := range p.EndpointsWithFeature("CTRL") {
+		attrCode := epCode(side, ep.ID, "CTRL.A0E")
+		if !p.Has(attrCode) {
+			continue
+		}
+
+		c09Code := epCode(side, ep.ID, "CTRL.C09.Rsp")
+		c0aCode := epCode(side, ep.ID, "CTRL.C0A.Rsp")
+
+		var missing []string
+		if !p.Has(c09Code) {
+			missing = append(missing, "Pause (C09.Rsp)")
+		}
+		if !p.Has(c0aCode) {
+			missing = append(missing, "Resume (C0A.Rsp)")
+		}
+
+		if len(missing) > 0 {
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): isPausable (A0E) requires: %s", ep.ID, ep.Type, strings.Join(missing, ", ")),
+				PICSCodes:  []string{attrCode, c09Code, c0aCode},
+				Suggestion: "Add the required command declarations",
+			})
+		}
 	}
 
-	c09Code := fmt.Sprintf("MASH.%s.CTRL.C09.Rsp", side)
-	c0aCode := fmt.Sprintf("MASH.%s.CTRL.C0A.Rsp", side)
-
-	var missing []string
-	if !p.Has(c09Code) {
-		missing = append(missing, "Pause (C09.Rsp)")
-	}
-	if !p.Has(c0aCode) {
-		missing = append(missing, "Resume (C0A.Rsp)")
-	}
-
-	if len(missing) > 0 {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    fmt.Sprintf("isPausable (A0E) requires: %s", strings.Join(missing, ", ")),
-			PICSCodes:  []string{attrCode, c09Code, c0aCode},
-			Suggestion: "Add the required command declarations",
-		}}
-	}
-	return nil
+	return violations
 }
 
-// CMD005 checks that isStoppable (A10) requires Stop (C0B).
+// CMD005 checks that isStoppable (A10) requires Stop (C0B) per endpoint.
 type CMD005 struct {
 	*pics.BaseRule
 }
@@ -201,27 +217,30 @@ func NewCMD005() *CMD005 {
 
 func (r *CMD005) Check(p *pics.PICS) []pics.Violation {
 	side := string(p.Side)
-	attrCode := fmt.Sprintf("MASH.%s.CTRL.A10", side)
+	var violations []pics.Violation
 
-	if !p.Has(attrCode) {
-		return nil
+	for _, ep := range p.EndpointsWithFeature("CTRL") {
+		attrCode := epCode(side, ep.ID, "CTRL.A10")
+		if !p.Has(attrCode) {
+			continue
+		}
+
+		c0bCode := epCode(side, ep.ID, "CTRL.C0B.Rsp")
+		if !p.Has(c0bCode) {
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): isStoppable (A10) requires Stop command (C0B.Rsp)", ep.ID, ep.Type),
+				PICSCodes:  []string{attrCode, c0bCode},
+				Suggestion: fmt.Sprintf("Add %s=1", c0bCode),
+			})
+		}
 	}
 
-	c0bCode := fmt.Sprintf("MASH.%s.CTRL.C0B.Rsp", side)
-
-	if !p.Has(c0bCode) {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    "isStoppable (A10) requires Stop command (C0B.Rsp)",
-			PICSCodes:  []string{attrCode, c0bCode},
-			Suggestion: fmt.Sprintf("Add %s=1", c0bCode),
-		}}
-	}
-	return nil
+	return violations
 }
 
-// CMD006 checks that V2X (F0A) requires SetCurrentSetpoints (C07) and ClearCurrentSetpoints (C08).
+// CMD006 checks that V2X (F0A) requires SetCurrentSetpoints (C07) and ClearCurrentSetpoints (C08) per endpoint.
 type CMD006 struct {
 	*pics.BaseRule
 }
@@ -234,36 +253,40 @@ func NewCMD006() *CMD006 {
 
 func (r *CMD006) Check(p *pics.PICS) []pics.Violation {
 	side := string(p.Side)
-	flagCode := fmt.Sprintf("MASH.%s.CTRL.F0A", side)
+	var violations []pics.Violation
 
-	if !p.Has(flagCode) {
-		return nil
+	for _, ep := range p.EndpointsWithFeature("CTRL") {
+		flagCode := epCode(side, ep.ID, "CTRL.F0A")
+		if !p.Has(flagCode) {
+			continue
+		}
+
+		c07Code := epCode(side, ep.ID, "CTRL.C07.Rsp")
+		c08Code := epCode(side, ep.ID, "CTRL.C08.Rsp")
+
+		var missing []string
+		if !p.Has(c07Code) {
+			missing = append(missing, "SetCurrentSetpoints (C07.Rsp)")
+		}
+		if !p.Has(c08Code) {
+			missing = append(missing, "ClearCurrentSetpoints (C08.Rsp)")
+		}
+
+		if len(missing) > 0 {
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): V2X (F0A) requires: %s", ep.ID, ep.Type, strings.Join(missing, ", ")),
+				PICSCodes:  []string{flagCode, c07Code, c08Code},
+				Suggestion: "Add the required command declarations",
+			})
+		}
 	}
 
-	c07Code := fmt.Sprintf("MASH.%s.CTRL.C07.Rsp", side)
-	c08Code := fmt.Sprintf("MASH.%s.CTRL.C08.Rsp", side)
-
-	var missing []string
-	if !p.Has(c07Code) {
-		missing = append(missing, "SetCurrentSetpoints (C07.Rsp)")
-	}
-	if !p.Has(c08Code) {
-		missing = append(missing, "ClearCurrentSetpoints (C08.Rsp)")
-	}
-
-	if len(missing) > 0 {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    fmt.Sprintf("V2X (F0A) requires: %s", strings.Join(missing, ", ")),
-			PICSCodes:  []string{flagCode, c07Code, c08Code},
-			Suggestion: "Add the required command declarations",
-		}}
-	}
-	return nil
+	return violations
 }
 
-// CMD007 checks that PROCESS (F07) requires ScheduleProcess (C0C) and CancelProcess (C0D).
+// CMD007 checks that PROCESS (F07) requires ScheduleProcess (C0C) and CancelProcess (C0D) per endpoint.
 type CMD007 struct {
 	*pics.BaseRule
 }
@@ -276,36 +299,40 @@ func NewCMD007() *CMD007 {
 
 func (r *CMD007) Check(p *pics.PICS) []pics.Violation {
 	side := string(p.Side)
-	flagCode := fmt.Sprintf("MASH.%s.CTRL.F07", side)
+	var violations []pics.Violation
 
-	if !p.Has(flagCode) {
-		return nil
+	for _, ep := range p.EndpointsWithFeature("CTRL") {
+		flagCode := epCode(side, ep.ID, "CTRL.F07")
+		if !p.Has(flagCode) {
+			continue
+		}
+
+		c0cCode := epCode(side, ep.ID, "CTRL.C0C.Rsp")
+		c0dCode := epCode(side, ep.ID, "CTRL.C0D.Rsp")
+
+		var missing []string
+		if !p.Has(c0cCode) {
+			missing = append(missing, "ScheduleProcess (C0C.Rsp)")
+		}
+		if !p.Has(c0dCode) {
+			missing = append(missing, "CancelProcess (C0D.Rsp)")
+		}
+
+		if len(missing) > 0 {
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): PROCESS (F07) requires: %s", ep.ID, ep.Type, strings.Join(missing, ", ")),
+				PICSCodes:  []string{flagCode, c0cCode, c0dCode},
+				Suggestion: "Add the required command declarations",
+			})
+		}
 	}
 
-	c0cCode := fmt.Sprintf("MASH.%s.CTRL.C0C.Rsp", side)
-	c0dCode := fmt.Sprintf("MASH.%s.CTRL.C0D.Rsp", side)
-
-	var missing []string
-	if !p.Has(c0cCode) {
-		missing = append(missing, "ScheduleProcess (C0C.Rsp)")
-	}
-	if !p.Has(c0dCode) {
-		missing = append(missing, "CancelProcess (C0D.Rsp)")
-	}
-
-	if len(missing) > 0 {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    fmt.Sprintf("PROCESS (F07) requires: %s", strings.Join(missing, ", ")),
-			PICSCodes:  []string{flagCode, c0cCode, c0dCode},
-			Suggestion: "Add the required command declarations",
-		}}
-	}
-	return nil
+	return violations
 }
 
-// CMD008 checks that SIG feature requires SendSignal (C01) and ClearSignals (C02).
+// CMD008 checks that SIG feature requires SendSignal (C01) and ClearSignals (C02) per endpoint.
 type CMD008 struct {
 	*pics.BaseRule
 }
@@ -318,36 +345,36 @@ func NewCMD008() *CMD008 {
 
 func (r *CMD008) Check(p *pics.PICS) []pics.Violation {
 	side := string(p.Side)
-	featureCode := fmt.Sprintf("MASH.%s.SIG", side)
+	var violations []pics.Violation
 
-	if !p.Has(featureCode) {
-		return nil
+	for _, ep := range p.EndpointsWithFeature("SIG") {
+		c01Code := epCode(side, ep.ID, "SIG.C01.Rsp")
+		c02Code := epCode(side, ep.ID, "SIG.C02.Rsp")
+
+		var missing []string
+		if !p.Has(c01Code) {
+			missing = append(missing, "SendSignal (C01.Rsp)")
+		}
+		if !p.Has(c02Code) {
+			missing = append(missing, "ClearSignals (C02.Rsp)")
+		}
+
+		if len(missing) > 0 {
+			featureCode := epCode(side, ep.ID, "SIG")
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): SIG feature requires: %s", ep.ID, ep.Type, strings.Join(missing, ", ")),
+				PICSCodes:  []string{featureCode, c01Code, c02Code},
+				Suggestion: "Add the required command declarations",
+			})
+		}
 	}
 
-	c01Code := fmt.Sprintf("MASH.%s.SIG.C01.Rsp", side)
-	c02Code := fmt.Sprintf("MASH.%s.SIG.C02.Rsp", side)
-
-	var missing []string
-	if !p.Has(c01Code) {
-		missing = append(missing, "SendSignal (C01.Rsp)")
-	}
-	if !p.Has(c02Code) {
-		missing = append(missing, "ClearSignals (C02.Rsp)")
-	}
-
-	if len(missing) > 0 {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    fmt.Sprintf("SIG feature requires: %s", strings.Join(missing, ", ")),
-			PICSCodes:  []string{featureCode, c01Code, c02Code},
-			Suggestion: "Add the required command declarations",
-		}}
-	}
-	return nil
+	return violations
 }
 
-// CMD009 checks that CHRG feature requires SetChargingMode (C01).
+// CMD009 checks that CHRG feature requires SetChargingMode (C01) per endpoint.
 type CMD009 struct {
 	*pics.BaseRule
 }
@@ -360,22 +387,22 @@ func NewCMD009() *CMD009 {
 
 func (r *CMD009) Check(p *pics.PICS) []pics.Violation {
 	side := string(p.Side)
-	featureCode := fmt.Sprintf("MASH.%s.CHRG", side)
+	var violations []pics.Violation
 
-	if !p.Has(featureCode) {
-		return nil
+	for _, ep := range p.EndpointsWithFeature("CHRG") {
+		c01Code := epCode(side, ep.ID, "CHRG.C01.Rsp")
+
+		if !p.Has(c01Code) {
+			featureCode := epCode(side, ep.ID, "CHRG")
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   r.DefaultSeverity(),
+				Message:    fmt.Sprintf("Endpoint %d (%s): CHRG feature requires SetChargingMode command (C01.Rsp)", ep.ID, ep.Type),
+				PICSCodes:  []string{featureCode, c01Code},
+				Suggestion: fmt.Sprintf("Add %s=1", c01Code),
+			})
+		}
 	}
 
-	c01Code := fmt.Sprintf("MASH.%s.CHRG.C01.Rsp", side)
-
-	if !p.Has(c01Code) {
-		return []pics.Violation{{
-			RuleID:     r.ID(),
-			Severity:   r.DefaultSeverity(),
-			Message:    "CHRG feature requires SetChargingMode command (C01.Rsp)",
-			PICSCodes:  []string{featureCode, c01Code},
-			Suggestion: fmt.Sprintf("Add %s=1", c01Code),
-		}}
-	}
-	return nil
+	return violations
 }

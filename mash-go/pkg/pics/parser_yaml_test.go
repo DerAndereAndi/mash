@@ -265,6 +265,107 @@ items:
 	}
 }
 
+func TestParseYAML_EndpointTypeDeclaration(t *testing.T) {
+	input := `
+items:
+  MASH.S: 1
+  MASH.S.E01: EV_CHARGER
+  MASH.S.E02: INVERTER
+`
+	parser := NewParser()
+	pics, err := parser.parseYAML([]byte(input))
+	if err != nil {
+		t.Fatalf("parseYAML failed: %v", err)
+	}
+
+	if pics.EndpointType(1) != "EV_CHARGER" {
+		t.Errorf("EndpointType(1) = %s, want EV_CHARGER", pics.EndpointType(1))
+	}
+	if pics.EndpointType(2) != "INVERTER" {
+		t.Errorf("EndpointType(2) = %s, want INVERTER", pics.EndpointType(2))
+	}
+
+	ids := pics.EndpointIDs()
+	if len(ids) != 2 {
+		t.Fatalf("len(EndpointIDs()) = %d, want 2", len(ids))
+	}
+}
+
+func TestParseYAML_EndpointFeatureCodes(t *testing.T) {
+	input := `
+items:
+  MASH.S: 1
+  MASH.S.TRANS: 1
+  MASH.S.E01: EV_CHARGER
+  MASH.S.E01.CTRL: 1
+  MASH.S.E01.MEAS: 1
+  MASH.S.E01.CTRL.A01: 1
+  MASH.S.E01.MEAS.A01: 1
+  MASH.S.E01.CTRL.C01.Rsp: 1
+  MASH.S.E01.CTRL.F03: 1
+`
+	parser := NewParser()
+	pics, err := parser.parseYAML([]byte(input))
+	if err != nil {
+		t.Fatalf("parseYAML failed: %v", err)
+	}
+
+	// Device-level features
+	foundTrans := false
+	for _, f := range pics.Features {
+		if f == "TRANS" {
+			foundTrans = true
+			break
+		}
+	}
+	if !foundTrans {
+		t.Errorf("expected TRANS in device-level Features, got %v", pics.Features)
+	}
+
+	// Endpoint features
+	ep := pics.Endpoints[1]
+	if ep == nil {
+		t.Fatal("expected endpoint 1 to exist")
+	}
+	if ep.Type != "EV_CHARGER" {
+		t.Errorf("endpoint 1 type = %s, want EV_CHARGER", ep.Type)
+	}
+
+	// Verify parsed codes
+	entry, ok := pics.ByCode["MASH.S.E01.CTRL.A01"]
+	if !ok {
+		t.Fatal("expected MASH.S.E01.CTRL.A01 in ByCode")
+	}
+	if entry.Code.EndpointID != 1 {
+		t.Errorf("EndpointID = %d, want 1", entry.Code.EndpointID)
+	}
+	if entry.Code.Feature != "CTRL" {
+		t.Errorf("Feature = %s, want CTRL", entry.Code.Feature)
+	}
+
+	// Verify command with qualifier
+	if !pics.Has("MASH.S.E01.CTRL.C01.Rsp") {
+		t.Error("expected MASH.S.E01.CTRL.C01.Rsp to be present")
+	}
+
+	// Verify feature flag
+	if !pics.Has("MASH.S.E01.CTRL.F03") {
+		t.Error("expected MASH.S.E01.CTRL.F03 to be present")
+	}
+
+	// Verify CTRL tracked in endpoint features
+	found := false
+	for _, f := range ep.Features {
+		if f == "CTRL" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected CTRL in endpoint features, got %v", ep.Features)
+	}
+}
+
 func TestParseYAML_EmptyItems(t *testing.T) {
 	input := `
 device:
