@@ -1,0 +1,40 @@
+name: FLOA
+fullName: Flexible Load
+specVersion: "1.0"
+description: >
+  Controller manages a generic flexible load via limits or setpoints.
+  Replaces EEBUS flexible load patterns. Applies to any controllable device.
+
+endpointTypes:
+  - HEAT_PUMP
+  - WATER_HEATER
+  - HVAC
+  - APPLIANCE
+
+features:
+  - feature: EnergyControl
+    required: true
+    attributes:
+      - name: acceptsLimits
+        requiredValue: true
+    commands:
+      - setLimit
+      - clearLimit
+    subscriptions:
+      - controlState
+      - effectiveConsumptionLimit
+      - processState
+
+  - feature: Electrical
+    required: true
+    attributes:
+      - name: nominalMaxConsumption
+
+  - feature: Measurement
+    required: false
+    subscriptions:
+      - acActivePower
+
+commands:
+  - limit
+  - clear

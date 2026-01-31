@@ -1,0 +1,26 @@
+name: TOUT
+fullName: Time of Use Tariff
+specVersion: "1.0"
+description: >
+  Controller sends time-of-use price signals to a device for local optimization.
+  Replaces EEBUS TOUT use case. Device uses price information autonomously.
+
+endpointTypes: []
+
+features:
+  - feature: Tariff
+    required: true
+    attributes:
+      - name: currency
+    commands:
+      - setTariff
+
+  - feature: Signals
+    required: true
+    commands:
+      - sendPriceSignal
+      - clearSignals
+    subscriptions:
+      - priceSlots
+
+commands: []

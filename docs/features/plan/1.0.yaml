@@ -1,0 +1,102 @@
+name: Plan
+id: 0x09
+revision: 1
+mandatory: false
+description: "Device reports intended power behavior. Commitment levels support negotiation."
+
+enums:
+  - name: Commitment
+    type: uint8
+    description: "How firm the plan is"
+    values:
+      - { name: PRELIMINARY, value: 0x00, description: "Initial draft, likely to change" }
+      - { name: TENTATIVE, value: 0x01, description: "Proposed, awaiting acceptance" }
+      - { name: COMMITTED, value: 0x02, description: "Accepted and scheduled" }
+      - { name: EXECUTING, value: 0x03, description: "Currently being executed" }
+
+attributes:
+  # Plan identity (1-9)
+  - id: 1
+    name: planId
+    type: uint32
+    access: readOnly
+    mandatory: true
+    default: 0
+    description: "Unique plan identifier"
+
+  - id: 2
+    name: planVersion
+    type: uint32
+    access: readOnly
+    mandatory: true
+    default: 0
+    description: "Increments on each plan update"
+
+  - id: 3
+    name: commitment
+    type: uint8
+    enum: Commitment
+    access: readOnly
+    mandatory: true
+    default: PRELIMINARY
+    description: "How firm this plan is"
+
+  # Plan time bounds (10-19)
+  - id: 10
+    name: startTime
+    type: uint64
+    access: readOnly
+    nullable: true
+    description: "When the plan starts (Unix timestamp)"
+
+  - id: 11
+    name: endTime
+    type: uint64
+    access: readOnly
+    nullable: true
+    description: "When the plan ends (Unix timestamp)"
+
+  # Plan totals (20-29)
+  - id: 20
+    name: totalEnergyPlanned
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mWh"
+    description: "Total planned energy (positive=consumption, negative=production)"
+
+  # Plan slots (40-49)
+  - id: 40
+    name: slots
+    type: array
+    items:
+      type: object
+      structName: PlanSlot
+      fields:
+        - { name: duration, type: uint32, description: "Slot duration in seconds" }
+        - { name: plannedPower, type: int64, description: "Expected power in mW" }
+        - { name: minPower, type: int64, description: "Minimum power in mW" }
+        - { name: maxPower, type: int64, description: "Maximum power in mW" }
+    access: readOnly
+    nullable: true
+    description: "Planned power behavior slots"
+
+commands:
+  - id: 1
+    name: requestPlan
+    mandatory: true
+    description: "Request device to generate/update its plan"
+    parameters:
+      - { name: startTime, type: uint64, required: false }
+      - { name: duration, type: uint32, required: false }
+    response:
+      - { name: planId, type: uint32, required: true }
+
+  - id: 2
+    name: acceptPlan
+    description: "Accept a plan, advancing its commitment level"
+    parameters:
+      - { name: planId, type: uint32, required: true }
+      - { name: planVersion, type: uint32, required: true }
+    response:
+      - { name: newCommitment, type: uint8, enum: Commitment, required: true }

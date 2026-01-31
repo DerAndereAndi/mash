@@ -1,0 +1,49 @@
+name: OHPCF
+fullName: Heat Pump Compressor Flexibility
+specVersion: "1.0"
+description: >
+  Controller flexibly controls heat pump compressor with min run/pause constraints.
+  Replaces EEBUS OHPCF use case. Uses process management with timing constraints.
+
+endpointTypes:
+  - HEAT_PUMP
+
+features:
+  - feature: EnergyControl
+    required: true
+    attributes:
+      - name: acceptsLimits
+        requiredValue: true
+      - name: isPausable
+      - name: processState
+      - name: optionalProcess
+      - name: minRunDuration
+      - name: minPauseDuration
+      - name: maxRunDuration
+      - name: maxPauseDuration
+      - name: optionalProcessPower
+    commands:
+      - setLimit
+      - clearLimit
+      - pause
+      - resume
+    subscriptions:
+      - controlState
+      - processState
+      - effectiveConsumptionLimit
+
+  - feature: Electrical
+    required: true
+    attributes:
+      - name: nominalMaxConsumption
+
+  - feature: Measurement
+    required: false
+    subscriptions:
+      - acActivePower
+
+commands:
+  - limit
+  - clear
+  - pause
+  - resume

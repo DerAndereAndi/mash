@@ -131,6 +131,22 @@ attributes:
     unit: "mWh"
     description: "EV battery capacity"
 
+  - id: 32
+    name: evMinStateOfCharge
+    type: uint8
+    access: readOnly
+    nullable: true
+    unit: "%"
+    description: "Minimum SoC to charge ASAP"
+
+  - id: 33
+    name: evTargetStateOfCharge
+    type: uint8
+    access: readOnly
+    nullable: true
+    unit: "%"
+    description: "User-defined target SoC"
+
   # EV energy demands (40-49)
   - id: 40
     name: evDemandMode

@@ -88,6 +88,14 @@ enums:
       - { name: DEVICE_OVERRIDE, value: 0x03 }
       - { name: NOT_SUPPORTED, value: 0x04 }
 
+  - name: ControlMode
+    type: uint8
+    description: "How setpoints/limits are interpreted"
+    values:
+      - { name: DIRECT, value: 0x00, description: "Setpoints target the device directly" }
+      - { name: PCC, value: 0x01, description: "Setpoints target the point of common coupling" }
+      - { name: AUTO, value: 0x02, description: "Device decides interpretation" }
+
 attributes:
   # Device type and control state (1-9)
   - id: 1
@@ -384,6 +392,54 @@ attributes:
     access: readOnly
     default: false
     description: "Whether the process is optional (can be deferred)"
+
+  - id: 82
+    name: minRunDuration
+    type: uint32
+    access: readOnly
+    nullable: true
+    unit: "s"
+    description: "Minimum run time before pause/stop"
+
+  - id: 83
+    name: minPauseDuration
+    type: uint32
+    access: readOnly
+    nullable: true
+    unit: "s"
+    description: "Minimum pause before restart"
+
+  - id: 84
+    name: maxRunDuration
+    type: uint32
+    access: readOnly
+    nullable: true
+    unit: "s"
+    description: "Maximum continuous run time"
+
+  - id: 85
+    name: maxPauseDuration
+    type: uint32
+    access: readOnly
+    nullable: true
+    unit: "s"
+    description: "Maximum pause time"
+
+  - id: 86
+    name: optionalProcessPower
+    type: int64
+    access: readOnly
+    nullable: true
+    unit: "mW"
+    description: "Expected power when process runs"
+
+  - id: 87
+    name: controlMode
+    type: uint8
+    enum: ControlMode
+    access: readWrite
+    nullable: true
+    description: "How setpoints/limits are interpreted"
 
 commands:
   - id: 1

@@ -579,8 +579,8 @@ func TestParseEnergyControlFeature(t *testing.T) {
 	if def.ID != 0x05 {
 		t.Errorf("id = 0x%02x, want 0x05", def.ID)
 	}
-	if len(def.Enums) != 8 {
-		t.Errorf("len(enums) = %d, want 8", len(def.Enums))
+	if len(def.Enums) != 9 {
+		t.Errorf("len(enums) = %d, want 9", len(def.Enums))
 	}
 	if len(def.Commands) != 11 {
 		t.Errorf("len(commands) = %d, want 11", len(def.Commands))
@@ -615,8 +615,8 @@ func TestParseChargingSessionFeature(t *testing.T) {
 	if len(def.Enums) != 4 {
 		t.Errorf("len(enums) = %d, want 4", len(def.Enums))
 	}
-	if len(def.Attributes) != 25 {
-		t.Errorf("len(attributes) = %d, want 25", len(def.Attributes))
+	if len(def.Attributes) != 27 {
+		t.Errorf("len(attributes) = %d, want 27", len(def.Attributes))
 	}
 	if len(def.Commands) != 1 {
 		t.Errorf("len(commands) = %d, want 1", len(def.Commands))
@@ -695,8 +695,8 @@ func TestParseProtocolVersionsFile(t *testing.T) {
 	if !ok {
 		t.Fatal("version 1.0 not found")
 	}
-	if len(ver.Features) != 6 {
-		t.Errorf("len(features) = %d, want 6", len(ver.Features))
+	if len(ver.Features) != 9 {
+		t.Errorf("len(features) = %d, want 9", len(ver.Features))
 	}
 	if ver.Features["Status"] != "1.0" {
 		t.Errorf("Status version = %q, want 1.0", ver.Features["Status"])

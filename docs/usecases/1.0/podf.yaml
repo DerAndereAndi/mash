@@ -1,0 +1,26 @@
+name: PODF
+fullName: Power Demand Forecast
+specVersion: "1.0"
+description: >
+  Device publishes its planned power demand as a forecast via Plan feature.
+  Replaces EEBUS PODF use case. CEM exposes Plan to higher-tier controllers.
+
+endpointTypes: []
+
+features:
+  - feature: Plan
+    required: true
+    attributes:
+      - name: commitment
+      - name: startTime
+      - name: endTime
+      - name: totalEnergyPlanned
+    commands:
+      - requestPlan
+    subscriptions:
+      - commitment
+      - slots
+      - startTime
+      - endTime
+
+commands: []

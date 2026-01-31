@@ -1,0 +1,24 @@
+name: EVSOC
+fullName: EV State of Charge
+specVersion: "1.0"
+description: >
+  Controller monitors EV state of charge and battery information.
+  Replaces EEBUS EVSOC use case. Read-only monitoring.
+
+endpointTypes: []
+
+features:
+  - feature: ChargingSession
+    required: true
+    attributes:
+      - name: evStateOfCharge
+      - name: evBatteryCapacity
+      - name: evMinStateOfCharge
+      - name: evTargetStateOfCharge
+    subscriptions:
+      - state
+      - evStateOfCharge
+      - evMinStateOfCharge
+      - evTargetStateOfCharge
+
+commands: []

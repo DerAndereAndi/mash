@@ -7,11 +7,332 @@ package usecase
 
 // Registry maps use case names to their resolved definitions.
 var Registry = map[UseCaseName]*UseCaseDef{
+	"CEVC": {
+		Name:        "CEVC",
+		FullName:    "Coordinated EV Charging",
+		Description: "Controller coordinates EV charging using price signals and plan negotiation. Replaces EEBUS CEVC use case. Device generates Plan from Signals input.\n",
+		SpecVersion: "1.0",
+		EndpointTypes: []string{"EV_CHARGER"},
+		Features: []FeatureRequirement{
+			{
+				FeatureName: "EnergyControl",
+				FeatureID:   0x05,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "acceptsLimits", AttrID: 10, RequiredValue: boolPtr(true)},
+				},
+				Commands: []CommandRequirement{
+					{Name: "setLimit", CommandID: 1},
+					{Name: "clearLimit", CommandID: 2},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "controlState", AttrID: 2},
+					{Name: "effectiveConsumptionLimit", AttrID: 20},
+				},
+			},
+			{
+				FeatureName: "ChargingSession",
+				FeatureID:   0x06,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "evDemandMode", AttrID: 40},
+					{Name: "evMinEnergyRequest", AttrID: 41},
+					{Name: "evMaxEnergyRequest", AttrID: 42},
+					{Name: "evTargetEnergyRequest", AttrID: 43},
+					{Name: "evDepartureTime", AttrID: 44},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "state", AttrID: 1},
+					{Name: "evStateOfCharge", AttrID: 30},
+					{Name: "evDemandMode", AttrID: 40},
+				},
+			},
+			{
+				FeatureName: "Signals",
+				FeatureID:   0x08,
+				Required:    true,
+				Commands: []CommandRequirement{
+					{Name: "sendPriceSignal", CommandID: 1},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "priceSlots", AttrID: 10},
+				},
+			},
+			{
+				FeatureName: "Plan",
+				FeatureID:   0x09,
+				Required:    true,
+				Commands: []CommandRequirement{
+					{Name: "requestPlan", CommandID: 1},
+					{Name: "acceptPlan", CommandID: 2},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "commitment", AttrID: 3},
+					{Name: "slots", AttrID: 40},
+				},
+			},
+			{
+				FeatureName: "Electrical",
+				FeatureID:   0x03,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "nominalMaxConsumption", AttrID: 10},
+				},
+			},
+			{
+				FeatureName: "Measurement",
+				FeatureID:   0x04,
+				Required:    false,
+				Subscriptions: []SubscriptionDef{
+					{Name: "acActivePower", AttrID: 1},
+				},
+			},
+		},
+		Commands: []string{"limit", "clear"},
+	},
+	"COB": {
+		Name:        "COB",
+		FullName:    "Control of Battery",
+		Description: "Controller manages battery charge/discharge via setpoints or limits. Replaces EEBUS COB use case. Uses controlMode to select PCC or DIRECT targeting.\n",
+		SpecVersion: "1.0",
+		EndpointTypes: []string{"BATTERY"},
+		Features: []FeatureRequirement{
+			{
+				FeatureName: "EnergyControl",
+				FeatureID:   0x05,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "acceptsSetpoints", AttrID: 12, RequiredValue: boolPtr(true)},
+					{Name: "controlMode", AttrID: 87},
+				},
+				Commands: []CommandRequirement{
+					{Name: "setSetpoint", CommandID: 5},
+					{Name: "clearSetpoint", CommandID: 6},
+					{Name: "setLimit", CommandID: 1},
+					{Name: "clearLimit", CommandID: 2},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "controlState", AttrID: 2},
+					{Name: "effectiveConsumptionSetpoint", AttrID: 40},
+					{Name: "effectiveProductionSetpoint", AttrID: 42},
+					{Name: "effectiveConsumptionLimit", AttrID: 20},
+					{Name: "effectiveProductionLimit", AttrID: 22},
+					{Name: "controlMode", AttrID: 87},
+				},
+			},
+			{
+				FeatureName: "Electrical",
+				FeatureID:   0x03,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "nominalMaxConsumption", AttrID: 10},
+					{Name: "nominalMaxProduction", AttrID: 11},
+				},
+			},
+			{
+				FeatureName: "Measurement",
+				FeatureID:   0x04,
+				Required:    true,
+				Subscriptions: []SubscriptionDef{
+					{Name: "acActivePower", AttrID: 1},
+				},
+			},
+		},
+		Commands: []string{"setpoint", "limit", "clear"},
+	},
+	"DBEVC": {
+		Name:        "DBEVC",
+		FullName:    "Dynamic Bidirectional EV Charging",
+		Description: "Controller manages bidirectional EV charging with setpoints and limits. Replaces EEBUS OSCEV use case. Supports V2G discharge via setpoints.\n",
+		SpecVersion: "1.0",
+		EndpointTypes: []string{"EV_CHARGER"},
+		Features: []FeatureRequirement{
+			{
+				FeatureName: "EnergyControl",
+				FeatureID:   0x05,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "acceptsSetpoints", AttrID: 12, RequiredValue: boolPtr(true)},
+					{Name: "acceptsLimits", AttrID: 10, RequiredValue: boolPtr(true)},
+				},
+				Commands: []CommandRequirement{
+					{Name: "setSetpoint", CommandID: 5},
+					{Name: "clearSetpoint", CommandID: 6},
+					{Name: "setLimit", CommandID: 1},
+					{Name: "clearLimit", CommandID: 2},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "controlState", AttrID: 2},
+					{Name: "effectiveConsumptionLimit", AttrID: 20},
+					{Name: "effectiveProductionLimit", AttrID: 22},
+					{Name: "effectiveConsumptionSetpoint", AttrID: 40},
+					{Name: "effectiveProductionSetpoint", AttrID: 42},
+				},
+			},
+			{
+				FeatureName: "ChargingSession",
+				FeatureID:   0x06,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "evDemandMode", AttrID: 40},
+					{Name: "evMinEnergyRequest", AttrID: 41},
+					{Name: "evMaxEnergyRequest", AttrID: 42},
+					{Name: "evTargetEnergyRequest", AttrID: 43},
+					{Name: "evDepartureTime", AttrID: 44},
+					{Name: "evMinDischargingRequest", AttrID: 50},
+					{Name: "evMaxDischargingRequest", AttrID: 51},
+					{Name: "evDischargeBelowTargetPermitted", AttrID: 52},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "state", AttrID: 1},
+					{Name: "evStateOfCharge", AttrID: 30},
+					{Name: "evDemandMode", AttrID: 40},
+				},
+			},
+			{
+				FeatureName: "Electrical",
+				FeatureID:   0x03,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "nominalMaxConsumption", AttrID: 10},
+					{Name: "nominalMaxProduction", AttrID: 11},
+				},
+			},
+			{
+				FeatureName: "Measurement",
+				FeatureID:   0x04,
+				Required:    true,
+				Subscriptions: []SubscriptionDef{
+					{Name: "acActivePower", AttrID: 1},
+				},
+			},
+		},
+		Commands: []string{"setpoint", "limit", "clear"},
+	},
+	"EVSOC": {
+		Name:        "EVSOC",
+		FullName:    "EV State of Charge",
+		Description: "Controller monitors EV state of charge and battery information. Replaces EEBUS EVSOC use case. Read-only monitoring.\n",
+		SpecVersion: "1.0",
+		Features: []FeatureRequirement{
+			{
+				FeatureName: "ChargingSession",
+				FeatureID:   0x06,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "evStateOfCharge", AttrID: 30},
+					{Name: "evBatteryCapacity", AttrID: 31},
+					{Name: "evMinStateOfCharge", AttrID: 32},
+					{Name: "evTargetStateOfCharge", AttrID: 33},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "state", AttrID: 1},
+					{Name: "evStateOfCharge", AttrID: 30},
+					{Name: "evMinStateOfCharge", AttrID: 32},
+					{Name: "evTargetStateOfCharge", AttrID: 33},
+				},
+			},
+		},
+	},
+	"FLOA": {
+		Name:        "FLOA",
+		FullName:    "Flexible Load",
+		Description: "Controller manages a generic flexible load via limits or setpoints. Replaces EEBUS flexible load patterns. Applies to any controllable device.\n",
+		SpecVersion: "1.0",
+		EndpointTypes: []string{"HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE"},
+		Features: []FeatureRequirement{
+			{
+				FeatureName: "EnergyControl",
+				FeatureID:   0x05,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "acceptsLimits", AttrID: 10, RequiredValue: boolPtr(true)},
+				},
+				Commands: []CommandRequirement{
+					{Name: "setLimit", CommandID: 1},
+					{Name: "clearLimit", CommandID: 2},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "controlState", AttrID: 2},
+					{Name: "effectiveConsumptionLimit", AttrID: 20},
+					{Name: "processState", AttrID: 80},
+				},
+			},
+			{
+				FeatureName: "Electrical",
+				FeatureID:   0x03,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "nominalMaxConsumption", AttrID: 10},
+				},
+			},
+			{
+				FeatureName: "Measurement",
+				FeatureID:   0x04,
+				Required:    false,
+				Subscriptions: []SubscriptionDef{
+					{Name: "acActivePower", AttrID: 1},
+				},
+			},
+		},
+		Commands: []string{"limit", "clear"},
+	},
+	"ITPCM": {
+		Name:        "ITPCM",
+		FullName:    "Incentive Table Power Consumption Management",
+		Description: "Controller sends incentive signals; device responds with optimized power plan. Replaces EEBUS ITPCM use case. Uses Signals for incentives and Plan for response.\n",
+		SpecVersion: "1.0",
+		EndpointTypes: []string{"HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE", "EV_CHARGER"},
+		Features: []FeatureRequirement{
+			{
+				FeatureName: "Signals",
+				FeatureID:   0x08,
+				Required:    true,
+				Commands: []CommandRequirement{
+					{Name: "sendPriceSignal", CommandID: 1},
+					{Name: "clearSignals", CommandID: 4},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "priceSlots", AttrID: 10},
+				},
+			},
+			{
+				FeatureName: "Plan",
+				FeatureID:   0x09,
+				Required:    true,
+				Commands: []CommandRequirement{
+					{Name: "requestPlan", CommandID: 1},
+					{Name: "acceptPlan", CommandID: 2},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "commitment", AttrID: 3},
+					{Name: "slots", AttrID: 40},
+				},
+			},
+			{
+				FeatureName: "EnergyControl",
+				FeatureID:   0x05,
+				Required:    false,
+				Subscriptions: []SubscriptionDef{
+					{Name: "controlState", AttrID: 2},
+					{Name: "processState", AttrID: 80},
+				},
+			},
+			{
+				FeatureName: "Measurement",
+				FeatureID:   0x04,
+				Required:    false,
+				Subscriptions: []SubscriptionDef{
+					{Name: "acActivePower", AttrID: 1},
+				},
+			},
+		},
+	},
 	"LPC": {
-		Name:          "LPC",
-		FullName:      "Limit Power Consumption",
-		Description:   "Controller limits active power consumption of a device. Replaces EEBUS LPC use case.\n",
-		SpecVersion:   "1.0",
+		Name:        "LPC",
+		FullName:    "Limit Power Consumption",
+		Description: "Controller limits active power consumption of a device. Replaces EEBUS LPC use case.\n",
+		SpecVersion: "1.0",
 		EndpointTypes: []string{"INVERTER", "EV_CHARGER", "BATTERY", "HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE"},
 		Features: []FeatureRequirement{
 			{
@@ -52,10 +373,10 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		Commands: []string{"limit", "clear", "capacity", "override", "lpc-demo"},
 	},
 	"LPP": {
-		Name:          "LPP",
-		FullName:      "Limit Power Production",
-		Description:   "Controller limits active power production (feed-in) of a device. Replaces EEBUS LPP use case. Only applies to bidirectional devices.\n",
-		SpecVersion:   "1.0",
+		Name:        "LPP",
+		FullName:    "Limit Power Production",
+		Description: "Controller limits active power production (feed-in) of a device. Replaces EEBUS LPP use case. Only applies to bidirectional devices.\n",
+		SpecVersion: "1.0",
 		EndpointTypes: []string{"INVERTER", "BATTERY"},
 		Features: []FeatureRequirement{
 			{
@@ -107,6 +428,155 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				Required:    true,
 				Subscriptions: []SubscriptionDef{
 					{Name: "acActivePower", AttrID: 1},
+				},
+			},
+		},
+	},
+	"OHPCF": {
+		Name:        "OHPCF",
+		FullName:    "Heat Pump Compressor Flexibility",
+		Description: "Controller flexibly controls heat pump compressor with min run/pause constraints. Replaces EEBUS OHPCF use case. Uses process management with timing constraints.\n",
+		SpecVersion: "1.0",
+		EndpointTypes: []string{"HEAT_PUMP"},
+		Features: []FeatureRequirement{
+			{
+				FeatureName: "EnergyControl",
+				FeatureID:   0x05,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "acceptsLimits", AttrID: 10, RequiredValue: boolPtr(true)},
+					{Name: "isPausable", AttrID: 14},
+					{Name: "processState", AttrID: 80},
+					{Name: "optionalProcess", AttrID: 81},
+					{Name: "minRunDuration", AttrID: 82},
+					{Name: "minPauseDuration", AttrID: 83},
+					{Name: "maxRunDuration", AttrID: 84},
+					{Name: "maxPauseDuration", AttrID: 85},
+					{Name: "optionalProcessPower", AttrID: 86},
+				},
+				Commands: []CommandRequirement{
+					{Name: "setLimit", CommandID: 1},
+					{Name: "clearLimit", CommandID: 2},
+					{Name: "pause", CommandID: 9},
+					{Name: "resume", CommandID: 10},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "controlState", AttrID: 2},
+					{Name: "processState", AttrID: 80},
+					{Name: "effectiveConsumptionLimit", AttrID: 20},
+				},
+			},
+			{
+				FeatureName: "Electrical",
+				FeatureID:   0x03,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "nominalMaxConsumption", AttrID: 10},
+				},
+			},
+			{
+				FeatureName: "Measurement",
+				FeatureID:   0x04,
+				Required:    false,
+				Subscriptions: []SubscriptionDef{
+					{Name: "acActivePower", AttrID: 1},
+				},
+			},
+		},
+		Commands: []string{"limit", "clear", "pause", "resume"},
+	},
+	"PODF": {
+		Name:        "PODF",
+		FullName:    "Power Demand Forecast",
+		Description: "Device publishes its planned power demand as a forecast via Plan feature. Replaces EEBUS PODF use case. CEM exposes Plan to higher-tier controllers.\n",
+		SpecVersion: "1.0",
+		Features: []FeatureRequirement{
+			{
+				FeatureName: "Plan",
+				FeatureID:   0x09,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "commitment", AttrID: 3},
+					{Name: "startTime", AttrID: 10},
+					{Name: "endTime", AttrID: 11},
+					{Name: "totalEnergyPlanned", AttrID: 20},
+				},
+				Commands: []CommandRequirement{
+					{Name: "requestPlan", CommandID: 1},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "commitment", AttrID: 3},
+					{Name: "slots", AttrID: 40},
+					{Name: "startTime", AttrID: 10},
+					{Name: "endTime", AttrID: 11},
+				},
+			},
+		},
+	},
+	"POEN": {
+		Name:        "POEN",
+		FullName:    "Power Envelope",
+		Description: "Controller sends time-slotted power constraints (envelope) to a device. Replaces EEBUS POEN use case. Uses constraint signals for all four bounds.\n",
+		SpecVersion: "1.0",
+		EndpointTypes: []string{"INVERTER", "EV_CHARGER", "BATTERY", "HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE"},
+		Features: []FeatureRequirement{
+			{
+				FeatureName: "Signals",
+				FeatureID:   0x08,
+				Required:    true,
+				Commands: []CommandRequirement{
+					{Name: "sendConstraintSignal", CommandID: 2},
+					{Name: "clearSignals", CommandID: 4},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "constraintSlots", AttrID: 20},
+				},
+			},
+			{
+				FeatureName: "Electrical",
+				FeatureID:   0x03,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "nominalMaxConsumption", AttrID: 10},
+				},
+			},
+			{
+				FeatureName: "Measurement",
+				FeatureID:   0x04,
+				Required:    false,
+				Subscriptions: []SubscriptionDef{
+					{Name: "acActivePower", AttrID: 1},
+				},
+			},
+		},
+	},
+	"TOUT": {
+		Name:        "TOUT",
+		FullName:    "Time of Use Tariff",
+		Description: "Controller sends time-of-use price signals to a device for local optimization. Replaces EEBUS TOUT use case. Device uses price information autonomously.\n",
+		SpecVersion: "1.0",
+		Features: []FeatureRequirement{
+			{
+				FeatureName: "Tariff",
+				FeatureID:   0x07,
+				Required:    true,
+				Attributes: []AttributeRequirement{
+					{Name: "currency", AttrID: 2},
+				},
+				Commands: []CommandRequirement{
+					{Name: "setTariff", CommandID: 1},
+				},
+			},
+			{
+				FeatureName: "Signals",
+				FeatureID:   0x08,
+				Required:    true,
+				Commands: []CommandRequirement{
+					{Name: "sendPriceSignal", CommandID: 1},
+					{Name: "clearSignals", CommandID: 4},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "priceSlots", AttrID: 10},
 				},
 			},
 		},

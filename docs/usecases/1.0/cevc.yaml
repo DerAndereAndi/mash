@@ -1,0 +1,65 @@
+name: CEVC
+fullName: Coordinated EV Charging
+specVersion: "1.0"
+description: >
+  Controller coordinates EV charging using price signals and plan negotiation.
+  Replaces EEBUS CEVC use case. Device generates Plan from Signals input.
+
+endpointTypes:
+  - EV_CHARGER
+
+features:
+  - feature: EnergyControl
+    required: true
+    attributes:
+      - name: acceptsLimits
+        requiredValue: true
+    commands:
+      - setLimit
+      - clearLimit
+    subscriptions:
+      - controlState
+      - effectiveConsumptionLimit
+
+  - feature: ChargingSession
+    required: true
+    attributes:
+      - name: evDemandMode
+      - name: evMinEnergyRequest
+      - name: evMaxEnergyRequest
+      - name: evTargetEnergyRequest
+      - name: evDepartureTime
+    subscriptions:
+      - state
+      - evStateOfCharge
+      - evDemandMode
+
+  - feature: Signals
+    required: true
+    commands:
+      - sendPriceSignal
+    subscriptions:
+      - priceSlots
+
+  - feature: Plan
+    required: true
+    commands:
+      - requestPlan
+      - acceptPlan
+    subscriptions:
+      - commitment
+      - slots
+
+  - feature: Electrical
+    required: true
+    attributes:
+      - name: nominalMaxConsumption
+
+  - feature: Measurement
+    required: false
+    subscriptions:
+      - acActivePower
+
+commands:
+  - limit
+  - clear

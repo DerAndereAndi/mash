@@ -586,7 +586,11 @@ func writeParamParse(b *strings.Builder, p RawParameterDef, fieldName, structVar
 	} else {
 		goType := goTypeName(p.Type)
 		fmt.Fprintf(b, "if v, ok := raw.(%s); ok {\n", goType)
-		fmt.Fprintf(b, "%s.%s = v\n", structVar, fieldName)
+		if !p.Required {
+			fmt.Fprintf(b, "%s.%s = &v\n", structVar, fieldName)
+		} else {
+			fmt.Fprintf(b, "%s.%s = v\n", structVar, fieldName)
+		}
 		b.WriteString("}\n")
 	}
 }

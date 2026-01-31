@@ -8,6 +8,9 @@ versions:
       Measurement: "1.0"
       EnergyControl: "1.0"
       ChargingSession: "1.0"
+      Tariff: "1.0"
+      Signals: "1.0"
+      Plan: "1.0"
     shared: "1.0"
     feature_types:
       - { name: DeviceInfo, id: 0x01, description: "Device identity and structure" }

@@ -1,0 +1,56 @@
+name: Tariff
+id: 0x07
+revision: 1
+mandatory: false
+description: "Static tariff metadata: currency context for Signals price values."
+
+enums:
+  - name: PriceUnit
+    type: uint8
+    description: "Unit for price values"
+    values:
+      - { name: PER_KWH, value: 0x00, description: "Price per kilowatt-hour" }
+      - { name: PER_KVAH, value: 0x01, description: "Price per kilovolt-ampere-hour" }
+
+attributes:
+  # Tariff identity (1-9)
+  - id: 1
+    name: tariffId
+    type: uint32
+    access: readOnly
+    mandatory: true
+    default: 0
+    description: "Tariff identifier"
+
+  - id: 2
+    name: currency
+    type: string
+    access: readOnly
+    mandatory: true
+    description: "ISO 4217 currency code (EUR, USD, etc.)"
+
+  - id: 3
+    name: priceUnit
+    type: uint8
+    enum: PriceUnit
+    access: readOnly
+    default: PER_KWH
+    description: "Unit for price values in Signals"
+
+  - id: 4
+    name: tariffDescription
+    type: string
+    access: readOnly
+    nullable: true
+    description: "Human-readable tariff name"
+
+commands:
+  - id: 1
+    name: setTariff
+    mandatory: true
+    description: "Set tariff metadata"
+    parameters:
+      - { name: tariffId, type: uint32, required: true }
+      - { name: currency, type: string, required: true }
+      - { name: priceUnit, type: uint8, enum: PriceUnit, required: false }
+      - { name: description, type: string, required: false }

@@ -46,6 +46,12 @@ const (
 	EnergyControlAttrOverrideDirection                    uint16 = 76
 	EnergyControlAttrProcessState                         uint16 = 80
 	EnergyControlAttrOptionalProcess                      uint16 = 81
+	EnergyControlAttrMinRunDuration                       uint16 = 82
+	EnergyControlAttrMinPauseDuration                     uint16 = 83
+	EnergyControlAttrMaxRunDuration                       uint16 = 84
+	EnergyControlAttrMaxPauseDuration                     uint16 = 85
+	EnergyControlAttrOptionalProcessPower                 uint16 = 86
+	EnergyControlAttrControlMode                          uint16 = 87
 )
 
 // EnergyControlFeatureRevision is the current revision of the EnergyControl feature.
@@ -299,6 +305,32 @@ func (v LimitRejectReason) String() string {
 		return "DEVICE_OVERRIDE"
 	case LimitRejectReasonNotSupported:
 		return "NOT_SUPPORTED"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+// ControlMode represents how setpoints/limits are interpreted.
+type ControlMode uint8
+
+const (
+	// ControlModeDirect setpoints target the device directly.
+	ControlModeDirect ControlMode = 0x00
+	// ControlModePcc setpoints target the point of common coupling.
+	ControlModePcc ControlMode = 0x01
+	// ControlModeAuto device decides interpretation.
+	ControlModeAuto ControlMode = 0x02
+)
+
+// String returns the controlMode name.
+func (v ControlMode) String() string {
+	switch v {
+	case ControlModeDirect:
+		return "DIRECT"
+	case ControlModePcc:
+		return "PCC"
+	case ControlModeAuto:
+		return "AUTO"
 	default:
 		return "UNKNOWN"
 	}
@@ -651,6 +683,65 @@ func NewEnergyControl() *EnergyControl {
 		Access:      model.AccessReadOnly,
 		Default:     false,
 		Description: "Whether the process is optional (can be deferred)",
+	}))
+
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          EnergyControlAttrMinRunDuration,
+		Name:        "minRunDuration",
+		Type:        model.DataTypeUint32,
+		Access:      model.AccessReadOnly,
+		Nullable:    true,
+		Unit:        "s",
+		Description: "Minimum run time before pause/stop",
+	}))
+
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          EnergyControlAttrMinPauseDuration,
+		Name:        "minPauseDuration",
+		Type:        model.DataTypeUint32,
+		Access:      model.AccessReadOnly,
+		Nullable:    true,
+		Unit:        "s",
+		Description: "Minimum pause before restart",
+	}))
+
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          EnergyControlAttrMaxRunDuration,
+		Name:        "maxRunDuration",
+		Type:        model.DataTypeUint32,
+		Access:      model.AccessReadOnly,
+		Nullable:    true,
+		Unit:        "s",
+		Description: "Maximum continuous run time",
+	}))
+
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          EnergyControlAttrMaxPauseDuration,
+		Name:        "maxPauseDuration",
+		Type:        model.DataTypeUint32,
+		Access:      model.AccessReadOnly,
+		Nullable:    true,
+		Unit:        "s",
+		Description: "Maximum pause time",
+	}))
+
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          EnergyControlAttrOptionalProcessPower,
+		Name:        "optionalProcessPower",
+		Type:        model.DataTypeInt64,
+		Access:      model.AccessReadOnly,
+		Nullable:    true,
+		Unit:        "mW",
+		Description: "Expected power when process runs",
+	}))
+
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          EnergyControlAttrControlMode,
+		Name:        "controlMode",
+		Type:        model.DataTypeUint8,
+		Access:      model.AccessReadWrite,
+		Nullable:    true,
+		Description: "How setpoints/limits are interpreted",
 	}))
 
 	e := &EnergyControl{Feature: f}
@@ -1038,6 +1129,78 @@ func (e *EnergyControl) OptionalProcess() bool {
 		return v
 	}
 	return false
+}
+
+// MinRunDuration returns the minimum run time before pause/stop.
+func (e *EnergyControl) MinRunDuration() (uint32, bool) {
+	val, err := e.ReadAttribute(EnergyControlAttrMinRunDuration)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(uint32); ok {
+		return v, true
+	}
+	return 0, false
+}
+
+// MinPauseDuration returns the minimum pause before restart.
+func (e *EnergyControl) MinPauseDuration() (uint32, bool) {
+	val, err := e.ReadAttribute(EnergyControlAttrMinPauseDuration)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(uint32); ok {
+		return v, true
+	}
+	return 0, false
+}
+
+// MaxRunDuration returns the maximum continuous run time.
+func (e *EnergyControl) MaxRunDuration() (uint32, bool) {
+	val, err := e.ReadAttribute(EnergyControlAttrMaxRunDuration)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(uint32); ok {
+		return v, true
+	}
+	return 0, false
+}
+
+// MaxPauseDuration returns the maximum pause time.
+func (e *EnergyControl) MaxPauseDuration() (uint32, bool) {
+	val, err := e.ReadAttribute(EnergyControlAttrMaxPauseDuration)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(uint32); ok {
+		return v, true
+	}
+	return 0, false
+}
+
+// OptionalProcessPower returns the expected power when process runs.
+func (e *EnergyControl) OptionalProcessPower() (int64, bool) {
+	val, err := e.ReadAttribute(EnergyControlAttrOptionalProcessPower)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(int64); ok {
+		return v, true
+	}
+	return 0, false
+}
+
+// ControlMode returns the how setpoints/limits are interpreted.
+func (e *EnergyControl) ControlMode() (ControlMode, bool) {
+	val, err := e.ReadAttribute(EnergyControlAttrControlMode)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(uint8); ok {
+		return ControlMode(v), true
+	}
+	return 0, false
 }
 
 // SetDeviceType sets the type of controllable device.
@@ -1727,6 +1890,162 @@ func (e *EnergyControl) SetOptionalProcess(optionalProcess bool) error {
 		return err
 	}
 	return attr.SetValueInternal(optionalProcess)
+}
+
+// SetMinRunDuration sets the minimum run time before pause/stop.
+func (e *EnergyControl) SetMinRunDuration(minRunDuration uint32) error {
+	attr, err := e.GetAttribute(EnergyControlAttrMinRunDuration)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(minRunDuration)
+}
+
+// ClearMinRunDuration clears the minimum run time before pause/stop.
+func (e *EnergyControl) ClearMinRunDuration() error {
+	attr, err := e.GetAttribute(EnergyControlAttrMinRunDuration)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(nil)
+}
+
+// SetMinRunDurationPtr sets or clears the minimum run time before pause/stop from a pointer.
+func (e *EnergyControl) SetMinRunDurationPtr(v *uint32) error {
+	if v == nil {
+		return e.ClearMinRunDuration()
+	}
+	return e.SetMinRunDuration(*v)
+}
+
+// SetMinPauseDuration sets the minimum pause before restart.
+func (e *EnergyControl) SetMinPauseDuration(minPauseDuration uint32) error {
+	attr, err := e.GetAttribute(EnergyControlAttrMinPauseDuration)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(minPauseDuration)
+}
+
+// ClearMinPauseDuration clears the minimum pause before restart.
+func (e *EnergyControl) ClearMinPauseDuration() error {
+	attr, err := e.GetAttribute(EnergyControlAttrMinPauseDuration)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(nil)
+}
+
+// SetMinPauseDurationPtr sets or clears the minimum pause before restart from a pointer.
+func (e *EnergyControl) SetMinPauseDurationPtr(v *uint32) error {
+	if v == nil {
+		return e.ClearMinPauseDuration()
+	}
+	return e.SetMinPauseDuration(*v)
+}
+
+// SetMaxRunDuration sets the maximum continuous run time.
+func (e *EnergyControl) SetMaxRunDuration(maxRunDuration uint32) error {
+	attr, err := e.GetAttribute(EnergyControlAttrMaxRunDuration)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(maxRunDuration)
+}
+
+// ClearMaxRunDuration clears the maximum continuous run time.
+func (e *EnergyControl) ClearMaxRunDuration() error {
+	attr, err := e.GetAttribute(EnergyControlAttrMaxRunDuration)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(nil)
+}
+
+// SetMaxRunDurationPtr sets or clears the maximum continuous run time from a pointer.
+func (e *EnergyControl) SetMaxRunDurationPtr(v *uint32) error {
+	if v == nil {
+		return e.ClearMaxRunDuration()
+	}
+	return e.SetMaxRunDuration(*v)
+}
+
+// SetMaxPauseDuration sets the maximum pause time.
+func (e *EnergyControl) SetMaxPauseDuration(maxPauseDuration uint32) error {
+	attr, err := e.GetAttribute(EnergyControlAttrMaxPauseDuration)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(maxPauseDuration)
+}
+
+// ClearMaxPauseDuration clears the maximum pause time.
+func (e *EnergyControl) ClearMaxPauseDuration() error {
+	attr, err := e.GetAttribute(EnergyControlAttrMaxPauseDuration)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(nil)
+}
+
+// SetMaxPauseDurationPtr sets or clears the maximum pause time from a pointer.
+func (e *EnergyControl) SetMaxPauseDurationPtr(v *uint32) error {
+	if v == nil {
+		return e.ClearMaxPauseDuration()
+	}
+	return e.SetMaxPauseDuration(*v)
+}
+
+// SetOptionalProcessPower sets the expected power when process runs.
+func (e *EnergyControl) SetOptionalProcessPower(optionalProcessPower int64) error {
+	attr, err := e.GetAttribute(EnergyControlAttrOptionalProcessPower)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(optionalProcessPower)
+}
+
+// ClearOptionalProcessPower clears the expected power when process runs.
+func (e *EnergyControl) ClearOptionalProcessPower() error {
+	attr, err := e.GetAttribute(EnergyControlAttrOptionalProcessPower)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(nil)
+}
+
+// SetOptionalProcessPowerPtr sets or clears the expected power when process runs from a pointer.
+func (e *EnergyControl) SetOptionalProcessPowerPtr(v *int64) error {
+	if v == nil {
+		return e.ClearOptionalProcessPower()
+	}
+	return e.SetOptionalProcessPower(*v)
+}
+
+// SetControlMode sets the how setpoints/limits are interpreted.
+func (e *EnergyControl) SetControlMode(controlMode ControlMode) error {
+	attr, err := e.GetAttribute(EnergyControlAttrControlMode)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(uint8(controlMode))
+}
+
+// ClearControlMode clears the how setpoints/limits are interpreted.
+func (e *EnergyControl) ClearControlMode() error {
+	attr, err := e.GetAttribute(EnergyControlAttrControlMode)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(nil)
+}
+
+// SetControlModePtr sets or clears the how setpoints/limits are interpreted from a pointer.
+func (e *EnergyControl) SetControlModePtr(v *ControlMode) error {
+	if v == nil {
+		return e.ClearControlMode()
+	}
+	return e.SetControlMode(*v)
 }
 
 // EnergyControl command IDs.

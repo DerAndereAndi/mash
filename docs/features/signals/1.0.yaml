@@ -1,0 +1,126 @@
+name: Signals
+id: 0x08
+revision: 1
+mandatory: false
+description: "Time-slotted price, constraint, and forecast signals from controller to device."
+
+enums:
+  - name: SignalSource
+    type: uint8
+    description: "Origin of the signal data"
+    values:
+      - { name: GRID, value: 0x00, description: "Grid operator" }
+      - { name: ENERGY_SUPPLIER, value: 0x01, description: "Energy supplier / utility" }
+      - { name: AGGREGATOR, value: 0x02, description: "Aggregator / VPP operator" }
+      - { name: LOCAL_EMS, value: 0x03, description: "Local energy management system" }
+
+attributes:
+  # Signal metadata (1-9)
+  - id: 1
+    name: signalSource
+    type: uint8
+    enum: SignalSource
+    access: readOnly
+    nullable: true
+    description: "Who sent the currently active signal"
+
+  - id: 2
+    name: startTime
+    type: uint64
+    access: readOnly
+    nullable: true
+    description: "Unix timestamp for first slot"
+
+  - id: 3
+    name: validUntil
+    type: uint64
+    access: readOnly
+    nullable: true
+    description: "When signal expires (Unix timestamp)"
+
+  # Price signal (10-19)
+  - id: 10
+    name: priceSlots
+    type: array
+    items:
+      type: object
+      structName: PriceSlot
+      fields:
+        - { name: duration, type: uint32, description: "Slot duration in seconds" }
+        - { name: price, type: int32, description: "Price in micro-currency per mWh" }
+        - { name: priceLevel, type: uint8, nullable: true, description: "Relative price level 0-10" }
+        - { name: renewablePercent, type: uint8, nullable: true, description: "Renewable energy percentage 0-100" }
+        - { name: co2Intensity, type: uint16, nullable: true, description: "CO2 intensity in g/kWh" }
+    access: readOnly
+    nullable: true
+    description: "Active price schedule slots"
+
+  # Constraint signal (20-29)
+  - id: 20
+    name: constraintSlots
+    type: array
+    items:
+      type: object
+      structName: ConstraintSlot
+      fields:
+        - { name: duration, type: uint32, description: "Slot duration in seconds" }
+        - { name: consumptionMax, type: int64, nullable: true, description: "Max consumption in mW" }
+        - { name: consumptionMin, type: int64, nullable: true, description: "Min consumption in mW" }
+        - { name: productionMax, type: int64, nullable: true, description: "Max production in mW" }
+        - { name: productionMin, type: int64, nullable: true, description: "Min production in mW" }
+    access: readOnly
+    nullable: true
+    description: "Active power constraint slots"
+
+  # Forecast signal (30-39)
+  - id: 30
+    name: forecastSlots
+    type: array
+    items:
+      type: object
+      structName: ForecastSlot
+      fields:
+        - { name: duration, type: uint32, description: "Slot duration in seconds" }
+        - { name: forecastPower, type: int64, description: "Forecast power in mW" }
+        - { name: forecastEnergy, type: int64, nullable: true, description: "Forecast energy in mWh" }
+    access: readOnly
+    nullable: true
+    description: "Active forecast slots"
+
+commands:
+  - id: 1
+    name: sendPriceSignal
+    mandatory: true
+    description: "Send a price signal schedule to the device"
+    parameters:
+      - { name: source, type: uint8, enum: SignalSource, required: true }
+      - { name: startTime, type: uint64, required: true }
+      - { name: validUntil, type: uint64, required: false }
+      - { name: slots, type: array, items: { type: object, structName: PriceSlot }, required: true }
+
+  - id: 2
+    name: sendConstraintSignal
+    mandatory: true
+    description: "Send a power constraint signal to the device"
+    parameters:
+      - { name: source, type: uint8, enum: SignalSource, required: true }
+      - { name: startTime, type: uint64, required: true }
+      - { name: validUntil, type: uint64, required: false }
+      - { name: slots, type: array, items: { type: object, structName: ConstraintSlot }, required: true }
+
+  - id: 3
+    name: sendForecastSignal
+    description: "Send a power forecast signal to the device"
+    parameters:
+      - { name: source, type: uint8, enum: SignalSource, required: true }
+      - { name: startTime, type: uint64, required: true }
+      - { name: validUntil, type: uint64, required: false }
+      - { name: slots, type: array, items: { type: object, structName: ForecastSlot }, required: true }
+
+  - id: 4
+    name: clearSignals
+    description: "Clear active signals"
+    parameters:
+      - { name: signalType, type: string, required: false, description: "price, constraint, or forecast (omit to clear all)" }
+    response:
+      - { name: cleared, type: uint8, required: true, description: "Number of signal types cleared" }

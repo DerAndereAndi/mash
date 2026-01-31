@@ -20,6 +20,8 @@ const (
 	ChargingSessionAttrEVIdentifications               uint16 = 20
 	ChargingSessionAttrEVStateOfCharge                 uint16 = 30
 	ChargingSessionAttrEVBatteryCapacity               uint16 = 31
+	ChargingSessionAttrEVMinStateOfCharge              uint16 = 32
+	ChargingSessionAttrEVTargetStateOfCharge           uint16 = 33
 	ChargingSessionAttrEVDemandMode                    uint16 = 40
 	ChargingSessionAttrEVMinEnergyRequest              uint16 = 41
 	ChargingSessionAttrEVMaxEnergyRequest              uint16 = 42
@@ -272,6 +274,26 @@ func NewChargingSession() *ChargingSession {
 		Nullable:    true,
 		Unit:        "mWh",
 		Description: "EV battery capacity",
+	}))
+
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          ChargingSessionAttrEVMinStateOfCharge,
+		Name:        "evMinStateOfCharge",
+		Type:        model.DataTypeUint8,
+		Access:      model.AccessReadOnly,
+		Nullable:    true,
+		Unit:        "%",
+		Description: "Minimum SoC to charge ASAP",
+	}))
+
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          ChargingSessionAttrEVTargetStateOfCharge,
+		Name:        "evTargetStateOfCharge",
+		Type:        model.DataTypeUint8,
+		Access:      model.AccessReadOnly,
+		Nullable:    true,
+		Unit:        "%",
+		Description: "User-defined target SoC",
 	}))
 
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
@@ -545,6 +567,30 @@ func (c *ChargingSession) EVBatteryCapacity() (uint64, bool) {
 		return 0, false
 	}
 	if v, ok := val.(uint64); ok {
+		return v, true
+	}
+	return 0, false
+}
+
+// EVMinStateOfCharge returns the minimum SoC to charge ASAP.
+func (c *ChargingSession) EVMinStateOfCharge() (uint8, bool) {
+	val, err := c.ReadAttribute(ChargingSessionAttrEVMinStateOfCharge)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(uint8); ok {
+		return v, true
+	}
+	return 0, false
+}
+
+// EVTargetStateOfCharge returns the user-defined target SoC.
+func (c *ChargingSession) EVTargetStateOfCharge() (uint8, bool) {
+	val, err := c.ReadAttribute(ChargingSessionAttrEVTargetStateOfCharge)
+	if err != nil || val == nil {
+		return 0, false
+	}
+	if v, ok := val.(uint8); ok {
 		return v, true
 	}
 	return 0, false
@@ -903,6 +949,58 @@ func (c *ChargingSession) SetEVBatteryCapacityPtr(v *uint64) error {
 		return c.ClearEVBatteryCapacity()
 	}
 	return c.SetEVBatteryCapacity(*v)
+}
+
+// SetEVMinStateOfCharge sets the minimum SoC to charge ASAP.
+func (c *ChargingSession) SetEVMinStateOfCharge(evMinStateOfCharge uint8) error {
+	attr, err := c.GetAttribute(ChargingSessionAttrEVMinStateOfCharge)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(evMinStateOfCharge)
+}
+
+// ClearEVMinStateOfCharge clears the minimum SoC to charge ASAP.
+func (c *ChargingSession) ClearEVMinStateOfCharge() error {
+	attr, err := c.GetAttribute(ChargingSessionAttrEVMinStateOfCharge)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(nil)
+}
+
+// SetEVMinStateOfChargePtr sets or clears the minimum SoC to charge ASAP from a pointer.
+func (c *ChargingSession) SetEVMinStateOfChargePtr(v *uint8) error {
+	if v == nil {
+		return c.ClearEVMinStateOfCharge()
+	}
+	return c.SetEVMinStateOfCharge(*v)
+}
+
+// SetEVTargetStateOfCharge sets the user-defined target SoC.
+func (c *ChargingSession) SetEVTargetStateOfCharge(evTargetStateOfCharge uint8) error {
+	attr, err := c.GetAttribute(ChargingSessionAttrEVTargetStateOfCharge)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(evTargetStateOfCharge)
+}
+
+// ClearEVTargetStateOfCharge clears the user-defined target SoC.
+func (c *ChargingSession) ClearEVTargetStateOfCharge() error {
+	attr, err := c.GetAttribute(ChargingSessionAttrEVTargetStateOfCharge)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(nil)
+}
+
+// SetEVTargetStateOfChargePtr sets or clears the user-defined target SoC from a pointer.
+func (c *ChargingSession) SetEVTargetStateOfChargePtr(v *uint8) error {
+	if v == nil {
+		return c.ClearEVTargetStateOfCharge()
+	}
+	return c.SetEVTargetStateOfCharge(*v)
 }
 
 // SetEVDemandMode sets the eV demand information mode.

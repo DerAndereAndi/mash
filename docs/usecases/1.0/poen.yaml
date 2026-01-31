@@ -1,0 +1,36 @@
+name: POEN
+fullName: Power Envelope
+specVersion: "1.0"
+description: >
+  Controller sends time-slotted power constraints (envelope) to a device.
+  Replaces EEBUS POEN use case. Uses constraint signals for all four bounds.
+
+endpointTypes:
+  - INVERTER
+  - EV_CHARGER
+  - BATTERY
+  - HEAT_PUMP
+  - WATER_HEATER
+  - HVAC
+  - APPLIANCE
+
+features:
+  - feature: Signals
+    required: true
+    commands:
+      - sendConstraintSignal
+      - clearSignals
+    subscriptions:
+      - constraintSlots
+
+  - feature: Electrical
+    required: true
+    attributes:
+      - name: nominalMaxConsumption
+
+  - feature: Measurement
+    required: false
+    subscriptions:
+      - acActivePower
+
+commands: []

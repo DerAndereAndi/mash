@@ -1,0 +1,45 @@
+name: COB
+fullName: Control of Battery
+specVersion: "1.0"
+description: >
+  Controller manages battery charge/discharge via setpoints or limits.
+  Replaces EEBUS COB use case. Uses controlMode to select PCC or DIRECT targeting.
+
+endpointTypes:
+  - BATTERY
+
+features:
+  - feature: EnergyControl
+    required: true
+    attributes:
+      - name: acceptsSetpoints
+        requiredValue: true
+      - name: controlMode
+    commands:
+      - setSetpoint
+      - clearSetpoint
+      - setLimit
+      - clearLimit
+    subscriptions:
+      - controlState
+      - effectiveConsumptionSetpoint
+      - effectiveProductionSetpoint
+      - effectiveConsumptionLimit
+      - effectiveProductionLimit
+      - controlMode
+
+  - feature: Electrical
+    required: true
+    attributes:
+      - name: nominalMaxConsumption
+      - name: nominalMaxProduction
+
+  - feature: Measurement
+    required: true
+    subscriptions:
+      - acActivePower
+
+commands:
+  - setpoint
+  - limit
+  - clear

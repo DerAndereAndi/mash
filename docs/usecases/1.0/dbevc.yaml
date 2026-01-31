@@ -1,0 +1,61 @@
+name: DBEVC
+fullName: Dynamic Bidirectional EV Charging
+specVersion: "1.0"
+description: >
+  Controller manages bidirectional EV charging with setpoints and limits.
+  Replaces EEBUS OSCEV use case. Supports V2G discharge via setpoints.
+
+endpointTypes:
+  - EV_CHARGER
+
+features:
+  - feature: EnergyControl
+    required: true
+    attributes:
+      - name: acceptsSetpoints
+        requiredValue: true
+      - name: acceptsLimits
+        requiredValue: true
+    commands:
+      - setSetpoint
+      - clearSetpoint
+      - setLimit
+      - clearLimit
+    subscriptions:
+      - controlState
+      - effectiveConsumptionLimit
+      - effectiveProductionLimit
+      - effectiveConsumptionSetpoint
+      - effectiveProductionSetpoint
+
+  - feature: ChargingSession
+    required: true
+    attributes:
+      - name: evDemandMode
+      - name: evMinEnergyRequest
+      - name: evMaxEnergyRequest
+      - name: evTargetEnergyRequest
+      - name: evDepartureTime
+      - name: evMinDischargingRequest
+      - name: evMaxDischargingRequest
+      - name: evDischargeBelowTargetPermitted
+    subscriptions:
+      - state
+      - evStateOfCharge
+      - evDemandMode
+
+  - feature: Electrical
+    required: true
+    attributes:
+      - name: nominalMaxConsumption
+      - name: nominalMaxProduction
+
+  - feature: Measurement
+    required: true
+    subscriptions:
+      - acActivePower
+
+commands:
+  - setpoint
+  - limit
+  - clear

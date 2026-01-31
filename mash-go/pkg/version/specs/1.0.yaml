@@ -131,6 +131,12 @@ features:
         - { id: 76, name: overrideDirection }
         - { id: 80, name: processState }
         - { id: 81, name: optionalProcess }
+        - { id: 82, name: minRunDuration }
+        - { id: 83, name: minPauseDuration }
+        - { id: 84, name: maxRunDuration }
+        - { id: 85, name: maxPauseDuration }
+        - { id: 86, name: optionalProcessPower }
+        - { id: 87, name: controlMode }
     commands:
       mandatory:
         - { id: 1, name: setLimit }
@@ -162,6 +168,8 @@ features:
         - { id: 20, name: evIdentifications }
         - { id: 30, name: evStateOfCharge }
         - { id: 31, name: evBatteryCapacity }
+        - { id: 32, name: evMinStateOfCharge }
+        - { id: 33, name: evTargetStateOfCharge }
         - { id: 40, name: evDemandMode }
         - { id: 41, name: evMinEnergyRequest }
         - { id: 42, name: evMaxEnergyRequest }
@@ -181,4 +189,59 @@ features:
     commands:
       mandatory:
         - { id: 1, name: setChargingMode }
+
+  Tariff:
+    id: 0x07
+    revision: 1
+    mandatory: false
+    attributes:
+      mandatory:
+        - { id: 1, name: tariffId }
+        - { id: 2, name: currency }
+      optional:
+        - { id: 3, name: priceUnit }
+        - { id: 4, name: tariffDescription }
+    commands:
+      mandatory:
+        - { id: 1, name: setTariff }
+
+  Signals:
+    id: 0x08
+    revision: 1
+    mandatory: false
+    attributes:
+      optional:
+        - { id: 1, name: signalSource }
+        - { id: 2, name: startTime }
+        - { id: 3, name: validUntil }
+        - { id: 10, name: priceSlots }
+        - { id: 20, name: constraintSlots }
+        - { id: 30, name: forecastSlots }
+    commands:
+      mandatory:
+        - { id: 1, name: sendPriceSignal }
+        - { id: 2, name: sendConstraintSignal }
+      optional:
+        - { id: 3, name: sendForecastSignal }
+        - { id: 4, name: clearSignals }
+
+  Plan:
+    id: 0x09
+    revision: 1
+    mandatory: false
+    attributes:
+      mandatory:
+        - { id: 1, name: planId }
+        - { id: 2, name: planVersion }
+        - { id: 3, name: commitment }
+      optional:
+        - { id: 10, name: startTime }
+        - { id: 11, name: endTime }
+        - { id: 20, name: totalEnergyPlanned }
+        - { id: 40, name: slots }
+    commands:
+      mandatory:
+        - { id: 1, name: requestPlan }
+      optional:
+        - { id: 2, name: acceptPlan }
 

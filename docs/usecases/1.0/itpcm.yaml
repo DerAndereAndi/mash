@@ -1,0 +1,44 @@
+name: ITPCM
+fullName: Incentive Table Power Consumption Management
+specVersion: "1.0"
+description: >
+  Controller sends incentive signals; device responds with optimized power plan.
+  Replaces EEBUS ITPCM use case. Uses Signals for incentives and Plan for response.
+
+endpointTypes:
+  - HEAT_PUMP
+  - WATER_HEATER
+  - HVAC
+  - APPLIANCE
+  - EV_CHARGER
+
+features:
+  - feature: Signals
+    required: true
+    commands:
+      - sendPriceSignal
+      - clearSignals
+    subscriptions:
+      - priceSlots
+
+  - feature: Plan
+    required: true
+    commands:
+      - requestPlan
+      - acceptPlan
+    subscriptions:
+      - commitment
+      - slots
+
+  - feature: EnergyControl
+    required: false
+    subscriptions:
+      - controlState
+      - processState
+
+  - feature: Measurement
+    required: false
+    subscriptions:
+      - acActivePower
+
+commands: []
