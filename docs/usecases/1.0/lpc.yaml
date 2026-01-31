@@ -1,6 +1,8 @@
 name: LPC
 fullName: Limit Power Consumption
 specVersion: "1.0"
+major: 1
+minor: 0
 description: >
   Controller limits active power consumption of a device.
   Replaces EEBUS LPC use case.

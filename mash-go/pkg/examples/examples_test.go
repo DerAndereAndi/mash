@@ -13,6 +13,49 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
+func TestEVSEUseCases(t *testing.T) {
+	evse := NewEVSE(EVSEConfig{
+		DeviceID:           "PEN12345.EVSE-001",
+		VendorName:         "Test Vendor",
+		ProductName:        "Test Charger",
+		SerialNumber:       "SN-001",
+		VendorID:           12345,
+		ProductID:          100,
+		PhaseCount:         3,
+		NominalVoltage:     400,
+		MaxCurrentPerPhase: 32000,
+		MinCurrentPerPhase: 6000,
+		NominalMaxPower:    22000000,
+		NominalMinPower:    1400000,
+	})
+
+	ucs := evse.deviceInfo.UseCases()
+	if len(ucs) == 0 {
+		t.Fatal("expected EVSE to declare use cases")
+	}
+
+	// Build lookup
+	ucMap := make(map[string]*model.UseCaseDecl)
+	for _, uc := range ucs {
+		ucMap[uc.Name] = uc
+	}
+
+	// EVSE should match LPC, MPD, EVC at minimum
+	for _, name := range []string{"LPC", "MPD", "EVC"} {
+		uc, ok := ucMap[name]
+		if !ok {
+			t.Errorf("expected use case %s to be declared", name)
+			continue
+		}
+		if uc.EndpointID != 1 {
+			t.Errorf("%s: EndpointID = %d, want 1", name, uc.EndpointID)
+		}
+		if uc.Major != 1 {
+			t.Errorf("%s: Major = %d, want 1", name, uc.Major)
+		}
+	}
+}
+
 func TestEVSECreation(t *testing.T) {
 	evse := NewEVSE(EVSEConfig{
 		DeviceID:           "PEN12345.EVSE-001",

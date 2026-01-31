@@ -99,6 +99,37 @@ func TestDeviceInfo(t *testing.T) {
 		}
 	})
 
+	t.Run("UseCasesAttribute", func(t *testing.T) {
+		if DeviceInfoAttrUseCases != 21 {
+			t.Errorf("expected useCases attribute ID 21, got %d", DeviceInfoAttrUseCases)
+		}
+	})
+
+	t.Run("SetUseCases", func(t *testing.T) {
+		ucs := []*model.UseCaseDecl{
+			{EndpointID: 1, Name: "LPC", Major: 1, Minor: 0},
+			{EndpointID: 1, Name: "MPD", Major: 1, Minor: 0},
+		}
+		err := di.SetUseCases(ucs)
+		if err != nil {
+			t.Fatalf("SetUseCases failed: %v", err)
+		}
+
+		got := di.UseCases()
+		if len(got) != 2 {
+			t.Fatalf("expected 2 use cases, got %d", len(got))
+		}
+		if got[0].Name != "LPC" {
+			t.Errorf("expected first use case LPC, got %s", got[0].Name)
+		}
+		if got[0].EndpointID != 1 {
+			t.Errorf("expected endpointId 1, got %d", got[0].EndpointID)
+		}
+		if got[1].Name != "MPD" {
+			t.Errorf("expected second use case MPD, got %s", got[1].Name)
+		}
+	})
+
 	t.Run("RemoveZoneCommandConstants", func(t *testing.T) {
 		// Verify command ID is as specified in the protocol
 		if DeviceInfoCmdRemoveZone != 0x10 {

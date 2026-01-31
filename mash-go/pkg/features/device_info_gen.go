@@ -20,6 +20,7 @@ const (
 	DeviceInfoAttrHardwareVersion uint16 = 11
 	DeviceInfoAttrSpecVersion     uint16 = 12
 	DeviceInfoAttrEndpoints       uint16 = 20
+	DeviceInfoAttrUseCases        uint16 = 21
 	DeviceInfoAttrLocation        uint16 = 30
 	DeviceInfoAttrLabel           uint16 = 31
 )
@@ -120,6 +121,14 @@ func NewDeviceInfo() *DeviceInfo {
 		Type:        model.DataTypeArray,
 		Access:      model.AccessReadOnly,
 		Description: "Complete device endpoint structure",
+	}))
+
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          DeviceInfoAttrUseCases,
+		Name:        "useCases",
+		Type:        model.DataTypeArray,
+		Access:      model.AccessReadOnly,
+		Description: "Use cases supported by this device",
 	}))
 
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{

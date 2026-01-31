@@ -323,6 +323,17 @@ func TestLPP_EndpointTypes(t *testing.T) {
 	}
 }
 
+func TestRegistry_AllHaveVersion(t *testing.T) {
+	for name, def := range Registry {
+		if def.Major != 1 {
+			t.Errorf("%s: Major = %d, want 1", name, def.Major)
+		}
+		if def.Minor != 0 {
+			t.Errorf("%s: Minor = %d, want 0", name, def.Minor)
+		}
+	}
+}
+
 func TestLPP_ElectricalNominalMaxProduction(t *testing.T) {
 	def := Registry[LPP]
 	var elec *FeatureRequirement

@@ -6,6 +6,7 @@ import (
 
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/usecase"
 )
 
 // HeatPump represents a heat pump device implementation.
@@ -125,8 +126,9 @@ func (h *HeatPump) setupHeatPumpEndpoint(cfg HeatPumpConfig) {
 
 	_ = h.device.AddEndpoint(hpEndpoint)
 
-	// Update DeviceInfo with endpoint structure
+	// Update DeviceInfo with endpoint structure and use cases
 	h.updateEndpointInfo()
+	h.updateUseCaseInfo()
 }
 
 func (h *HeatPump) setupCommandHandlers() {
@@ -164,6 +166,11 @@ func (h *HeatPump) updateEndpointInfo() {
 		endpoints = append(endpoints, ep.Info())
 	}
 	_ = h.deviceInfo.SetEndpoints(endpoints)
+}
+
+func (h *HeatPump) updateUseCaseInfo() {
+	decls := usecase.EvaluateDevice(h.device, usecase.Registry)
+	_ = h.deviceInfo.SetUseCases(decls)
 }
 
 // Device returns the underlying MASH device.

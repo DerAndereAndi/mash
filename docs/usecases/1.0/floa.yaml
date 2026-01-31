@@ -1,6 +1,8 @@
 name: FLOA
 fullName: Flexible Load
 specVersion: "1.0"
+major: 1
+minor: 0
 description: >
   Controller manages a generic flexible load via limits or setpoints.
   Replaces EEBUS flexible load patterns. Applies to any controllable device.

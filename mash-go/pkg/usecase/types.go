@@ -25,6 +25,8 @@ type UseCaseDef struct {
 	FullName      string
 	Description   string
 	SpecVersion   string
+	Major         uint8                // contract version (breaking changes)
+	Minor         uint8                // contract version (compatible refinements)
 	EndpointTypes []string             // empty = any endpoint type
 	Features      []FeatureRequirement // features needed for this use case
 	Commands      []string             // interactive commands enabled by this use case

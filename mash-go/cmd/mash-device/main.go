@@ -76,6 +76,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/persistence"
 	"github.com/mash-protocol/mash-go/pkg/service"
+	"github.com/mash-protocol/mash-go/pkg/usecase"
 )
 
 // DeviceType represents supported device types.
@@ -478,6 +479,10 @@ func createInverterDevice() (*model.Device, *features.LimitResolver) {
 
 	_ = device.AddEndpoint(inverter)
 
+	// Populate use cases on DeviceInfo
+	decls := usecase.EvaluateDevice(device, usecase.Registry)
+	_ = deviceInfo.SetUseCases(decls)
+
 	return device, resolver
 }
 
@@ -532,6 +537,10 @@ func createBatteryDevice() (*model.Device, *features.LimitResolver) {
 	battery.AddFeature(status.Feature)
 
 	_ = device.AddEndpoint(battery)
+
+	// Populate use cases on DeviceInfo
+	decls := usecase.EvaluateDevice(device, usecase.Registry)
+	_ = deviceInfo.SetUseCases(decls)
 
 	return device, resolver
 }

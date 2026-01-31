@@ -3209,6 +3209,96 @@ MASH.S.E02.CTRL.A02=1       # controlState
 
 ---
 
+### DEC-055: Use Cases on the Wire
+
+**Date:** 2026-01-31
+**Status:** Accepted
+
+**Context:** MASH treats use cases as controller-side inference: the controller probes features, builds a capability profile, and locally matches against a use case registry. This has three problems: (1) no business logic testing -- conformance tests verify protocol behavior ("SetLimit returns success") but not use case behavior ("failsafe engages on heartbeat timeout"), (2) no explicit contract -- a device never declares its behavioral commitments, and (3) unnecessary probing cost (~34 Read round-trips to discover what could be a single attribute).
+
+Matter solves this with `DeviceTypeList` on every endpoint (explicit declaration) plus a Device Library Specification (behavioral requirements). EEBUS solves it with `NodeManagement.UseCaseInformation` plus per-use-case test specifications. EEBUS's core weakness is independent release of use cases and test specs, creating a combinatorial compatibility matrix.
+
+**Design Constraints:**
+
+- **Bundled releases:** Everything ships together under `specVersion`. Use case versions do not float independently. This is the primary lesson from EEBUS.
+- **REST API versioning model:** Use case contracts must be forward-compatible within a major version. Breaking changes require a new major version (a new contract).
+- **Controller version spread:** Controllers talk to devices on different specVersions simultaneously. A controller must handle LPC 1.0 devices and LPC 1.1 devices without branching on specVersion.
+
+**Options Evaluated:**
+
+1. **Use case names only (no version on wire):** Device declares names + endpointId. `specVersion` implicitly determines the use case contract version. Simplest wire format.
+2. **Use case names with major.minor version:** Device declares name + major + minor + endpointId. Version follows REST API compatibility rules: minor = forward-compatible, major = new contract.
+3. **No wire changes (tests only):** Keep use cases as controller-side inference. Add behavioral test suites selected via PICS files.
+
+**Decision:** Option 2 -- Use case names with major.minor version on the wire.
+
+**Wire Format:**
+
+New `useCases` attribute (id 21) on DeviceInfo (endpoint 0):
+
+```
+UseCaseDecl struct (CBOR integer keys):
+  1: endpointId  uint8    which endpoint implements this use case
+  2: name        string   e.g. "LPC"
+  3: major       uint8    contract version (breaking changes)
+  4: minor       uint8    contract version (compatible refinements)
+```
+
+Example:
+```cbor
+useCases: [
+  {1: 1, 2: "LPC", 3: 1, 4: 0},
+  {1: 1, 2: "EVC", 3: 1, 4: 0}
+]
+```
+
+**Versioning Rules:**
+
+- **Minor increment:** Forward-compatible changes only. Tighter timing, new optional behaviors, clarifications, additional optional attributes. Any controller handling major X works with any minor within that major.
+- **Major increment:** Breaking changes to the behavioral contract. Different state machine structure, removed mandatory behavior, changed semantics. A device may declare both the old and new major version during a transition period. Old controllers match the old major; new controllers prefer the new one.
+- **Bundling:** Each `specVersion` release defines which use case versions are available. A device on specVersion 1.0 declares use case versions from the 1.0 manifest. Use case versions never float independently.
+
+**Use Case YAML Changes:**
+
+```yaml
+name: LPC
+fullName: Limit Power Consumption
+specVersion: "1.0"
+major: 1
+minor: 0
+```
+
+**Rationale:**
+
+*Why not names only (Option 1):* A controller talking to devices on different specVersions needs to know which behavioral contract applies. Without the version on the wire, the controller must maintain a specVersion-to-use-case-version mapping table and branch accordingly. With the version on the wire, the contract is self-describing. The minor version also enables precise test selection without ambiguity.
+
+*Why not tests only (Option 3):* Does not solve the explicit contract problem (device never declares intent) or the probing cost problem (~34 reads). Test selection depends on external PICS files rather than self-describing devices.
+
+*Why major.minor matches protocol versioning:* Consistency. The protocol already uses major.minor for specVersion with identical semantics (major = breaking, minor = additive). Using the same model for use cases makes the versioning story uniform across the protocol.
+
+*Why REST API model:* Controllers in the real world handle devices on different versions simultaneously, just like API servers handle clients on different versions. Forward compatibility within a major version means controllers don't need per-minor branching logic. Breaking changes get a new major, which the device can declare alongside the old one for graceful migration.
+
+**Declined Alternatives:**
+
+- **Per-use-case revision without major/minor (single integer):** No way to distinguish compatible refinements from breaking changes. Controllers must treat every revision bump as potentially breaking.
+- **Version in the name string ("LPC/v1"):** Unusual for a binary protocol. Structured fields are more consistent with the rest of the wire format and enable numeric comparison.
+- **Independent use case releases:** The EEBUS path. Creates combinatorial compatibility matrix. Rejected by design constraint.
+
+**Impact:**
+
+- DeviceInfo gains `useCases` attribute (id 21, mandatory, readOnly)
+- Use case YAML files gain `major` and `minor` fields
+- `mash-ucgen` generates registry with version information
+- `mash-test` reads `useCases` from device to select test suites (version-aware)
+- `protocol-versions.yaml` version manifest expands to include use case versions per release
+- DEC-050 (feature versioning) is unaffected -- features continue using `attributeList` for capability discovery
+
+**Related:** DEC-050 (protocol versioning), DEC-035 (capability discovery), DEC-053 (endpoint type conformance)
+
+**Design Document:** [docs/design/use-cases-on-wire.md](design/use-cases-on-wire.md)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -3336,3 +3426,4 @@ Key learnings:
 | 2026-01-31 | Added DEC-052: Feature-level subscription model. Use cases default to subscribe-all for features. Replaces incomplete per-attribute subscription lists.
 | 2026-01-31 | Added DEC-054: Endpoint-aware PICS format. Application feature codes scoped to endpoints (`MASH.S.E01.CTRL.A01`). Transport/pairing codes unchanged. Enables per-endpoint conformance validation. |
 | 2026-01-31 | Added DEC-053: Endpoint type conformance registry. Two-layer model: feature YAML defines superset, endpoint type registry defines per-type mandatory/recommended attributes. |
+| 2026-01-31 | Added DEC-055: Use cases on the wire. Adds `useCases` attribute to DeviceInfo with name + major.minor version + endpointId. REST API versioning model: minor = forward-compatible, major = new contract. Bundled with specVersion releases. Enables business logic testing and explicit device contracts. |

@@ -15,6 +15,7 @@ features:
         - { id: 10, name: softwareVersion }
         - { id: 12, name: specVersion }
         - { id: 20, name: endpoints }
+        - { id: 21, name: useCases }
       optional:
         - { id: 5, name: vendorId }
         - { id: 6, name: productId }

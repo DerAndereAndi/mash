@@ -63,6 +63,119 @@ func DiscoverDevice(ctx context.Context, client DeviceReader, deviceID string) (
 	return profile, nil
 }
 
+// DiscoverUseCases discovers what use cases a remote device supports.
+// It first tries the fast path: reading the useCases attribute from DeviceInfo.
+// If that attribute is present, it builds DeviceUseCases directly from the
+// declarations without probing individual features. If absent, it falls back
+// to the existing probe-and-match flow.
+func DiscoverUseCases(ctx context.Context, client DeviceReader, deviceID string, registry map[UseCaseName]*UseCaseDef) (*DeviceUseCases, error) {
+	// Try fast path: read both endpoints and useCases from DeviceInfo
+	attrs, err := client.Read(ctx, 0, uint8(model.FeatureDeviceInfo), []uint16{
+		features.DeviceInfoAttrEndpoints,
+		features.DeviceInfoAttrUseCases,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reading DeviceInfo: %w", err)
+	}
+
+	// Check if useCases attribute is present
+	if ucRaw, ok := attrs[features.DeviceInfoAttrUseCases]; ok {
+		decls, err := parseUseCases(ucRaw)
+		if err == nil && len(decls) > 0 {
+			return buildFromDeclarations(deviceID, decls, registry), nil
+		}
+	}
+
+	// Fall back to probe-and-match
+	endpoints, err := parseEndpoints(attrs[features.DeviceInfoAttrEndpoints])
+	if err != nil {
+		return nil, fmt.Errorf("parsing endpoints: %w", err)
+	}
+
+	profile := &DeviceProfile{
+		DeviceID:  deviceID,
+		Endpoints: make(map[uint8]*EndpointProfile),
+	}
+	for _, epInfo := range endpoints {
+		ep, err := discoverEndpoint(ctx, client, epInfo.id, epInfo.epType, knownFeatureIDs)
+		if err != nil {
+			continue
+		}
+		profile.Endpoints[epInfo.id] = ep
+	}
+
+	du := MatchAll(profile, registry)
+	return du, nil
+}
+
+// buildFromDeclarations constructs DeviceUseCases from parsed UseCaseDecl values.
+func buildFromDeclarations(deviceID string, decls []*model.UseCaseDecl, registry map[UseCaseName]*UseCaseDef) *DeviceUseCases {
+	du := &DeviceUseCases{
+		DeviceID: deviceID,
+		registry: registry,
+	}
+	for _, d := range decls {
+		du.Matches = append(du.Matches, MatchResult{
+			UseCase:    UseCaseName(d.Name),
+			Matched:    true,
+			EndpointID: d.EndpointID,
+		})
+	}
+	return du
+}
+
+// parseUseCases parses the raw useCases attribute value into UseCaseDecl structs.
+func parseUseCases(raw any) ([]*model.UseCaseDecl, error) {
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("useCases is not an array: %T", raw)
+	}
+
+	var decls []*model.UseCaseDecl
+	for _, item := range arr {
+		m, ok := item.(map[any]any)
+		if !ok {
+			continue
+		}
+
+		d := &model.UseCaseDecl{}
+
+		// Parse endpointId (key 1)
+		if v, ok := m[uint64(1)]; ok {
+			if id, ok := toUint8(v); ok {
+				d.EndpointID = id
+			}
+		}
+
+		// Parse name (key 2)
+		if v, ok := m[uint64(2)]; ok {
+			if s, ok := v.(string); ok {
+				d.Name = s
+			}
+		}
+
+		// Parse major (key 3)
+		if v, ok := m[uint64(3)]; ok {
+			if maj, ok := toUint8(v); ok {
+				d.Major = maj
+			}
+		}
+
+		// Parse minor (key 4)
+		if v, ok := m[uint64(4)]; ok {
+			if min, ok := toUint8(v); ok {
+				d.Minor = min
+			}
+		}
+
+		if d.Name != "" {
+			decls = append(decls, d)
+		}
+	}
+
+	return decls, nil
+}
+
 type endpointInfo struct {
 	id     uint8
 	epType string

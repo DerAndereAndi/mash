@@ -1,6 +1,8 @@
 name: MPD
 fullName: Monitor Power Device
 specVersion: "1.0"
+major: 1
+minor: 0
 description: >
   Monitor power, energy, voltage, current, SoC, and operating state of any device.
   Replaces EEBUS MPC, MGCP, MOB, MOI, MPS.

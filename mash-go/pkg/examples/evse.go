@@ -7,6 +7,7 @@ import (
 
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/usecase"
 )
 
 // EVSE represents a complete EV charger device implementation.
@@ -168,8 +169,9 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 
 	_ = e.device.AddEndpoint(charger)
 
-	// Update DeviceInfo with endpoint structure
+	// Update DeviceInfo with endpoint structure and use cases
 	e.updateEndpointInfo()
+	e.updateUseCaseInfo()
 }
 
 func (e *EVSE) setupCommandHandlers() {
@@ -281,6 +283,11 @@ func (e *EVSE) updateEndpointInfo() {
 		endpoints = append(endpoints, ep.Info())
 	}
 	_ = e.deviceInfo.SetEndpoints(endpoints)
+}
+
+func (e *EVSE) updateUseCaseInfo() {
+	decls := usecase.EvaluateDevice(e.device, usecase.Registry)
+	_ = e.deviceInfo.SetUseCases(decls)
 }
 
 // Device returns the underlying MASH device.

@@ -1,6 +1,8 @@
 name: LPP
 fullName: Limit Power Production
 specVersion: "1.0"
+major: 1
+minor: 0
 description: >
   Controller limits active power production (feed-in) of a device.
   Replaces EEBUS LPP use case. Only applies to bidirectional devices.

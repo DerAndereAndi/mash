@@ -1,6 +1,8 @@
 name: TOUT
 fullName: Time of Use Tariff
 specVersion: "1.0"
+major: 1
+minor: 0
 description: >
   Controller sends time-of-use price signals to a device for local optimization.
   Replaces EEBUS TOUT use case. Device uses price information autonomously.

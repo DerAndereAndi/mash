@@ -1,6 +1,8 @@
 name: EVC
 fullName: EV Charging
 specVersion: "1.0"
+major: 1
+minor: 0
 description: >
   Comprehensive EV charging management: monitoring, limits, setpoints,
   bidirectional V2G, and coordinated charging via price signals and plans.

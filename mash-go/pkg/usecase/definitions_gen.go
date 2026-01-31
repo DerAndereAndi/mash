@@ -12,6 +12,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		FullName:    "Control of Battery",
 		Description: "Controller manages battery charge/discharge via setpoints or limits. Replaces EEBUS COB use case. Uses controlMode to select PCC or DIRECT targeting.\n",
 		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
 		EndpointTypes: []string{"BATTERY"},
 		Features: []FeatureRequirement{
 			{
@@ -53,6 +55,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		FullName:    "EV Charging",
 		Description: "Comprehensive EV charging management: monitoring, limits, setpoints, bidirectional V2G, and coordinated charging via price signals and plans. Replaces EEBUS CEVC, DBEVC, EVSOC, OPEV, OSCEV, EVCC, EVSECC.\n",
 		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
 		EndpointTypes: []string{"EV_CHARGER"},
 		Features: []FeatureRequirement{
 			{
@@ -141,6 +145,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		FullName:    "Flexible Load",
 		Description: "Controller manages a generic flexible load via limits or setpoints. Replaces EEBUS flexible load patterns. Applies to any controllable device.\n",
 		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
 		EndpointTypes: []string{"HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE"},
 		Features: []FeatureRequirement{
 			{
@@ -178,6 +184,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		FullName:    "Incentive Table Power Consumption Management",
 		Description: "Controller sends incentive signals; device responds with optimized power plan. Replaces EEBUS ITPCM use case. Uses Signals for incentives and Plan for response.\n",
 		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
 		EndpointTypes: []string{"HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE", "EV_CHARGER"},
 		Features: []FeatureRequirement{
 			{
@@ -220,6 +228,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		FullName:    "Limit Power Consumption",
 		Description: "Controller limits active power consumption of a device. Replaces EEBUS LPC use case.\n",
 		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
 		EndpointTypes: []string{"INVERTER", "EV_CHARGER", "BATTERY", "HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE"},
 		Features: []FeatureRequirement{
 			{
@@ -257,6 +267,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		FullName:    "Limit Power Production",
 		Description: "Controller limits active power production (feed-in) of a device. Replaces EEBUS LPP use case. Only applies to bidirectional devices.\n",
 		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
 		EndpointTypes: []string{"INVERTER", "BATTERY"},
 		Features: []FeatureRequirement{
 			{
@@ -294,6 +306,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		FullName:    "Monitor Power Device",
 		Description: "Monitor power, energy, voltage, current, SoC, and operating state of any device. Replaces EEBUS MPC, MGCP, MOB, MOI, MPS.\n",
 		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
 		EndpointTypes: []string{"GRID_CONNECTION", "INVERTER", "PV_STRING", "BATTERY", "EV_CHARGER", "HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE", "SUB_METER"},
 		Features: []FeatureRequirement{
 			{
@@ -325,6 +339,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		FullName:    "Heat Pump Compressor Flexibility",
 		Description: "Controller flexibly controls heat pump compressor with min run/pause constraints. Replaces EEBUS OHPCF use case. Uses process management with timing constraints.\n",
 		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
 		EndpointTypes: []string{"HEAT_PUMP"},
 		Features: []FeatureRequirement{
 			{
@@ -372,6 +388,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		FullName:    "Power Demand Forecast",
 		Description: "Device publishes its planned power demand as a forecast via Plan feature. Replaces EEBUS PODF use case. CEM exposes Plan to higher-tier controllers.\n",
 		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
 		Features: []FeatureRequirement{
 			{
 				FeatureName: "Plan",
@@ -395,6 +413,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		FullName:    "Power Envelope",
 		Description: "Controller sends time-slotted power constraints (envelope) to a device. Replaces EEBUS POEN use case. Uses constraint signals for all four bounds.\n",
 		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
 		EndpointTypes: []string{"INVERTER", "EV_CHARGER", "BATTERY", "HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE"},
 		Features: []FeatureRequirement{
 			{
@@ -429,6 +449,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		FullName:    "Time of Use Tariff",
 		Description: "Controller sends time-of-use price signals to a device for local optimization. Replaces EEBUS TOUT use case. Device uses price information autonomously.\n",
 		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
 		Features: []FeatureRequirement{
 			{
 				FeatureName: "Tariff",

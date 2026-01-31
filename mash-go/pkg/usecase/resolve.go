@@ -12,6 +12,8 @@ type RawUseCaseDef struct {
 	Name          string              `yaml:"name"`
 	FullName      string              `yaml:"fullName"`
 	SpecVersion   string              `yaml:"specVersion"`
+	Major         uint8               `yaml:"major"`
+	Minor         uint8               `yaml:"minor"`
 	Description   string              `yaml:"description"`
 	EndpointTypes []string            `yaml:"endpointTypes"`
 	Features      []RawFeatureReq     `yaml:"features"`
@@ -60,6 +62,8 @@ func ResolveUseCaseDef(raw *RawUseCaseDef) (*UseCaseDef, error) {
 		FullName:      raw.FullName,
 		Description:   raw.Description,
 		SpecVersion:   specVer,
+		Major:         raw.Major,
+		Minor:         raw.Minor,
 		EndpointTypes: raw.EndpointTypes,
 		Commands:      raw.Commands,
 	}

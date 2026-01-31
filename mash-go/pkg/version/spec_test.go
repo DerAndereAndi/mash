@@ -254,7 +254,7 @@ func TestValidateDevice_AllMandatoryPresent(t *testing.T) {
 		Features: map[string]FeatureCapabilities{
 			"DeviceInfo": {
 				Revision:   1,
-				Attributes: []uint16{1, 2, 3, 4, 10, 12, 20},
+				Attributes: []uint16{1, 2, 3, 4, 10, 12, 20, 21},
 				Commands:   []uint8{0x10},
 			},
 		},
@@ -315,7 +315,7 @@ func TestValidateDevice_OptionalFeatureMissingMandatoryAttr(t *testing.T) {
 		Features: map[string]FeatureCapabilities{
 			"DeviceInfo": {
 				Revision:   1,
-				Attributes: []uint16{1, 2, 3, 4, 10, 12, 20},
+				Attributes: []uint16{1, 2, 3, 4, 10, 12, 20, 21},
 				Commands:   []uint8{0x10},
 			},
 			// Status is present but missing operatingState(1)
@@ -342,7 +342,7 @@ func TestValidateDevice_RevisionMismatch(t *testing.T) {
 		Features: map[string]FeatureCapabilities{
 			"DeviceInfo": {
 				Revision:   2, // spec says 1
-				Attributes: []uint16{1, 2, 3, 4, 10, 12, 20},
+				Attributes: []uint16{1, 2, 3, 4, 10, 12, 20, 21},
 				Commands:   []uint8{0x10},
 			},
 		},

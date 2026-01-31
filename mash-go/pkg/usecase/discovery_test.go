@@ -305,6 +305,150 @@ func TestDiscoverDevice_SingleEndpoint(t *testing.T) {
 	}
 }
 
+func TestDiscoverUseCases_FastPath(t *testing.T) {
+	// Mock client returns useCases attribute -> should build DeviceUseCases without probing
+	client := &mockClient{
+		readFunc: func(_ context.Context, epID uint8, fID uint8, attrIDs []uint16) (map[uint16]any, error) {
+			if epID == 0 && fID == uint8(model.FeatureDeviceInfo) {
+				return map[uint16]any{
+					20: []any{ // endpoints
+						map[any]any{
+							uint64(1): uint64(1),
+							uint64(2): uint64(0x05), // EV_CHARGER
+						},
+					},
+					21: []any{ // useCases
+						map[any]any{
+							uint64(1): uint64(1),   // endpointId
+							uint64(2): "LPC",        // name
+							uint64(3): uint64(1),    // major
+							uint64(4): uint64(0),    // minor
+						},
+						map[any]any{
+							uint64(1): uint64(1),
+							uint64(2): "MPD",
+							uint64(3): uint64(1),
+							uint64(4): uint64(0),
+						},
+					},
+				}, nil
+			}
+			// If any feature probing happens, fail -- fast path should skip it
+			return nil, fmt.Errorf("should not probe features in fast path")
+		},
+	}
+
+	du, err := DiscoverUseCases(context.Background(), client, "test-device", Registry)
+	if err != nil {
+		t.Fatalf("DiscoverUseCases: %v", err)
+	}
+	if !du.HasUseCase(LPC) {
+		t.Error("expected LPC to be present")
+	}
+	if !du.HasUseCase(MPD) {
+		t.Error("expected MPD to be present")
+	}
+	if du.HasUseCase(LPP) {
+		t.Error("expected LPP to be absent")
+	}
+
+	// Verify endpoint IDs
+	epID, ok := du.EndpointForUseCase(LPC)
+	if !ok || epID != 1 {
+		t.Errorf("EndpointForUseCase(LPC) = (%d, %v), want (1, true)", epID, ok)
+	}
+}
+
+func TestDiscoverUseCases_FallbackToProbing(t *testing.T) {
+	// Mock client returns endpoints but no useCases -> should fall back to probing
+	client := &mockClient{
+		readFunc: func(_ context.Context, epID uint8, fID uint8, attrIDs []uint16) (map[uint16]any, error) {
+			if epID == 0 && fID == uint8(model.FeatureDeviceInfo) {
+				return map[uint16]any{
+					20: []any{ // endpoints only, no useCases
+						map[any]any{
+							uint64(1): uint64(1),
+							uint64(2): uint64(0x05), // EV_CHARGER
+						},
+					},
+				}, nil
+			}
+			// Endpoint 1 probes: only Measurement exists
+			if epID == 1 {
+				if fID == uint8(model.FeatureMeasurement) {
+					if len(attrIDs) == 1 && attrIDs[0] == model.AttrIDAttributeList {
+						return map[uint16]any{
+							model.AttrIDAttributeList: []any{uint64(1)},
+						}, nil
+					}
+					if len(attrIDs) == 1 && attrIDs[0] == model.AttrIDCommandList {
+						return map[uint16]any{
+							model.AttrIDCommandList: []any{},
+						}, nil
+					}
+					if len(attrIDs) == 1 && attrIDs[0] == model.AttrIDFeatureMap {
+						return map[uint16]any{
+							model.AttrIDFeatureMap: uint64(0),
+						}, nil
+					}
+				}
+				return nil, fmt.Errorf("feature not found")
+			}
+			return nil, fmt.Errorf("not found")
+		},
+	}
+
+	du, err := DiscoverUseCases(context.Background(), client, "test-device", Registry)
+	if err != nil {
+		t.Fatalf("DiscoverUseCases: %v", err)
+	}
+	// Should match MPD via fallback probing
+	if !du.HasUseCase(MPD) {
+		t.Error("expected MPD to match via fallback probing")
+	}
+}
+
+func TestParseUseCases_Valid(t *testing.T) {
+	raw := []any{
+		map[any]any{
+			uint64(1): uint64(1),
+			uint64(2): "LPC",
+			uint64(3): uint64(1),
+			uint64(4): uint64(0),
+		},
+		map[any]any{
+			uint64(1): uint64(2),
+			uint64(2): "EVC",
+			uint64(3): uint64(1),
+			uint64(4): uint64(2),
+		},
+	}
+
+	decls, err := parseUseCases(raw)
+	if err != nil {
+		t.Fatalf("parseUseCases: %v", err)
+	}
+	if len(decls) != 2 {
+		t.Fatalf("expected 2 decls, got %d", len(decls))
+	}
+	if decls[0].Name != "LPC" || decls[0].EndpointID != 1 || decls[0].Major != 1 || decls[0].Minor != 0 {
+		t.Errorf("decl[0] = %+v", decls[0])
+	}
+	if decls[1].Name != "EVC" || decls[1].EndpointID != 2 || decls[1].Major != 1 || decls[1].Minor != 2 {
+		t.Errorf("decl[1] = %+v", decls[1])
+	}
+}
+
+func TestParseUseCases_Empty(t *testing.T) {
+	decls, err := parseUseCases([]any{})
+	if err != nil {
+		t.Fatalf("parseUseCases: %v", err)
+	}
+	if len(decls) != 0 {
+		t.Errorf("expected 0 decls, got %d", len(decls))
+	}
+}
+
 func TestDiscoverDevice_ErrorReadingDeviceInfo(t *testing.T) {
 	client := &mockClient{
 		readFunc: func(_ context.Context, epID uint8, fID uint8, attrIDs []uint16) (map[uint16]any, error) {

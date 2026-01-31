@@ -115,6 +115,8 @@ func generateGoSource(defs []*usecase.UseCaseDef, specVer string) string {
 		b.WriteString(fmt.Sprintf("\t\tFullName:    %q,\n", def.FullName))
 		b.WriteString(fmt.Sprintf("\t\tDescription: %q,\n", def.Description))
 		b.WriteString(fmt.Sprintf("\t\tSpecVersion: %q,\n", def.SpecVersion))
+		b.WriteString(fmt.Sprintf("\t\tMajor:       %d,\n", def.Major))
+		b.WriteString(fmt.Sprintf("\t\tMinor:       %d,\n", def.Minor))
 
 		// EndpointTypes
 		if len(def.EndpointTypes) > 0 {

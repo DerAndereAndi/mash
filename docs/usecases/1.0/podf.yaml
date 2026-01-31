@@ -1,6 +1,8 @@
 name: PODF
 fullName: Power Demand Forecast
 specVersion: "1.0"
+major: 1
+minor: 0
 description: >
   Device publishes its planned power demand as a forecast via Plan feature.
   Replaces EEBUS PODF use case. CEM exposes Plan to higher-tier controllers.

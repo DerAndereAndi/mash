@@ -12,6 +12,18 @@ versions:
       Signals: "1.0"
       Plan: "1.0"
     shared: "1.0"
+    usecases:
+      LPC: { major: 1, minor: 0 }
+      LPP: { major: 1, minor: 0 }
+      MPD: { major: 1, minor: 0 }
+      EVC: { major: 1, minor: 0 }
+      COB: { major: 1, minor: 0 }
+      FLOA: { major: 1, minor: 0 }
+      ITPCM: { major: 1, minor: 0 }
+      OHPCF: { major: 1, minor: 0 }
+      PODF: { major: 1, minor: 0 }
+      POEN: { major: 1, minor: 0 }
+      TOUT: { major: 1, minor: 0 }
     feature_types:
       - { name: DeviceInfo, id: 0x01, description: "Device identity and structure" }
       - { name: Status, id: 0x02, description: "Operating state and fault information" }

@@ -1,6 +1,8 @@
 name: POEN
 fullName: Power Envelope
 specVersion: "1.0"
+major: 1
+minor: 0
 description: >
   Controller sends time-slotted power constraints (envelope) to a device.
   Replaces EEBUS POEN use case. Uses constraint signals for all four bounds.

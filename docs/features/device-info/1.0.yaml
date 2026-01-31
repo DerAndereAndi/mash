@@ -79,6 +79,13 @@ attributes:
     mandatory: true
     description: "Complete device endpoint structure"
 
+  - id: 21
+    name: useCases
+    type: array
+    access: readOnly
+    mandatory: true
+    description: "Use cases supported by this device"
+
   # Optional metadata (30-39)
   - id: 30
     name: location

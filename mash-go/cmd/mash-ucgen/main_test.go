@@ -16,6 +16,8 @@ func TestGenerator_ProducesValidGo(t *testing.T) {
 name: TEST
 fullName: Test Use Case
 specVersion: "1.0"
+major: 1
+minor: 0
 description: A test use case.
 endpointTypes:
   - EV_CHARGER
@@ -65,6 +67,12 @@ commands:
 	}
 	if !strings.Contains(content, `"TEST"`) {
 		t.Error("missing TEST use case")
+	}
+	if !strings.Contains(content, "Major:") {
+		t.Error("missing Major field in generated output")
+	}
+	if !strings.Contains(content, "Minor:") {
+		t.Error("missing Minor field in generated output")
 	}
 
 	// Verify it compiles by writing a main.go that imports it
