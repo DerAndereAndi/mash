@@ -35,7 +35,7 @@
 | **Target devices** | Energy equipment (EVSE, inverter, heat pump, battery) | All consumer IoT including energy | Energy equipment |
 | **Organization** | Open source | CSA (Connectivity Standards Alliance) | EEBus Initiative e.V. |
 
-**Key takeaway:** Matter 1.5 has reached feature parity with EEBUS for energy management (EVSE, DEM, pricing, metering), making it a credible alternative. MASH occupies a distinct niche: purpose-built for energy with Matter-inspired architecture but dramatically lower complexity than either.
+**Key takeaway:** Matter 1.5 has significantly expanded its energy management capabilities (EVSE, DEM, pricing, metering), but still lacks critical features for European energy management: phase-specific limits, controller-driven power curtailment, regulatory grid operator integration, and full bidirectional charging control. MASH occupies a distinct niche: purpose-built for energy with Matter-inspired architecture but dramatically lower complexity than either.
 
 ---
 
@@ -58,7 +58,7 @@ Application / Device Types
 Data Model (Matter TLV)
 Interaction Model (Read/Write/Subscribe/Invoke)
 Secure Channel (PASE/CASE sessions, MRP)
-Transport (UDP+MRP / TCP / BLE+BTP / NFC+NTL / Wi-Fi+PAFTP)
+Transport (UDP+MRP / TCP / BLE+BTP)
 Network (IPv6 / Thread / Wi-Fi / Ethernet / BLE)
 Discovery (mDNS/DNS-SD + BLE advertising)
 ```
@@ -108,7 +108,7 @@ Discovery (mDNS/DNS-SD)
 - Endpoints can compose via Descriptor cluster's PartsList (tree structure)
 - Device Types define required/optional clusters per endpoint
 - Explicit composition patterns (e.g., EVSE is always endpoint composition)
-- Hundreds of clusters, ~15 energy-specific clusters in 1.5
+- Multiple energy-specific clusters added in 1.3-1.5
 - Cluster IDs are 32-bit integers
 
 **EEBUS (SPINE):**
@@ -126,7 +126,7 @@ MASH:     deviceId / endpointId / featureId / attribute
           evse-001 / 1 / Measurement / acActivePower
 
 Matter:   nodeId / endpointId / clusterId / attributeId
-          0x1234 / 1 / 0x0098 / 0x0000
+          (integer IDs at each level)
 
 EEBUS:    device / entity[] / feature / function
           evse-001 / [0,1] / Measurement / powerDescription
@@ -158,7 +158,7 @@ EEBUS:    device / entity[] / feature / function
 | Error reporting | Status in response | Status Response action | **result** with error code |
 | Partial update | Not supported (full replace) | Fabric-scoped list writes | **write** with partial flag |
 
-**Total operation types:** MASH: 4 | Matter: 4 | EEBUS: 7 (read, reply, notify, write, call, result, error)
+**Total operation types:** MASH: 4 | Matter: 4 | EEBUS: 6 (read, reply, write, notify, call, result)
 
 ### 4.2 Subscription Model
 
@@ -219,7 +219,7 @@ MASH:    Controller ──TCP/TLS──► Device (always controller-initiated)
 
 Matter:  Commissioner ──(various)──► Node
          Multiple sessions possible (PASE for commissioning, CASE for operational)
-         UDP sessions are stateless, TCP connections are persistent
+         MRP sessions maintain state over UDP, TCP connections are persistent
 
 EEBUS:   Node A ◄──WebSocket/TLS──► Node B (either side can initiate)
          Double-connection race condition when both sides connect simultaneously
@@ -259,8 +259,8 @@ EEBUS:   Node A ◄──WebSocket/TLS──► Node B (either side can initiate
 | Setup code | 8-digit (~27 bits) | 8-digit (27 bits) | SKI (Subject Key Identifier) |
 | Setup code delivery | QR code | QR code / NFC / manual | Display / manual / QR code |
 | Session establishment | SPAKE2+ then TLS with Op Cert | PASE (commissioning) then CASE (operational) | TLS handshake + SKI verification + trust negotiation |
-| Commissioning window | 15 min default (3 min - 3 hr range) | 15 min default (Matter 5.4.2.3.1) | No timeout defined |
-| Steps to pair | 5 (discover, connect, SPAKE2+, CSR, cert install) | 21 (detailed flow in Matter spec 5.5) | Multiple phases (connection, trust, access setup, binding, subscription) |
+| Commissioning window | 15 min default (3 min - 3 hr range) | 15 min default | No timeout defined |
+| Steps to pair | 5 (discover, connect, SPAKE2+, CSR, cert install) | Multi-step (PASE, attestation, NOC install, CASE) | Multiple phases (connection, trust, access setup, binding, subscription) |
 
 ### 6.4 Certificate Renewal
 
@@ -293,8 +293,8 @@ EEBUS:   Node A ◄──WebSocket/TLS──► Node B (either side can initiate
 MASH:   MASH:<version>:<discriminator>:<setupcode>:<vendorid>:<productid>
         MASH:1:1234:12345678:0x1234:0x5678
 
-Matter:  MT:<discriminator>:<passcode>:<VID>:<PID>:<flags>
-         (base-38 encoded, ~22 characters)
+Matter:  MT:<base-38 encoded payload>
+         (encodes passcode, discriminator, VID, PID, discovery capabilities)
 
 EEBUS:   SKI-based (manufacturer-specific QR content)
 ```
@@ -337,27 +337,27 @@ Matter and EEBUS leave conflict resolution to application-level implementation.
 | Energy Domain | MASH Features | Matter 1.5 Clusters | EEBUS Use Cases |
 |---------------|---------------|---------------------|-----------------|
 | **Device identity** | DeviceInfo | Basic Information, Descriptor | DeviceClassification, NetworkManagement |
-| **Operating state** | Status | (per-device cluster, e.g., EVSE State) | Status-specific functions per use case |
-| **Electrical config** | Electrical | Electrical Power Measurement (partly) | ElectricalConnection |
+| **Operating state** | Status | State attributes within device-specific clusters (e.g., EVSE) | Status-specific functions per use case |
+| **Electrical config** | Electrical | No direct equivalent | ElectricalConnection |
 | **Power measurement** | Measurement | Electrical Power Measurement | Measurement (via MPC, MGCP, MOB, MOI, MPS) |
 | **Energy measurement** | Measurement | Electrical Energy Measurement | Measurement |
 | **Load/production control** | EnergyControl | Device Energy Management (PowerAdjustment) | LPC, LPP |
 | **Battery control** | EnergyControl (on BATTERY endpoint) | Device Energy Management (on battery device) | COB |
-| **EV charging** | ChargingSession + EnergyControl | Energy EVSE + Energy EVSE Mode | EVSE + EVCEM + CEVC + OSCEV |
+| **EV charging** | ChargingSession + EnergyControl | Energy EVSE + Energy EVSE Mode | CEVC + OSCEV + OPEV + DBEVC |
 | **Tariff/pricing** | Tariff | Commodity Price + Commodity Tariff | IncentiveTable (via ITPCM) |
-| **Grid signals** | Signals (PRICE, CONSTRAINT, FORECAST) | Electrical Grid Conditions + Commodity Price | ToUT + POEN + ITPCM |
-| **Device plan/forecast** | Plan | Device Energy Management (PowerForecastReporting) | SmartEnergyManagementPs (power sequences) |
+| **Grid signals** | Signals (PRICE, CONSTRAINT, FORECAST) | Commodity Price (partial) | ToUT + POEN + ITPCM |
+| **Device plan/forecast** | Plan | Device Energy Management (forecast) | Power sequences (via SPINE) |
 | **Heat pump flexibility** | EnergyControl (processState) | Device Energy Management | OHPCF |
 | **Water heater** | (future) | Water Heater Management | (not standardized) |
 | **Metering** | Measurement (on SUB_METER/GRID_CONNECTION) | Commodity Metering | MGCP |
-| **V2X (vehicle-to-grid)** | EnergyControl (V2X feature bit) | Energy EVSE (V2X feature) | OSCEV (bidirectional) |
+| **V2X (vehicle-to-grid)** | EnergyControl (V2X feature bit) | Energy EVSE (V2X feature) | DBEVC + OSCEV |
 
 ### 9.2 Energy-Specific Cluster Count
 
 | Protocol | Energy-related features/clusters | Total features/clusters in spec |
 |----------|----------------------------------|-------------------------------|
 | MASH | 9 features (all energy-focused) | 9 + vendor extensions |
-| Matter 1.5 | ~15 energy clusters | 100+ clusters total |
+| Matter 1.5 | ~10 energy clusters | Dozens of clusters total |
 | EEBUS | 50+ classes (all energy-focused) | 50+ classes |
 
 ### 9.3 Coverage Gaps
@@ -365,25 +365,28 @@ Matter and EEBUS leave conflict resolution to application-level implementation.
 **MASH gaps vs Matter 1.5:**
 - No water heater management (planned)
 - No commodity metering cluster equivalent (Measurement covers basic metering)
-- No energy preference / user preference cluster
 
 **MASH gaps vs EEBUS:**
 - No historical time-series data
 - No HVAC-specific use cases (planned)
-- Fewer smart appliance use cases (FLOA, washing machine, etc.)
+- Fewer smart appliance use cases (washing machine, dishwasher, etc.)
 
 **Matter 1.5 gaps vs MASH:**
 - No built-in multi-controller priority resolution
 - No explicit state machine for control states (AUTONOMOUS, CONTROLLED, LIMITED, FAILSAFE)
-- More complex commissioning (21 steps vs 5)
+- More complex commissioning (multi-step PASE+CASE vs 5 steps)
 - No domain-specific zone types (GRID_OPERATOR, BUILDING_MANAGER, etc.)
 
 **Matter 1.5 gaps vs EEBUS:**
-- Grid services are explicitly out of scope (deferred to OpenADR/IEEE 2030.5)
+- No phase-specific current limits (EEBUS OPEV supports independent per-phase current limits for circuit overload protection)
+- No controller-driven power curtailment (DEM is device-flexibility-oriented; EEBUS LPC/LPP allows controller to set consumption/production limits directly)
 - No equivalent to EEBUS's cascading limit architecture (LPC instance 1 + instance 2)
+- No grid operator integration (EEBUS supports regulatory grid limits e.g. German section 14a EnWG via grid operator LPC instances)
+- Limited bidirectional charging control (V2X feature bit exists but lacks production-side limits and discharge scheduling depth of EEBUS DBEVC)
+- No PV surplus charging workflow (EEBUS OSCEV provides optimization for self-consumption from solar production)
 
 **EEBUS gaps vs both:**
-- No modern PAKE commissioning (SKI-based trust only; SHIP Pairing Service is newer)
+- No modern PAKE commissioning (SKI-based trust only)
 - No built-in multi-controller conflict resolution
 - WebSocket+JSON is heavier than CBOR or TLV on constrained devices
 - Double-connection race condition still present
@@ -395,8 +398,8 @@ Matter and EEBUS leave conflict resolution to application-level implementation.
 
 | Aspect | MASH | Matter 1.5 | EEBUS |
 |--------|------|------------|-------|
-| Target RAM | 256 KB (ESP32-class) | 512 KB+ (Thread), 4 MB+ (full) | 4 MB+ (typical) |
-| Flash footprint (est.) | ~100 KB | ~500 KB - 2 MB | ~500 KB - 1 MB |
+| Target RAM | 256 KB (ESP32-class) | 512 KB+ (Thread), 4 MB+ (full) (est.) | 4 MB+ (typical) (est.) |
+| Flash footprint (est.) | ~100 KB | ~500 KB - 2 MB (est.) | ~500 KB - 1 MB (est.) |
 | Network requirements | IPv6 + TCP | IPv6 + UDP/TCP (+ Thread/BLE optional) | IPv4 or IPv6 + TCP + WebSocket |
 | Crypto requirements | TLS 1.3, SPAKE2+, X.509 | TLS 1.3, SPAKE2+, CASE, X.509, Matter TLV certs | TLS 1.2+, X.509 |
 | Typical message size | < 2 KB | < 1.3 KB (UDP), variable (TCP) | 4-10 KB |
@@ -409,13 +412,13 @@ Matter and EEBUS leave conflict resolution to application-level implementation.
 | Dimension | MASH | Matter 1.5 | EEBUS |
 |-----------|------|------------|-------|
 | **Spec complexity** | Low | High | Medium-High |
-| **Implementation effort** | Days-weeks | Months | Weeks-months |
+| **Implementation effort** | Low | High | Medium-High |
 | **Wire efficiency** | High (CBOR) | High (TLV) | Low (JSON) |
 | **RAM footprint** | Low (256 KB target) | Medium-High | Medium-High |
 | **Transport flexibility** | Low (TCP only) | High (UDP, TCP, BLE, NFC, Wi-Fi) | Low (WebSocket only) |
 | **Energy features** | Purpose-built | Added in 1.3-1.5 | Purpose-built |
 | **Multi-controller** | Built-in priority model | Multi-fabric (no priority) | App-level (no framework) |
-| **Commissioning** | Simple (5 steps, SPAKE2+) | Complex (21 steps, PASE+CASE) | Complex (multi-phase, SKI trust) |
+| **Commissioning** | Simple (5 steps, SPAKE2+) | Complex (PASE+CASE, attestation) | Complex (multi-phase, SKI trust) |
 | **Certificate renewal** | Auto (1-year, in-session) | Manual (UpdateNOC) | None (self-signed) |
 | **State machines** | ControlStateEnum + ProcessStateEnum | Per-cluster state | Per-use case state (heartbeat-inferred) |
 | **Ecosystem** | Open source, no certification | CSA certification, large ecosystem | EEBus Initiative, certification available |
@@ -433,9 +436,9 @@ Matter and EEBUS leave conflict resolution to application-level implementation.
 - [Decision Log](decision-log.md) -- Design decisions and rationale
 
 ### Matter 1.5
-- [Matter Core Specification (23-27349-009)](https://csa-iot.org/developer-resource/specifications-download-request/) -- Interaction model, security, transport
-- [Matter Application Cluster Specification (23-27350-008)](https://csa-iot.org/developer-resource/specifications-download-request/) -- Energy management clusters
-- [Matter Device Library Specification (23-27351-008)](https://csa-iot.org/developer-resource/specifications-download-request/) -- EVSE and energy device types
+- [Matter Core Specification](https://csa-iot.org/developer-resource/specifications-download-request/) -- Interaction model, security, transport
+- [Matter Application Cluster Specification](https://csa-iot.org/developer-resource/specifications-download-request/) -- Energy management clusters
+- [Matter Device Library Specification](https://csa-iot.org/developer-resource/specifications-download-request/) -- EVSE and energy device types
 
 ### EEBUS
 - [SHIP Specification v1.0.1 / v1.1.0 RC1](https://www.eebus.org/) -- Transport layer
