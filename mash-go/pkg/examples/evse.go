@@ -28,6 +28,8 @@ type EVSE struct {
 	energyControl   *features.EnergyControl
 	chargingSession *features.ChargingSession
 	status          *features.Status
+	signals         *features.Signals
+	plan            *features.Plan
 
 	// Limit resolution
 	limitResolver *features.LimitResolver
@@ -95,8 +97,8 @@ func (e *EVSE) setupDeviceInfo(cfg EVSEConfig) {
 func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 	charger := model.NewEndpoint(1, model.EndpointEVCharger, "EV Charger")
 
-	// EVSE capability bitmap: CORE + FLEX + EMOB
-	evseCapabilities := uint32(model.FeatureMapCore | model.FeatureMapFlex | model.FeatureMapEMob)
+	// EVSE capability bitmap: CORE + FLEX + EMOB + SIGNALS + PLAN
+	evseCapabilities := uint32(model.FeatureMapCore | model.FeatureMapFlex | model.FeatureMapEMob | model.FeatureMapSignals | model.FeatureMapPlan)
 
 	// Electrical - static capabilities
 	e.electrical = features.NewElectrical()
@@ -154,6 +156,16 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 	_ = e.status.SetOperatingState(features.OperatingStateStandby)
 	charger.AddFeature(e.status.Feature)
 
+	// Signals - price/constraint signal reception
+	e.signals = features.NewSignals()
+	e.signals.Feature.SetFeatureMap(evseCapabilities)
+	charger.AddFeature(e.signals.Feature)
+
+	// Plan - power plan reporting
+	e.plan = features.NewPlan()
+	e.plan.Feature.SetFeatureMap(evseCapabilities)
+	charger.AddFeature(e.plan.Feature)
+
 	_ = e.device.AddEndpoint(charger)
 
 	// Update DeviceInfo with endpoint structure
@@ -203,6 +215,42 @@ func (e *EVSE) setupCommandHandlers() {
 		_ = e.measurement.SetACActivePower(0)
 
 		return nil
+	})
+
+	// Signals handlers - store received signals
+	e.signals.OnSendPriceSignal(func(ctx context.Context, req features.SendPriceSignalRequest) error {
+		_ = e.signals.SetSignalSource(req.Source)
+		_ = e.signals.SetStartTime(req.StartTime)
+		if req.ValidUntil != nil {
+			_ = e.signals.SetValidUntil(*req.ValidUntil)
+		}
+		return nil
+	})
+	e.signals.OnSendConstraintSignal(func(ctx context.Context, req features.SendConstraintSignalRequest) error {
+		_ = e.signals.SetSignalSource(req.Source)
+		_ = e.signals.SetStartTime(req.StartTime)
+		if req.ValidUntil != nil {
+			_ = e.signals.SetValidUntil(*req.ValidUntil)
+		}
+		return nil
+	})
+	e.signals.OnClearSignals(func(ctx context.Context, req features.ClearSignalsRequest) (features.ClearSignalsResponse, error) {
+		_ = e.signals.ClearPriceSlots()
+		_ = e.signals.ClearConstraintSlots()
+		_ = e.signals.ClearForecastSlots()
+		_ = e.signals.ClearSignalSource()
+		return features.ClearSignalsResponse{Cleared: 1}, nil
+	})
+
+	// Plan handlers - respond with plan data
+	e.plan.OnRequestPlan(func(ctx context.Context, req features.RequestPlanRequest) (features.RequestPlanResponse, error) {
+		return features.RequestPlanResponse{PlanID: e.plan.PlanID()}, nil
+	})
+	e.plan.OnAcceptPlan(func(ctx context.Context, req features.AcceptPlanRequest) (features.AcceptPlanResponse, error) {
+		if req.PlanID == e.plan.PlanID() {
+			_ = e.plan.SetCommitment(features.CommitmentCommitted)
+		}
+		return features.AcceptPlanResponse{NewCommitment: e.plan.Commitment()}, nil
 	})
 
 	// SetChargingMode handler

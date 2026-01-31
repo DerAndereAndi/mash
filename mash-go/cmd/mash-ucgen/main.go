@@ -163,12 +163,6 @@ func generateGoSource(defs []*usecase.UseCaseDef, specVer string) string {
 				// Subscriptions
 				if fr.SubscribeAll {
 					b.WriteString("\t\t\t\tSubscribeAll: true,\n")
-				} else if len(fr.Subscriptions) > 0 {
-					b.WriteString("\t\t\t\tSubscriptions: []SubscriptionDef{\n")
-					for _, sd := range fr.Subscriptions {
-						b.WriteString(fmt.Sprintf("\t\t\t\t\t{Name: %q, AttrID: %d},\n", sd.Name, sd.AttrID))
-					}
-					b.WriteString("\t\t\t\t},\n")
 				}
 
 				b.WriteString("\t\t\t},\n")

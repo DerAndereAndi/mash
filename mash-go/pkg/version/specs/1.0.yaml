@@ -62,9 +62,8 @@ features:
     revision: 1
     mandatory: false
     attributes:
-      mandatory:
-        - { id: 1, name: acActivePower }
       optional:
+        - { id: 1, name: acActivePower }
         - { id: 2, name: acReactivePower }
         - { id: 3, name: acApparentPower }
         - { id: 10, name: acActivePowerPerPhase }

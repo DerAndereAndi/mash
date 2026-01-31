@@ -134,7 +134,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				SubscribeAll: true,
 			},
 		},
-		Commands: []string{"setpoint", "limit", "clear"},
+		Commands: []string{"setpoint", "limit", "clear", "signal", "plan"},
 	},
 	"FLOA": {
 		Name:        "FLOA",
@@ -213,6 +213,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				SubscribeAll: true,
 			},
 		},
+		Commands: []string{"signal", "plan"},
 	},
 	"LPC": {
 		Name:        "LPC",
@@ -421,6 +422,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				SubscribeAll: true,
 			},
 		},
+		Commands: []string{"signal"},
 	},
 	"TOUT": {
 		Name:        "TOUT",
@@ -450,6 +452,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				SubscribeAll: true,
 			},
 		},
+		Commands: []string{"signal"},
 	},
 }
 

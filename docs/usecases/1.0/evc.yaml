@@ -74,3 +74,5 @@ commands:
   - setpoint
   - limit
   - clear
+  - signal
+  - plan

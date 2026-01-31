@@ -1510,6 +1510,311 @@ func TestSetLimitRejectsNegativeValue(t *testing.T) {
 	}
 }
 
+func TestTariff(t *testing.T) {
+	tariff := NewTariff()
+
+	t.Run("Type", func(t *testing.T) {
+		if tariff.Type() != model.FeatureTariff {
+			t.Errorf("expected type Tariff, got %v", tariff.Type())
+		}
+	})
+
+	t.Run("SetAndGet", func(t *testing.T) {
+		_ = tariff.SetTariffID(42)
+		_ = tariff.SetCurrency("EUR")
+		_ = tariff.SetPriceUnit(PriceUnitPerKwh)
+		_ = tariff.SetTariffDescription("Day/Night Tariff")
+
+		if tariff.TariffID() != 42 {
+			t.Errorf("expected tariffId 42, got %d", tariff.TariffID())
+		}
+		if tariff.Currency() != "EUR" {
+			t.Errorf("expected currency EUR, got %s", tariff.Currency())
+		}
+		if tariff.PriceUnit() != PriceUnitPerKwh {
+			t.Errorf("expected priceUnit PER_KWH, got %v", tariff.PriceUnit())
+		}
+		desc, ok := tariff.TariffDescription()
+		if !ok || desc != "Day/Night Tariff" {
+			t.Errorf("expected description 'Day/Night Tariff', got %q (ok=%v)", desc, ok)
+		}
+	})
+
+	t.Run("OnSetTariff", func(t *testing.T) {
+		var called bool
+		tariff.OnSetTariff(func(ctx context.Context, req SetTariffRequest) error {
+			called = true
+			if req.TariffID != 100 {
+				t.Errorf("expected tariffId 100, got %d", req.TariffID)
+			}
+			if req.Currency != "USD" {
+				t.Errorf("expected currency USD, got %s", req.Currency)
+			}
+			return nil
+		})
+
+		_, err := tariff.InvokeCommand(context.Background(), TariffCmdSetTariff, map[string]any{
+			"tariffId": uint32(100),
+			"currency": "USD",
+		})
+		if err != nil {
+			t.Fatalf("InvokeCommand failed: %v", err)
+		}
+		if !called {
+			t.Error("expected OnSetTariff handler to be called")
+		}
+	})
+}
+
+func TestSignals(t *testing.T) {
+	sig := NewSignals()
+
+	t.Run("Type", func(t *testing.T) {
+		if sig.Type() != model.FeatureSignals {
+			t.Errorf("expected type Signals, got %v", sig.Type())
+		}
+	})
+
+	t.Run("SetAndGetSignalSource", func(t *testing.T) {
+		_ = sig.SetSignalSource(SignalSourceEnergySupplier)
+		src, ok := sig.SignalSource()
+		if !ok || src != SignalSourceEnergySupplier {
+			t.Errorf("expected ENERGY_SUPPLIER, got %v (ok=%v)", src, ok)
+		}
+	})
+
+	t.Run("SetAndGetPriceSlots", func(t *testing.T) {
+		slots := []PriceSlot{
+			{Duration: 3600, Price: 2500, PriceLevel: 2, RenewablePercent: 45},
+			{Duration: 3600, Price: 1800, PriceLevel: 1, RenewablePercent: 70},
+		}
+		_ = sig.SetPriceSlots(slots)
+		read, ok := sig.PriceSlots()
+		if !ok || len(read) != 2 {
+			t.Fatalf("expected 2 price slots, got %d (ok=%v)", len(read), ok)
+		}
+		if read[0].Price != 2500 {
+			t.Errorf("expected price 2500, got %d", read[0].Price)
+		}
+	})
+
+	t.Run("SetAndGetConstraintSlots", func(t *testing.T) {
+		slots := []ConstraintSlot{
+			{Duration: 3600, ConsumptionMax: 11_000_000, ConsumptionMin: 0},
+		}
+		_ = sig.SetConstraintSlots(slots)
+		read, ok := sig.ConstraintSlots()
+		if !ok || len(read) != 1 {
+			t.Fatalf("expected 1 constraint slot, got %d (ok=%v)", len(read), ok)
+		}
+		if read[0].ConsumptionMax != 11_000_000 {
+			t.Errorf("expected consumptionMax 11000000, got %d", read[0].ConsumptionMax)
+		}
+	})
+
+	t.Run("OnSendPriceSignal", func(t *testing.T) {
+		var called bool
+		sig.OnSendPriceSignal(func(ctx context.Context, req SendPriceSignalRequest) error {
+			called = true
+			if req.Source != SignalSourceGrid {
+				t.Errorf("expected source GRID, got %v", req.Source)
+			}
+			return nil
+		})
+
+		_, err := sig.InvokeCommand(context.Background(), SignalsCmdSendPriceSignal, map[string]any{
+			"source":    uint8(SignalSourceGrid),
+			"startTime": uint64(1700000000),
+			"slots":     []any{},
+		})
+		if err != nil {
+			t.Fatalf("InvokeCommand failed: %v", err)
+		}
+		if !called {
+			t.Error("expected OnSendPriceSignal handler to be called")
+		}
+	})
+
+	t.Run("OnClearSignals", func(t *testing.T) {
+		var called bool
+		sig.OnClearSignals(func(ctx context.Context, req ClearSignalsRequest) (ClearSignalsResponse, error) {
+			called = true
+			return ClearSignalsResponse{Cleared: 3}, nil
+		})
+
+		result, err := sig.InvokeCommand(context.Background(), SignalsCmdClearSignals, map[string]any{})
+		if err != nil {
+			t.Fatalf("InvokeCommand failed: %v", err)
+		}
+		if !called {
+			t.Error("expected OnClearSignals handler to be called")
+		}
+		if cleared, ok := result["cleared"].(uint8); !ok || cleared != 3 {
+			t.Errorf("expected cleared=3, got %v", result["cleared"])
+		}
+	})
+
+	t.Run("HasActivePriceSignal", func(t *testing.T) {
+		sig2 := NewSignals()
+		if sig2.HasActivePriceSignal() {
+			t.Error("expected no active price signal initially")
+		}
+
+		_ = sig2.SetPriceSlots([]PriceSlot{{Duration: 3600, Price: 2500}})
+		if !sig2.HasActivePriceSignal() {
+			t.Error("expected active price signal after setting slots")
+		}
+
+		_ = sig2.ClearPriceSlots()
+		if sig2.HasActivePriceSignal() {
+			t.Error("expected no active price signal after clearing")
+		}
+	})
+
+	t.Run("HasActiveConstraints", func(t *testing.T) {
+		sig2 := NewSignals()
+		if sig2.HasActiveConstraints() {
+			t.Error("expected no active constraints initially")
+		}
+
+		_ = sig2.SetConstraintSlots([]ConstraintSlot{{Duration: 3600, ConsumptionMax: 11_000_000}})
+		if !sig2.HasActiveConstraints() {
+			t.Error("expected active constraints after setting slots")
+		}
+
+		_ = sig2.ClearConstraintSlots()
+		if sig2.HasActiveConstraints() {
+			t.Error("expected no active constraints after clearing")
+		}
+	})
+}
+
+func TestPlan(t *testing.T) {
+	plan := NewPlan()
+
+	t.Run("Type", func(t *testing.T) {
+		if plan.Type() != model.FeaturePlan {
+			t.Errorf("expected type Plan, got %v", plan.Type())
+		}
+	})
+
+	t.Run("DefaultValues", func(t *testing.T) {
+		if plan.PlanID() != 0 {
+			t.Errorf("expected default planId 0, got %d", plan.PlanID())
+		}
+		if plan.Commitment() != CommitmentPreliminary {
+			t.Errorf("expected default commitment PRELIMINARY, got %v", plan.Commitment())
+		}
+	})
+
+	t.Run("SetAndGet", func(t *testing.T) {
+		_ = plan.SetPlanID(42)
+		_ = plan.SetPlanVersion(3)
+		_ = plan.SetCommitment(CommitmentTentative)
+
+		if plan.PlanID() != 42 {
+			t.Errorf("expected planId 42, got %d", plan.PlanID())
+		}
+		if plan.PlanVersion() != 3 {
+			t.Errorf("expected planVersion 3, got %d", plan.PlanVersion())
+		}
+		if plan.Commitment() != CommitmentTentative {
+			t.Errorf("expected commitment TENTATIVE, got %v", plan.Commitment())
+		}
+	})
+
+	t.Run("OnRequestPlan", func(t *testing.T) {
+		var called bool
+		plan.OnRequestPlan(func(ctx context.Context, req RequestPlanRequest) (RequestPlanResponse, error) {
+			called = true
+			return RequestPlanResponse{PlanID: 99}, nil
+		})
+
+		result, err := plan.InvokeCommand(context.Background(), PlanCmdRequestPlan, map[string]any{})
+		if err != nil {
+			t.Fatalf("InvokeCommand failed: %v", err)
+		}
+		if !called {
+			t.Error("expected OnRequestPlan handler to be called")
+		}
+		if planID, ok := result["planId"].(uint32); !ok || planID != 99 {
+			t.Errorf("expected planId=99, got %v", result["planId"])
+		}
+	})
+
+	t.Run("OnAcceptPlan", func(t *testing.T) {
+		var called bool
+		plan.OnAcceptPlan(func(ctx context.Context, req AcceptPlanRequest) (AcceptPlanResponse, error) {
+			called = true
+			if req.PlanID != 99 {
+				t.Errorf("expected planId 99, got %d", req.PlanID)
+			}
+			return AcceptPlanResponse{NewCommitment: CommitmentCommitted}, nil
+		})
+
+		result, err := plan.InvokeCommand(context.Background(), PlanCmdAcceptPlan, map[string]any{
+			"planId":      uint32(99),
+			"planVersion": uint32(1),
+		})
+		if err != nil {
+			t.Fatalf("InvokeCommand failed: %v", err)
+		}
+		if !called {
+			t.Error("expected OnAcceptPlan handler to be called")
+		}
+		if nc, ok := result["newCommitment"].(uint8); !ok || Commitment(nc) != CommitmentCommitted {
+			t.Errorf("expected newCommitment=COMMITTED, got %v", result["newCommitment"])
+		}
+	})
+
+	t.Run("IsCommitted", func(t *testing.T) {
+		p := NewPlan()
+		if p.IsCommitted() {
+			t.Error("expected not committed initially")
+		}
+		_ = p.SetCommitment(CommitmentCommitted)
+		if !p.IsCommitted() {
+			t.Error("expected IsCommitted after setting COMMITTED")
+		}
+		_ = p.SetCommitment(CommitmentExecuting)
+		if !p.IsCommitted() {
+			t.Error("expected IsCommitted for EXECUTING (committed or above)")
+		}
+	})
+
+	t.Run("IsExecuting", func(t *testing.T) {
+		p := NewPlan()
+		if p.IsExecuting() {
+			t.Error("expected not executing initially")
+		}
+		_ = p.SetCommitment(CommitmentExecuting)
+		if !p.IsExecuting() {
+			t.Error("expected IsExecuting after setting EXECUTING")
+		}
+		_ = p.SetCommitment(CommitmentCommitted)
+		if p.IsExecuting() {
+			t.Error("expected not executing for COMMITTED")
+		}
+	})
+
+	t.Run("CommitmentEnum", func(t *testing.T) {
+		tests := []struct {
+			c    Commitment
+			name string
+		}{
+			{CommitmentPreliminary, "PRELIMINARY"},
+			{CommitmentTentative, "TENTATIVE"},
+			{CommitmentCommitted, "COMMITTED"},
+			{CommitmentExecuting, "EXECUTING"},
+		}
+		for _, tc := range tests {
+			if tc.c.String() != tc.name {
+				t.Errorf("Commitment(%d).String() = %s, want %s", tc.c, tc.c.String(), tc.name)
+			}
+		}
+	})
+}
+
 func TestSetLimitRequestParsing(t *testing.T) {
 	ec := NewEnergyControl()
 	ec.SetCapabilities(true, false, false, false, false, false, false)

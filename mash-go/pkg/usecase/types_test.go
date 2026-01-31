@@ -122,6 +122,18 @@ func TestDeviceUseCases_EndpointForUseCase(t *testing.T) {
 	}
 }
 
+func TestFeatureRequirement_ShouldSubscribe(t *testing.T) {
+	fr := FeatureRequirement{SubscribeAll: true}
+	if !fr.ShouldSubscribe() {
+		t.Error("ShouldSubscribe() should return true when SubscribeAll is true")
+	}
+
+	fr2 := FeatureRequirement{SubscribeAll: false}
+	if fr2.ShouldSubscribe() {
+		t.Error("ShouldSubscribe() should return false when SubscribeAll is false")
+	}
+}
+
 func TestDeviceUseCases_MatchedUseCases(t *testing.T) {
 	du := &DeviceUseCases{
 		DeviceID: "test-device",

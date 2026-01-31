@@ -9,7 +9,9 @@ usecases/
   1.0/           # Use cases for spec version 1.0
     lpc.yaml     # Limit Power Consumption
     lpp.yaml     # Limit Power Production
-    mpc.yaml     # Monitor Power Consumption
+    mpd.yaml     # Monitor Power Device
+    evc.yaml     # EV Charging
+    ...          # See 1.0/ directory for full list
 ```
 
 ## Format
@@ -35,8 +37,7 @@ features:                     # Required and optional features
         requiredValue: true   # Optional: attribute must have this value
     commands:
       - setLimit              # Command name (from spec manifest)
-    subscriptions:
-      - controlState          # Attribute to subscribe to
+    subscribe: all            # Subscribe to all feature attributes (DEC-052)
 
 commands:                     # Interactive controller commands this enables
   - limit

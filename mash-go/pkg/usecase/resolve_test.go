@@ -29,11 +29,7 @@ features:
     commands:
       - setLimit
       - clearLimit
-    subscriptions:
-      - controlState
-      - effectiveConsumptionLimit
-      - overrideReason
-      - overrideDirection
+    subscribe: all
 
   - feature: Electrical
     required: true
@@ -42,8 +38,7 @@ features:
 
   - feature: Measurement
     required: false
-    subscriptions:
-      - acActivePower
+    subscribe: all
 
 commands:
   - limit
@@ -98,8 +93,8 @@ func TestParseUseCaseYAML(t *testing.T) {
 	if len(ec.Commands) != 2 {
 		t.Errorf("feature[0].Commands length = %d, want 2", len(ec.Commands))
 	}
-	if len(ec.Subscriptions) != 4 {
-		t.Errorf("feature[0].Subscriptions length = %d, want 4", len(ec.Subscriptions))
+	if ec.Subscribe != "all" {
+		t.Errorf("feature[0].Subscribe = %q, want \"all\"", ec.Subscribe)
 	}
 }
 
@@ -156,12 +151,9 @@ func TestResolveNames_Valid(t *testing.T) {
 		t.Errorf("clearLimit CommandID = %d, want 2", ec.Commands[1].CommandID)
 	}
 
-	// Check subscriptions
-	if len(ec.Subscriptions) != 4 {
-		t.Fatalf("ec subscriptions count = %d, want 4", len(ec.Subscriptions))
-	}
-	if ec.Subscriptions[0].AttrID != 2 { // controlState
-		t.Errorf("controlState AttrID = %d, want 2", ec.Subscriptions[0].AttrID)
+	// Check subscriptions (subscribe: all)
+	if !ec.SubscribeAll {
+		t.Error("EnergyControl SubscribeAll should be true")
 	}
 
 	// Check Electrical feature

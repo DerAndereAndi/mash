@@ -880,7 +880,7 @@ func (c *ChargingSession) SetEVIdentifications(evIdentifications []EVIdentificat
 	if evIdentifications == nil {
 		return attr.SetValueInternal(nil)
 	}
-	data := make([]map[string]any, len(evIdentifications))
+	data := make([]any, len(evIdentifications))
 	for i, item := range evIdentifications {
 		data[i] = map[string]any{
 			"type":  uint8(item.Type),

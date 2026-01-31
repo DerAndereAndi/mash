@@ -6,10 +6,17 @@ package usecase
 type UseCaseName string
 
 const (
-	LPC UseCaseName = "LPC"
-	LPP UseCaseName = "LPP"
-	MPD UseCaseName = "MPD"
-	EVC UseCaseName = "EVC"
+	COB   UseCaseName = "COB"   // Control of Battery
+	EVC   UseCaseName = "EVC"   // EV Charging
+	FLOA  UseCaseName = "FLOA"  // Flexible Load
+	ITPCM UseCaseName = "ITPCM" // Incentive Table-based Power Consumption Management
+	LPC   UseCaseName = "LPC"   // Limit Power Consumption
+	LPP   UseCaseName = "LPP"   // Limit Power Production
+	MPD   UseCaseName = "MPD"   // Monitor Power Device
+	OHPCF UseCaseName = "OHPCF" // Optimized Heat Pump Control Flow
+	PODF  UseCaseName = "PODF"  // Power-on Demand Forecast
+	POEN  UseCaseName = "POEN"  // Power-on Energy Negotiation
+	TOUT  UseCaseName = "TOUT"  // Time of Use Tariff
 )
 
 // UseCaseDef describes the requirements of a single use case.
@@ -30,8 +37,12 @@ type FeatureRequirement struct {
 	Required      bool
 	Attributes    []AttributeRequirement
 	Commands      []CommandRequirement
-	SubscribeAll  bool              // true = subscribe to all attributes (DEC-052)
-	Subscriptions []SubscriptionDef // legacy: specific attribute subscriptions
+	SubscribeAll bool // true = subscribe to all attributes (DEC-052)
+}
+
+// ShouldSubscribe returns true if this feature requires subscription.
+func (f *FeatureRequirement) ShouldSubscribe() bool {
+	return f.SubscribeAll
 }
 
 // AttributeRequirement describes an attribute needed by a use case.
@@ -45,12 +56,6 @@ type AttributeRequirement struct {
 type CommandRequirement struct {
 	Name      string
 	CommandID uint8 // resolved from spec manifest
-}
-
-// SubscriptionDef describes an attribute to subscribe to.
-type SubscriptionDef struct {
-	Name   string
-	AttrID uint16 // resolved from spec manifest
 }
 
 // --- Discovery result types ---

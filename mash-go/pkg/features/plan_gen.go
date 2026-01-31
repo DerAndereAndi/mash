@@ -362,7 +362,7 @@ func (p *Plan) SetSlots(slots []PlanSlot) error {
 	if slots == nil {
 		return attr.SetValueInternal(nil)
 	}
-	data := make([]map[string]any, len(slots))
+	data := make([]any, len(slots))
 	for i, item := range slots {
 		data[i] = map[string]any{
 			"duration":     item.Duration,

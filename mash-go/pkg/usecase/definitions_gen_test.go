@@ -2,6 +2,20 @@ package usecase
 
 import "testing"
 
+// TestRegistry_AllKeysHaveConstants verifies every registry key has a matching UseCaseName constant.
+func TestRegistry_AllKeysHaveConstants(t *testing.T) {
+	knownConstants := map[UseCaseName]bool{
+		LPC: true, LPP: true, MPD: true, EVC: true,
+		COB: true, FLOA: true, ITPCM: true, OHPCF: true,
+		PODF: true, POEN: true, TOUT: true,
+	}
+	for key := range Registry {
+		if !knownConstants[key] {
+			t.Errorf("Registry key %q has no matching UseCaseName constant", key)
+		}
+	}
+}
+
 func TestRegistry_ContainsLPC(t *testing.T) {
 	def, ok := Registry[LPC]
 	if !ok {

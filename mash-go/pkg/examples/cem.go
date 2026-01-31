@@ -64,6 +64,15 @@ type ConnectedDevice struct {
 	EffectiveProductionLimit *int64                // From EnergyControl subscription
 	ProcessState             features.ProcessState // From EnergyControl subscription
 
+	// Signals state (from Signals subscription)
+	SignalSource        *features.SignalSource // Who sent the active signal
+	HasPriceSignal      bool                  // Non-nil priceSlots present
+	HasConstraintSignal bool                  // Non-nil constraintSlots present
+
+	// Plan state (from Plan subscription)
+	PlanID         *uint32             // Current plan ID
+	PlanCommitment *features.Commitment // How firm the current plan is
+
 	// LPC/LPP state
 	LimitApplied      bool                        // Was last SetLimit applied?
 	RejectReason      *features.LimitRejectReason // Why limit was rejected
@@ -619,6 +628,152 @@ func (c *CEM) SetChargingMode(ctx context.Context, deviceID string, endpointID u
 	return nil
 }
 
+// SendPriceSignal sends a price signal to a device's Signals feature.
+func (c *CEM) SendPriceSignal(ctx context.Context, deviceID string, endpointID uint8, source features.SignalSource, startTime uint64, validUntil *uint64, slots []features.PriceSlot) error {
+	c.mu.RLock()
+	device, exists := c.connectedDevices[deviceID]
+	c.mu.RUnlock()
+
+	if !exists {
+		return errors.New("device not connected")
+	}
+
+	slotsData := make([]any, len(slots))
+	for i, s := range slots {
+		slotsData[i] = map[string]any{
+			"duration":         s.Duration,
+			"price":            s.Price,
+			"priceLevel":       s.PriceLevel,
+			"renewablePercent": s.RenewablePercent,
+			"co2Intensity":     s.Co2Intensity,
+		}
+	}
+
+	params := map[string]any{
+		"source":    uint8(source),
+		"startTime": startTime,
+		"slots":     slotsData,
+	}
+	if validUntil != nil {
+		params["validUntil"] = *validUntil
+	}
+
+	_, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeatureSignals),
+		features.SignalsCmdSendPriceSignal, params)
+	return err
+}
+
+// SendConstraintSignal sends a constraint signal to a device's Signals feature.
+func (c *CEM) SendConstraintSignal(ctx context.Context, deviceID string, endpointID uint8, source features.SignalSource, startTime uint64, validUntil *uint64, slots []features.ConstraintSlot) error {
+	c.mu.RLock()
+	device, exists := c.connectedDevices[deviceID]
+	c.mu.RUnlock()
+
+	if !exists {
+		return errors.New("device not connected")
+	}
+
+	slotsData := make([]any, len(slots))
+	for i, s := range slots {
+		slotsData[i] = map[string]any{
+			"duration":       s.Duration,
+			"consumptionMax": s.ConsumptionMax,
+			"consumptionMin": s.ConsumptionMin,
+			"productionMax":  s.ProductionMax,
+			"productionMin":  s.ProductionMin,
+		}
+	}
+
+	params := map[string]any{
+		"source":    uint8(source),
+		"startTime": startTime,
+		"slots":     slotsData,
+	}
+	if validUntil != nil {
+		params["validUntil"] = *validUntil
+	}
+
+	_, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeatureSignals),
+		features.SignalsCmdSendConstraintSignal, params)
+	return err
+}
+
+// ClearSignals clears all active signals on a device.
+func (c *CEM) ClearSignals(ctx context.Context, deviceID string, endpointID uint8) error {
+	c.mu.RLock()
+	device, exists := c.connectedDevices[deviceID]
+	c.mu.RUnlock()
+
+	if !exists {
+		return errors.New("device not connected")
+	}
+
+	_, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeatureSignals),
+		features.SignalsCmdClearSignals, nil)
+	return err
+}
+
+// RequestPlan asks a device to generate or update its power plan.
+// Returns the plan ID from the device's response.
+func (c *CEM) RequestPlan(ctx context.Context, deviceID string, endpointID uint8) (uint32, error) {
+	c.mu.RLock()
+	device, exists := c.connectedDevices[deviceID]
+	c.mu.RUnlock()
+
+	if !exists {
+		return 0, errors.New("device not connected")
+	}
+
+	rawResult, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeaturePlan),
+		features.PlanCmdRequestPlan, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	if resultMap := wire.ToStringMap(rawResult); resultMap != nil {
+		if rawVal, exists := resultMap["planId"]; exists {
+			if v, ok := wire.ToUint32(rawVal); ok {
+				return v, nil
+			}
+		}
+	}
+
+	return 0, nil
+}
+
+// AcceptPlan accepts a device's plan, advancing its commitment level.
+// Returns the new commitment level.
+func (c *CEM) AcceptPlan(ctx context.Context, deviceID string, endpointID uint8, planID uint32) (features.Commitment, error) {
+	c.mu.RLock()
+	device, exists := c.connectedDevices[deviceID]
+	c.mu.RUnlock()
+
+	if !exists {
+		return 0, errors.New("device not connected")
+	}
+
+	params := map[string]any{
+		"planId":      planID,
+		"planVersion": uint32(0),
+	}
+
+	rawResult, err := device.Client.Invoke(ctx, endpointID, uint8(model.FeaturePlan),
+		features.PlanCmdAcceptPlan, params)
+	if err != nil {
+		return 0, err
+	}
+
+	if resultMap := wire.ToStringMap(rawResult); resultMap != nil {
+		if rawVal, exists := resultMap["newCommitment"]; exists {
+			if v, ok := wire.ToUint8Public(rawVal); ok {
+				return features.Commitment(v), nil
+			}
+		}
+	}
+
+	return features.CommitmentPreliminary, nil
+}
+
 // HandleNotification processes incoming notifications from subscribed devices.
 // Call this when a notification is received from a connected device.
 // Uses wire.ToInt64/ToUint8Public for type-safe CBOR value extraction.
@@ -695,6 +850,37 @@ func (c *CEM) HandleNotification(deviceID string, endpointID uint8, featureID ui
 		if rawVal, exists := changes[features.ChargingSessionAttrEVTargetEnergyRequest]; exists {
 			if v, ok := wire.ToInt64(rawVal); ok {
 				device.EVTargetEnergyRequest = &v
+			}
+		}
+
+	case model.FeatureSignals:
+		if rawVal, ok := changes[features.SignalsAttrSignalSource]; ok {
+			if rawVal != nil {
+				if v, ok := wire.ToUint8Public(rawVal); ok {
+					src := features.SignalSource(v)
+					device.SignalSource = &src
+				}
+			} else {
+				device.SignalSource = nil
+			}
+		}
+		if rawVal, ok := changes[features.SignalsAttrPriceSlots]; ok {
+			device.HasPriceSignal = rawVal != nil
+		}
+		if rawVal, ok := changes[features.SignalsAttrConstraintSlots]; ok {
+			device.HasConstraintSignal = rawVal != nil
+		}
+
+	case model.FeaturePlan:
+		if rawVal, exists := changes[features.PlanAttrPlanID]; exists {
+			if v, ok := wire.ToUint32(rawVal); ok {
+				device.PlanID = &v
+			}
+		}
+		if rawVal, exists := changes[features.PlanAttrCommitment]; exists {
+			if v, ok := wire.ToUint8Public(rawVal); ok {
+				c := features.Commitment(v)
+				device.PlanCommitment = &c
 			}
 		}
 	}

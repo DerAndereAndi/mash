@@ -37,6 +37,31 @@ func TestEVSECreation(t *testing.T) {
 	if evse.Device().EndpointCount() != 2 {
 		t.Errorf("expected 2 endpoints (root + charger), got %d", evse.Device().EndpointCount())
 	}
+
+	// Endpoint 1 should have Signals and Plan features
+	ep1, err := evse.Device().GetEndpoint(1)
+	if err != nil {
+		t.Fatalf("GetEndpoint(1): %v", err)
+	}
+	if _, err := ep1.GetFeature(model.FeatureSignals); err != nil {
+		t.Error("charger endpoint missing Signals feature")
+	}
+	if _, err := ep1.GetFeature(model.FeaturePlan); err != nil {
+		t.Error("charger endpoint missing Plan feature")
+	}
+
+	// Feature map should include Signals and Plan bits
+	sigFeature, sigErr := ep1.GetFeature(model.FeatureSignals)
+	if sigErr != nil {
+		t.Fatal("cannot check featureMap: Signals feature missing")
+	}
+	fmap := sigFeature.FeatureMap()
+	if fmap&uint32(model.FeatureMapSignals) == 0 {
+		t.Error("featureMap missing Signals bit")
+	}
+	if fmap&uint32(model.FeatureMapPlan) == 0 {
+		t.Error("featureMap missing Plan bit")
+	}
 }
 
 func TestCEMCreation(t *testing.T) {
@@ -464,6 +489,236 @@ func TestSubscribeToEnergyControl(t *testing.T) {
 	}
 }
 
+func TestHandleNotification_Signals(t *testing.T) {
+	cem := NewCEM(CEMConfig{
+		DeviceID:     "PEN67890.CEM-001",
+		VendorName:   "Test Vendor",
+		ProductName:  "Test CEM",
+		SerialNumber: "SN-CEM-001",
+		VendorID:     67890,
+		ProductID:    200,
+	})
+
+	_, _ = cem.ConnectDevice("dev-1", nil)
+
+	// Simulate Signals notification with signalSource
+	cem.HandleNotification("dev-1", 1, uint8(model.FeatureSignals), map[uint16]any{
+		features.SignalsAttrSignalSource: uint8(features.SignalSourceLocalEms),
+	})
+
+	device := cem.GetDevice("dev-1")
+	if device.SignalSource == nil {
+		t.Fatal("expected SignalSource to be set")
+	}
+	if *device.SignalSource != features.SignalSourceLocalEms {
+		t.Errorf("SignalSource = %v, want LOCAL_EMS", *device.SignalSource)
+	}
+
+	// Simulate priceSlots arriving (non-nil indicates active signal)
+	cem.HandleNotification("dev-1", 1, uint8(model.FeatureSignals), map[uint16]any{
+		features.SignalsAttrPriceSlots: []any{map[string]any{"duration": uint32(3600)}},
+	})
+	if !device.HasPriceSignal {
+		t.Error("expected HasPriceSignal to be true after priceSlots notification")
+	}
+
+	// Simulate constraintSlots arriving
+	cem.HandleNotification("dev-1", 1, uint8(model.FeatureSignals), map[uint16]any{
+		features.SignalsAttrConstraintSlots: []any{map[string]any{"duration": uint32(1800)}},
+	})
+	if !device.HasConstraintSignal {
+		t.Error("expected HasConstraintSignal to be true after constraintSlots notification")
+	}
+
+	// Clear signalSource (nil value)
+	cem.HandleNotification("dev-1", 1, uint8(model.FeatureSignals), map[uint16]any{
+		features.SignalsAttrSignalSource: nil,
+	})
+	if device.SignalSource != nil {
+		t.Error("expected SignalSource to be nil after clear")
+	}
+}
+
+func TestHandleNotification_Plan(t *testing.T) {
+	cem := NewCEM(CEMConfig{
+		DeviceID:     "PEN67890.CEM-001",
+		VendorName:   "Test Vendor",
+		ProductName:  "Test CEM",
+		SerialNumber: "SN-CEM-001",
+		VendorID:     67890,
+		ProductID:    200,
+	})
+
+	_, _ = cem.ConnectDevice("dev-1", nil)
+
+	// Simulate Plan notification with planId and commitment
+	cem.HandleNotification("dev-1", 1, uint8(model.FeaturePlan), map[uint16]any{
+		features.PlanAttrPlanID:     uint32(42),
+		features.PlanAttrCommitment: uint8(features.CommitmentCommitted),
+	})
+
+	device := cem.GetDevice("dev-1")
+	if device.PlanID == nil || *device.PlanID != 42 {
+		t.Errorf("PlanID = %v, want 42", device.PlanID)
+	}
+	if device.PlanCommitment == nil || *device.PlanCommitment != features.CommitmentCommitted {
+		t.Errorf("PlanCommitment = %v, want COMMITTED", device.PlanCommitment)
+	}
+}
+
+func TestCEM_SendPriceSignal(t *testing.T) {
+	evse := NewEVSE(EVSEConfig{
+		DeviceID:           "PEN12345.EVSE-001",
+		VendorName:         "Test Vendor",
+		ProductName:        "Test Charger",
+		SerialNumber:       "SN-001",
+		VendorID:           12345,
+		ProductID:          100,
+		PhaseCount:         3,
+		NominalVoltage:     400,
+		MaxCurrentPerPhase: 32000,
+		MinCurrentPerPhase: 6000,
+		NominalMaxPower:    22000000,
+		NominalMinPower:    1400000,
+	})
+
+	evseServer := interaction.NewServer(evse.Device())
+
+	cem := NewCEM(CEMConfig{
+		DeviceID:     "PEN67890.CEM-001",
+		VendorName:   "Test Vendor",
+		ProductName:  "Test CEM",
+		SerialNumber: "SN-CEM-001",
+		VendorID:     67890,
+		ProductID:    200,
+	})
+
+	sender := &roundTripSender{server: evseServer}
+	client := interaction.NewClient(sender)
+	sender.client = client
+	client.SetTimeout(5 * time.Second)
+
+	_, err := cem.ConnectDevice("PEN12345.EVSE-001", client)
+	if err != nil {
+		t.Fatalf("ConnectDevice failed: %v", err)
+	}
+
+	ctx := context.Background()
+	slots := []features.PriceSlot{
+		{Duration: 3600, Price: 250, PriceLevel: 2},
+		{Duration: 3600, Price: 180, PriceLevel: 1},
+	}
+
+	err = cem.SendPriceSignal(ctx, "PEN12345.EVSE-001", 1, features.SignalSourceLocalEms, 1700000000, nil, slots)
+	if err != nil {
+		t.Fatalf("SendPriceSignal failed: %v", err)
+	}
+}
+
+func TestCEM_RequestAndAcceptPlan(t *testing.T) {
+	evse := NewEVSE(EVSEConfig{
+		DeviceID:           "PEN12345.EVSE-001",
+		VendorName:         "Test Vendor",
+		ProductName:        "Test Charger",
+		SerialNumber:       "SN-001",
+		VendorID:           12345,
+		ProductID:          100,
+		PhaseCount:         3,
+		NominalVoltage:     400,
+		MaxCurrentPerPhase: 32000,
+		MinCurrentPerPhase: 6000,
+		NominalMaxPower:    22000000,
+		NominalMinPower:    1400000,
+	})
+
+	evseServer := interaction.NewServer(evse.Device())
+
+	cem := NewCEM(CEMConfig{
+		DeviceID:     "PEN67890.CEM-001",
+		VendorName:   "Test Vendor",
+		ProductName:  "Test CEM",
+		SerialNumber: "SN-CEM-001",
+		VendorID:     67890,
+		ProductID:    200,
+	})
+
+	sender := &roundTripSender{server: evseServer}
+	client := interaction.NewClient(sender)
+	sender.client = client
+	client.SetTimeout(5 * time.Second)
+
+	_, err := cem.ConnectDevice("PEN12345.EVSE-001", client)
+	if err != nil {
+		t.Fatalf("ConnectDevice failed: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Request plan
+	planID, err := cem.RequestPlan(ctx, "PEN12345.EVSE-001", 1)
+	if err != nil {
+		t.Fatalf("RequestPlan failed: %v", err)
+	}
+	// The EVSE handler returns current planID (defaults to 0)
+	if planID != 0 {
+		t.Errorf("expected planID 0, got %d", planID)
+	}
+
+	// Accept plan
+	commitment, err := cem.AcceptPlan(ctx, "PEN12345.EVSE-001", 1, planID)
+	if err != nil {
+		t.Fatalf("AcceptPlan failed: %v", err)
+	}
+	// The EVSE handler commits the plan when IDs match
+	if commitment != features.CommitmentCommitted {
+		t.Errorf("expected COMMITTED, got %s", commitment)
+	}
+}
+
+func TestCEM_ClearSignals(t *testing.T) {
+	evse := NewEVSE(EVSEConfig{
+		DeviceID:           "PEN12345.EVSE-001",
+		VendorName:         "Test Vendor",
+		ProductName:        "Test Charger",
+		SerialNumber:       "SN-001",
+		VendorID:           12345,
+		ProductID:          100,
+		PhaseCount:         3,
+		NominalVoltage:     400,
+		MaxCurrentPerPhase: 32000,
+		MinCurrentPerPhase: 6000,
+		NominalMaxPower:    22000000,
+		NominalMinPower:    1400000,
+	})
+
+	evseServer := interaction.NewServer(evse.Device())
+
+	cem := NewCEM(CEMConfig{
+		DeviceID:     "PEN67890.CEM-001",
+		VendorName:   "Test Vendor",
+		ProductName:  "Test CEM",
+		SerialNumber: "SN-CEM-001",
+		VendorID:     67890,
+		ProductID:    200,
+	})
+
+	sender := &roundTripSender{server: evseServer}
+	client := interaction.NewClient(sender)
+	sender.client = client
+	client.SetTimeout(5 * time.Second)
+
+	_, err := cem.ConnectDevice("PEN12345.EVSE-001", client)
+	if err != nil {
+		t.Fatalf("ConnectDevice failed: %v", err)
+	}
+
+	ctx := context.Background()
+	err = cem.ClearSignals(ctx, "PEN12345.EVSE-001", 1)
+	if err != nil {
+		t.Fatalf("ClearSignals failed: %v", err)
+	}
+}
+
 func TestPauseResume(t *testing.T) {
 	evse := NewEVSE(EVSEConfig{
 		DeviceID:           "PEN12345.EVSE-001",
@@ -532,5 +787,118 @@ func TestPauseResume(t *testing.T) {
 
 	if evse.GetCurrentPower() != 11000000 {
 		t.Errorf("expected power 11000000 after resume, got %d", evse.GetCurrentPower())
+	}
+}
+
+func TestHeatPumpCreation(t *testing.T) {
+	hp := NewHeatPump(HeatPumpConfig{
+		DeviceID:           "PEN12345.HP-001",
+		VendorName:         "Test Vendor",
+		ProductName:        "Test Heat Pump",
+		SerialNumber:       "SN-HP-001",
+		VendorID:           12345,
+		ProductID:          300,
+		PhaseCount:         3,
+		NominalVoltage:     230,
+		NominalMaxPower:    8000000,  // 8 kW
+		NominalMinPower:    1500000,  // 1.5 kW
+		MaxCurrentPerPhase: 12000,    // 12A
+	})
+
+	if hp.Device() == nil {
+		t.Fatal("expected device to be created")
+	}
+
+	// Check structure: root + heat pump endpoint
+	if hp.Device().EndpointCount() != 2 {
+		t.Errorf("expected 2 endpoints, got %d", hp.Device().EndpointCount())
+	}
+
+	// Endpoint 1 should be HEAT_PUMP type
+	ep1, err := hp.Device().GetEndpoint(1)
+	if err != nil {
+		t.Fatalf("GetEndpoint(1): %v", err)
+	}
+	if ep1.Info().Type != model.EndpointHeatPump {
+		t.Errorf("endpoint type = %v, want EndpointHeatPump", ep1.Info().Type)
+	}
+
+	// Check features
+	if _, err := ep1.GetFeature(model.FeatureElectrical); err != nil {
+		t.Error("missing Electrical feature")
+	}
+	if _, err := ep1.GetFeature(model.FeatureMeasurement); err != nil {
+		t.Error("missing Measurement feature")
+	}
+	if _, err := ep1.GetFeature(model.FeatureEnergyControl); err != nil {
+		t.Error("missing EnergyControl feature")
+	}
+	if _, err := ep1.GetFeature(model.FeatureStatus); err != nil {
+		t.Error("missing Status feature")
+	}
+}
+
+func TestHeatPumpPauseResume(t *testing.T) {
+	hp := NewHeatPump(HeatPumpConfig{
+		DeviceID:           "PEN12345.HP-001",
+		VendorName:         "Test Vendor",
+		ProductName:        "Test Heat Pump",
+		SerialNumber:       "SN-HP-001",
+		VendorID:           12345,
+		ProductID:          300,
+		PhaseCount:         3,
+		NominalVoltage:     230,
+		NominalMaxPower:    8000000,
+		NominalMinPower:    1500000,
+		MaxCurrentPerPhase: 12000,
+	})
+
+	hpServer := interaction.NewServer(hp.Device())
+
+	// Simulate heat pump running
+	hp.SimulateHeating(5000000) // 5 kW
+
+	if hp.GetCurrentPower() != 5000000 {
+		t.Errorf("expected power 5000000, got %d", hp.GetCurrentPower())
+	}
+
+	ctx := context.Background()
+
+	// Pause
+	pauseReq := &wire.Request{
+		MessageID:  1,
+		Operation:  wire.OpInvoke,
+		EndpointID: 1,
+		FeatureID:  uint8(model.FeatureEnergyControl),
+		Payload: &wire.InvokePayload{
+			CommandID:  features.EnergyControlCmdPause,
+			Parameters: map[string]any{},
+		},
+	}
+
+	resp := hpServer.HandleRequest(ctx, pauseReq)
+	if !resp.Status.IsSuccess() {
+		t.Fatalf("Pause failed: %v", resp.Status)
+	}
+
+	if hp.GetCurrentPower() != 0 {
+		t.Errorf("expected power 0 after pause, got %d", hp.GetCurrentPower())
+	}
+
+	// Resume
+	resumeReq := &wire.Request{
+		MessageID:  2,
+		Operation:  wire.OpInvoke,
+		EndpointID: 1,
+		FeatureID:  uint8(model.FeatureEnergyControl),
+		Payload: &wire.InvokePayload{
+			CommandID:  features.EnergyControlCmdResume,
+			Parameters: map[string]any{},
+		},
+	}
+
+	resp = hpServer.HandleRequest(ctx, resumeReq)
+	if !resp.Status.IsSuccess() {
+		t.Fatalf("Resume failed: %v", resp.Status)
 	}
 }

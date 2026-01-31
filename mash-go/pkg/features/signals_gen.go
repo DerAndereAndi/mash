@@ -405,7 +405,7 @@ func (s *Signals) SetPriceSlots(priceSlots []PriceSlot) error {
 	if priceSlots == nil {
 		return attr.SetValueInternal(nil)
 	}
-	data := make([]map[string]any, len(priceSlots))
+	data := make([]any, len(priceSlots))
 	for i, item := range priceSlots {
 		data[i] = map[string]any{
 			"duration":         item.Duration,
@@ -436,7 +436,7 @@ func (s *Signals) SetConstraintSlots(constraintSlots []ConstraintSlot) error {
 	if constraintSlots == nil {
 		return attr.SetValueInternal(nil)
 	}
-	data := make([]map[string]any, len(constraintSlots))
+	data := make([]any, len(constraintSlots))
 	for i, item := range constraintSlots {
 		data[i] = map[string]any{
 			"duration":       item.Duration,
@@ -467,7 +467,7 @@ func (s *Signals) SetForecastSlots(forecastSlots []ForecastSlot) error {
 	if forecastSlots == nil {
 		return attr.SetValueInternal(nil)
 	}
-	data := make([]map[string]any, len(forecastSlots))
+	data := make([]any, len(forecastSlots))
 	for i, item := range forecastSlots {
 		data[i] = map[string]any{
 			"duration":       item.Duration,

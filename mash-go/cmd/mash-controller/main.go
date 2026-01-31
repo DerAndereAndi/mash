@@ -472,12 +472,8 @@ func setupDeviceMonitoring(deviceID string) {
 		}
 		def := usecase.Registry[m.UseCase]
 		for _, freq := range def.Features {
-			if len(freq.Subscriptions) == 0 {
+			if !freq.ShouldSubscribe() {
 				continue
-			}
-			attrIDs := make([]uint16, len(freq.Subscriptions))
-			for i, sub := range freq.Subscriptions {
-				attrIDs[i] = sub.AttrID
 			}
 			subID, values, subErr := session.Subscribe(ctx, m.EndpointID, freq.FeatureID, nil)
 			if subErr != nil {

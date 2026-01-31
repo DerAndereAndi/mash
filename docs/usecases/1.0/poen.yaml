@@ -31,4 +31,5 @@ features:
     required: false
     subscribe: all
 
-commands: []
+commands:
+  - signal

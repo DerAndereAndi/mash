@@ -22,4 +22,5 @@ features:
       - clearSignals
     subscribe: all
 
-commands: []
+commands:
+  - signal

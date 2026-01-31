@@ -337,7 +337,7 @@ func generateSetters(b *strings.Builder, def *RawFeatureDef) {
 				fmt.Fprintf(b, "if %s == nil {\n", paramName)
 				fmt.Fprintf(b, "return attr.SetValueInternal(nil)\n")
 				fmt.Fprintf(b, "}\n")
-				fmt.Fprintf(b, "data := make([]map[string]any, len(%s))\n", paramName)
+				fmt.Fprintf(b, "data := make([]any, len(%s))\n", paramName)
 				fmt.Fprintf(b, "for i, item := range %s {\n", paramName)
 				b.WriteString("data[i] = map[string]any{\n")
 				for _, field := range attr.Items.Fields {

@@ -85,6 +85,7 @@ const (
 	DeviceTypeEVSE     DeviceType = "evse"
 	DeviceTypeInverter DeviceType = "inverter"
 	DeviceTypeBattery  DeviceType = "battery"
+	DeviceTypeHeatPump DeviceType = "heatpump"
 )
 
 // Config holds the device configuration.
@@ -133,7 +134,7 @@ var (
 )
 
 func init() {
-	flag.StringVar((*string)(&config.Type), "type", "evse", "Device type: evse, inverter, battery")
+	flag.StringVar((*string)(&config.Type), "type", "evse", "Device type: evse, inverter, battery, heatpump")
 	flag.StringVar(&config.ConfigFile, "config", "", "Configuration file path")
 	flag.UintVar(&discriminator, "discriminator", 1234, "Discriminator for commissioning (0-4095)")
 	flag.StringVar(&config.SetupCode, "setup-code", "12345678", "8-digit setup code for commissioning")
@@ -355,7 +356,7 @@ func validateConfig() error {
 		return fmt.Errorf("setup code must be 8 digits, got %d", len(config.SetupCode))
 	}
 	switch config.Type {
-	case DeviceTypeEVSE, DeviceTypeInverter, DeviceTypeBattery:
+	case DeviceTypeEVSE, DeviceTypeInverter, DeviceTypeBattery, DeviceTypeHeatPump:
 		// Valid
 	default:
 		return fmt.Errorf("unknown device type: %s", config.Type)
@@ -375,6 +376,8 @@ func applyDefaults() {
 			config.Model = "Reference Inverter 10kW"
 		case DeviceTypeBattery:
 			config.Model = "Reference Battery 10kWh"
+		case DeviceTypeHeatPump:
+			config.Model = "Reference Heat Pump 8kW"
 		}
 	}
 	if config.DeviceName == "" {
@@ -414,6 +417,10 @@ func createDevice() (*model.Device, *features.LimitResolver, discovery.DeviceCat
 	case DeviceTypeBattery:
 		device, resolver := createBatteryDevice()
 		return device, resolver, discovery.CategoryInverter
+
+	case DeviceTypeHeatPump:
+		device, resolver := createHeatPumpDevice()
+		return device, resolver, discovery.CategoryHVAC
 
 	default:
 		return nil, nil, 0
@@ -527,6 +534,28 @@ func createBatteryDevice() (*model.Device, *features.LimitResolver) {
 	_ = device.AddEndpoint(battery)
 
 	return device, resolver
+}
+
+func createHeatPumpDevice() (*model.Device, *features.LimitResolver) {
+	hp := examples.NewHeatPump(examples.HeatPumpConfig{
+		DeviceID:           config.SerialNumber,
+		VendorName:         config.Brand,
+		ProductName:        config.Model,
+		SerialNumber:       config.SerialNumber,
+		VendorID:           0x1234,
+		ProductID:          0x0004,
+		PhaseCount:         3,
+		NominalVoltage:     230,
+		NominalMaxPower:    8000000, // 8 kW
+		NominalMinPower:    1500000, // 1.5 kW
+		MaxCurrentPerPhase: 12000,   // 12A
+	})
+	resolver := hp.LimitResolver()
+	resolver.ZoneIDFromContext = service.CallerZoneIDFromContext
+	resolver.ZoneTypeFromContext = func(ctx context.Context) cert.ZoneType {
+		return service.CallerZoneTypeFromContext(ctx)
+	}
+	return hp.Device(), resolver
 }
 
 // setupEnergyControlHandler configures the SetLimit/ClearLimit handlers
@@ -688,6 +717,15 @@ func runSimulation(ctx context.Context, deviceType DeviceType) {
 				} else {
 					log.Println("[SIM] Battery idle")
 				}
+
+			case DeviceTypeHeatPump:
+				// Simulate varying heating power
+				power = (power + 500000) % 8000000
+				if power == 0 {
+					power = 1500000 // Minimum 1.5 kW
+				}
+				attrID = attrACActivePower
+				log.Printf("[SIM] Heat pump consuming %.1f kW", float64(power)/1000000)
 			}
 
 			// Update the attribute and notify subscribed zones

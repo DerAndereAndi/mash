@@ -26,6 +26,7 @@ const (
 	DeviceTypeEVSE     DeviceType = "evse"
 	DeviceTypeInverter DeviceType = "inverter"
 	DeviceTypeBattery  DeviceType = "battery"
+	DeviceTypeHeatPump DeviceType = "heatpump"
 )
 
 // DeviceConfig provides configuration information to the interactive device.
@@ -692,7 +693,7 @@ func (d *Device) setPowerDirect(powerMW int64) {
 
 	var attrID uint16
 	switch d.config.DeviceType() {
-	case DeviceTypeEVSE, DeviceTypeInverter:
+	case DeviceTypeEVSE, DeviceTypeInverter, DeviceTypeHeatPump:
 		attrID = attrACActivePower
 	case DeviceTypeBattery:
 		attrID = attrDCPower
@@ -751,6 +752,14 @@ func (d *Device) runSimulation(ctx context.Context) {
 				// Simulate charge/discharge cycles
 				power = (power + 500000) % 10000000 - 5000000
 				attrID = attrDCPower
+
+			case DeviceTypeHeatPump:
+				// Simulate varying heating power
+				power = (power + 500000) % 8000000
+				if power == 0 {
+					power = 1500000
+				}
+				attrID = attrACActivePower
 			}
 
 			// Update the attribute and notify subscribed zones

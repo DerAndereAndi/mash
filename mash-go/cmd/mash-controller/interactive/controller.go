@@ -4,6 +4,7 @@ package interactive
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strconv"
@@ -153,6 +154,12 @@ func (c *Controller) Run(ctx context.Context, cancel context.CancelFunc) {
 		case "override":
 			c.cmdOverride(ctx, args)
 
+		case "signal":
+			c.cmdSignal(ctx, args)
+
+		case "plan":
+			c.cmdPlan(ctx, args)
+
 		case "lpc-demo", "lpp-demo":
 			c.cmdLpcDemo(ctx, args)
 
@@ -206,6 +213,11 @@ MASH Controller Commands:
     resume <device-id>                - Resume device
     capacity <device-id>              - Show device capacity information
     override <device-id>              - Show override state (if in OVERRIDE)
+    signal <device-id> price <json>       - Send price signal
+    signal <device-id> constraint <json>  - Send constraint signal
+    signal <device-id> clear              - Clear all signals
+    plan <device-id> request              - Request device to generate a plan
+    plan <device-id> accept <plan-id>     - Accept a plan
     lpc-demo <device-id>              - Run automated LPC/LPP demo sequence
 
   Certificate Management:
@@ -899,6 +911,194 @@ func (c *Controller) cmdCapabilities(args []string) {
 		fmt.Fprintln(c.rl.Stdout(), "\n  No interactive commands available (monitoring only)")
 	}
 	fmt.Fprintln(c.rl.Stdout())
+}
+
+// cmdSignal handles the signal command.
+func (c *Controller) cmdSignal(ctx context.Context, args []string) {
+	if len(args) < 2 {
+		fmt.Fprintln(c.rl.Stdout(), "Usage: signal <device-id> price <slots-json>")
+		fmt.Fprintln(c.rl.Stdout(), "       signal <device-id> constraint <slots-json>")
+		fmt.Fprintln(c.rl.Stdout(), "       signal <device-id> clear")
+		fmt.Fprintln(c.rl.Stdout(), "  Slots JSON: [{\"duration\":3600,\"price\":250,\"priceLevel\":2}]")
+		return
+	}
+
+	deviceID := c.resolveDeviceID(args[0])
+	if deviceID == "" {
+		fmt.Fprintf(c.rl.Stdout(), "Device not found: %s\n", args[0])
+		return
+	}
+
+	if !c.deviceSupportsCommand(deviceID, "signal") {
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support signal command")
+		return
+	}
+
+	subCmd := strings.ToLower(args[1])
+
+	switch subCmd {
+	case "clear":
+		fmt.Fprintf(c.rl.Stdout(), "Clearing signals on %s...\n", deviceID)
+		if err := c.cem.ClearSignals(ctx, deviceID, 1); err != nil {
+			fmt.Fprintf(c.rl.Stdout(), "Failed to clear signals: %v\n", err)
+			return
+		}
+		fmt.Fprintln(c.rl.Stdout(), "Signals cleared")
+
+	case "price":
+		if len(args) < 3 {
+			fmt.Fprintln(c.rl.Stdout(), "Usage: signal <device-id> price <slots-json>")
+			return
+		}
+		slotsJSON := strings.Join(args[2:], " ")
+		slots, err := parsePriceSlots(slotsJSON)
+		if err != nil {
+			fmt.Fprintf(c.rl.Stdout(), "Invalid slots JSON: %v\n", err)
+			return
+		}
+		startTime := uint64(time.Now().Unix())
+		fmt.Fprintf(c.rl.Stdout(), "Sending price signal (%d slots) to %s...\n", len(slots), deviceID)
+		if err := c.cem.SendPriceSignal(ctx, deviceID, 1, features.SignalSourceLocalEms, startTime, nil, slots); err != nil {
+			fmt.Fprintf(c.rl.Stdout(), "Failed to send price signal: %v\n", err)
+			return
+		}
+		fmt.Fprintln(c.rl.Stdout(), "Price signal sent")
+
+	case "constraint":
+		if len(args) < 3 {
+			fmt.Fprintln(c.rl.Stdout(), "Usage: signal <device-id> constraint <slots-json>")
+			return
+		}
+		slotsJSON := strings.Join(args[2:], " ")
+		slots, err := parseConstraintSlots(slotsJSON)
+		if err != nil {
+			fmt.Fprintf(c.rl.Stdout(), "Invalid slots JSON: %v\n", err)
+			return
+		}
+		startTime := uint64(time.Now().Unix())
+		fmt.Fprintf(c.rl.Stdout(), "Sending constraint signal (%d slots) to %s...\n", len(slots), deviceID)
+		if err := c.cem.SendConstraintSignal(ctx, deviceID, 1, features.SignalSourceLocalEms, startTime, nil, slots); err != nil {
+			fmt.Fprintf(c.rl.Stdout(), "Failed to send constraint signal: %v\n", err)
+			return
+		}
+		fmt.Fprintln(c.rl.Stdout(), "Constraint signal sent")
+
+	default:
+		fmt.Fprintf(c.rl.Stdout(), "Unknown signal subcommand: %s (use price, constraint, or clear)\n", subCmd)
+	}
+}
+
+// parsePriceSlots parses a JSON array of price slots.
+func parsePriceSlots(jsonStr string) ([]features.PriceSlot, error) {
+	var raw []map[string]any
+	if err := parseJSON(jsonStr, &raw); err != nil {
+		return nil, err
+	}
+	slots := make([]features.PriceSlot, len(raw))
+	for i, m := range raw {
+		if v, ok := m["duration"].(float64); ok {
+			slots[i].Duration = uint32(v)
+		}
+		if v, ok := m["price"].(float64); ok {
+			slots[i].Price = int32(v)
+		}
+		if v, ok := m["priceLevel"].(float64); ok {
+			slots[i].PriceLevel = uint8(v)
+		}
+		if v, ok := m["renewablePercent"].(float64); ok {
+			slots[i].RenewablePercent = uint8(v)
+		}
+		if v, ok := m["co2Intensity"].(float64); ok {
+			slots[i].Co2Intensity = uint16(v)
+		}
+	}
+	return slots, nil
+}
+
+// parseConstraintSlots parses a JSON array of constraint slots.
+func parseConstraintSlots(jsonStr string) ([]features.ConstraintSlot, error) {
+	var raw []map[string]any
+	if err := parseJSON(jsonStr, &raw); err != nil {
+		return nil, err
+	}
+	slots := make([]features.ConstraintSlot, len(raw))
+	for i, m := range raw {
+		if v, ok := m["duration"].(float64); ok {
+			slots[i].Duration = uint32(v)
+		}
+		if v, ok := m["consumptionMax"].(float64); ok {
+			slots[i].ConsumptionMax = int64(v)
+		}
+		if v, ok := m["consumptionMin"].(float64); ok {
+			slots[i].ConsumptionMin = int64(v)
+		}
+		if v, ok := m["productionMax"].(float64); ok {
+			slots[i].ProductionMax = int64(v)
+		}
+		if v, ok := m["productionMin"].(float64); ok {
+			slots[i].ProductionMin = int64(v)
+		}
+	}
+	return slots, nil
+}
+
+// parseJSON decodes a JSON string into the target value.
+func parseJSON(jsonStr string, target any) error {
+	return json.Unmarshal([]byte(jsonStr), target)
+}
+
+// cmdPlan handles the plan command.
+func (c *Controller) cmdPlan(ctx context.Context, args []string) {
+	if len(args) < 2 {
+		fmt.Fprintln(c.rl.Stdout(), "Usage: plan <device-id> request")
+		fmt.Fprintln(c.rl.Stdout(), "       plan <device-id> accept <plan-id>")
+		return
+	}
+
+	deviceID := c.resolveDeviceID(args[0])
+	if deviceID == "" {
+		fmt.Fprintf(c.rl.Stdout(), "Device not found: %s\n", args[0])
+		return
+	}
+
+	if !c.deviceSupportsCommand(deviceID, "plan") {
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support plan command")
+		return
+	}
+
+	subCmd := strings.ToLower(args[1])
+
+	switch subCmd {
+	case "request":
+		fmt.Fprintf(c.rl.Stdout(), "Requesting plan from %s...\n", deviceID)
+		planID, err := c.cem.RequestPlan(ctx, deviceID, 1)
+		if err != nil {
+			fmt.Fprintf(c.rl.Stdout(), "Failed to request plan: %v\n", err)
+			return
+		}
+		fmt.Fprintf(c.rl.Stdout(), "Plan requested, ID: %d\n", planID)
+
+	case "accept":
+		if len(args) < 3 {
+			fmt.Fprintln(c.rl.Stdout(), "Usage: plan <device-id> accept <plan-id>")
+			return
+		}
+		planID, err := strconv.ParseUint(args[2], 10, 32)
+		if err != nil {
+			fmt.Fprintf(c.rl.Stdout(), "Invalid plan ID: %v\n", err)
+			return
+		}
+		fmt.Fprintf(c.rl.Stdout(), "Accepting plan %d on %s...\n", planID, deviceID)
+		commitment, err := c.cem.AcceptPlan(ctx, deviceID, 1, uint32(planID))
+		if err != nil {
+			fmt.Fprintf(c.rl.Stdout(), "Failed to accept plan: %v\n", err)
+			return
+		}
+		fmt.Fprintf(c.rl.Stdout(), "Plan accepted, commitment: %s\n", commitment)
+
+	default:
+		fmt.Fprintf(c.rl.Stdout(), "Unknown plan subcommand: %s (use request or accept)\n", subCmd)
+	}
 }
 
 // cmdLpcDemo runs an automated LPC/LPP demonstration sequence.
