@@ -21,6 +21,8 @@
 | [Multi-Zone](multi-zone.md) | Zone types, roles, priority resolution |
 | [Features](features/README.md) | Feature definitions and registry |
 | [Decision Log](decision-log.md) | Design decisions and rationale |
+| [Protocol Comparison](protocol-comparison.md) | MASH vs Matter 1.5 vs EEBUS |
+| [Matter Comparison](matter-comparison.md) | PKI and certificate model deep-dive |
 
 ---
 
@@ -516,6 +518,8 @@ EMS sets consumptionLimit = 8000W (priority 3)
 | Grid Signals | ToUT, POEN, ITPCM | Defined |
 | Heat Pump Flexibility | OHPCF | Defined |
 | Device Monitoring | MPC, MGCP, MOB, MOI, MPS | Defined |
+| Flexible Load | FLOA | Defined |
+| Power Demand Forecast | PODF | Defined |
 
 ### 10.2 Future Use Cases
 
