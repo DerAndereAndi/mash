@@ -296,12 +296,25 @@ function validateConformance(device):
         if featureMap.V2X and endpoint.electrical.supportedDirections != BIDIRECTIONAL:
             return ERROR("V2X requires BIDIRECTIONAL supportedDirections")
 
-    // Check attribute presence
+    // Check attribute presence (feature-level mandatory from YAML)
     for each endpoint in device.endpoints:
         for each attribute in CONFORMANCE_TABLE:
             if attribute.isMandatory(endpoint.featureMap):
                 if attribute not in endpoint.attributeList:
                     return ERROR("Missing mandatory attribute: " + attribute.name)
+
+    // Check endpoint-type-aware conformance (DEC-053)
+    // See docs/features/endpoint-conformance.yaml for the registry
+    for each endpoint in device.endpoints:
+        conformance = ENDPOINT_CONFORMANCE[endpoint.type]
+        for each feature in endpoint.features:
+            if feature.name in conformance:
+                for each attr in conformance[feature.name].mandatory:
+                    if attr not in endpoint.attributeList:
+                        return ERROR("Missing mandatory attribute for " + endpoint.type + ": " + attr)
+                for each attr in conformance[feature.name].recommended:
+                    if attr not in endpoint.attributeList:
+                        WARN("Missing recommended attribute for " + endpoint.type + ": " + attr)
 
     return SUCCESS
 ```
@@ -353,4 +366,5 @@ Each conformance rule maps to a PICS code. See [pics-format.md](../testing/pics-
 |----------|-------------|
 | [Discovery](../discovery.md) | Feature map and capability discovery |
 | [Features README](../features/README.md) | Feature definitions |
+| [Endpoint Conformance](../features/endpoint-conformance.yaml) | Per-endpoint-type mandatory/recommended attributes (DEC-053) |
 | [PICS Format](../testing/pics-format.md) | PICS specification format |

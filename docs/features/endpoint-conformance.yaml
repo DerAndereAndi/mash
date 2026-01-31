@@ -1,0 +1,176 @@
+# Endpoint Type Conformance Registry
+#
+# Defines per-endpoint-type mandatory and recommended attributes for each feature.
+# This is the second layer of the two-layer conformance model (DEC-053):
+#   Layer 1: Feature YAML defines the superset of all possible attributes
+#   Layer 2: This file defines what's expected per endpoint type
+#
+# Conformance levels:
+#   mandatory:   Must be in attributeList. PICS validation fails without it.
+#                Value may be null per DEC-051 (static attributeList).
+#   recommended: Should be in attributeList if hardware supports it.
+#                PICS validation warns if missing.
+#   (everything else in the feature YAML is optional)
+#
+# Only features with endpoint-type-dependent conformance are listed here.
+# Features with uniform conformance (e.g., Status: operatingState is always
+# mandatory) are fully specified in their feature YAML.
+
+specVersion: "1.0"
+
+endpointTypes:
+
+  GRID_CONNECTION:
+    Measurement:
+      mandatory:
+        - acActivePower
+      recommended:
+        - acReactivePower
+        - acCurrentPerPhase
+        - acVoltagePerPhase
+        - acFrequency
+        - acEnergyConsumed
+        - acEnergyProduced
+        - powerFactor
+    Electrical:
+      mandatory:
+        - phaseCount
+        - supportedDirections
+        - nominalMaxConsumption
+      recommended:
+        - nominalFrequency
+        - nominalVoltage
+
+  INVERTER:
+    Measurement:
+      mandatory:
+        - acActivePower
+      recommended:
+        - acReactivePower
+        - acCurrentPerPhase
+        - acVoltagePerPhase
+        - acFrequency
+        - acEnergyConsumed
+        - acEnergyProduced
+        - powerFactor
+        - temperature
+    Electrical:
+      mandatory:
+        - phaseCount
+        - supportedDirections
+        - nominalMaxConsumption
+        - nominalMaxProduction
+
+  PV_STRING:
+    Measurement:
+      mandatory:
+        - dcPower
+      recommended:
+        - dcVoltage
+        - dcCurrent
+        - dcEnergyOut
+        - temperature
+    Electrical:
+      recommended:
+        - nominalMaxProduction
+
+  BATTERY:
+    Measurement:
+      mandatory:
+        - dcPower
+        - stateOfCharge
+      recommended:
+        - dcVoltage
+        - dcCurrent
+        - dcEnergyIn
+        - dcEnergyOut
+        - stateOfHealth
+        - stateOfEnergy
+        - useableCapacity
+        - cycleCount
+        - temperature
+    Electrical:
+      mandatory:
+        - supportedDirections
+        - nominalMaxConsumption
+        - nominalMaxProduction
+        - energyCapacity
+
+  EV_CHARGER:
+    Measurement:
+      mandatory:
+        - acActivePower
+      recommended:
+        - acCurrentPerPhase
+        - acVoltagePerPhase
+        - acEnergyConsumed
+    Electrical:
+      mandatory:
+        - phaseCount
+        - supportedDirections
+        - nominalMaxConsumption
+        - maxCurrentPerPhase
+      recommended:
+        - minCurrentPerPhase
+
+  HEAT_PUMP:
+    Measurement:
+      mandatory:
+        - acActivePower
+      recommended:
+        - acEnergyConsumed
+        - temperature
+    Electrical:
+      mandatory:
+        - phaseCount
+        - nominalMaxConsumption
+
+  WATER_HEATER:
+    Measurement:
+      mandatory:
+        - acActivePower
+      recommended:
+        - acEnergyConsumed
+        - temperature
+    Electrical:
+      mandatory:
+        - phaseCount
+        - nominalMaxConsumption
+
+  HVAC:
+    Measurement:
+      mandatory:
+        - acActivePower
+      recommended:
+        - acEnergyConsumed
+        - temperature
+    Electrical:
+      mandatory:
+        - phaseCount
+        - nominalMaxConsumption
+
+  APPLIANCE:
+    Measurement:
+      mandatory:
+        - acActivePower
+      recommended:
+        - acEnergyConsumed
+    Electrical:
+      mandatory:
+        - nominalMaxConsumption
+
+  SUB_METER:
+    Measurement:
+      mandatory:
+        - acActivePower
+      recommended:
+        - acCurrentPerPhase
+        - acVoltagePerPhase
+        - acFrequency
+        - acEnergyConsumed
+        - acEnergyProduced
+    Electrical:
+      mandatory:
+        - phaseCount
+      recommended:
+        - nominalMaxConsumption

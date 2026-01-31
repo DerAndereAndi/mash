@@ -18,11 +18,7 @@ features:
     commands:
       - setLimit
       - clearLimit
-    subscriptions:
-      - controlState
-      - effectiveProductionLimit
-      - overrideReason
-      - overrideDirection
+    subscribe: all
 
   - feature: Electrical
     required: true
@@ -31,8 +27,7 @@ features:
 
   - feature: Measurement
     required: false
-    subscriptions:
-      - acActivePower
+    subscribe: all
 
 commands:
   - limit

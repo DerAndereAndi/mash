@@ -30,7 +30,8 @@ type FeatureRequirement struct {
 	Required      bool
 	Attributes    []AttributeRequirement
 	Commands      []CommandRequirement
-	Subscriptions []SubscriptionDef
+	SubscribeAll  bool              // true = subscribe to all attributes (DEC-052)
+	Subscriptions []SubscriptionDef // legacy: specific attribute subscriptions
 }
 
 // AttributeRequirement describes an attribute needed by a use case.

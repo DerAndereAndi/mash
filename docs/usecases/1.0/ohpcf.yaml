@@ -27,10 +27,7 @@ features:
       - clearLimit
       - pause
       - resume
-    subscriptions:
-      - controlState
-      - processState
-      - effectiveConsumptionLimit
+    subscribe: all
 
   - feature: Electrical
     required: true
@@ -39,8 +36,7 @@ features:
 
   - feature: Measurement
     required: false
-    subscriptions:
-      - acActivePower
+    subscribe: all
 
 commands:
   - limit

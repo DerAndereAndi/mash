@@ -290,6 +290,14 @@ func (r *MAN006) Check(p *pics.PICS) []pics.Violation {
 }
 
 // MAN007 checks mandatory attributes for MEAS feature.
+// Per DEC-053, specific mandatory attributes depend on endpoint type.
+// PICS is device-level, so this rule uses featureMap bits as a proxy:
+//   - BATTERY flag (F02) → dcPower (A28) and stateOfCharge (A32) required
+//   - No BATTERY flag → acActivePower (A01) required (AC device)
+//   - At minimum, either AC or DC power must be present
+//
+// Full endpoint-level conformance validation requires PICS format extension
+// (see docs/features/endpoint-conformance.yaml for the complete registry).
 type MAN007 struct {
 	*pics.BaseRule
 }
@@ -308,21 +316,49 @@ func (r *MAN007) Check(p *pics.PICS) []pics.Violation {
 		return nil
 	}
 
-	// Check for AC power (A01) or DC power (A28)
+	var violations []pics.Violation
+
 	a01Code := fmt.Sprintf("MASH.%s.MEAS.A01", side)
 	a28Code := fmt.Sprintf("MASH.%s.MEAS.A28", side)
+	a32Code := fmt.Sprintf("MASH.%s.MEAS.A32", side)
 
 	hasAC := p.Has(a01Code)
 	hasDC := p.Has(a28Code)
 
+	// Basic check: at least AC or DC power must be present
 	if !hasAC && !hasDC {
-		return []pics.Violation{{
+		violations = append(violations, pics.Violation{
 			RuleID:     r.ID(),
 			Severity:   r.DefaultSeverity(),
 			Message:    "Measurement feature requires either acActivePower (A01) for AC or dcPower (A28) for DC",
 			PICSCodes:  []string{a01Code, a28Code},
 			Suggestion: "Add A01=1 for AC measurement or A28=1 for DC measurement",
-		}}
+		})
 	}
-	return nil
+
+	// BATTERY flag (F02) → dcPower and stateOfCharge required
+	batteryFlag := fmt.Sprintf("MASH.%s.F02", side)
+	if p.Has(batteryFlag) {
+		var missing []string
+		var codes []string
+		if !hasDC {
+			missing = append(missing, "dcPower (A28)")
+			codes = append(codes, a28Code)
+		}
+		if !p.Has(a32Code) {
+			missing = append(missing, "stateOfCharge (A32)")
+			codes = append(codes, a32Code)
+		}
+		if len(missing) > 0 {
+			violations = append(violations, pics.Violation{
+				RuleID:     r.ID(),
+				Severity:   pics.SeverityError,
+				Message:    fmt.Sprintf("BATTERY flag set but Measurement missing: %s", strings.Join(missing, ", ")),
+				PICSCodes:  codes,
+				Suggestion: "Battery endpoints require dcPower and stateOfCharge (see endpoint-conformance.yaml)",
+			})
+		}
+	}
+
+	return violations
 }

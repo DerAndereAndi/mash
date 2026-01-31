@@ -18,27 +18,21 @@ features:
     commands:
       - sendPriceSignal
       - clearSignals
-    subscriptions:
-      - priceSlots
+    subscribe: all
 
   - feature: Plan
     required: true
     commands:
       - requestPlan
       - acceptPlan
-    subscriptions:
-      - commitment
-      - slots
+    subscribe: all
 
   - feature: EnergyControl
     required: false
-    subscriptions:
-      - controlState
-      - processState
+    subscribe: all
 
   - feature: Measurement
     required: false
-    subscriptions:
-      - acActivePower
+    subscribe: all
 
 commands: []

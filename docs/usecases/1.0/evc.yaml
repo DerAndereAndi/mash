@@ -25,12 +25,7 @@ features:
       - clearSetpoint
       - setCurrentLimits
       - clearCurrentLimits
-    subscriptions:
-      - controlState
-      - effectiveConsumptionLimit
-      - effectiveProductionLimit
-      - effectiveConsumptionSetpoint
-      - effectiveProductionSetpoint
+    subscribe: all
 
   - feature: ChargingSession
     required: true
@@ -49,30 +44,21 @@ features:
       - name: evDischargeBelowTargetPermitted
     commands:
       - setChargingMode
-    subscriptions:
-      - state
-      - evStateOfCharge
-      - evDemandMode
-      - evMinStateOfCharge
-      - evTargetStateOfCharge
+    subscribe: all
 
   - feature: Signals
     required: false
     commands:
       - sendPriceSignal
       - sendConstraintSignal
-    subscriptions:
-      - priceSlots
-      - constraintSlots
+    subscribe: all
 
   - feature: Plan
     required: false
     commands:
       - requestPlan
       - acceptPlan
-    subscriptions:
-      - commitment
-      - slots
+    subscribe: all
 
   - feature: Electrical
     required: true
@@ -82,8 +68,7 @@ features:
 
   - feature: Measurement
     required: true
-    subscriptions:
-      - acActivePower
+    subscribe: all
 
 commands:
   - setpoint

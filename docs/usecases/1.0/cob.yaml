@@ -20,13 +20,7 @@ features:
       - clearSetpoint
       - setLimit
       - clearLimit
-    subscriptions:
-      - controlState
-      - effectiveConsumptionSetpoint
-      - effectiveProductionSetpoint
-      - effectiveConsumptionLimit
-      - effectiveProductionLimit
-      - controlMode
+    subscribe: all
 
   - feature: Electrical
     required: true
@@ -36,8 +30,7 @@ features:
 
   - feature: Measurement
     required: true
-    subscriptions:
-      - acActivePower
+    subscribe: all
 
 commands:
   - setpoint

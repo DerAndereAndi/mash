@@ -24,7 +24,8 @@ type RawFeatureReq struct {
 	Required      bool              `yaml:"required"`
 	Attributes    []RawAttrReq      `yaml:"attributes"`
 	Commands      []string          `yaml:"commands"`
-	Subscriptions []string          `yaml:"subscriptions"`
+	Subscribe     string            `yaml:"subscribe"`     // "all" = subscribe to all attributes (DEC-052)
+	Subscriptions []string          `yaml:"subscriptions"` // legacy: specific attribute names
 }
 
 // RawAttrReq is an attribute requirement before name resolution.
@@ -116,7 +117,14 @@ func resolveFeatureReq(spec *version.SpecManifest, rf RawFeatureReq) (*FeatureRe
 		})
 	}
 
-	// Resolve subscriptions (these are attributes)
+	// Resolve subscriptions
+	if rf.Subscribe == "all" {
+		fr.SubscribeAll = true
+	} else if rf.Subscribe != "" {
+		return nil, fmt.Errorf("feature %s: invalid subscribe value %q (expected \"all\")", rf.Feature, rf.Subscribe)
+	}
+
+	// Legacy: resolve per-attribute subscriptions
 	for _, subName := range rf.Subscriptions {
 		attrID, ok := attrByName[subName]
 		if !ok {

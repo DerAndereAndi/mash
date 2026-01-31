@@ -418,7 +418,40 @@ When a controller connects to a device:
 
 ---
 
-## 8. Benefits of This Approach
+## 8. attributeList Immutability (DEC-051)
+
+`attributeList` is **immutable for the lifetime of a connection**. It reflects the device's hardware capabilities, not transient runtime state:
+
+- Attributes that are supported but currently have no value report `null`
+- Example: a ChargingSession feature on an EVSE always lists `evStateOfCharge` in `attributeList`, even when no EV is plugged in -- the value is simply `null`
+- A change in hardware configuration (e.g., modular device reconfiguration) requires the device to close and re-establish the connection
+
+This guarantees that controllers can read `attributeList` once at discovery time and build a stable data model without handling dynamic schema changes.
+
+---
+
+## 9. Endpoint Type Conformance (DEC-053)
+
+Which attributes a device must support depends on its endpoint type. The two-layer conformance model:
+
+| Layer | Defines | Location |
+|-------|---------|----------|
+| **Feature YAML** | Superset of all possible attributes | `docs/features/<feature>/1.0.yaml` |
+| **Endpoint type registry** | Per-type mandatory/recommended attributes | `docs/features/endpoint-conformance.yaml` |
+
+Example: Measurement feature conformance varies by endpoint type:
+
+| Endpoint Type | Mandatory | Recommended |
+|---------------|-----------|-------------|
+| GRID_CONNECTION | acActivePower | acCurrentPerPhase, acVoltagePerPhase, acFrequency, acEnergyConsumed, acEnergyProduced, powerFactor |
+| BATTERY | dcPower, stateOfCharge | dcVoltage, stateOfHealth, temperature, dcEnergyIn, dcEnergyOut |
+| PV_STRING | dcPower | dcVoltage, dcCurrent, dcEnergyOut |
+
+See `docs/features/endpoint-conformance.yaml` for the complete registry.
+
+---
+
+## 10. Benefits of This Approach
 
 | Benefit | Explanation |
 |---------|-------------|
@@ -427,10 +460,11 @@ When a controller connects to a device:
 | **Fine-grained** | `attributeList` gives exact attribute availability |
 | **Compact** | Bitmap `featureMap` is efficient for quick capability checks |
 | **Predictable** | No implicit assumptions about what "EVSE" means |
+| **Stable** | `attributeList` is immutable per connection (DEC-051) |
 
 ---
 
-## 9. Comparison with EEBUS Discovery
+## 11. Comparison with EEBUS Discovery
 
 | Aspect | EEBUS | MASH |
 |--------|-------|------|

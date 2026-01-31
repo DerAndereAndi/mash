@@ -90,6 +90,31 @@ FeatureMap bits indicate **high-level categories**. Detailed capability informat
 
 ---
 
+## Attribute Conformance (DEC-053)
+
+MASH uses a **two-layer conformance model** for attributes:
+
+| Layer | Defines | Location |
+|-------|---------|----------|
+| **Feature YAML** | Superset of all possible attributes, with universal `mandatory` flags | `<feature>/1.0.yaml` |
+| **Endpoint type registry** | Per-endpoint-type mandatory/recommended attributes | `endpoint-conformance.yaml` |
+
+**Feature YAML** defines what *can* exist. Attributes marked `mandatory: true` in the YAML are mandatory whenever the feature is present on **any** endpoint type.
+
+**Endpoint type registry** tightens conformance per endpoint type. For example, Measurement has no universally mandatory attributes (a PV_STRING has DC only, a meter has AC only). Instead, `endpoint-conformance.yaml` defines:
+- GRID_CONNECTION + Measurement: `acActivePower` mandatory
+- BATTERY + Measurement: `dcPower`, `stateOfCharge` mandatory
+- PV_STRING + Measurement: `dcPower` mandatory
+
+Conformance levels:
+- **mandatory**: Must be in `attributeList`. PICS validation fails without it. Value may be `null` (DEC-051).
+- **recommended**: Should be in `attributeList` if hardware supports it. PICS validation warns if missing.
+- **optional**: Everything else. Device's choice.
+
+See [endpoint-conformance.yaml](endpoint-conformance.yaml) for the complete registry.
+
+---
+
 ## YAML Definitions and Code Generation
 
 Each feature has two representations:

@@ -17,10 +17,6 @@ features:
       - name: totalEnergyPlanned
     commands:
       - requestPlan
-    subscriptions:
-      - commitment
-      - slots
-      - startTime
-      - endTime
+    subscribe: all
 
 commands: []

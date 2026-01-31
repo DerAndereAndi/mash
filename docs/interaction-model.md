@@ -350,6 +350,41 @@ When subscribed attributes change:
 
 ### 6.5 Subscription Behavior
 
+#### Static attributeList (DEC-051)
+
+`attributeList` is **immutable for the lifetime of a connection**. It reflects the device's hardware capabilities, not transient runtime state:
+
+- Attributes that are supported but currently have no value report `null`
+- Example: `evStateOfCharge` remains in `attributeList` when no EV is plugged in, but its value is `null`
+- A change in hardware configuration (e.g., modular device reconfiguration) requires the device to close and re-establish the connection
+
+This applies to all features. Controllers can read `attributeList` once at discovery time and build a stable data model.
+
+#### Feature-Level Subscription (DEC-052)
+
+The default subscription model is **subscribe to all attributes** of a feature:
+
+```cbor
+{
+  1: 12348,            // messageId
+  2: 3,                // operation: Subscribe
+  3: 1,                // endpointId
+  4: 2,                // featureId (e.g., Measurement)
+  5: {
+    1: [],             // attributeIds: empty = all
+    2: 1000,           // minInterval (ms)
+    3: 60000           // maxInterval (ms)
+  }
+}
+```
+
+When `attributeIds` is empty, the device reports all supported attributes. Combined with:
+- **minInterval** for batching: simultaneous changes (e.g., power, current, voltage from one measurement cycle) are coalesced into a single notification
+- **Delta notifications**: only changed attributes are sent
+- **Nullable attributes**: device only sends attributes it has; unsupported attributes never appear
+
+This means a single subscription to a feature delivers all relevant telemetry without the controller needing to know which specific attributes the device supports.
+
 #### Priming Report (Initial Response)
 
 When a subscription is established, the Subscribe Response includes **all** requested attributes' current values. This is the **priming report**:

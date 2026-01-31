@@ -3,7 +3,7 @@
 > Tracking what we evaluated, decided, and declined
 
 **Created:** 2025-01-24
-**Last Updated:** 2026-01-29
+**Last Updated:** 2026-01-31
 
 ---
 
@@ -2957,6 +2957,181 @@ MASH 1.1 (example):
 
 ---
 
+### DEC-051: Static attributeList Immutability
+
+**Date:** 2026-01-31
+**Status:** Accepted
+
+**Context:** `attributeList` (global attribute 0xFFFB) reports which attribute IDs a feature instance supports. The question arose whether this list can change during a connection -- for example, an EV charger adding measurement attributes when an EV plugs in, or a modular device gaining capabilities at runtime.
+
+This has protocol-wide implications: if `attributeList` can change, controllers must handle dynamic schema changes at runtime (reallocation, null checks for disappearing attributes, re-subscription). If it's static, controllers can read it once and build a stable data model.
+
+**Options Evaluated:**
+
+1. **Static attributeList:** Immutable for the lifetime of a connection. Reflects hardware capabilities, not transient state. Values go `null` when data is temporarily unavailable. Hardware reconfiguration requires connection re-establishment.
+2. **Dynamic attributeList:** Can change at runtime. Changes reported via subscription notifications. Controllers must handle structural changes dynamically.
+
+**Decision:** Option 1 - Static attributeList.
+
+**Rules:**
+
+- `attributeList` is immutable for the lifetime of a connection
+- It reflects the device's hardware capabilities, not transient runtime state
+- Attributes that are supported but currently have no value report `null` (e.g., `evStateOfCharge` is `null` when no EV is plugged in, but remains in `attributeList`)
+- A change in hardware configuration (e.g., modular device reconfiguration) requires the device to close and re-establish the connection
+- This applies to all features, not just Measurement
+
+**Rationale:**
+
+- **Targets 256KB MCUs (DEC-003):** Static schemas can be allocated once. Dynamic schemas require runtime reallocation.
+- **Nullable already handles "unavailable":** The interaction model distinguishes "key absent" (not in message), "key with value" (has data), and "key with null" (explicitly no value). This is sufficient for "supported but currently unavailable."
+- **Simplifies subscriptions:** The set of attributes that can appear in delta notifications never changes. No re-subscription needed.
+- **Avoids ambiguity:** With dynamic lists, "attribute disappeared" could mean temporarily unavailable, permanently removed, or error. With static lists and nullable values, there's one interpretation: `null` = no current value.
+- **PICS conformance stays meaningful:** PICS declarations match runtime reality without conditionals.
+- **Matter precedent:** Matter's `AttributeList` is expected to be stable -- transient unavailability is handled through nullable values, not structural changes.
+
+**Declined Alternatives:**
+
+- **Dynamic attributeList:** Requires all controllers to handle schema changes at runtime. Adds complexity to every implementation for a rare scenario (hardware reconfiguration). The nullable mechanism already covers the common cases (EV plug/unplug, sensor temporarily offline).
+
+**Related:** DEC-035 (capability discovery), DEC-003 (target hardware constraints)
+
+---
+
+### DEC-052: Feature-Level Subscription Model
+
+**Date:** 2026-01-31
+**Status:** Accepted
+
+**Context:** Use case YAML definitions listed individual attribute names in their `subscriptions` field (e.g., MPD subscribed only to `acActivePower`). Analysis revealed these lists were incomplete and sometimes incorrect (e.g., COB subscribing to `acActivePower` on a BATTERY endpoint, which only has DC measurements).
+
+The interaction model already supports "subscribe to all" via an empty `attributeIds` array in the Subscribe request. Combined with `minInterval` for batching and delta notifications that only send changed values, feature-level subscription is practical for MASH's target domain (energy devices over TLS/TCP).
+
+**Options Evaluated:**
+
+1. **Fix per-attribute subscription lists:** Keep the current model, make lists complete and endpoint-type-aware in each use case YAML.
+2. **Feature-level subscription (subscribe to all):** Use cases declare "subscribe to this feature" without listing individual attributes. Controller subscribes with empty `attributeIds` array. Device pushes all changed attributes.
+3. **Hybrid:** Default to subscribe-all, with optional per-attribute overrides for special cases.
+
+**Decision:** Option 2 - Feature-level subscription as default.
+
+**Model:**
+
+- Use case YAML declares `subscribe: all` for features that need push notifications
+- Controller sends Subscribe with empty `attributeIds` array (already supported by interaction model)
+- Device batches attribute changes within `minInterval` and sends a single delta notification per coalescing window
+- Device only sends attributes it has (nullable attributes without values are not pushed)
+- `maxInterval` ensures periodic heartbeats for freshness
+
+**Use case YAML change:**
+
+Before:
+```yaml
+- feature: Measurement
+  required: true
+  subscriptions:
+    - acActivePower
+```
+
+After:
+```yaml
+- feature: Measurement
+  required: true
+  subscribe: all
+```
+
+**Rationale:**
+
+- **Correct by default:** No risk of incomplete subscription lists going stale as features evolve.
+- **Simpler YAML:** No need to maintain per-attribute lists that duplicate feature definitions.
+- **Efficient on wire:** Delta notifications only send changed values. `minInterval` batches simultaneous changes into one message. A single feature subscription report carries all changed attributes in one CBOR payload.
+- **Practical for the domain:** Energy devices over TLS/TCP can handle a few hundred bytes per report. The devices are inverters and EVSEs, not coin-cell sensors.
+- **Device controls cadence:** Device decides per-attribute reporting behavior within the `minInterval`/`maxInterval` bounds. Slowly-changing attributes (like `stateOfHealth`) are only sent on change or at `maxInterval` heartbeats.
+
+**Declined Alternatives:**
+
+- **Per-attribute subscription lists (Option 1):** High maintenance burden. Lists were already incorrect. Endpoint-type-dependent requirements make per-use-case lists complex.
+- **Hybrid (Option 3):** Adds complexity without clear benefit. The empty-array-means-all mechanism is clean and sufficient.
+
+**Related:** DEC-051 (static attributeList), DEC-029 (Measurement feature)
+
+---
+
+### DEC-053: Endpoint Type Conformance Registry
+
+**Date:** 2026-01-31
+**Status:** Accepted
+
+**Context:** Feature YAML files define the superset of all possible attributes a feature can have. But not every attribute applies to every endpoint type -- a PV_STRING has no AC measurements, a GRID_CONNECTION has no battery SoC. With DEC-052 adopting feature-level subscriptions, the question becomes: how does a device developer know which attributes are mandatory for their endpoint type? And how is this testable?
+
+The existing `mandatory` field in feature YAML is too coarse: `acActivePower` was marked `mandatory: true` in Measurement, but it's meaningless for DC-only endpoints (PV_STRING, BATTERY).
+
+**Options Evaluated:**
+
+1. **FeatureMap-gated conformance (Matter-style):** Use existing featureMap bits to gate attributes (e.g., `[BATTERY]` makes `stateOfCharge` mandatory). Proven pattern but the bits weren't designed for this granularity.
+2. **Endpoint type conformance registry:** Per-endpoint-type mandatory/recommended attribute lists in a dedicated registry file. Most explicit and readable.
+3. **Per-feature flags:** Each feature gets its own capability flags (Measurement gets AC, DC, BATT). Clean grouping but adds a second layer of feature flags.
+4. **Keep simple, PICS only:** No formalization. Conformance lives in PICS files and human documentation. Simple but not testable from spec alone.
+
+**Decision:** Option 2 - Endpoint type conformance registry with two-layer model.
+
+**Two-layer conformance model:**
+
+| Layer | Defines | Location |
+|-------|---------|----------|
+| **Feature YAML** | The superset of all possible attributes, types, access, units | `docs/features/<feature>/1.0.yaml` |
+| **Endpoint type registry** | Per-endpoint-type mandatory/recommended attributes per feature | `docs/features/endpoint-conformance.yaml` |
+
+**Conformance levels:**
+
+- **mandatory:** Must be in `attributeList`. PICS validation fails without it. Value may be `null` per DEC-051.
+- **recommended:** Should be in `attributeList` if hardware supports it. PICS validation warns if missing.
+- **optional:** Everything else in the feature YAML. Device's choice.
+
+**Example (Measurement feature):**
+
+```yaml
+GRID_CONNECTION:
+  Measurement:
+    mandatory: [acActivePower]
+    recommended: [acCurrentPerPhase, acVoltagePerPhase, acFrequency,
+                  acEnergyConsumed, acEnergyProduced]
+
+BATTERY:
+  Measurement:
+    mandatory: [dcPower, stateOfCharge]
+    recommended: [dcVoltage, stateOfHealth, temperature,
+                  dcEnergyIn, dcEnergyOut]
+
+PV_STRING:
+  Measurement:
+    mandatory: [dcPower]
+    recommended: [dcVoltage, dcCurrent, dcEnergyOut]
+```
+
+**Feature YAML changes:**
+
+- The `mandatory` flag in feature YAML now means "mandatory whenever the feature is present on ANY endpoint type" (universal minimum).
+- For Measurement, `acActivePower` loses its `mandatory: true` since it's not applicable to DC-only endpoints. The endpoint type registry handles per-type requirements.
+
+**Rationale:**
+
+- **Single source of truth per concern:** Feature YAML defines what's possible. Endpoint type registry defines what's expected.
+- **Readable:** A device developer building a BATTERY looks at one place and sees exactly what's required.
+- **Testable:** PICS validator and mash-test can verify conformance against the registry.
+- **Decoupled:** Feature definitions remain endpoint-agnostic. New endpoint types can be added to the registry without changing feature YAML.
+- **Not over-engineered:** Two files, clear relationship, no new runtime mechanisms.
+
+**Declined Alternatives:**
+
+- **FeatureMap gating (Option 1):** featureMap bits are coarse (BATTERY applies cross-feature) and weren't designed for per-attribute conformance. Would require new bits or overloading existing ones.
+- **Per-feature flags (Option 3):** Adds conceptual complexity. A second layer of capability flags makes the protocol harder to learn.
+- **PICS only (Option 4):** Not testable from spec alone. Conformance knowledge lives in scattered docs rather than a machine-readable registry.
+
+**Related:** DEC-051 (static attributeList), DEC-052 (feature-level subscription), DEC-035 (capability discovery), DEC-029 (Measurement feature)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -3080,3 +3255,6 @@ Key learnings:
 | 2026-01-29 | Added DEC-047: Commissioning security hardening. Zone-based connection model, PASE attempt backoff, nonce binding for renewal, generic error responses, handshake timeout. |
 | 2026-01-29 | Added DEC-048: Commissioning window duration alignment. Default 15 minutes (was 3 hours), min 3 minutes (was 1 hour), max 3 hours (was 24 hours). Aligns with Matter 5.4.2.3.1. |
 | 2026-01-30 | Added DEC-050: Protocol versioning strategy. Single protocol version (major.minor) on the wire via ALPN + specVersion. Removes per-feature clusterRevision. Feature revisions tracked in spec as version manifest per release. Resolves OPEN-004. |
+| 2026-01-31 | Added DEC-051: Static attributeList immutability. attributeList is immutable for connection lifetime. Unavailable data uses null values, not structural changes. |
+| 2026-01-31 | Added DEC-052: Feature-level subscription model. Use cases default to subscribe-all for features. Replaces incomplete per-attribute subscription lists. |
+| 2026-01-31 | Added DEC-053: Endpoint type conformance registry. Two-layer model: feature YAML defines superset, endpoint type registry defines per-type mandatory/recommended attributes. |

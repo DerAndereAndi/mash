@@ -10,7 +10,6 @@ attributes:
     name: acActivePower
     type: int64
     access: readOnly
-    mandatory: true
     nullable: true
     unit: "mW"
     description: "Active/real power"

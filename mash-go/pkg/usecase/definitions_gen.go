@@ -28,14 +28,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "setLimit", CommandID: 1},
 					{Name: "clearLimit", CommandID: 2},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "controlState", AttrID: 2},
-					{Name: "effectiveConsumptionSetpoint", AttrID: 40},
-					{Name: "effectiveProductionSetpoint", AttrID: 42},
-					{Name: "effectiveConsumptionLimit", AttrID: 20},
-					{Name: "effectiveProductionLimit", AttrID: 22},
-					{Name: "controlMode", AttrID: 87},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Electrical",
@@ -50,9 +43,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				FeatureName: "Measurement",
 				FeatureID:   0x04,
 				Required:    true,
-				Subscriptions: []SubscriptionDef{
-					{Name: "acActivePower", AttrID: 1},
-				},
+				SubscribeAll: true,
 			},
 		},
 		Commands: []string{"setpoint", "limit", "clear"},
@@ -82,13 +73,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "setCurrentLimits", CommandID: 3},
 					{Name: "clearCurrentLimits", CommandID: 4},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "controlState", AttrID: 2},
-					{Name: "effectiveConsumptionLimit", AttrID: 20},
-					{Name: "effectiveProductionLimit", AttrID: 22},
-					{Name: "effectiveConsumptionSetpoint", AttrID: 40},
-					{Name: "effectiveProductionSetpoint", AttrID: 42},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "ChargingSession",
@@ -111,13 +96,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				Commands: []CommandRequirement{
 					{Name: "setChargingMode", CommandID: 1},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "state", AttrID: 1},
-					{Name: "evStateOfCharge", AttrID: 30},
-					{Name: "evDemandMode", AttrID: 40},
-					{Name: "evMinStateOfCharge", AttrID: 32},
-					{Name: "evTargetStateOfCharge", AttrID: 33},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Signals",
@@ -127,10 +106,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "sendPriceSignal", CommandID: 1},
 					{Name: "sendConstraintSignal", CommandID: 2},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "priceSlots", AttrID: 10},
-					{Name: "constraintSlots", AttrID: 20},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Plan",
@@ -140,10 +116,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "requestPlan", CommandID: 1},
 					{Name: "acceptPlan", CommandID: 2},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "commitment", AttrID: 3},
-					{Name: "slots", AttrID: 40},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Electrical",
@@ -158,9 +131,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				FeatureName: "Measurement",
 				FeatureID:   0x04,
 				Required:    true,
-				Subscriptions: []SubscriptionDef{
-					{Name: "acActivePower", AttrID: 1},
-				},
+				SubscribeAll: true,
 			},
 		},
 		Commands: []string{"setpoint", "limit", "clear"},
@@ -183,11 +154,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "setLimit", CommandID: 1},
 					{Name: "clearLimit", CommandID: 2},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "controlState", AttrID: 2},
-					{Name: "effectiveConsumptionLimit", AttrID: 20},
-					{Name: "processState", AttrID: 80},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Electrical",
@@ -201,9 +168,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				FeatureName: "Measurement",
 				FeatureID:   0x04,
 				Required:    false,
-				Subscriptions: []SubscriptionDef{
-					{Name: "acActivePower", AttrID: 1},
-				},
+				SubscribeAll: true,
 			},
 		},
 		Commands: []string{"limit", "clear"},
@@ -223,9 +188,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "sendPriceSignal", CommandID: 1},
 					{Name: "clearSignals", CommandID: 4},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "priceSlots", AttrID: 10},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Plan",
@@ -235,27 +198,19 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "requestPlan", CommandID: 1},
 					{Name: "acceptPlan", CommandID: 2},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "commitment", AttrID: 3},
-					{Name: "slots", AttrID: 40},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "EnergyControl",
 				FeatureID:   0x05,
 				Required:    false,
-				Subscriptions: []SubscriptionDef{
-					{Name: "controlState", AttrID: 2},
-					{Name: "processState", AttrID: 80},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Measurement",
 				FeatureID:   0x04,
 				Required:    false,
-				Subscriptions: []SubscriptionDef{
-					{Name: "acActivePower", AttrID: 1},
-				},
+				SubscribeAll: true,
 			},
 		},
 	},
@@ -277,12 +232,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "setLimit", CommandID: 1},
 					{Name: "clearLimit", CommandID: 2},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "controlState", AttrID: 2},
-					{Name: "effectiveConsumptionLimit", AttrID: 20},
-					{Name: "overrideReason", AttrID: 75},
-					{Name: "overrideDirection", AttrID: 76},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Electrical",
@@ -296,9 +246,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				FeatureName: "Measurement",
 				FeatureID:   0x04,
 				Required:    false,
-				Subscriptions: []SubscriptionDef{
-					{Name: "acActivePower", AttrID: 1},
-				},
+				SubscribeAll: true,
 			},
 		},
 		Commands: []string{"limit", "clear", "capacity", "override", "lpc-demo"},
@@ -321,12 +269,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "setLimit", CommandID: 1},
 					{Name: "clearLimit", CommandID: 2},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "controlState", AttrID: 2},
-					{Name: "effectiveProductionLimit", AttrID: 22},
-					{Name: "overrideReason", AttrID: 75},
-					{Name: "overrideDirection", AttrID: 76},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Electrical",
@@ -340,9 +283,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				FeatureName: "Measurement",
 				FeatureID:   0x04,
 				Required:    false,
-				Subscriptions: []SubscriptionDef{
-					{Name: "acActivePower", AttrID: 1},
-				},
+				SubscribeAll: true,
 			},
 		},
 		Commands: []string{"limit", "clear", "capacity", "override", "lpc-demo"},
@@ -358,9 +299,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				FeatureName: "Measurement",
 				FeatureID:   0x04,
 				Required:    true,
-				Subscriptions: []SubscriptionDef{
-					{Name: "acActivePower", AttrID: 1},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Electrical",
@@ -376,10 +315,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				FeatureName: "Status",
 				FeatureID:   0x02,
 				Required:    false,
-				Subscriptions: []SubscriptionDef{
-					{Name: "operatingState", AttrID: 1},
-					{Name: "faultCode", AttrID: 3},
-				},
+				SubscribeAll: true,
 			},
 		},
 	},
@@ -411,11 +347,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "pause", CommandID: 9},
 					{Name: "resume", CommandID: 10},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "controlState", AttrID: 2},
-					{Name: "processState", AttrID: 80},
-					{Name: "effectiveConsumptionLimit", AttrID: 20},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Electrical",
@@ -429,9 +361,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				FeatureName: "Measurement",
 				FeatureID:   0x04,
 				Required:    false,
-				Subscriptions: []SubscriptionDef{
-					{Name: "acActivePower", AttrID: 1},
-				},
+				SubscribeAll: true,
 			},
 		},
 		Commands: []string{"limit", "clear", "pause", "resume"},
@@ -455,12 +385,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				Commands: []CommandRequirement{
 					{Name: "requestPlan", CommandID: 1},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "commitment", AttrID: 3},
-					{Name: "slots", AttrID: 40},
-					{Name: "startTime", AttrID: 10},
-					{Name: "endTime", AttrID: 11},
-				},
+				SubscribeAll: true,
 			},
 		},
 	},
@@ -479,9 +404,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "sendConstraintSignal", CommandID: 2},
 					{Name: "clearSignals", CommandID: 4},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "constraintSlots", AttrID: 20},
-				},
+				SubscribeAll: true,
 			},
 			{
 				FeatureName: "Electrical",
@@ -495,9 +418,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				FeatureName: "Measurement",
 				FeatureID:   0x04,
 				Required:    false,
-				Subscriptions: []SubscriptionDef{
-					{Name: "acActivePower", AttrID: 1},
-				},
+				SubscribeAll: true,
 			},
 		},
 	},
@@ -526,9 +447,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "sendPriceSignal", CommandID: 1},
 					{Name: "clearSignals", CommandID: 4},
 				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "priceSlots", AttrID: 10},
-				},
+				SubscribeAll: true,
 			},
 		},
 	},
