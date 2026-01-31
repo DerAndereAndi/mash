@@ -25,13 +25,29 @@ func TestRegistry_ContainsLPP(t *testing.T) {
 	}
 }
 
-func TestRegistry_ContainsMPC(t *testing.T) {
-	def, ok := Registry[MPC]
+func TestRegistry_ContainsMPD(t *testing.T) {
+	def, ok := Registry[MPD]
 	if !ok {
-		t.Fatal("Registry missing MPC")
+		t.Fatal("Registry missing MPD")
 	}
-	if def.Name != MPC {
-		t.Errorf("name = %q, want MPC", def.Name)
+	if def.Name != MPD {
+		t.Errorf("name = %q, want MPD", def.Name)
+	}
+	if def.FullName != "Monitor Power Device" {
+		t.Errorf("fullName = %q, want Monitor Power Device", def.FullName)
+	}
+}
+
+func TestRegistry_ContainsEVC(t *testing.T) {
+	def, ok := Registry[EVC]
+	if !ok {
+		t.Fatal("Registry missing EVC")
+	}
+	if def.Name != EVC {
+		t.Errorf("name = %q, want EVC", def.Name)
+	}
+	if def.FullName != "EV Charging" {
+		t.Errorf("fullName = %q, want EV Charging", def.FullName)
 	}
 }
 
@@ -132,10 +148,148 @@ func TestLPC_Commands(t *testing.T) {
 	}
 }
 
-func TestMPC_NoCommands(t *testing.T) {
-	def := Registry[MPC]
+func TestMPD_NoCommands(t *testing.T) {
+	def := Registry[MPD]
 	if len(def.Commands) != 0 {
-		t.Errorf("MPC should have no commands, got %v", def.Commands)
+		t.Errorf("MPD should have no commands, got %v", def.Commands)
+	}
+}
+
+func TestEVC_ChargingSessionRequired(t *testing.T) {
+	def := Registry[EVC]
+	var cs *FeatureRequirement
+	for i := range def.Features {
+		if def.Features[i].FeatureName == "ChargingSession" {
+			cs = &def.Features[i]
+			break
+		}
+	}
+	if cs == nil {
+		t.Fatal("EVC missing ChargingSession feature")
+	}
+	if !cs.Required {
+		t.Error("ChargingSession should be required")
+	}
+	// Check evDemandMode attribute is present
+	found := false
+	for _, attr := range cs.Attributes {
+		if attr.Name == "evDemandMode" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("ChargingSession missing evDemandMode attribute")
+	}
+}
+
+func TestEVC_EnergyControlRequired(t *testing.T) {
+	def := Registry[EVC]
+	var ec *FeatureRequirement
+	for i := range def.Features {
+		if def.Features[i].FeatureName == "EnergyControl" {
+			ec = &def.Features[i]
+			break
+		}
+	}
+	if ec == nil {
+		t.Fatal("EVC missing EnergyControl feature")
+	}
+	if !ec.Required {
+		t.Error("EnergyControl should be required")
+	}
+	// Check acceptsLimits = true
+	if len(ec.Attributes) < 1 {
+		t.Fatal("missing attributes")
+	}
+	al := ec.Attributes[0]
+	if al.Name != "acceptsLimits" {
+		t.Errorf("attribute name = %q, want acceptsLimits", al.Name)
+	}
+	if al.RequiredValue == nil || !*al.RequiredValue {
+		t.Error("acceptsLimits RequiredValue should be true")
+	}
+}
+
+func TestEVC_SignalsOptional(t *testing.T) {
+	def := Registry[EVC]
+	var sig *FeatureRequirement
+	for i := range def.Features {
+		if def.Features[i].FeatureName == "Signals" {
+			sig = &def.Features[i]
+			break
+		}
+	}
+	if sig == nil {
+		t.Fatal("EVC missing Signals feature")
+	}
+	if sig.Required {
+		t.Error("Signals should be optional")
+	}
+}
+
+func TestEVC_EndpointTypes(t *testing.T) {
+	def := Registry[EVC]
+	if len(def.EndpointTypes) != 1 || def.EndpointTypes[0] != "EV_CHARGER" {
+		t.Errorf("endpoint types = %v, want [EV_CHARGER]", def.EndpointTypes)
+	}
+}
+
+func TestMPD_EndpointTypes(t *testing.T) {
+	def := Registry[MPD]
+	expected := map[string]bool{
+		"GRID_CONNECTION": true,
+		"INVERTER":        true,
+		"PV_STRING":       true,
+		"BATTERY":         true,
+		"EV_CHARGER":      true,
+		"HEAT_PUMP":       true,
+		"WATER_HEATER":    true,
+		"HVAC":            true,
+		"APPLIANCE":       true,
+		"SUB_METER":       true,
+	}
+	if len(def.EndpointTypes) != len(expected) {
+		t.Errorf("endpoint types count = %d, want %d", len(def.EndpointTypes), len(expected))
+	}
+	for _, et := range def.EndpointTypes {
+		if !expected[et] {
+			t.Errorf("unexpected endpoint type %q", et)
+		}
+	}
+}
+
+func TestMPD_MeasurementRequired(t *testing.T) {
+	def := Registry[MPD]
+	var meas *FeatureRequirement
+	for i := range def.Features {
+		if def.Features[i].FeatureName == "Measurement" {
+			meas = &def.Features[i]
+			break
+		}
+	}
+	if meas == nil {
+		t.Fatal("MPD missing Measurement feature")
+	}
+	if !meas.Required {
+		t.Error("Measurement should be required for MPD")
+	}
+}
+
+func TestMPD_StatusOptional(t *testing.T) {
+	def := Registry[MPD]
+	var status *FeatureRequirement
+	for i := range def.Features {
+		if def.Features[i].FeatureName == "Status" {
+			status = &def.Features[i]
+			break
+		}
+	}
+	if status == nil {
+		t.Fatal("MPD missing Status feature")
+	}
+	if status.Required {
+		t.Error("Status should be optional for MPD")
 	}
 }
 

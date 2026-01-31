@@ -1,4 +1,4 @@
-// Package usecase defines EEBUS-style use case definitions (LPC, LPP, MPC),
+// Package usecase defines use case definitions (LPC, LPP, MPD, EVC, etc.),
 // discovers device capabilities, and matches them against use case requirements.
 package usecase
 
@@ -8,7 +8,8 @@ type UseCaseName string
 const (
 	LPC UseCaseName = "LPC"
 	LPP UseCaseName = "LPP"
-	MPC UseCaseName = "MPC"
+	MPD UseCaseName = "MPD"
+	EVC UseCaseName = "EVC"
 )
 
 // UseCaseDef describes the requirements of a single use case.

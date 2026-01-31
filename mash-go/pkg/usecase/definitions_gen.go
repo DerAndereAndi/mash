@@ -7,89 +7,6 @@ package usecase
 
 // Registry maps use case names to their resolved definitions.
 var Registry = map[UseCaseName]*UseCaseDef{
-	"CEVC": {
-		Name:        "CEVC",
-		FullName:    "Coordinated EV Charging",
-		Description: "Controller coordinates EV charging using price signals and plan negotiation. Replaces EEBUS CEVC use case. Device generates Plan from Signals input.\n",
-		SpecVersion: "1.0",
-		EndpointTypes: []string{"EV_CHARGER"},
-		Features: []FeatureRequirement{
-			{
-				FeatureName: "EnergyControl",
-				FeatureID:   0x05,
-				Required:    true,
-				Attributes: []AttributeRequirement{
-					{Name: "acceptsLimits", AttrID: 10, RequiredValue: boolPtr(true)},
-				},
-				Commands: []CommandRequirement{
-					{Name: "setLimit", CommandID: 1},
-					{Name: "clearLimit", CommandID: 2},
-				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "controlState", AttrID: 2},
-					{Name: "effectiveConsumptionLimit", AttrID: 20},
-				},
-			},
-			{
-				FeatureName: "ChargingSession",
-				FeatureID:   0x06,
-				Required:    true,
-				Attributes: []AttributeRequirement{
-					{Name: "evDemandMode", AttrID: 40},
-					{Name: "evMinEnergyRequest", AttrID: 41},
-					{Name: "evMaxEnergyRequest", AttrID: 42},
-					{Name: "evTargetEnergyRequest", AttrID: 43},
-					{Name: "evDepartureTime", AttrID: 44},
-				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "state", AttrID: 1},
-					{Name: "evStateOfCharge", AttrID: 30},
-					{Name: "evDemandMode", AttrID: 40},
-				},
-			},
-			{
-				FeatureName: "Signals",
-				FeatureID:   0x08,
-				Required:    true,
-				Commands: []CommandRequirement{
-					{Name: "sendPriceSignal", CommandID: 1},
-				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "priceSlots", AttrID: 10},
-				},
-			},
-			{
-				FeatureName: "Plan",
-				FeatureID:   0x09,
-				Required:    true,
-				Commands: []CommandRequirement{
-					{Name: "requestPlan", CommandID: 1},
-					{Name: "acceptPlan", CommandID: 2},
-				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "commitment", AttrID: 3},
-					{Name: "slots", AttrID: 40},
-				},
-			},
-			{
-				FeatureName: "Electrical",
-				FeatureID:   0x03,
-				Required:    true,
-				Attributes: []AttributeRequirement{
-					{Name: "nominalMaxConsumption", AttrID: 10},
-				},
-			},
-			{
-				FeatureName: "Measurement",
-				FeatureID:   0x04,
-				Required:    false,
-				Subscriptions: []SubscriptionDef{
-					{Name: "acActivePower", AttrID: 1},
-				},
-			},
-		},
-		Commands: []string{"limit", "clear"},
-	},
 	"COB": {
 		Name:        "COB",
 		FullName:    "Control of Battery",
@@ -140,10 +57,10 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		},
 		Commands: []string{"setpoint", "limit", "clear"},
 	},
-	"DBEVC": {
-		Name:        "DBEVC",
-		FullName:    "Dynamic Bidirectional EV Charging",
-		Description: "Controller manages bidirectional EV charging with setpoints and limits. Replaces EEBUS OSCEV use case. Supports V2G discharge via setpoints.\n",
+	"EVC": {
+		Name:        "EVC",
+		FullName:    "EV Charging",
+		Description: "Comprehensive EV charging management: monitoring, limits, setpoints, bidirectional V2G, and coordinated charging via price signals and plans. Replaces EEBUS CEVC, DBEVC, EVSOC, OPEV, OSCEV, EVCC, EVSECC.\n",
 		SpecVersion: "1.0",
 		EndpointTypes: []string{"EV_CHARGER"},
 		Features: []FeatureRequirement{
@@ -152,14 +69,18 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				FeatureID:   0x05,
 				Required:    true,
 				Attributes: []AttributeRequirement{
-					{Name: "acceptsSetpoints", AttrID: 12, RequiredValue: boolPtr(true)},
 					{Name: "acceptsLimits", AttrID: 10, RequiredValue: boolPtr(true)},
+					{Name: "acceptsSetpoints", AttrID: 12},
+					{Name: "acceptsCurrentLimits", AttrID: 11},
+					{Name: "acceptsCurrentSetpoints", AttrID: 13},
 				},
 				Commands: []CommandRequirement{
-					{Name: "setSetpoint", CommandID: 5},
-					{Name: "clearSetpoint", CommandID: 6},
 					{Name: "setLimit", CommandID: 1},
 					{Name: "clearLimit", CommandID: 2},
+					{Name: "setSetpoint", CommandID: 5},
+					{Name: "clearSetpoint", CommandID: 6},
+					{Name: "setCurrentLimits", CommandID: 3},
+					{Name: "clearCurrentLimits", CommandID: 4},
 				},
 				Subscriptions: []SubscriptionDef{
 					{Name: "controlState", AttrID: 2},
@@ -179,14 +100,49 @@ var Registry = map[UseCaseName]*UseCaseDef{
 					{Name: "evMaxEnergyRequest", AttrID: 42},
 					{Name: "evTargetEnergyRequest", AttrID: 43},
 					{Name: "evDepartureTime", AttrID: 44},
+					{Name: "evStateOfCharge", AttrID: 30},
+					{Name: "evBatteryCapacity", AttrID: 31},
+					{Name: "evMinStateOfCharge", AttrID: 32},
+					{Name: "evTargetStateOfCharge", AttrID: 33},
 					{Name: "evMinDischargingRequest", AttrID: 50},
 					{Name: "evMaxDischargingRequest", AttrID: 51},
 					{Name: "evDischargeBelowTargetPermitted", AttrID: 52},
+				},
+				Commands: []CommandRequirement{
+					{Name: "setChargingMode", CommandID: 1},
 				},
 				Subscriptions: []SubscriptionDef{
 					{Name: "state", AttrID: 1},
 					{Name: "evStateOfCharge", AttrID: 30},
 					{Name: "evDemandMode", AttrID: 40},
+					{Name: "evMinStateOfCharge", AttrID: 32},
+					{Name: "evTargetStateOfCharge", AttrID: 33},
+				},
+			},
+			{
+				FeatureName: "Signals",
+				FeatureID:   0x08,
+				Required:    false,
+				Commands: []CommandRequirement{
+					{Name: "sendPriceSignal", CommandID: 1},
+					{Name: "sendConstraintSignal", CommandID: 2},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "priceSlots", AttrID: 10},
+					{Name: "constraintSlots", AttrID: 20},
+				},
+			},
+			{
+				FeatureName: "Plan",
+				FeatureID:   0x09,
+				Required:    false,
+				Commands: []CommandRequirement{
+					{Name: "requestPlan", CommandID: 1},
+					{Name: "acceptPlan", CommandID: 2},
+				},
+				Subscriptions: []SubscriptionDef{
+					{Name: "commitment", AttrID: 3},
+					{Name: "slots", AttrID: 40},
 				},
 			},
 			{
@@ -208,31 +164,6 @@ var Registry = map[UseCaseName]*UseCaseDef{
 			},
 		},
 		Commands: []string{"setpoint", "limit", "clear"},
-	},
-	"EVSOC": {
-		Name:        "EVSOC",
-		FullName:    "EV State of Charge",
-		Description: "Controller monitors EV state of charge and battery information. Replaces EEBUS EVSOC use case. Read-only monitoring.\n",
-		SpecVersion: "1.0",
-		Features: []FeatureRequirement{
-			{
-				FeatureName: "ChargingSession",
-				FeatureID:   0x06,
-				Required:    true,
-				Attributes: []AttributeRequirement{
-					{Name: "evStateOfCharge", AttrID: 30},
-					{Name: "evBatteryCapacity", AttrID: 31},
-					{Name: "evMinStateOfCharge", AttrID: 32},
-					{Name: "evTargetStateOfCharge", AttrID: 33},
-				},
-				Subscriptions: []SubscriptionDef{
-					{Name: "state", AttrID: 1},
-					{Name: "evStateOfCharge", AttrID: 30},
-					{Name: "evMinStateOfCharge", AttrID: 32},
-					{Name: "evTargetStateOfCharge", AttrID: 33},
-				},
-			},
-		},
 	},
 	"FLOA": {
 		Name:        "FLOA",
@@ -416,11 +347,12 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		},
 		Commands: []string{"limit", "clear", "capacity", "override", "lpc-demo"},
 	},
-	"MPC": {
-		Name:        "MPC",
-		FullName:    "Monitor Power Consumption",
-		Description: "Controller monitors active power consumption of a device. Replaces EEBUS MPC use case. Read-only, no commands.\n",
+	"MPD": {
+		Name:        "MPD",
+		FullName:    "Monitor Power Device",
+		Description: "Monitor power, energy, voltage, current, SoC, and operating state of any device. Replaces EEBUS MPC, MGCP, MOB, MOI, MPS.\n",
 		SpecVersion: "1.0",
+		EndpointTypes: []string{"GRID_CONNECTION", "INVERTER", "PV_STRING", "BATTERY", "EV_CHARGER", "HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE", "SUB_METER"},
 		Features: []FeatureRequirement{
 			{
 				FeatureName: "Measurement",
@@ -428,6 +360,25 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				Required:    true,
 				Subscriptions: []SubscriptionDef{
 					{Name: "acActivePower", AttrID: 1},
+				},
+			},
+			{
+				FeatureName: "Electrical",
+				FeatureID:   0x03,
+				Required:    false,
+				Attributes: []AttributeRequirement{
+					{Name: "nominalMaxConsumption", AttrID: 10},
+					{Name: "nominalMaxProduction", AttrID: 11},
+					{Name: "energyCapacity", AttrID: 20},
+				},
+			},
+			{
+				FeatureName: "Status",
+				FeatureID:   0x02,
+				Required:    false,
+				Subscriptions: []SubscriptionDef{
+					{Name: "operatingState", AttrID: 1},
+					{Name: "faultCode", AttrID: 3},
 				},
 			},
 		},

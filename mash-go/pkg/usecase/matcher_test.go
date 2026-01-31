@@ -213,8 +213,8 @@ func TestMatchAll_LPP_Matched(t *testing.T) {
 	}
 }
 
-func TestMatchAll_MPC_Matched(t *testing.T) {
-	// Any endpoint with Measurement
+func TestMatchAll_MPD_Matched(t *testing.T) {
+	// MPD matches endpoints in its type list with Measurement
 	profile := buildProfile("dev-1",
 		buildEndpoint(1, "GRID_CONNECTION",
 			buildFeature(0x04,
@@ -225,12 +225,12 @@ func TestMatchAll_MPC_Matched(t *testing.T) {
 	)
 
 	du := MatchAll(profile, Registry)
-	if !du.HasUseCase(MPC) {
-		t.Error("expected MPC to match any endpoint with Measurement")
+	if !du.HasUseCase(MPD) {
+		t.Error("expected MPD to match GRID_CONNECTION with Measurement")
 	}
 }
 
-func TestMatchAll_MPC_NoCommands(t *testing.T) {
+func TestMatchAll_MPD_NoCommands(t *testing.T) {
 	profile := buildProfile("dev-1",
 		buildEndpoint(1, "PV_STRING",
 			buildFeature(0x04,
@@ -243,7 +243,7 @@ func TestMatchAll_MPC_NoCommands(t *testing.T) {
 	du := MatchAll(profile, Registry)
 	cmds := du.SupportedCommands()
 	if len(cmds) != 0 {
-		t.Errorf("MPC-only device should have no commands, got %v", cmds)
+		t.Errorf("MPD-only device should have no commands, got %v", cmds)
 	}
 }
 
@@ -268,7 +268,7 @@ func TestSupportedCommands_Union(t *testing.T) {
 
 	du := MatchAll(profile, Registry)
 
-	// Should have LPC + MPC (MPC has no commands)
+	// Should have LPC + MPD (MPD has no commands)
 	cmds := du.SupportedCommands()
 	for _, cmd := range []string{"limit", "clear", "capacity", "override", "lpc-demo"} {
 		if !cmds[cmd] {
@@ -303,15 +303,15 @@ func TestEndpointForUseCase_FromMatch(t *testing.T) {
 		t.Errorf("EndpointForUseCase(LPC) = (%d, %v), want (1, true)", epID, ok)
 	}
 
-	epID, ok = du.EndpointForUseCase(MPC)
+	epID, ok = du.EndpointForUseCase(MPD)
 	if !ok || epID != 1 {
-		t.Errorf("EndpointForUseCase(MPC) = (%d, %v), want (1, true)", epID, ok)
+		t.Errorf("EndpointForUseCase(MPD) = (%d, %v), want (1, true)", epID, ok)
 	}
 }
 
 func TestMatchAll_MultiEndpoint(t *testing.T) {
 	profile := buildProfile("dev-1",
-		// Endpoint 1: INVERTER with full LPC/LPP/MPC support
+		// Endpoint 1: INVERTER with full LPC/LPP/MPD support
 		buildEndpoint(1, "INVERTER",
 			buildFeature(0x05,
 				[]uint16{1, 2, 10, 20, 22, 75, 76},
@@ -327,7 +327,7 @@ func TestMatchAll_MultiEndpoint(t *testing.T) {
 				nil, nil,
 			),
 		),
-		// Endpoint 2: PV_STRING with only Measurement (MPC only)
+		// Endpoint 2: PV_STRING with only Measurement (MPD only)
 		buildEndpoint(2, "PV_STRING",
 			buildFeature(0x04,
 				[]uint16{1},
@@ -344,8 +344,8 @@ func TestMatchAll_MultiEndpoint(t *testing.T) {
 	if !du.HasUseCase(LPP) {
 		t.Error("expected LPP to match on endpoint 1")
 	}
-	if !du.HasUseCase(MPC) {
-		t.Error("expected MPC to match")
+	if !du.HasUseCase(MPD) {
+		t.Error("expected MPD to match")
 	}
 
 	// Check LPC is on endpoint 1

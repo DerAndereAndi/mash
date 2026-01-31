@@ -1,0 +1,39 @@
+name: MPD
+fullName: Monitor Power Device
+specVersion: "1.0"
+description: >
+  Monitor power, energy, voltage, current, SoC, and operating state of any device.
+  Replaces EEBUS MPC, MGCP, MOB, MOI, MPS.
+
+endpointTypes:
+  - GRID_CONNECTION
+  - INVERTER
+  - PV_STRING
+  - BATTERY
+  - EV_CHARGER
+  - HEAT_PUMP
+  - WATER_HEATER
+  - HVAC
+  - APPLIANCE
+  - SUB_METER
+
+features:
+  - feature: Measurement
+    required: true
+    subscriptions:
+      - acActivePower
+
+  - feature: Electrical
+    required: false
+    attributes:
+      - name: nominalMaxConsumption
+      - name: nominalMaxProduction
+      - name: energyCapacity
+
+  - feature: Status
+    required: false
+    subscriptions:
+      - operatingState
+      - faultCode
+
+commands: []

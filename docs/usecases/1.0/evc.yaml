@@ -1,9 +1,10 @@
-name: DBEVC
-fullName: Dynamic Bidirectional EV Charging
+name: EVC
+fullName: EV Charging
 specVersion: "1.0"
 description: >
-  Controller manages bidirectional EV charging with setpoints and limits.
-  Replaces EEBUS OSCEV use case. Supports V2G discharge via setpoints.
+  Comprehensive EV charging management: monitoring, limits, setpoints,
+  bidirectional V2G, and coordinated charging via price signals and plans.
+  Replaces EEBUS CEVC, DBEVC, EVSOC, OPEV, OSCEV, EVCC, EVSECC.
 
 endpointTypes:
   - EV_CHARGER
@@ -12,15 +13,18 @@ features:
   - feature: EnergyControl
     required: true
     attributes:
-      - name: acceptsSetpoints
-        requiredValue: true
       - name: acceptsLimits
         requiredValue: true
+      - name: acceptsSetpoints
+      - name: acceptsCurrentLimits
+      - name: acceptsCurrentSetpoints
     commands:
-      - setSetpoint
-      - clearSetpoint
       - setLimit
       - clearLimit
+      - setSetpoint
+      - clearSetpoint
+      - setCurrentLimits
+      - clearCurrentLimits
     subscriptions:
       - controlState
       - effectiveConsumptionLimit
@@ -36,13 +40,39 @@ features:
       - name: evMaxEnergyRequest
       - name: evTargetEnergyRequest
       - name: evDepartureTime
+      - name: evStateOfCharge
+      - name: evBatteryCapacity
+      - name: evMinStateOfCharge
+      - name: evTargetStateOfCharge
       - name: evMinDischargingRequest
       - name: evMaxDischargingRequest
       - name: evDischargeBelowTargetPermitted
+    commands:
+      - setChargingMode
     subscriptions:
       - state
       - evStateOfCharge
       - evDemandMode
+      - evMinStateOfCharge
+      - evTargetStateOfCharge
+
+  - feature: Signals
+    required: false
+    commands:
+      - sendPriceSignal
+      - sendConstraintSignal
+    subscriptions:
+      - priceSlots
+      - constraintSlots
+
+  - feature: Plan
+    required: false
+    commands:
+      - requestPlan
+      - acceptPlan
+    subscriptions:
+      - commitment
+      - slots
 
   - feature: Electrical
     required: true
