@@ -1,0 +1,89 @@
+# PICS (Protocol Implementation Conformance Statement)
+# Grid Connection Device Profile
+#
+# Reference implementation for a standalone grid connection point (smart meter).
+# Separate from lpc-lpp-ems.yaml which is an EMS-specific profile.
+# Use cases: MPD
+
+# Device Identification
+device:
+  vendor: "Reference"
+  product: "Smart Grid Meter"
+  model: "GC-001"
+  version: "1.0.0"
+
+# PICS Items
+items:
+  # Protocol declaration
+  MASH.S: 1
+
+  # Communication capabilities
+  MASH.S.TRANS.SC: true
+  MASH.S.TRANS.PASE: true
+  MASH.S.TRANS.MDNS: true
+  MASH.S.TRANS.TLS13: true
+
+  # ==========================================================================
+  # Use case declarations with per-scenario codes
+  # ==========================================================================
+
+  # MPD: Monitor Power Device
+  MASH.S.UC.MPD: true
+  MASH.S.UC.MPD.S00: true          # BASE
+  MASH.S.UC.MPD.S01: true          # ELECTRICAL
+  MASH.S.UC.MPD.S02: true          # STATUS
+
+  # ==========================================================================
+  # Endpoint declaration
+  # ==========================================================================
+
+  MASH.S.E01: GRID_CONNECTION      # Endpoint 1: Grid Connection
+
+  # ==========================================================================
+  # Feature Presence
+  # ==========================================================================
+
+  MASH.S.E01.ELEC: true            # Electrical
+  MASH.S.E01.MEAS: true            # Measurement
+  MASH.S.E01.STAT: true            # Status
+
+  # ==========================================================================
+  # Electrical (ELEC) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.ELEC.A01: true        # phaseCount
+  MASH.S.E01.ELEC.A02: true        # phaseMapping
+  MASH.S.E01.ELEC.A03: true        # nominalVoltage
+  MASH.S.E01.ELEC.A04: true        # nominalFrequency
+  MASH.S.E01.ELEC.A05: true        # supportedDirections (bidirectional)
+  MASH.S.E01.ELEC.A0A: true        # nominalMaxConsumption
+  MASH.S.E01.ELEC.A0B: true        # nominalMaxProduction
+  MASH.S.E01.ELEC.A0D: true        # maxCurrentPerPhase
+
+  # ==========================================================================
+  # Measurement (MEAS) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.MEAS.A01: true        # acActivePower
+  MASH.S.E01.MEAS.A0A: true        # acActivePowerPerPhase
+  MASH.S.E01.MEAS.A14: true        # acCurrentPerPhase
+  MASH.S.E01.MEAS.A15: true        # acVoltagePerPhase
+  MASH.S.E01.MEAS.A17: true        # acFrequency
+  MASH.S.E01.MEAS.A18: true        # powerFactor
+  MASH.S.E01.MEAS.A1E: true        # acEnergyConsumed
+  MASH.S.E01.MEAS.A1F: true        # acEnergyProduced
+  MASH.S.E01.MEAS.A02: true        # acReactivePower
+
+  # ==========================================================================
+  # Status (STAT) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.STAT.A01: true        # operatingState
+  MASH.S.E01.STAT.A03: true        # faultCode
+
+  # ==========================================================================
+  # Multi-zone support
+  # ==========================================================================
+
+  MASH.S.ZONE.MAX: 2
+  MASH.S.ZONE.LOCAL: true

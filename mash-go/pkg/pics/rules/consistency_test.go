@@ -51,7 +51,7 @@ MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0B=1`)
 	violations := rule.Check(p)
 	if len(violations) == 0 {
-		t.Error("Expected violation for A0B without C05/C06")
+		t.Error("Expected violation for A0B without C03/C04")
 	}
 
 	// A0B with commands - no violation
@@ -59,8 +59,8 @@ MASH.S.E01.CTRL.A0B=1`)
 MASH.S.E01=EV_CHARGER
 MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0B=1
-MASH.S.E01.CTRL.C05.Rsp=1
-MASH.S.E01.CTRL.C06.Rsp=1`)
+MASH.S.E01.CTRL.C03.Rsp=1
+MASH.S.E01.CTRL.C04.Rsp=1`)
 	violations = rule.Check(p)
 	if len(violations) > 0 {
 		t.Errorf("Expected no violation, got: %v", violations)
@@ -77,7 +77,7 @@ MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0C=1`)
 	violations := rule.Check(p)
 	if len(violations) == 0 {
-		t.Error("Expected violation for A0C without C03/C04")
+		t.Error("Expected violation for A0C without C05/C06")
 	}
 
 	// A0C with commands - no violation
@@ -85,8 +85,8 @@ MASH.S.E01.CTRL.A0C=1`)
 MASH.S.E01=EV_CHARGER
 MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0C=1
-MASH.S.E01.CTRL.C03.Rsp=1
-MASH.S.E01.CTRL.C04.Rsp=1`)
+MASH.S.E01.CTRL.C05.Rsp=1
+MASH.S.E01.CTRL.C06.Rsp=1`)
 	violations = rule.Check(p)
 	if len(violations) > 0 {
 		t.Errorf("Expected no violation, got: %v", violations)

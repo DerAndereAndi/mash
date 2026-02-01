@@ -22,11 +22,31 @@ items:
   # Protocol declaration
   MASH.S: 1
 
-  # Use case declarations
-  MASH.S.UC.LPC: true            # Limit Power Consumption
-  MASH.S.UC.LPP: true            # Limit Power Production
+  # ==========================================================================
+  # Use case declarations with per-scenario codes
+  # ==========================================================================
 
+  # LPC: Limit Power Consumption
+  MASH.S.UC.LPC: true
+  MASH.S.UC.LPC.S00: true            # BASE
+  MASH.S.UC.LPC.S01: true            # MEASUREMENT
+  MASH.S.UC.LPC.S02: true            # OVERRIDE
+
+  # LPP: Limit Power Production
+  MASH.S.UC.LPP: true
+  MASH.S.UC.LPP.S00: true            # BASE
+  MASH.S.UC.LPP.S01: true            # MEASUREMENT
+  MASH.S.UC.LPP.S02: true            # OVERRIDE
+
+  # MPD: Monitor Power Device
+  MASH.S.UC.MPD: true
+  MASH.S.UC.MPD.S00: true            # BASE
+  MASH.S.UC.MPD.S01: true            # ELECTRICAL
+
+  # ==========================================================================
   # Endpoint declaration
+  # ==========================================================================
+
   MASH.S.E01: GRID_CONNECTION      # EMS endpoint represents grid connection
 
   # ==========================================================================
@@ -35,12 +55,11 @@ items:
 
   MASH.S.E01.CTRL: true            # EnergyControl feature present
   MASH.S.E01.ELEC: true            # Electrical feature present
+  MASH.S.E01.MEAS: true            # Measurement feature present
 
   # ==========================================================================
   # Electrical (ELEC) Attributes - Grid Connection
   # ==========================================================================
-  # Grid connection represents the building's utility connection,
-  # not an individual device.
 
   MASH.S.E01.ELEC.A01: true        # phaseCount (3-phase building connection)
   MASH.S.E01.ELEC.A02: true        # phaseMapping
@@ -48,75 +67,67 @@ items:
   MASH.S.E01.ELEC.A04: true        # nominalFrequency
   MASH.S.E01.ELEC.A05: true        # supportedDirections (bidirectional)
   MASH.S.E01.ELEC.A0A: true        # nominalMaxConsumption (contractual limit)
+  MASH.S.E01.ELEC.A0B: true        # nominalMaxProduction
   MASH.S.E01.ELEC.A0D: true        # maxCurrentPerPhase
 
   # ==========================================================================
-  # Feature Flags
+  # Measurement (MEAS) Attributes - Grid Metering
   # ==========================================================================
 
+  MASH.S.E01.MEAS.A01: true        # acActivePower
+  MASH.S.E01.MEAS.A02: true        # acReactivePower
+  MASH.S.E01.MEAS.A14: true        # acCurrentPerPhase
+  MASH.S.E01.MEAS.A15: true        # acVoltagePerPhase
+  MASH.S.E01.MEAS.A17: true        # acFrequency
+  MASH.S.E01.MEAS.A18: true        # powerFactor
+  MASH.S.E01.MEAS.A1E: true        # acEnergyConsumed
+  MASH.S.E01.MEAS.A1F: true        # acEnergyProduced
+
+  # ==========================================================================
+  # EnergyControl (CTRL) Attributes
+  # ==========================================================================
+
+  # Feature Flags
   MASH.S.E01.CTRL.F00: true        # CORE - Always required
 
-  # ==========================================================================
   # Device Type & State Attributes
-  # ==========================================================================
-
   MASH.S.E01.CTRL.A01: true        # deviceType (will be OTHER for EMS)
   MASH.S.E01.CTRL.A02: true        # controlState
   MASH.S.E01.CTRL.A03: true        # optOutState
 
-  # ==========================================================================
   # Control Capabilities
-  # ==========================================================================
-
   MASH.S.E01.CTRL.A0A: true        # acceptsLimits
-  MASH.S.E01.CTRL.A0B: false       # acceptsCurrentLimits (declared but not supported)
-  MASH.S.E01.CTRL.A0C: false       # acceptsSetpoints (declared but not supported)
-  MASH.S.E01.CTRL.A0D: false       # acceptsCurrentSetpoints (declared but not supported)
-  MASH.S.E01.CTRL.A0E: false       # isPausable (declared but not supported)
-  MASH.S.E01.CTRL.A0F: false       # isShiftable (declared but not supported)
-  MASH.S.E01.CTRL.A10: false       # isStoppable (declared but not supported)
+  MASH.S.E01.CTRL.A0B: false       # acceptsCurrentLimits (not supported)
+  MASH.S.E01.CTRL.A0C: false       # acceptsSetpoints (not supported)
+  MASH.S.E01.CTRL.A0D: false       # acceptsCurrentSetpoints (not supported)
+  MASH.S.E01.CTRL.A0E: false       # isPausable (not supported)
+  MASH.S.E01.CTRL.A0F: false       # isShiftable (not supported)
+  MASH.S.E01.CTRL.A10: false       # isStoppable (not supported)
 
-  # ==========================================================================
-  # Power Limit Attributes - EMS uses both consumption and production
-  # ==========================================================================
-
+  # Power Limit Attributes
   MASH.S.E01.CTRL.A14: true        # effectiveConsumptionLimit
   MASH.S.E01.CTRL.A15: true        # myConsumptionLimit
-  MASH.S.E01.CTRL.A16: true        # effectiveProductionLimit (bidirectional building)
+  MASH.S.E01.CTRL.A16: true        # effectiveProductionLimit (bidirectional)
   MASH.S.E01.CTRL.A17: true        # myProductionLimit
 
-  # ==========================================================================
   # Failsafe Attributes
-  # ==========================================================================
-
   MASH.S.E01.CTRL.A46: true        # failsafeConsumptionLimit
   MASH.S.E01.CTRL.A47: true        # failsafeProductionLimit (bidirectional)
   MASH.S.E01.CTRL.A48: true        # failsafeDuration
 
-  # ==========================================================================
-  # Contractual Limits (EMS-specific - LPC/LPP)
-  # ==========================================================================
-  # These represent the building's contractual grid connection limits,
-  # NOT the nominal power of any single device.
-
+  # Contractual Limits (EMS-specific)
   MASH.S.E01.CTRL.A49: true        # contractualConsumptionMax
   MASH.S.E01.CTRL.A4A: true        # contractualProductionMax
 
-  # ==========================================================================
-  # Override Tracking (LPC/LPP)
-  # ==========================================================================
-
+  # Override Tracking (LPC/LPP OVERRIDE scenario)
   MASH.S.E01.CTRL.A4B: true        # overrideReason
   MASH.S.E01.CTRL.A4C: true        # overrideDirection
 
-  # ==========================================================================
   # Commands
-  # ==========================================================================
-
   MASH.S.E01.CTRL.C01.Rsp: true    # SetLimit
   MASH.S.E01.CTRL.C02.Rsp: true    # ClearLimit
-  MASH.S.E01.CTRL.C03.Rsp: false   # SetSetpoint (not supported)
-  MASH.S.E01.CTRL.C04.Rsp: false   # ClearSetpoint (not supported)
+  MASH.S.E01.CTRL.C05.Rsp: false   # SetSetpoint (not supported)
+  MASH.S.E01.CTRL.C06.Rsp: false   # ClearSetpoint (not supported)
   MASH.S.E01.CTRL.C09.Rsp: false   # Pause (not supported)
   MASH.S.E01.CTRL.C0A.Rsp: false   # Resume (not supported)
 
@@ -125,16 +136,11 @@ items:
   # ==========================================================================
 
   MASH.S.E01.CTRL.B_MULTIZONE: true  # Multi-zone value resolution
-  MASH.S.E01.CTRL.B_DURATION: true # Duration-based expiry
+  MASH.S.E01.CTRL.B_DURATION: true   # Duration-based expiry
   MASH.S.E01.CTRL.B_EFFECTIVE: true  # Effective/own value split
-  MASH.S.E01.CTRL.B_OPTOUT: true   # OptOut state filtering
-
-  # ==========================================================================
-  # LPC/LPP Behavioral Capabilities
-  # ==========================================================================
-
-  MASH.S.E01.CTRL.B_APPLIED: true  # SetLimit returns 'applied' field
-  MASH.S.E01.CTRL.B_REJECT: true   # SetLimit returns 'rejectReason' field
+  MASH.S.E01.CTRL.B_OPTOUT: true     # OptOut state filtering
+  MASH.S.E01.CTRL.B_APPLIED: true    # SetLimit returns 'applied' field
+  MASH.S.E01.CTRL.B_REJECT: true     # SetLimit returns 'rejectReason' field
   MASH.S.E01.CTRL.B_CTRLSTATE: true  # SetLimit returns 'controlState' field
   MASH.S.E01.CTRL.B_VALIDATE_NEG: true  # Rejects negative limit values
   MASH.S.E01.CTRL.B_VALIDATE_MIN: false  # No minimum power for EMS (aggregate)

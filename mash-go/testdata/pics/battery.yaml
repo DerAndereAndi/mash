@@ -1,0 +1,184 @@
+# PICS (Protocol Implementation Conformance Statement)
+# Battery Device Profile
+#
+# Reference implementation: exercises all battery scenarios.
+# Use cases: LPC, LPP, MPD, COB (all 3 scenarios), POEN
+
+# Device Identification
+device:
+  vendor: "Reference"
+  product: "Smart Battery Inverter"
+  model: "BAT-001"
+  version: "1.0.0"
+
+# PICS Items
+items:
+  # Protocol declaration
+  MASH.S: 1
+
+  # Communication capabilities
+  MASH.S.TRANS.SC: true
+  MASH.S.TRANS.PASE: true
+  MASH.S.TRANS.MDNS: true
+  MASH.S.TRANS.TLS13: true
+
+  # ==========================================================================
+  # Use case declarations with per-scenario codes
+  # ==========================================================================
+
+  # LPC: Limit Power Consumption
+  MASH.S.UC.LPC: true
+  MASH.S.UC.LPC.S00: true          # BASE
+  MASH.S.UC.LPC.S01: true          # MEASUREMENT
+  MASH.S.UC.LPC.S02: true          # OVERRIDE
+
+  # LPP: Limit Power Production
+  MASH.S.UC.LPP: true
+  MASH.S.UC.LPP.S00: true          # BASE
+  MASH.S.UC.LPP.S01: true          # MEASUREMENT
+  MASH.S.UC.LPP.S02: true          # OVERRIDE
+
+  # MPD: Monitor Power Device
+  MASH.S.UC.MPD: true
+  MASH.S.UC.MPD.S00: true          # BASE
+  MASH.S.UC.MPD.S01: true          # ELECTRICAL
+  MASH.S.UC.MPD.S02: true          # STATUS
+
+  # COB: Control of Battery
+  MASH.S.UC.COB: true
+  MASH.S.UC.COB.S00: true          # BASE
+  MASH.S.UC.COB.S01: true          # LIMITS
+  MASH.S.UC.COB.S02: true          # CONTROL_MODE
+
+  # POEN: Power Envelope
+  MASH.S.UC.POEN: true
+  MASH.S.UC.POEN.S00: true         # BASE
+  MASH.S.UC.POEN.S01: true         # MEASUREMENT
+
+  # ==========================================================================
+  # Endpoint declaration
+  # ==========================================================================
+
+  MASH.S.E01: BATTERY              # Endpoint 1: Battery
+
+  # ==========================================================================
+  # Feature Presence
+  # ==========================================================================
+
+  MASH.S.E01.CTRL: true            # EnergyControl
+  MASH.S.E01.ELEC: true            # Electrical
+  MASH.S.E01.MEAS: true            # Measurement
+  MASH.S.E01.STAT: true            # Status
+  MASH.S.E01.SIG: true             # Signals
+
+  # ==========================================================================
+  # EnergyControl (CTRL) Attributes
+  # ==========================================================================
+
+  # Device type & state (mandatory)
+  MASH.S.E01.CTRL.A01: true        # deviceType
+  MASH.S.E01.CTRL.A02: true        # controlState
+  MASH.S.E01.CTRL.A03: true        # optOutState
+
+  # Control capabilities
+  MASH.S.E01.CTRL.A0A: true        # acceptsLimits (COB LIMITS + LPC/LPP)
+  MASH.S.E01.CTRL.A0B: false       # acceptsCurrentLimits
+  MASH.S.E01.CTRL.A0C: true        # acceptsSetpoints (COB BASE)
+  MASH.S.E01.CTRL.A0E: true        # isPausable
+
+  # Failsafe
+  MASH.S.E01.CTRL.A46: true        # failsafeConsumptionLimit
+  MASH.S.E01.CTRL.A47: true        # failsafeProductionLimit
+  MASH.S.E01.CTRL.A48: true        # failsafeDuration
+
+  # Power limit tracking (LPC/LPP)
+  MASH.S.E01.CTRL.A14: true        # effectiveConsumptionLimit
+  MASH.S.E01.CTRL.A15: true        # myConsumptionLimit
+  MASH.S.E01.CTRL.A16: true        # effectiveProductionLimit
+  MASH.S.E01.CTRL.A17: true        # myProductionLimit
+
+  # Power setpoints (COB BASE)
+  MASH.S.E01.CTRL.A28: true        # effectiveConsumptionSetpoint
+  MASH.S.E01.CTRL.A29: true        # myConsumptionSetpoint
+  MASH.S.E01.CTRL.A2A: true        # effectiveProductionSetpoint
+  MASH.S.E01.CTRL.A2B: true        # myProductionSetpoint
+
+  # Override tracking
+  MASH.S.E01.CTRL.A4B: true        # overrideReason
+  MASH.S.E01.CTRL.A4C: true        # overrideDirection
+
+  # Control mode (COB CONTROL_MODE)
+  MASH.S.E01.CTRL.A57: true        # controlMode
+
+  # EnergyControl commands
+  MASH.S.E01.CTRL.C01.Rsp: true    # SetLimit
+  MASH.S.E01.CTRL.C02.Rsp: true    # ClearLimit
+  MASH.S.E01.CTRL.C05.Rsp: true    # SetSetpoint
+  MASH.S.E01.CTRL.C06.Rsp: true    # ClearSetpoint
+  MASH.S.E01.CTRL.C09.Rsp: true    # Pause
+  MASH.S.E01.CTRL.C0A.Rsp: true    # Resume
+
+  # ==========================================================================
+  # Electrical (ELEC) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.ELEC.A01: true        # phaseCount
+  MASH.S.E01.ELEC.A02: true        # phaseMapping
+  MASH.S.E01.ELEC.A03: true        # nominalVoltage
+  MASH.S.E01.ELEC.A04: true        # nominalFrequency
+  MASH.S.E01.ELEC.A05: true        # supportedDirections (bidirectional)
+  MASH.S.E01.ELEC.A0A: true        # nominalMaxConsumption (charge)
+  MASH.S.E01.ELEC.A0B: true        # nominalMaxProduction (discharge)
+  MASH.S.E01.ELEC.A0D: true        # maxCurrentPerPhase
+  MASH.S.E01.ELEC.A14: true        # energyCapacity
+
+  # ==========================================================================
+  # Measurement (MEAS) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.MEAS.A01: true        # acActivePower
+  MASH.S.E01.MEAS.A28: true        # dcPower
+  MASH.S.E01.MEAS.A29: true        # dcCurrent
+  MASH.S.E01.MEAS.A2A: true        # dcVoltage
+  MASH.S.E01.MEAS.A32: true        # stateOfCharge
+  MASH.S.E01.MEAS.A33: true        # stateOfHealth
+  MASH.S.E01.MEAS.A34: true        # stateOfEnergy
+  MASH.S.E01.MEAS.A1E: true        # acEnergyConsumed
+  MASH.S.E01.MEAS.A1F: true        # acEnergyProduced
+  MASH.S.E01.MEAS.A2B: true        # dcEnergyIn
+  MASH.S.E01.MEAS.A2C: true        # dcEnergyOut
+  MASH.S.E01.MEAS.A35: true        # useableCapacity
+  MASH.S.E01.MEAS.A36: true        # cycleCount
+  MASH.S.E01.MEAS.A3C: true        # temperature
+
+  # ==========================================================================
+  # Status (STAT) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.STAT.A01: true        # operatingState
+  MASH.S.E01.STAT.A03: true        # faultCode
+  MASH.S.E01.STAT.A04: true        # faultMessage
+
+  # ==========================================================================
+  # Signals (SIG) - POEN
+  # ==========================================================================
+
+  MASH.S.E01.SIG.A01: true         # signalSource
+  MASH.S.E01.SIG.A02: true         # startTime
+  MASH.S.E01.SIG.A03: true         # validUntil
+  MASH.S.E01.SIG.A0A: true         # lastReceivedSignalId
+  MASH.S.E01.SIG.A0B: true         # signalStatus
+  MASH.S.E01.SIG.A14: true         # constraintSlots
+
+  # Signals commands
+  MASH.S.E01.SIG.C01.Rsp: true     # SendPriceSignal
+  MASH.S.E01.SIG.C02.Rsp: true     # SendConstraintSignal
+  MASH.S.E01.SIG.C04.Rsp: true     # ClearSignals
+
+  # ==========================================================================
+  # Multi-zone support
+  # ==========================================================================
+
+  MASH.S.ZONE.MAX: 3
+  MASH.S.ZONE.GRID: true
+  MASH.S.ZONE.LOCAL: true

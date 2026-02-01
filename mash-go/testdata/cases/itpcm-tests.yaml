@@ -1,0 +1,303 @@
+# Test Suite: ITPCM (Incentive Table Power Consumption Management) Tests
+# Replaces EEBUS ITPCM
+#
+# Scenarios:
+#   S00 (BASE): Incentive signals + plan exchange
+#   S01 (ENERGY_CONTROL): Direct energy control alongside incentives
+#   S02 (MEASUREMENT): Measurement telemetry
+
+---
+# ==========================================================================
+# ITPCM BASE Scenario (S00)
+# ==========================================================================
+
+---
+id: TC-ITPCM-S00-001
+name: SendPriceSignal With Slots Accepted
+description: |
+  Verifies SendPriceSignal with time-slotted prices is accepted.
+
+pics_requirements:
+  - MASH.S.UC.ITPCM
+  - MASH.S.UC.ITPCM.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send price signal with slots
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Signals
+      command: SendPriceSignal
+      args:
+        slots:
+          - duration: 3600
+            price: 300000          # 0.30 EUR/kWh (expensive)
+          - duration: 3600
+            price: 100000          # 0.10 EUR/kWh (cheap)
+          - duration: 3600
+            price: 200000          # 0.20 EUR/kWh (moderate)
+    expect:
+      invoke_success: true
+
+postconditions:
+  - price_signal_sent: true
+
+timeout: "10s"
+tags:
+  - itpcm
+  - base
+  - price-signal
+
+---
+id: TC-ITPCM-S00-002
+name: RequestPlan After Signal Returns Plan
+description: |
+  Verifies that after receiving price signals, the device can
+  produce a power consumption plan.
+
+pics_requirements:
+  - MASH.S.UC.ITPCM
+  - MASH.S.UC.ITPCM.S00
+
+preconditions:
+  - session_established: true
+  - price_signal_sent: true
+
+steps:
+  - name: Request plan
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Plan
+      command: RequestPlan
+    expect:
+      invoke_success: true
+      response_contains:
+        - planId
+
+postconditions:
+  - plan_available: true
+
+timeout: "10s"
+tags:
+  - itpcm
+  - base
+  - request-plan
+
+---
+id: TC-ITPCM-S00-003
+name: AcceptPlan Transitions Commitment
+description: |
+  Verifies AcceptPlan transitions the plan's commitment state.
+
+pics_requirements:
+  - MASH.S.UC.ITPCM
+  - MASH.S.UC.ITPCM.S00
+
+preconditions:
+  - session_established: true
+  - plan_available: true
+
+steps:
+  - name: Accept plan
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Plan
+      command: AcceptPlan
+    expect:
+      invoke_success: true
+
+  - name: Verify commitment advanced
+    action: read
+    params:
+      endpoint: 1
+      feature: Plan
+      attribute: commitment
+    expect:
+      read_success: true
+      value_gte: 1                 # At least TENTATIVE
+
+postconditions:
+  - plan_committed: true
+
+timeout: "10s"
+tags:
+  - itpcm
+  - base
+  - accept-plan
+
+---
+id: TC-ITPCM-S00-004
+name: ClearSignals Removes Incentives
+description: |
+  Verifies ClearSignals removes the active price signals.
+
+pics_requirements:
+  - MASH.S.UC.ITPCM
+  - MASH.S.UC.ITPCM.S00
+
+preconditions:
+  - session_established: true
+  - price_signal_sent: true
+
+steps:
+  - name: Clear signals
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Signals
+      command: ClearSignals
+    expect:
+      invoke_success: true
+
+  - name: Verify priceSlots cleared
+    action: read
+    params:
+      endpoint: 1
+      feature: Signals
+      attribute: priceSlots
+    expect:
+      read_success: true
+      value_is_null: true
+
+postconditions:
+  - signals_cleared: true
+
+timeout: "10s"
+tags:
+  - itpcm
+  - base
+  - clear-signals
+
+---
+# ==========================================================================
+# ITPCM ENERGY_CONTROL Scenario (S01)
+# ==========================================================================
+
+---
+id: TC-ITPCM-S01-001
+name: EnergyControl Subscription Active
+description: |
+  Verifies EnergyControl feature is subscribable alongside incentives.
+
+pics_requirements:
+  - MASH.S.UC.ITPCM
+  - MASH.S.UC.ITPCM.S01
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to EnergyControl
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: EnergyControl
+    expect:
+      subscribe_success: true
+
+postconditions:
+  - energy_control_subscribed: true
+
+timeout: "10s"
+tags:
+  - itpcm
+  - energy-control
+  - subscribe
+
+---
+id: TC-ITPCM-S01-002
+name: Direct Control Works Alongside Incentives
+description: |
+  Verifies that direct energy control can coexist with incentive signals.
+
+pics_requirements:
+  - MASH.S.UC.ITPCM
+  - MASH.S.UC.ITPCM.S00
+  - MASH.S.UC.ITPCM.S01
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send price signal
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Signals
+      command: SendPriceSignal
+      args:
+        slots:
+          - duration: 3600
+            price: 200000
+    expect:
+      invoke_success: true
+
+  - name: Read controlState
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+postconditions:
+  - coexistence_verified: true
+
+timeout: "10s"
+tags:
+  - itpcm
+  - energy-control
+  - coexistence
+
+---
+# ==========================================================================
+# ITPCM MEASUREMENT Scenario (S02)
+# ==========================================================================
+
+---
+id: TC-ITPCM-S02-001
+name: Measurement Subscription Active
+description: |
+  Verifies Measurement subscription delivers telemetry during
+  incentive-based operation.
+
+pics_requirements:
+  - MASH.S.UC.ITPCM
+  - MASH.S.UC.ITPCM.S02
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to Measurement
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+    expect:
+      subscribe_success: true
+
+  - name: Verify report received
+    action: wait_report
+    params:
+      feature: Measurement
+      attribute: acActivePower
+      timeout: 5s
+    expect:
+      report_received: true
+
+postconditions:
+  - itpcm_measurement_active: true
+
+timeout: "15s"
+tags:
+  - itpcm
+  - measurement
+  - subscribe

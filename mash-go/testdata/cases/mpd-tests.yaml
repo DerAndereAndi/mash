@@ -1,0 +1,313 @@
+# Test Suite: MPD (Monitor Power Device) Use Case Tests
+# Replaces EEBUS MPC, MGCP, MOB, MOI, MPS
+#
+# Scenarios:
+#   S00 (BASE): Basic power monitoring via Measurement
+#   S01 (ELECTRICAL): Static electrical configuration
+#   S02 (STATUS): Operating state and fault information
+
+---
+# ==========================================================================
+# MPD BASE Scenario (S00)
+# ==========================================================================
+
+---
+id: TC-MPD-S00-001
+name: Subscribe to Measurement Attributes
+description: |
+  Verifies Measurement feature subscription delivers telemetry
+  for basic power monitoring.
+
+pics_requirements:
+  - MASH.S.UC.MPD
+  - MASH.S.UC.MPD.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to Measurement
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+    expect:
+      subscribe_success: true
+
+  - name: Verify report received
+    action: wait_report
+    params:
+      feature: Measurement
+      attribute: acActivePower
+      timeout: 5s
+    expect:
+      report_received: true
+
+postconditions:
+  - measurement_subscription_active: true
+
+timeout: "15s"
+tags:
+  - mpd
+  - base
+  - subscribe
+
+---
+id: TC-MPD-S00-002
+name: acActivePower Readable and Signed Correctly
+description: |
+  Verifies acActivePower is readable and follows sign convention:
+  positive = consumption, negative = production.
+
+pics_requirements:
+  - MASH.S.UC.MPD
+  - MASH.S.UC.MPD.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read acActivePower
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+postconditions:
+  - power_readable: true
+
+timeout: "10s"
+tags:
+  - mpd
+  - base
+  - power
+  - sign-convention
+
+---
+id: TC-MPD-S00-003
+name: Energy Counters Monotonically Increasing
+description: |
+  Verifies that cumulative energy counters (acEnergyConsumed)
+  are monotonically increasing over successive reads.
+
+pics_requirements:
+  - MASH.S.UC.MPD
+  - MASH.S.UC.MPD.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read acEnergyConsumed (first)
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acEnergyConsumed
+    expect:
+      read_success: true
+      save_as: energy_first
+
+  - name: Wait briefly
+    action: wait
+    params:
+      duration: 2s
+
+  - name: Read acEnergyConsumed (second)
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acEnergyConsumed
+    expect:
+      read_success: true
+      value_gte_saved: energy_first
+
+postconditions:
+  - energy_monotonic: true
+
+timeout: "15s"
+tags:
+  - mpd
+  - base
+  - energy
+  - monotonic
+
+---
+# ==========================================================================
+# MPD ELECTRICAL Scenario (S01)
+# ==========================================================================
+
+---
+id: TC-MPD-S01-001
+name: nominalMaxConsumption/Production Readable
+description: |
+  Verifies static electrical configuration is readable for
+  device capacity discovery.
+
+pics_requirements:
+  - MASH.S.UC.MPD
+  - MASH.S.UC.MPD.S01
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read nominalMaxConsumption
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxConsumption
+    expect:
+      read_success: true
+
+  - name: Read nominalMaxProduction
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxProduction
+    expect:
+      read_success: true
+
+postconditions:
+  - electrical_config_readable: true
+
+timeout: "10s"
+tags:
+  - mpd
+  - electrical
+  - capacity
+
+---
+id: TC-MPD-S01-002
+name: energyCapacity Readable for Storage
+description: |
+  Verifies energyCapacity is readable, indicating storage capacity
+  for battery-type endpoints.
+
+pics_requirements:
+  - MASH.S.UC.MPD
+  - MASH.S.UC.MPD.S01
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read energyCapacity
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: energyCapacity
+    expect:
+      read_success: true
+
+postconditions:
+  - energy_capacity_readable: true
+
+timeout: "10s"
+tags:
+  - mpd
+  - electrical
+  - storage
+
+---
+# ==========================================================================
+# MPD STATUS Scenario (S02)
+# ==========================================================================
+
+---
+id: TC-MPD-S02-001
+name: Subscribe to Status, Receive operatingState
+description: |
+  Verifies Status feature subscription delivers operating state updates.
+
+pics_requirements:
+  - MASH.S.UC.MPD
+  - MASH.S.UC.MPD.S02
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to Status
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Status
+    expect:
+      subscribe_success: true
+
+  - name: Read operatingState
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: operatingState
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+postconditions:
+  - status_subscription_active: true
+
+timeout: "15s"
+tags:
+  - mpd
+  - status
+  - subscribe
+
+---
+id: TC-MPD-S02-002
+name: Fault State Includes faultCode
+description: |
+  Verifies that when device is in FAULT state, faultCode is populated.
+
+pics_requirements:
+  - MASH.S.UC.MPD
+  - MASH.S.UC.MPD.S02
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Trigger fault state
+    action: device_trigger
+    params:
+      trigger: enter_fault
+      faultCode: 42
+
+  - name: Verify operatingState is FAULT
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: operatingState
+    expect:
+      read_success: true
+      value: 7                     # FAULT
+
+  - name: Verify faultCode is set
+    action: read
+    params:
+      endpoint: 1
+      feature: Status
+      attribute: faultCode
+    expect:
+      read_success: true
+      value: 42
+
+postconditions:
+  - fault_code_populated: true
+
+timeout: "10s"
+tags:
+  - mpd
+  - status
+  - fault

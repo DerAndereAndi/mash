@@ -1,27 +1,26 @@
 # PICS (Protocol Implementation Conformance Statement)
-# EV Charger Device Profile
+# Heat Pump Device Profile
 #
-# Reference implementation: exercises all EV charger scenarios.
-# Use cases: LPC, MPD, EVC (all 6 scenarios), ITPCM, POEN
+# Reference implementation: exercises all heat pump scenarios.
+# Use cases: LPC, MPD, FLOA, ITPCM, OHPCF (all 2 scenarios), POEN
 
 # Device Identification
 device:
   vendor: "Reference"
-  product: "Smart Charger Pro"
-  model: "SCP-11"
+  product: "Smart Heat Pump"
+  model: "HP-001"
   version: "1.0.0"
 
 # PICS Items
-# Format: MASH.{S|C}[.E<xx>].FEATURE[.TYPE_ID][.Qualifier]: value
 items:
   # Protocol declaration
-  MASH.S: 1                       # Server/device side
+  MASH.S: 1
 
-  # Communication capabilities (device-level)
-  MASH.S.TRANS.SC: true           # Secure connection supported
-  MASH.S.TRANS.PASE: true         # PASE commissioning supported
-  MASH.S.TRANS.MDNS: true         # mDNS discovery supported
-  MASH.S.TRANS.TLS13: true        # TLS 1.3 supported
+  # Communication capabilities
+  MASH.S.TRANS.SC: true
+  MASH.S.TRANS.PASE: true
+  MASH.S.TRANS.MDNS: true
+  MASH.S.TRANS.TLS13: true
 
   # ==========================================================================
   # Use case declarations with per-scenario codes
@@ -39,20 +38,22 @@ items:
   MASH.S.UC.MPD.S01: true          # ELECTRICAL
   MASH.S.UC.MPD.S02: true          # STATUS
 
-  # EVC: EV Charging (all 6 scenarios)
-  MASH.S.UC.EVC: true
-  MASH.S.UC.EVC.S00: true          # BASE
-  MASH.S.UC.EVC.S01: true          # SOC_REPORTING
-  MASH.S.UC.EVC.S02: true          # ASYMMETRIC_CHARGING
-  MASH.S.UC.EVC.S03: true          # V2G_DISCHARGE
-  MASH.S.UC.EVC.S04: true          # COORDINATED
-  MASH.S.UC.EVC.S05: true          # EV_DEMAND
+  # FLOA: Flexible Load
+  MASH.S.UC.FLOA: true
+  MASH.S.UC.FLOA.S00: true         # BASE
+  MASH.S.UC.FLOA.S01: true         # MEASUREMENT
+  MASH.S.UC.FLOA.S02: true         # SETPOINTS
 
   # ITPCM: Incentive Table Power Consumption Management
   MASH.S.UC.ITPCM: true
   MASH.S.UC.ITPCM.S00: true        # BASE
   MASH.S.UC.ITPCM.S01: true        # ENERGY_CONTROL
   MASH.S.UC.ITPCM.S02: true        # MEASUREMENT
+
+  # OHPCF: Heat Pump Compressor Flexibility
+  MASH.S.UC.OHPCF: true
+  MASH.S.UC.OHPCF.S00: true        # BASE
+  MASH.S.UC.OHPCF.S01: true        # MEASUREMENT
 
   # POEN: Power Envelope
   MASH.S.UC.POEN: true
@@ -63,16 +64,15 @@ items:
   # Endpoint declaration
   # ==========================================================================
 
-  MASH.S.E01: EV_CHARGER           # Endpoint 1: EV Charger
+  MASH.S.E01: HEAT_PUMP            # Endpoint 1: Heat Pump
 
   # ==========================================================================
-  # Feature Presence (endpoint-level)
+  # Feature Presence
   # ==========================================================================
 
   MASH.S.E01.CTRL: true            # EnergyControl
   MASH.S.E01.ELEC: true            # Electrical
   MASH.S.E01.MEAS: true            # Measurement
-  MASH.S.E01.CHRG: true            # ChargingSession
   MASH.S.E01.STAT: true            # Status
   MASH.S.E01.SIG: true             # Signals
   MASH.S.E01.PLAN: true            # Plan
@@ -81,48 +81,44 @@ items:
   # EnergyControl (CTRL) Attributes
   # ==========================================================================
 
-  # Device type & state (mandatory)
   MASH.S.E01.CTRL.A01: true        # deviceType
   MASH.S.E01.CTRL.A02: true        # controlState
   MASH.S.E01.CTRL.A03: true        # optOutState
 
-  # Control capabilities (mandatory)
-  MASH.S.E01.CTRL.A0A: true        # acceptsLimits
-  MASH.S.E01.CTRL.A0B: true        # acceptsCurrentLimits
-  MASH.S.E01.CTRL.A0C: true        # acceptsSetpoints
-  MASH.S.E01.CTRL.A0D: true        # acceptsCurrentSetpoints
-  MASH.S.E01.CTRL.A0E: true        # isPausable
+  # Control capabilities
+  MASH.S.E01.CTRL.A0A: true        # acceptsLimits (LPC/FLOA/OHPCF)
+  MASH.S.E01.CTRL.A0B: false       # acceptsCurrentLimits
+  MASH.S.E01.CTRL.A0C: true        # acceptsSetpoints (FLOA SETPOINTS)
+  MASH.S.E01.CTRL.A0E: true        # isPausable (OHPCF)
 
-  # Failsafe (mandatory)
+  # Failsafe
   MASH.S.E01.CTRL.A46: true        # failsafeConsumptionLimit
-  MASH.S.E01.CTRL.A47: true        # failsafeProductionLimit
   MASH.S.E01.CTRL.A48: true        # failsafeDuration
 
   # Power limit tracking
   MASH.S.E01.CTRL.A14: true        # effectiveConsumptionLimit
   MASH.S.E01.CTRL.A15: true        # myConsumptionLimit
-  MASH.S.E01.CTRL.A16: true        # effectiveProductionLimit
-  MASH.S.E01.CTRL.A17: true        # myProductionLimit
 
-  # Per-phase current limits (ASYMMETRIC_CHARGING)
-  MASH.S.E01.CTRL.A1E: true        # effectiveCurrentLimitsConsumption
-  MASH.S.E01.CTRL.A1F: true        # myCurrentLimitsConsumption
-
-  # Power setpoints (V2G_DISCHARGE)
+  # Power setpoint tracking (FLOA SETPOINTS)
   MASH.S.E01.CTRL.A28: true        # effectiveConsumptionSetpoint
   MASH.S.E01.CTRL.A29: true        # myConsumptionSetpoint
-  MASH.S.E01.CTRL.A2A: true        # effectiveProductionSetpoint
-  MASH.S.E01.CTRL.A2B: true        # myProductionSetpoint
 
-  # Override tracking (LPC OVERRIDE scenario)
+  # Override tracking
   MASH.S.E01.CTRL.A4B: true        # overrideReason
   MASH.S.E01.CTRL.A4C: true        # overrideDirection
 
-  # EnergyControl commands
+  # Process management (OHPCF)
+  MASH.S.E01.CTRL.A50: true        # processState
+  MASH.S.E01.CTRL.A51: true        # optionalProcess
+  MASH.S.E01.CTRL.A52: true        # minRunDuration
+  MASH.S.E01.CTRL.A53: true        # minPauseDuration
+  MASH.S.E01.CTRL.A54: true        # maxRunDuration
+  MASH.S.E01.CTRL.A55: true        # maxPauseDuration
+  MASH.S.E01.CTRL.A56: true        # optionalProcessPower
+
+  # Commands
   MASH.S.E01.CTRL.C01.Rsp: true    # SetLimit
   MASH.S.E01.CTRL.C02.Rsp: true    # ClearLimit
-  MASH.S.E01.CTRL.C03.Rsp: true    # SetCurrentLimits
-  MASH.S.E01.CTRL.C04.Rsp: true    # ClearCurrentLimits
   MASH.S.E01.CTRL.C05.Rsp: true    # SetSetpoint
   MASH.S.E01.CTRL.C06.Rsp: true    # ClearSetpoint
   MASH.S.E01.CTRL.C09.Rsp: true    # Pause
@@ -132,64 +128,26 @@ items:
   # Electrical (ELEC) Attributes
   # ==========================================================================
 
-  # Mandatory
-  MASH.S.E01.ELEC.A01: true        # phaseCount (3-phase)
+  MASH.S.E01.ELEC.A01: true        # phaseCount
   MASH.S.E01.ELEC.A02: true        # phaseMapping
   MASH.S.E01.ELEC.A03: true        # nominalVoltage
   MASH.S.E01.ELEC.A04: true        # nominalFrequency
-  MASH.S.E01.ELEC.A05: true        # supportedDirections (bidirectional for V2G)
-  MASH.S.E01.ELEC.A0A: true        # nominalMaxConsumption (22 kW)
-  MASH.S.E01.ELEC.A0B: true        # nominalMaxProduction (V2G discharge)
-  MASH.S.E01.ELEC.A0D: true        # maxCurrentPerPhase (32 A)
-  MASH.S.E01.ELEC.A0E: true        # minCurrentPerPhase (6 A)
+  MASH.S.E01.ELEC.A05: true        # supportedDirections
+  MASH.S.E01.ELEC.A0A: true        # nominalMaxConsumption
+  MASH.S.E01.ELEC.A0D: true        # maxCurrentPerPhase
 
   # ==========================================================================
   # Measurement (MEAS) Attributes
   # ==========================================================================
 
-  # Mandatory
   MASH.S.E01.MEAS.A01: true        # acActivePower
-
-  # Recommended
   MASH.S.E01.MEAS.A14: true        # acCurrentPerPhase
   MASH.S.E01.MEAS.A15: true        # acVoltagePerPhase
   MASH.S.E01.MEAS.A1E: true        # acEnergyConsumed
+  MASH.S.E01.MEAS.A3C: true        # temperature
 
   # ==========================================================================
-  # ChargingSession (CHRG) Attributes
-  # ==========================================================================
-
-  # Mandatory
-  MASH.S.E01.CHRG.A01: true        # state
-  MASH.S.E01.CHRG.A02: true        # sessionId
-  MASH.S.E01.CHRG.A03: true        # sessionStartTime
-  MASH.S.E01.CHRG.A0A: true        # sessionEnergyCharged
-  MASH.S.E01.CHRG.A28: true        # evDemandMode
-  MASH.S.E01.CHRG.A46: true        # chargingMode
-  MASH.S.E01.CHRG.A47: true        # supportedChargingModes
-
-  # SOC_REPORTING scenario
-  MASH.S.E01.CHRG.A1E: true        # evStateOfCharge
-  MASH.S.E01.CHRG.A1F: true        # evBatteryCapacity
-  MASH.S.E01.CHRG.A20: true        # evMinStateOfCharge
-  MASH.S.E01.CHRG.A21: true        # evTargetStateOfCharge
-
-  # EV_DEMAND scenario
-  MASH.S.E01.CHRG.A29: true        # evMinEnergyRequest
-  MASH.S.E01.CHRG.A2A: true        # evMaxEnergyRequest
-  MASH.S.E01.CHRG.A2B: true        # evTargetEnergyRequest
-  MASH.S.E01.CHRG.A2C: true        # evDepartureTime
-
-  # V2G_DISCHARGE scenario
-  MASH.S.E01.CHRG.A32: true        # evMinDischargingRequest
-  MASH.S.E01.CHRG.A33: true        # evMaxDischargingRequest
-  MASH.S.E01.CHRG.A34: true        # evDischargeBelowTargetPermitted
-
-  # ChargingSession commands
-  MASH.S.E01.CHRG.C01.Rsp: true    # SetChargingMode
-
-  # ==========================================================================
-  # Status (STAT) Attributes - MPD STATUS scenario
+  # Status (STAT) Attributes
   # ==========================================================================
 
   MASH.S.E01.STAT.A01: true        # operatingState
@@ -197,23 +155,22 @@ items:
   MASH.S.E01.STAT.A04: true        # faultMessage
 
   # ==========================================================================
-  # Signals (SIG) - COORDINATED + ITPCM + POEN scenarios
+  # Signals (SIG) - ITPCM + POEN
   # ==========================================================================
 
   MASH.S.E01.SIG.A01: true         # signalSource
   MASH.S.E01.SIG.A02: true         # startTime
   MASH.S.E01.SIG.A03: true         # validUntil
-  MASH.S.E01.SIG.A0A: true         # priceSlots
+  MASH.S.E01.SIG.A0A: true         # priceSlots (ITPCM)
   MASH.S.E01.SIG.A0B: true         # signalStatus
-  MASH.S.E01.SIG.A14: true         # constraintSlots
+  MASH.S.E01.SIG.A14: true         # constraintSlots (POEN)
 
-  # Signals commands
   MASH.S.E01.SIG.C01.Rsp: true     # SendPriceSignal
   MASH.S.E01.SIG.C02.Rsp: true     # SendConstraintSignal
   MASH.S.E01.SIG.C04.Rsp: true     # ClearSignals
 
   # ==========================================================================
-  # Plan (PLAN) - COORDINATED scenario
+  # Plan (PLAN) - ITPCM
   # ==========================================================================
 
   MASH.S.E01.PLAN.A01: true        # planId
@@ -223,14 +180,13 @@ items:
   MASH.S.E01.PLAN.A0B: true        # endTime
   MASH.S.E01.PLAN.A28: true        # slots
 
-  # Plan commands
   MASH.S.E01.PLAN.C01.Rsp: true    # RequestPlan
   MASH.S.E01.PLAN.C02.Rsp: true    # AcceptPlan
 
   # ==========================================================================
-  # Multi-zone support (device-level)
+  # Multi-zone support
   # ==========================================================================
 
-  MASH.S.ZONE.MAX: 3               # Maximum 3 zones supported
-  MASH.S.ZONE.GRID: true           # Grid zone supported
-  MASH.S.ZONE.LOCAL: true          # Local zone supported
+  MASH.S.ZONE.MAX: 3
+  MASH.S.ZONE.GRID: true
+  MASH.S.ZONE.LOCAL: true

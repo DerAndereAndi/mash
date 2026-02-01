@@ -172,8 +172,8 @@ func TestMatchAll_LPC_MeasurementOptional(t *testing.T) {
 	}
 }
 
-func TestMatchAll_LPC_WrongEndpointType(t *testing.T) {
-	// GRID_CONNECTION is not in LPC's endpoint types
+func TestMatchAll_LPC_GridConnection(t *testing.T) {
+	// GRID_CONNECTION is in LPC's endpoint types (EMS scenario)
 	profile := buildProfile("dev-1",
 		buildEndpoint(1, "GRID_CONNECTION",
 			buildFeature(0x05,
@@ -193,8 +193,8 @@ func TestMatchAll_LPC_WrongEndpointType(t *testing.T) {
 	)
 
 	du := MatchAll(profile, Registry)
-	if du.HasUseCase(LPC) {
-		t.Error("LPC should not match GRID_CONNECTION endpoint")
+	if !du.HasUseCase(LPC) {
+		t.Error("LPC should match GRID_CONNECTION endpoint")
 	}
 }
 

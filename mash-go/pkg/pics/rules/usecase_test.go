@@ -423,11 +423,11 @@ MASH.S.E01.ELEC.A0A=1
 }
 
 func TestUC001_EndpointTypeMismatch(t *testing.T) {
-	// LPC on GRID_CONNECTION endpoint (LPC requires INVERTER/EV_CHARGER/BATTERY/etc.)
+	// LPC on PV_STRING endpoint (LPC does not allow PV_STRING)
 	input := `
 MASH.S=1
 MASH.S.UC.LPC=1
-MASH.S.E01=GRID_CONNECTION
+MASH.S.E01=PV_STRING
 MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0A=1
 MASH.S.E01.CTRL.C01.Rsp=1
@@ -451,7 +451,7 @@ MASH.S.E01.ELEC.A0A=1
 		}
 	}
 	if !foundWarning {
-		t.Error("expected warning for LPC on GRID_CONNECTION endpoint")
+		t.Error("expected warning for LPC on PV_STRING endpoint")
 		for _, v := range violations {
 			t.Logf("  violation: [%s] %s", v.Severity, v.Message)
 		}

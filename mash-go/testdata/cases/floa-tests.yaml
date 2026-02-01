@@ -1,0 +1,289 @@
+# Test Suite: FLOA (Flexible Load) Use Case Tests
+# Replaces EEBUS flexible load patterns
+#
+# Scenarios:
+#   S00 (BASE): Power limits + electrical
+#   S01 (MEASUREMENT): Measurement telemetry
+#   S02 (SETPOINTS): Setpoint control
+
+---
+# ==========================================================================
+# FLOA BASE Scenario (S00)
+# ==========================================================================
+
+---
+id: TC-FLOA-S00-001
+name: SetLimit Accepted on Flexible Load
+description: |
+  Verifies SetLimit is accepted on a flexible load endpoint.
+
+pics_requirements:
+  - MASH.S.UC.FLOA
+  - MASH.S.UC.FLOA.S00
+
+preconditions:
+  - session_established: true
+  - device_accepts_limits: true
+
+steps:
+  - name: Send SetLimit
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 2000000  # 2 kW
+        cause: 3                   # LOCAL_OPTIMIZATION
+    expect:
+      invoke_success: true
+      response_contains:
+        - applied
+
+  - name: Verify applied
+    action: check_response
+    params:
+      field: applied
+    expect:
+      value: true
+
+postconditions:
+  - floa_limit_applied: true
+
+timeout: "10s"
+tags:
+  - floa
+  - base
+  - setlimit
+
+---
+id: TC-FLOA-S00-002
+name: ClearLimit Restores Autonomous Operation
+description: |
+  Verifies ClearLimit returns flexible load to autonomous operation.
+
+pics_requirements:
+  - MASH.S.UC.FLOA
+  - MASH.S.UC.FLOA.S00
+
+preconditions:
+  - session_established: true
+  - floa_limit_applied: true
+
+steps:
+  - name: Send ClearLimit
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: ClearLimit
+    expect:
+      invoke_success: true
+
+  - name: Verify controlState
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 1                     # CONTROLLED
+
+postconditions:
+  - floa_autonomous_restored: true
+
+timeout: "10s"
+tags:
+  - floa
+  - base
+  - clearlimit
+
+---
+id: TC-FLOA-S00-003
+name: nominalMaxConsumption Reflects Load Capacity
+description: |
+  Verifies nominalMaxConsumption is readable and reflects the load's
+  maximum power capacity.
+
+pics_requirements:
+  - MASH.S.UC.FLOA
+  - MASH.S.UC.FLOA.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read nominalMaxConsumption
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxConsumption
+    expect:
+      read_success: true
+      value_gt: 0
+
+postconditions:
+  - floa_capacity_readable: true
+
+timeout: "10s"
+tags:
+  - floa
+  - base
+  - electrical
+
+---
+# ==========================================================================
+# FLOA MEASUREMENT Scenario (S01)
+# ==========================================================================
+
+---
+id: TC-FLOA-S01-001
+name: Subscription Delivers Telemetry
+description: |
+  Verifies Measurement subscription delivers telemetry for the flexible load.
+
+pics_requirements:
+  - MASH.S.UC.FLOA
+  - MASH.S.UC.FLOA.S01
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to Measurement
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+    expect:
+      subscribe_success: true
+
+  - name: Verify report received
+    action: wait_report
+    params:
+      feature: Measurement
+      attribute: acActivePower
+      timeout: 5s
+    expect:
+      report_received: true
+
+postconditions:
+  - floa_measurement_active: true
+
+timeout: "15s"
+tags:
+  - floa
+  - measurement
+  - subscribe
+
+---
+id: TC-FLOA-S01-002
+name: Power Reflects Operational Changes
+description: |
+  Verifies power measurement changes when load operates.
+
+pics_requirements:
+  - MASH.S.UC.FLOA
+  - MASH.S.UC.FLOA.S01
+
+preconditions:
+  - session_established: true
+  - floa_measurement_active: true
+
+steps:
+  - name: Read acActivePower
+    action: read
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+postconditions:
+  - floa_power_readable: true
+
+timeout: "10s"
+tags:
+  - floa
+  - measurement
+  - power
+
+---
+# ==========================================================================
+# FLOA SETPOINTS Scenario (S02)
+# ==========================================================================
+
+---
+id: TC-FLOA-S02-001
+name: SetSetpoint Accepted
+description: |
+  Verifies SetSetpoint is accepted on a flexible load that
+  supports setpoint control.
+
+pics_requirements:
+  - MASH.S.UC.FLOA
+  - MASH.S.UC.FLOA.S02
+
+preconditions:
+  - session_established: true
+  - device_accepts_setpoints: true
+
+steps:
+  - name: Send SetSetpoint
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetSetpoint
+      args:
+        consumptionSetpoint: 1500000  # 1.5 kW target
+        cause: 2                      # PRICE_OPTIMIZATION
+    expect:
+      invoke_success: true
+
+postconditions:
+  - floa_setpoint_active: true
+
+timeout: "10s"
+tags:
+  - floa
+  - setpoints
+  - setsetpoint
+
+---
+id: TC-FLOA-S02-002
+name: Setpoint Targets Specific Power Level
+description: |
+  Verifies that the setpoint is reflected in the effective setpoint attribute.
+
+pics_requirements:
+  - MASH.S.UC.FLOA
+  - MASH.S.UC.FLOA.S02
+
+preconditions:
+  - session_established: true
+  - floa_setpoint_active: true
+
+steps:
+  - name: Read effectiveConsumptionSetpoint
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionSetpoint
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+postconditions:
+  - floa_setpoint_reflected: true
+
+timeout: "10s"
+tags:
+  - floa
+  - setpoints
+  - effective

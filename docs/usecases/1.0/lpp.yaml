@@ -11,6 +11,7 @@ description: >
 endpointTypes:
   - INVERTER
   - BATTERY
+  - GRID_CONNECTION
 
 scenarios:
   - bit: 0
@@ -53,4 +54,3 @@ commands:
   - clear
   - capacity
   - override
-  - lpc-demo

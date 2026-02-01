@@ -68,7 +68,7 @@ func (r *CMD001) Check(p *pics.PICS) []pics.Violation {
 	return violations
 }
 
-// CMD002 checks that acceptsCurrentLimits (A0B) requires SetCurrentLimits (C05) and ClearCurrentLimits (C06) per endpoint.
+// CMD002 checks that acceptsCurrentLimits (A0B) requires SetCurrentLimits (C03) and ClearCurrentLimits (C04) per endpoint.
 type CMD002 struct {
 	*pics.BaseRule
 }
@@ -89,15 +89,15 @@ func (r *CMD002) Check(p *pics.PICS) []pics.Violation {
 			continue
 		}
 
-		c05Code := epCode(side, ep.ID, "CTRL.C05.Rsp")
-		c06Code := epCode(side, ep.ID, "CTRL.C06.Rsp")
+		c03Code := epCode(side, ep.ID, "CTRL.C03.Rsp")
+		c04Code := epCode(side, ep.ID, "CTRL.C04.Rsp")
 
 		var missing []string
-		if !p.Has(c05Code) {
-			missing = append(missing, "SetCurrentLimits (C05.Rsp)")
+		if !p.Has(c03Code) {
+			missing = append(missing, "SetCurrentLimits (C03.Rsp)")
 		}
-		if !p.Has(c06Code) {
-			missing = append(missing, "ClearCurrentLimits (C06.Rsp)")
+		if !p.Has(c04Code) {
+			missing = append(missing, "ClearCurrentLimits (C04.Rsp)")
 		}
 
 		if len(missing) > 0 {
@@ -105,7 +105,7 @@ func (r *CMD002) Check(p *pics.PICS) []pics.Violation {
 				RuleID:     r.ID(),
 				Severity:   r.DefaultSeverity(),
 				Message:    fmt.Sprintf("Endpoint %d (%s): acceptsCurrentLimits (A0B) requires: %s", ep.ID, ep.Type, strings.Join(missing, ", ")),
-				PICSCodes:  []string{attrCode, c05Code, c06Code},
+				PICSCodes:  []string{attrCode, c03Code, c04Code},
 				Suggestion: "Add the required command declarations",
 			})
 		}
@@ -114,7 +114,7 @@ func (r *CMD002) Check(p *pics.PICS) []pics.Violation {
 	return violations
 }
 
-// CMD003 checks that acceptsSetpoints (A0C) requires SetSetpoint (C03) and ClearSetpoint (C04) per endpoint.
+// CMD003 checks that acceptsSetpoints (A0C) requires SetSetpoint (C05) and ClearSetpoint (C06) per endpoint.
 type CMD003 struct {
 	*pics.BaseRule
 }
@@ -135,15 +135,15 @@ func (r *CMD003) Check(p *pics.PICS) []pics.Violation {
 			continue
 		}
 
-		c03Code := epCode(side, ep.ID, "CTRL.C03.Rsp")
-		c04Code := epCode(side, ep.ID, "CTRL.C04.Rsp")
+		c05Code := epCode(side, ep.ID, "CTRL.C05.Rsp")
+		c06Code := epCode(side, ep.ID, "CTRL.C06.Rsp")
 
 		var missing []string
-		if !p.Has(c03Code) {
-			missing = append(missing, "SetSetpoint (C03.Rsp)")
+		if !p.Has(c05Code) {
+			missing = append(missing, "SetSetpoint (C05.Rsp)")
 		}
-		if !p.Has(c04Code) {
-			missing = append(missing, "ClearSetpoint (C04.Rsp)")
+		if !p.Has(c06Code) {
+			missing = append(missing, "ClearSetpoint (C06.Rsp)")
 		}
 
 		if len(missing) > 0 {
@@ -151,7 +151,7 @@ func (r *CMD003) Check(p *pics.PICS) []pics.Violation {
 				RuleID:     r.ID(),
 				Severity:   r.DefaultSeverity(),
 				Message:    fmt.Sprintf("Endpoint %d (%s): acceptsSetpoints (A0C) requires: %s", ep.ID, ep.Type, strings.Join(missing, ", ")),
-				PICSCodes:  []string{attrCode, c03Code, c04Code},
+				PICSCodes:  []string{attrCode, c05Code, c06Code},
 				Suggestion: "Add the required command declarations",
 			})
 		}

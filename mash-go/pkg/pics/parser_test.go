@@ -710,7 +710,7 @@ items:
 
 func TestDetectFormat_YAML_Device(t *testing.T) {
 	input := `device:
-  vendor: "Example Corp"
+  vendor: "Reference"
   product: "Smart Charger"
 items:
   MASH.S.TRANS.SC: true`
@@ -905,8 +905,8 @@ func TestParseFile_YAML(t *testing.T) {
 		t.Error("expected Device to be non-nil")
 	}
 
-	if pics.Device.Vendor != "Example Corp" {
-		t.Errorf("Device.Vendor = %s, want Example Corp", pics.Device.Vendor)
+	if pics.Device.Vendor != "Reference" {
+		t.Errorf("Device.Vendor = %s, want Reference", pics.Device.Vendor)
 	}
 
 	// Check that entries are present

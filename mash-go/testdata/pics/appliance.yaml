@@ -1,0 +1,161 @@
+# PICS (Protocol Implementation Conformance Statement)
+# Appliance Device Profile
+#
+# Reference implementation: exercises all appliance scenarios.
+# Use cases: LPC, MPD, FLOA, ITPCM, POEN
+
+# Device Identification
+device:
+  vendor: "Reference"
+  product: "Smart Appliance"
+  model: "APP-001"
+  version: "1.0.0"
+
+# PICS Items
+items:
+  # Protocol declaration
+  MASH.S: 1
+
+  # Communication capabilities
+  MASH.S.TRANS.SC: true
+  MASH.S.TRANS.PASE: true
+  MASH.S.TRANS.MDNS: true
+  MASH.S.TRANS.TLS13: true
+
+  # ==========================================================================
+  # Use case declarations with per-scenario codes
+  # ==========================================================================
+
+  # LPC: Limit Power Consumption
+  MASH.S.UC.LPC: true
+  MASH.S.UC.LPC.S00: true          # BASE
+  MASH.S.UC.LPC.S01: true          # MEASUREMENT
+
+  # MPD: Monitor Power Device
+  MASH.S.UC.MPD: true
+  MASH.S.UC.MPD.S00: true          # BASE
+  MASH.S.UC.MPD.S01: true          # ELECTRICAL
+  MASH.S.UC.MPD.S02: true          # STATUS
+
+  # FLOA: Flexible Load
+  MASH.S.UC.FLOA: true
+  MASH.S.UC.FLOA.S00: true         # BASE
+  MASH.S.UC.FLOA.S01: true         # MEASUREMENT
+  MASH.S.UC.FLOA.S02: true         # SETPOINTS
+
+  # ITPCM: Incentive Table Power Consumption Management
+  MASH.S.UC.ITPCM: true
+  MASH.S.UC.ITPCM.S00: true        # BASE
+  MASH.S.UC.ITPCM.S01: true        # ENERGY_CONTROL
+  MASH.S.UC.ITPCM.S02: true        # MEASUREMENT
+
+  # POEN: Power Envelope
+  MASH.S.UC.POEN: true
+  MASH.S.UC.POEN.S00: true         # BASE
+  MASH.S.UC.POEN.S01: true         # MEASUREMENT
+
+  # ==========================================================================
+  # Endpoint declaration
+  # ==========================================================================
+
+  MASH.S.E01: APPLIANCE            # Endpoint 1: Appliance
+
+  # ==========================================================================
+  # Feature Presence
+  # ==========================================================================
+
+  MASH.S.E01.CTRL: true            # EnergyControl
+  MASH.S.E01.ELEC: true            # Electrical
+  MASH.S.E01.MEAS: true            # Measurement
+  MASH.S.E01.STAT: true            # Status
+  MASH.S.E01.SIG: true             # Signals
+  MASH.S.E01.PLAN: true            # Plan
+
+  # ==========================================================================
+  # EnergyControl (CTRL) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.CTRL.A01: true        # deviceType
+  MASH.S.E01.CTRL.A02: true        # controlState
+
+  MASH.S.E01.CTRL.A0A: true        # acceptsLimits
+  MASH.S.E01.CTRL.A0B: false       # acceptsCurrentLimits
+  MASH.S.E01.CTRL.A0C: true        # acceptsSetpoints (FLOA SETPOINTS)
+  MASH.S.E01.CTRL.A0E: false       # isPausable
+
+  MASH.S.E01.CTRL.A46: true        # failsafeConsumptionLimit
+  MASH.S.E01.CTRL.A48: true        # failsafeDuration
+
+  MASH.S.E01.CTRL.A14: true        # effectiveConsumptionLimit
+  MASH.S.E01.CTRL.A15: true        # myConsumptionLimit
+  MASH.S.E01.CTRL.A28: true        # effectiveConsumptionSetpoint
+  MASH.S.E01.CTRL.A29: true        # myConsumptionSetpoint
+
+  # Commands
+  MASH.S.E01.CTRL.C01.Rsp: true    # SetLimit
+  MASH.S.E01.CTRL.C02.Rsp: true    # ClearLimit
+  MASH.S.E01.CTRL.C05.Rsp: true    # SetSetpoint
+  MASH.S.E01.CTRL.C06.Rsp: true    # ClearSetpoint
+
+  # ==========================================================================
+  # Electrical (ELEC) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.ELEC.A01: true        # phaseCount
+  MASH.S.E01.ELEC.A02: true        # phaseMapping
+  MASH.S.E01.ELEC.A03: true        # nominalVoltage
+  MASH.S.E01.ELEC.A04: true        # nominalFrequency
+  MASH.S.E01.ELEC.A05: true        # supportedDirections
+  MASH.S.E01.ELEC.A0A: true        # nominalMaxConsumption
+  MASH.S.E01.ELEC.A0D: true        # maxCurrentPerPhase
+
+  # ==========================================================================
+  # Measurement (MEAS) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.MEAS.A01: true        # acActivePower
+  MASH.S.E01.MEAS.A1E: true        # acEnergyConsumed
+
+  # ==========================================================================
+  # Status (STAT) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.STAT.A01: true        # operatingState
+  MASH.S.E01.STAT.A03: true        # faultCode
+
+  # ==========================================================================
+  # Signals (SIG) - ITPCM + POEN
+  # ==========================================================================
+
+  MASH.S.E01.SIG.A01: true         # signalSource
+  MASH.S.E01.SIG.A02: true         # startTime
+  MASH.S.E01.SIG.A03: true         # validUntil
+  MASH.S.E01.SIG.A0A: true         # priceSlots
+  MASH.S.E01.SIG.A0B: true         # signalStatus
+  MASH.S.E01.SIG.A14: true         # constraintSlots
+
+  MASH.S.E01.SIG.C01.Rsp: true     # SendPriceSignal
+  MASH.S.E01.SIG.C02.Rsp: true     # SendConstraintSignal
+  MASH.S.E01.SIG.C04.Rsp: true     # ClearSignals
+
+  # ==========================================================================
+  # Plan (PLAN) - ITPCM
+  # ==========================================================================
+
+  MASH.S.E01.PLAN.A01: true        # planId
+  MASH.S.E01.PLAN.A02: true        # planVersion
+  MASH.S.E01.PLAN.A03: true        # commitment
+  MASH.S.E01.PLAN.A0A: true        # startTime
+  MASH.S.E01.PLAN.A0B: true        # endTime
+  MASH.S.E01.PLAN.A28: true        # slots
+
+  MASH.S.E01.PLAN.C01.Rsp: true    # RequestPlan
+  MASH.S.E01.PLAN.C02.Rsp: true    # AcceptPlan
+
+  # ==========================================================================
+  # Multi-zone support
+  # ==========================================================================
+
+  MASH.S.ZONE.MAX: 3
+  MASH.S.ZONE.GRID: true
+  MASH.S.ZONE.LOCAL: true

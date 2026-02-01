@@ -1,0 +1,367 @@
+# Test Suite: OHPCF (Heat Pump Compressor Flexibility) Use Case Tests
+# Replaces EEBUS OHPCF
+#
+# Scenarios:
+#   S00 (BASE): Process control with timing constraints
+#   S01 (MEASUREMENT): Power telemetry during operation
+
+---
+# ==========================================================================
+# OHPCF BASE Scenario (S00)
+# ==========================================================================
+
+---
+id: TC-OHPCF-S00-001
+name: processState Readable
+description: |
+  Verifies processState is readable and shows one of the valid
+  process states (NONE, AVAILABLE, RUNNING, PAUSED, etc.).
+
+pics_requirements:
+  - MASH.S.UC.OHPCF
+  - MASH.S.UC.OHPCF.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read processState
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+postconditions:
+  - process_state_readable: true
+
+timeout: "10s"
+tags:
+  - ohpcf
+  - base
+  - process-state
+
+---
+id: TC-OHPCF-S00-002
+name: Pause Command Transitions to PAUSED
+description: |
+  Verifies Pause command transitions processState to PAUSED.
+
+pics_requirements:
+  - MASH.S.UC.OHPCF
+  - MASH.S.UC.OHPCF.S00
+
+preconditions:
+  - session_established: true
+  - compressor_running: true
+
+steps:
+  - name: Verify processState is RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 3                     # RUNNING
+
+  - name: Send Pause command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Pause
+    expect:
+      invoke_success: true
+
+  - name: Verify processState is PAUSED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 4                     # PAUSED
+
+postconditions:
+  - compressor_paused: true
+
+timeout: "10s"
+tags:
+  - ohpcf
+  - base
+  - pause
+
+---
+id: TC-OHPCF-S00-003
+name: Resume Command Transitions Back to RUNNING
+description: |
+  Verifies Resume command transitions processState from PAUSED to RUNNING.
+
+pics_requirements:
+  - MASH.S.UC.OHPCF
+  - MASH.S.UC.OHPCF.S00
+
+preconditions:
+  - session_established: true
+  - compressor_paused: true
+
+steps:
+  - name: Send Resume command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Resume
+    expect:
+      invoke_success: true
+
+  - name: Verify processState is RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 3                     # RUNNING
+
+postconditions:
+  - compressor_resumed: true
+
+timeout: "10s"
+tags:
+  - ohpcf
+  - base
+  - resume
+
+---
+id: TC-OHPCF-S00-004
+name: minRunDuration Respected (Pause Rejected If Too Early)
+description: |
+  Verifies that Pause is rejected if the compressor hasn't run
+  for minRunDuration yet.
+
+pics_requirements:
+  - MASH.S.UC.OHPCF
+  - MASH.S.UC.OHPCF.S00
+
+preconditions:
+  - session_established: true
+  - compressor_just_started: true
+
+steps:
+  - name: Read minRunDuration
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: minRunDuration
+    expect:
+      read_success: true
+      value_gt: 0
+      save_as: min_run
+
+  - name: Attempt Pause before minRunDuration
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Pause
+    expect:
+      invoke_success: true
+      response_contains:
+        - applied
+
+  - name: Verify pause was rejected
+    action: check_response
+    params:
+      field: applied
+    expect:
+      value: false
+
+postconditions:
+  - min_run_respected: true
+
+timeout: "10s"
+tags:
+  - ohpcf
+  - base
+  - min-run
+  - timing
+
+---
+id: TC-OHPCF-S00-005
+name: minPauseDuration Respected (Resume Rejected If Too Early)
+description: |
+  Verifies that Resume is rejected if the compressor hasn't been
+  paused for minPauseDuration yet.
+
+pics_requirements:
+  - MASH.S.UC.OHPCF
+  - MASH.S.UC.OHPCF.S00
+
+preconditions:
+  - session_established: true
+  - compressor_just_paused: true
+
+steps:
+  - name: Read minPauseDuration
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: minPauseDuration
+    expect:
+      read_success: true
+      value_gt: 0
+      save_as: min_pause
+
+  - name: Attempt Resume before minPauseDuration
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Resume
+    expect:
+      invoke_success: true
+      response_contains:
+        - applied
+
+  - name: Verify resume was rejected
+    action: check_response
+    params:
+      field: applied
+    expect:
+      value: false
+
+postconditions:
+  - min_pause_respected: true
+
+timeout: "10s"
+tags:
+  - ohpcf
+  - base
+  - min-pause
+  - timing
+
+---
+id: TC-OHPCF-S00-006
+name: optionalProcess Indicates Flexibility
+description: |
+  Verifies optionalProcess attribute is readable, indicating whether
+  the compressor run is optional (can be deferred).
+
+pics_requirements:
+  - MASH.S.UC.OHPCF
+  - MASH.S.UC.OHPCF.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read optionalProcess
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: optionalProcess
+    expect:
+      read_success: true
+
+postconditions:
+  - optional_process_readable: true
+
+timeout: "10s"
+tags:
+  - ohpcf
+  - base
+  - optional
+
+---
+id: TC-OHPCF-S00-007
+name: SetLimit Limits Compressor Power
+description: |
+  Verifies SetLimit can cap the compressor's power consumption.
+
+pics_requirements:
+  - MASH.S.UC.OHPCF
+  - MASH.S.UC.OHPCF.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send SetLimit
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 2000000  # 2 kW cap
+        cause: 3                   # LOCAL_OPTIMIZATION
+    expect:
+      invoke_success: true
+      response_contains:
+        - applied
+
+postconditions:
+  - compressor_limited: true
+
+timeout: "10s"
+tags:
+  - ohpcf
+  - base
+  - setlimit
+
+---
+# ==========================================================================
+# OHPCF MEASUREMENT Scenario (S01)
+# ==========================================================================
+
+---
+id: TC-OHPCF-S01-001
+name: Power Telemetry During Compressor Operation
+description: |
+  Verifies Measurement subscription delivers power telemetry
+  during compressor operation.
+
+pics_requirements:
+  - MASH.S.UC.OHPCF
+  - MASH.S.UC.OHPCF.S01
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to Measurement
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+    expect:
+      subscribe_success: true
+
+  - name: Verify power report
+    action: wait_report
+    params:
+      feature: Measurement
+      attribute: acActivePower
+      timeout: 5s
+    expect:
+      report_received: true
+
+postconditions:
+  - ohpcf_measurement_active: true
+
+timeout: "15s"
+tags:
+  - ohpcf
+  - measurement
+  - subscribe

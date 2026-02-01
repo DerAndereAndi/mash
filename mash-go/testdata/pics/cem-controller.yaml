@@ -2,7 +2,7 @@
 # CEM Controller (Client-Side)
 #
 # This PICS file describes a Customer Energy Manager (CEM) controller
-# that acts as a client for multiple use cases. Controllers declare
+# that acts as a client for all use cases. Controllers declare
 # which use cases they support via MASH.C.UC.<name> codes.
 
 # Device Identification
@@ -17,15 +17,69 @@ items:
   # Protocol declaration
   MASH.C: 1
 
-  # Use case declarations (client-side)
-  MASH.C.UC.LPC: true            # Limit Power Consumption
-  MASH.C.UC.LPP: true            # Limit Power Production
-  MASH.C.UC.MPD: true            # Monitor Power Device
-  MASH.C.UC.EVC: true            # EV Charging
-  MASH.C.UC.COB: true            # Control of Battery
-  MASH.C.UC.FLOA: true           # Flexible Load
-  MASH.C.UC.OHPCF: true          # Heat Pump Compressor Flexibility
-  MASH.C.UC.ITPCM: true          # Incentive Table Power Consumption Management
-  MASH.C.UC.TOUT: true           # Time of Use Tariff
-  MASH.C.UC.POEN: true           # Power Envelope
-  MASH.C.UC.PODF: true           # Power Demand Forecast
+  # ==========================================================================
+  # Use case declarations (client-side) with per-scenario codes
+  # ==========================================================================
+
+  # LPC: Limit Power Consumption
+  MASH.C.UC.LPC: true
+  MASH.C.UC.LPC.S00: true            # BASE
+  MASH.C.UC.LPC.S01: true            # MEASUREMENT
+  MASH.C.UC.LPC.S02: true            # OVERRIDE
+
+  # LPP: Limit Power Production
+  MASH.C.UC.LPP: true
+  MASH.C.UC.LPP.S00: true            # BASE
+  MASH.C.UC.LPP.S01: true            # MEASUREMENT
+  MASH.C.UC.LPP.S02: true            # OVERRIDE
+
+  # MPD: Monitor Power Device
+  MASH.C.UC.MPD: true
+  MASH.C.UC.MPD.S00: true            # BASE
+  MASH.C.UC.MPD.S01: true            # ELECTRICAL
+  MASH.C.UC.MPD.S02: true            # STATUS
+
+  # EVC: EV Charging
+  MASH.C.UC.EVC: true
+  MASH.C.UC.EVC.S00: true            # BASE
+  MASH.C.UC.EVC.S01: true            # SOC_REPORTING
+  MASH.C.UC.EVC.S02: true            # ASYMMETRIC_CHARGING
+  MASH.C.UC.EVC.S03: true            # V2G_DISCHARGE
+  MASH.C.UC.EVC.S04: true            # COORDINATED
+  MASH.C.UC.EVC.S05: true            # EV_DEMAND
+
+  # COB: Control of Battery
+  MASH.C.UC.COB: true
+  MASH.C.UC.COB.S00: true            # BASE
+  MASH.C.UC.COB.S01: true            # LIMITS
+  MASH.C.UC.COB.S02: true            # CONTROL_MODE
+
+  # FLOA: Flexible Load
+  MASH.C.UC.FLOA: true
+  MASH.C.UC.FLOA.S00: true           # BASE
+  MASH.C.UC.FLOA.S01: true           # MEASUREMENT
+  MASH.C.UC.FLOA.S02: true           # SETPOINTS
+
+  # ITPCM: Incentive Table Power Consumption Management
+  MASH.C.UC.ITPCM: true
+  MASH.C.UC.ITPCM.S00: true          # BASE
+  MASH.C.UC.ITPCM.S01: true          # ENERGY_CONTROL
+  MASH.C.UC.ITPCM.S02: true          # MEASUREMENT
+
+  # OHPCF: Heat Pump Compressor Flexibility
+  MASH.C.UC.OHPCF: true
+  MASH.C.UC.OHPCF.S00: true          # BASE
+  MASH.C.UC.OHPCF.S01: true          # MEASUREMENT
+
+  # PODF: Power Demand Forecast
+  MASH.C.UC.PODF: true
+  MASH.C.UC.PODF.S00: true           # BASE
+
+  # TOUT: Time of Use Tariff
+  MASH.C.UC.TOUT: true
+  MASH.C.UC.TOUT.S00: true           # BASE
+
+  # POEN: Power Envelope
+  MASH.C.UC.POEN: true
+  MASH.C.UC.POEN.S00: true           # BASE
+  MASH.C.UC.POEN.S01: true           # MEASUREMENT

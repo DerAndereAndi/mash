@@ -324,12 +324,18 @@ func (p *PICS) HasUseCase(name string) bool {
 }
 
 // UseCases returns all declared use case names (those with true values), sorted.
+// Scenario sub-codes (e.g., MASH.S.UC.LPC.S00) are excluded -- only top-level
+// use case declarations (e.g., MASH.S.UC.LPC) are returned.
 func (p *PICS) UseCases() []string {
 	prefix := fmt.Sprintf("MASH.%s.UC.", p.Side)
 	var names []string
 	for code, entry := range p.ByCode {
 		if strings.HasPrefix(code, prefix) && entry.Value.IsTrue() {
 			name := strings.TrimPrefix(code, prefix)
+			// Skip scenario sub-codes (contain a dot, e.g., "LPC.S00")
+			if strings.Contains(name, ".") {
+				continue
+			}
 			names = append(names, name)
 		}
 	}

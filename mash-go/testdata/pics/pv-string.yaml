@@ -1,0 +1,83 @@
+# PICS (Protocol Implementation Conformance Statement)
+# PV String Device Profile
+#
+# Reference implementation for a PV string (solar input).
+# Use cases: MPD
+
+# Device Identification
+device:
+  vendor: "Reference"
+  product: "PV String Monitor"
+  model: "PV-001"
+  version: "1.0.0"
+
+# PICS Items
+items:
+  # Protocol declaration
+  MASH.S: 1
+
+  # Communication capabilities
+  MASH.S.TRANS.SC: true
+  MASH.S.TRANS.PASE: true
+  MASH.S.TRANS.MDNS: true
+  MASH.S.TRANS.TLS13: true
+
+  # ==========================================================================
+  # Use case declarations with per-scenario codes
+  # ==========================================================================
+
+  # MPD: Monitor Power Device
+  MASH.S.UC.MPD: true
+  MASH.S.UC.MPD.S00: true          # BASE
+  MASH.S.UC.MPD.S01: true          # ELECTRICAL
+  MASH.S.UC.MPD.S02: true          # STATUS
+
+  # ==========================================================================
+  # Endpoint declaration
+  # ==========================================================================
+
+  MASH.S.E01: PV_STRING            # Endpoint 1: PV String
+
+  # ==========================================================================
+  # Feature Presence
+  # ==========================================================================
+
+  MASH.S.E01.ELEC: true            # Electrical
+  MASH.S.E01.MEAS: true            # Measurement
+  MASH.S.E01.STAT: true            # Status
+
+  # ==========================================================================
+  # Electrical (ELEC) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.ELEC.A01: true        # phaseCount
+  MASH.S.E01.ELEC.A02: true        # phaseMapping
+  MASH.S.E01.ELEC.A03: true        # nominalVoltage
+  MASH.S.E01.ELEC.A04: true        # nominalFrequency
+  MASH.S.E01.ELEC.A05: true        # supportedDirections (production only)
+  MASH.S.E01.ELEC.A0B: true        # nominalMaxProduction
+  MASH.S.E01.ELEC.A0D: true        # maxCurrentPerPhase
+
+  # ==========================================================================
+  # Measurement (MEAS) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.MEAS.A28: true        # dcPower
+  MASH.S.E01.MEAS.A29: true        # dcCurrent
+  MASH.S.E01.MEAS.A2A: true        # dcVoltage
+  MASH.S.E01.MEAS.A2C: true        # dcEnergyOut
+  MASH.S.E01.MEAS.A3C: true        # temperature
+
+  # ==========================================================================
+  # Status (STAT) Attributes
+  # ==========================================================================
+
+  MASH.S.E01.STAT.A01: true        # operatingState
+  MASH.S.E01.STAT.A03: true        # faultCode
+
+  # ==========================================================================
+  # Multi-zone support
+  # ==========================================================================
+
+  MASH.S.ZONE.MAX: 2
+  MASH.S.ZONE.LOCAL: true

@@ -1,0 +1,131 @@
+# Test Suite: PODF (Power Demand Forecast) Use Case Tests
+# Replaces EEBUS PODF
+#
+# Scenarios:
+#   S00 (BASE): Plan feature with forecast publishing
+
+---
+# ==========================================================================
+# PODF BASE Scenario (S00)
+# ==========================================================================
+
+---
+id: TC-PODF-S00-001
+name: Plan Feature Present with Commitment
+description: |
+  Verifies Plan feature is present and commitment attribute is readable.
+
+pics_requirements:
+  - MASH.S.UC.PODF
+  - MASH.S.UC.PODF.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read commitment
+    action: read
+    params:
+      endpoint: 1
+      feature: Plan
+      attribute: commitment
+    expect:
+      read_success: true
+
+postconditions:
+  - plan_feature_present: true
+
+timeout: "10s"
+tags:
+  - podf
+  - base
+  - commitment
+
+---
+id: TC-PODF-S00-002
+name: RequestPlan Returns Forecast
+description: |
+  Verifies RequestPlan returns a power demand forecast with
+  startTime and endTime.
+
+pics_requirements:
+  - MASH.S.UC.PODF
+  - MASH.S.UC.PODF.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Request plan
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Plan
+      command: RequestPlan
+    expect:
+      invoke_success: true
+      response_contains:
+        - planId
+
+  - name: Verify startTime is set
+    action: read
+    params:
+      endpoint: 1
+      feature: Plan
+      attribute: startTime
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+  - name: Verify endTime is set
+    action: read
+    params:
+      endpoint: 1
+      feature: Plan
+      attribute: endTime
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+postconditions:
+  - forecast_available: true
+
+timeout: "10s"
+tags:
+  - podf
+  - base
+  - forecast
+
+---
+id: TC-PODF-S00-003
+name: totalEnergyPlanned Reflects Forecast
+description: |
+  Verifies totalEnergyPlanned is populated after requesting a plan.
+
+pics_requirements:
+  - MASH.S.UC.PODF
+  - MASH.S.UC.PODF.S00
+
+preconditions:
+  - session_established: true
+  - forecast_available: true
+
+steps:
+  - name: Read totalEnergyPlanned
+    action: read
+    params:
+      endpoint: 1
+      feature: Plan
+      attribute: totalEnergyPlanned
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+postconditions:
+  - energy_planned_readable: true
+
+timeout: "10s"
+tags:
+  - podf
+  - base
+  - energy-planned

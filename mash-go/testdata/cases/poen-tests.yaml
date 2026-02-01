@@ -1,0 +1,208 @@
+# Test Suite: POEN (Power Envelope) Use Case Tests
+# Replaces EEBUS POEN
+#
+# Scenarios:
+#   S00 (BASE): Constraint signals + electrical
+#   S01 (MEASUREMENT): Power telemetry during envelope
+
+---
+# ==========================================================================
+# POEN BASE Scenario (S00)
+# ==========================================================================
+
+---
+id: TC-POEN-S00-001
+name: SendConstraintSignal With Slots Accepted
+description: |
+  Verifies SendConstraintSignal with time-slotted power bounds is accepted.
+
+pics_requirements:
+  - MASH.S.UC.POEN
+  - MASH.S.UC.POEN.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send constraint signal
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Signals
+      command: SendConstraintSignal
+      args:
+        slots:
+          - duration: 3600
+            consumptionMax: 10000000  # 10 kW max
+            consumptionMin: 0          # 0 kW min
+          - duration: 3600
+            consumptionMax: 5000000   # 5 kW max
+            consumptionMin: 1000000    # 1 kW min
+    expect:
+      invoke_success: true
+
+postconditions:
+  - constraint_signal_sent: true
+
+timeout: "10s"
+tags:
+  - poen
+  - base
+  - constraint-signal
+
+---
+id: TC-POEN-S00-002
+name: Constraint Slots Have Bounds
+description: |
+  Verifies constraint slots contain consumptionMax/Min bounds.
+
+pics_requirements:
+  - MASH.S.UC.POEN
+  - MASH.S.UC.POEN.S00
+
+preconditions:
+  - session_established: true
+  - constraint_signal_sent: true
+
+steps:
+  - name: Read constraintSlots
+    action: read
+    params:
+      endpoint: 1
+      feature: Signals
+      attribute: constraintSlots
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+postconditions:
+  - constraints_readable: true
+
+timeout: "10s"
+tags:
+  - poen
+  - base
+  - bounds
+
+---
+id: TC-POEN-S00-003
+name: ClearSignals Removes Constraints
+description: |
+  Verifies ClearSignals removes the active constraint envelope.
+
+pics_requirements:
+  - MASH.S.UC.POEN
+  - MASH.S.UC.POEN.S00
+
+preconditions:
+  - session_established: true
+  - constraint_signal_sent: true
+
+steps:
+  - name: Clear signals
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Signals
+      command: ClearSignals
+    expect:
+      invoke_success: true
+
+  - name: Verify constraintSlots cleared
+    action: read
+    params:
+      endpoint: 1
+      feature: Signals
+      attribute: constraintSlots
+    expect:
+      read_success: true
+      value_is_null: true
+
+postconditions:
+  - constraints_cleared: true
+
+timeout: "10s"
+tags:
+  - poen
+  - base
+  - clear-signals
+
+---
+id: TC-POEN-S00-004
+name: nominalMaxConsumption Consistent with Constraints
+description: |
+  Verifies nominalMaxConsumption from Electrical is consistent
+  with constraint signal bounds.
+
+pics_requirements:
+  - MASH.S.UC.POEN
+  - MASH.S.UC.POEN.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read nominalMaxConsumption
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxConsumption
+    expect:
+      read_success: true
+      value_gt: 0
+
+postconditions:
+  - nominal_consistent: true
+
+timeout: "10s"
+tags:
+  - poen
+  - base
+  - electrical
+
+---
+# ==========================================================================
+# POEN MEASUREMENT Scenario (S01)
+# ==========================================================================
+
+---
+id: TC-POEN-S01-001
+name: Power Telemetry During Envelope Period
+description: |
+  Verifies Measurement subscription delivers power telemetry
+  during an active envelope period.
+
+pics_requirements:
+  - MASH.S.UC.POEN
+  - MASH.S.UC.POEN.S01
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to Measurement
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+    expect:
+      subscribe_success: true
+
+  - name: Verify power report
+    action: wait_report
+    params:
+      feature: Measurement
+      attribute: acActivePower
+      timeout: 5s
+    expect:
+      report_received: true
+
+postconditions:
+  - poen_measurement_active: true
+
+timeout: "15s"
+tags:
+  - poen
+  - measurement
+  - subscribe

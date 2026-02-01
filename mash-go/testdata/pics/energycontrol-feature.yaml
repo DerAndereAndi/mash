@@ -147,13 +147,13 @@ items:
   MASH.S.E01.CTRL.C01.Rsp: true    # SetLimit
   MASH.S.E01.CTRL.C02.Rsp: true    # ClearLimit
 
-  # Power Setpoints
-  MASH.S.E01.CTRL.C03.Rsp: true    # SetSetpoint
-  MASH.S.E01.CTRL.C04.Rsp: true    # ClearSetpoint
-
   # Current Limits
-  MASH.S.E01.CTRL.C05.Rsp: true    # SetCurrentLimits
-  MASH.S.E01.CTRL.C06.Rsp: true    # ClearCurrentLimits
+  MASH.S.E01.CTRL.C03.Rsp: true    # SetCurrentLimits
+  MASH.S.E01.CTRL.C04.Rsp: true    # ClearCurrentLimits
+
+  # Power Setpoints
+  MASH.S.E01.CTRL.C05.Rsp: true    # SetSetpoint
+  MASH.S.E01.CTRL.C06.Rsp: true    # ClearSetpoint
 
   # Current Setpoints (requires V2X)
   MASH.S.E01.CTRL.C07.Rsp: false   # SetCurrentSetpoints

@@ -1,0 +1,693 @@
+# Test Suite: EVC (EV Charging) Use Case Tests
+# Replaces EEBUS CEVC, DBEVC, EVSOC, OPEV, OSCEV, EVCC, EVSECC
+#
+# Scenarios:
+#   S00 (BASE): Power limits + measurement
+#   S01 (SOC_REPORTING): EV state of charge
+#   S02 (ASYMMETRIC_CHARGING): Per-phase current limits
+#   S03 (V2G_DISCHARGE): Bidirectional setpoints
+#   S04 (COORDINATED): Price signals + plans
+#   S05 (EV_DEMAND): EV energy/departure requests
+
+---
+# ==========================================================================
+# EVC BASE Scenario (S00)
+# ==========================================================================
+
+---
+id: TC-EVC-S00-001
+name: SetLimit Accepted on EV Charger
+description: |
+  Verifies SetLimit is accepted on an EV_CHARGER endpoint,
+  transitioning to LIMITED state.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S00
+
+preconditions:
+  - session_established: true
+  - device_accepts_limits: true
+
+steps:
+  - name: Send SetLimit
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 7400000  # 7.4 kW (single phase max)
+        cause: 3                   # LOCAL_OPTIMIZATION
+    expect:
+      invoke_success: true
+      response_contains:
+        - applied
+
+  - name: Verify applied
+    action: check_response
+    params:
+      field: applied
+    expect:
+      value: true
+
+postconditions:
+  - ev_limit_applied: true
+
+timeout: "10s"
+tags:
+  - evc
+  - base
+  - setlimit
+
+---
+id: TC-EVC-S00-002
+name: Measurement Subscription During Charging
+description: |
+  Verifies Measurement subscription is active and delivers
+  power telemetry during EV charging.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to Measurement
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+    expect:
+      subscribe_success: true
+
+  - name: Verify power report
+    action: wait_report
+    params:
+      feature: Measurement
+      attribute: acActivePower
+      timeout: 5s
+    expect:
+      report_received: true
+
+postconditions:
+  - ev_measurement_active: true
+
+timeout: "15s"
+tags:
+  - evc
+  - base
+  - measurement
+
+---
+id: TC-EVC-S00-003
+name: ClearLimit Restores Autonomous Charging
+description: |
+  Verifies ClearLimit returns EVSE to autonomous charging.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S00
+
+preconditions:
+  - session_established: true
+  - ev_limit_applied: true
+
+steps:
+  - name: Send ClearLimit
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: ClearLimit
+    expect:
+      invoke_success: true
+
+  - name: Verify controlState is CONTROLLED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 1                     # CONTROLLED
+
+postconditions:
+  - ev_autonomous_restored: true
+
+timeout: "10s"
+tags:
+  - evc
+  - base
+  - clearlimit
+
+---
+# ==========================================================================
+# EVC SOC_REPORTING Scenario (S01)
+# ==========================================================================
+
+---
+id: TC-EVC-S01-001
+name: evStateOfCharge Readable During Session
+description: |
+  Verifies evStateOfCharge is readable during a charging session.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S01
+
+preconditions:
+  - session_established: true
+  - ev_plugged_in: true
+
+steps:
+  - name: Read evStateOfCharge
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evStateOfCharge
+    expect:
+      read_success: true
+      value_gte: 0
+      value_lte: 100
+
+postconditions:
+  - soc_readable: true
+
+timeout: "10s"
+tags:
+  - evc
+  - soc
+  - chargingsession
+
+---
+id: TC-EVC-S01-002
+name: evBatteryCapacity Non-Zero When SoC Available
+description: |
+  Verifies evBatteryCapacity is populated when SoC data is available.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S01
+
+preconditions:
+  - session_established: true
+  - ev_plugged_in: true
+
+steps:
+  - name: Read evBatteryCapacity
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evBatteryCapacity
+    expect:
+      read_success: true
+      value_gt: 0
+
+postconditions:
+  - battery_capacity_readable: true
+
+timeout: "10s"
+tags:
+  - evc
+  - soc
+  - capacity
+
+---
+id: TC-EVC-S01-003
+name: evTargetStateOfCharge Reflects User Preference
+description: |
+  Verifies evTargetStateOfCharge is readable and reflects the
+  user's charging target.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S01
+
+preconditions:
+  - session_established: true
+  - ev_plugged_in: true
+
+steps:
+  - name: Read evTargetStateOfCharge
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evTargetStateOfCharge
+    expect:
+      read_success: true
+      value_gte: 0
+      value_lte: 100
+
+postconditions:
+  - target_soc_readable: true
+
+timeout: "10s"
+tags:
+  - evc
+  - soc
+  - target
+
+---
+# ==========================================================================
+# EVC ASYMMETRIC_CHARGING Scenario (S02)
+# ==========================================================================
+
+---
+id: TC-EVC-S02-001
+name: SetCurrentLimits Per-Phase Accepted
+description: |
+  Verifies per-phase current limits are accepted for asymmetric charging.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S02
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send SetCurrentLimits
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetCurrentLimits
+      args:
+        currentLimits:
+          A: 16000                 # 16A on phase A
+          B: 10000                 # 10A on phase B
+          C: 6000                  # 6A on phase C
+        cause: 3                   # LOCAL_OPTIMIZATION
+    expect:
+      invoke_success: true
+
+postconditions:
+  - asymmetric_limits_set: true
+
+timeout: "10s"
+tags:
+  - evc
+  - asymmetric
+  - current-limits
+
+---
+id: TC-EVC-S02-002
+name: ClearCurrentLimits Restores Symmetric
+description: |
+  Verifies ClearCurrentLimits removes per-phase limits.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S02
+
+preconditions:
+  - session_established: true
+  - asymmetric_limits_set: true
+
+steps:
+  - name: Send ClearCurrentLimits
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: ClearCurrentLimits
+    expect:
+      invoke_success: true
+
+postconditions:
+  - symmetric_restored: true
+
+timeout: "10s"
+tags:
+  - evc
+  - asymmetric
+  - clear
+
+---
+# ==========================================================================
+# EVC V2G_DISCHARGE Scenario (S03)
+# ==========================================================================
+
+---
+id: TC-EVC-S03-001
+name: SetSetpoint With Negative Value (Discharge)
+description: |
+  Verifies that a negative setpoint triggers V2G discharge.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S03
+
+preconditions:
+  - session_established: true
+  - device_accepts_setpoints: true
+
+steps:
+  - name: Send SetSetpoint with negative power
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetSetpoint
+      args:
+        productionSetpoint: 3000000  # 3 kW discharge
+        cause: 1                     # SELF_CONSUMPTION
+    expect:
+      invoke_success: true
+
+postconditions:
+  - v2g_discharge_active: true
+
+timeout: "10s"
+tags:
+  - evc
+  - v2g
+  - discharge
+  - setpoint
+
+---
+id: TC-EVC-S03-002
+name: nominalMaxProduction Reflects Discharge Capability
+description: |
+  Verifies nominalMaxProduction is non-zero for V2G-capable chargers.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S03
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read nominalMaxProduction
+    action: read
+    params:
+      endpoint: 1
+      feature: Electrical
+      attribute: nominalMaxProduction
+    expect:
+      read_success: true
+      value_gt: 0
+
+postconditions:
+  - v2g_capable: true
+
+timeout: "10s"
+tags:
+  - evc
+  - v2g
+  - electrical
+
+---
+id: TC-EVC-S03-003
+name: evDischargeBelowTargetPermitted Check
+description: |
+  Verifies evDischargeBelowTargetPermitted is readable, indicating
+  whether EV allows discharge below target SoC.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S03
+
+preconditions:
+  - session_established: true
+  - ev_plugged_in: true
+
+steps:
+  - name: Read evDischargeBelowTargetPermitted
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evDischargeBelowTargetPermitted
+    expect:
+      read_success: true
+
+postconditions:
+  - discharge_permission_readable: true
+
+timeout: "10s"
+tags:
+  - evc
+  - v2g
+  - discharge-permission
+
+---
+# ==========================================================================
+# EVC COORDINATED Scenario (S04)
+# ==========================================================================
+
+---
+id: TC-EVC-S04-001
+name: SendPriceSignal Accepted
+description: |
+  Verifies price signal is accepted for coordinated charging.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S04
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send price signal
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Signals
+      command: SendPriceSignal
+      args:
+        slots:
+          - duration: 3600
+            price: 250000          # 0.25 EUR/kWh
+          - duration: 3600
+            price: 150000          # 0.15 EUR/kWh
+    expect:
+      invoke_success: true
+
+postconditions:
+  - price_signal_sent: true
+
+timeout: "10s"
+tags:
+  - evc
+  - coordinated
+  - price-signal
+
+---
+id: TC-EVC-S04-002
+name: RequestPlan Returns Valid Plan
+description: |
+  Verifies RequestPlan returns a valid charging plan.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S04
+
+preconditions:
+  - session_established: true
+  - price_signal_sent: true
+
+steps:
+  - name: Request plan
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Plan
+      command: RequestPlan
+    expect:
+      invoke_success: true
+      response_contains:
+        - planId
+
+postconditions:
+  - plan_requested: true
+
+timeout: "10s"
+tags:
+  - evc
+  - coordinated
+  - plan
+
+---
+id: TC-EVC-S04-003
+name: AcceptPlan Advances Commitment
+description: |
+  Verifies AcceptPlan transitions plan commitment forward.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S04
+
+preconditions:
+  - session_established: true
+  - plan_requested: true
+
+steps:
+  - name: Accept plan
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Plan
+      command: AcceptPlan
+    expect:
+      invoke_success: true
+
+  - name: Verify commitment advanced
+    action: read
+    params:
+      endpoint: 1
+      feature: Plan
+      attribute: commitment
+    expect:
+      read_success: true
+      value_gte: 1                 # At least TENTATIVE
+
+postconditions:
+  - plan_accepted: true
+
+timeout: "10s"
+tags:
+  - evc
+  - coordinated
+  - accept-plan
+
+---
+# ==========================================================================
+# EVC EV_DEMAND Scenario (S05)
+# ==========================================================================
+
+---
+id: TC-EVC-S05-001
+name: evDemandMode Readable
+description: |
+  Verifies evDemandMode is readable, indicating EV demand reporting style.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S05
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read evDemandMode
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evDemandMode
+    expect:
+      read_success: true
+
+postconditions:
+  - demand_mode_readable: true
+
+timeout: "10s"
+tags:
+  - evc
+  - ev-demand
+  - mode
+
+---
+id: TC-EVC-S05-002
+name: Energy Requests Reflect EV Needs
+description: |
+  Verifies EV energy request attributes are populated during a session.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S05
+
+preconditions:
+  - session_established: true
+  - ev_plugged_in: true
+
+steps:
+  - name: Read evMinEnergyRequest
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evMinEnergyRequest
+    expect:
+      read_success: true
+
+  - name: Read evMaxEnergyRequest
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evMaxEnergyRequest
+    expect:
+      read_success: true
+
+  - name: Read evTargetEnergyRequest
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evTargetEnergyRequest
+    expect:
+      read_success: true
+
+postconditions:
+  - energy_requests_populated: true
+
+timeout: "10s"
+tags:
+  - evc
+  - ev-demand
+  - energy
+
+---
+id: TC-EVC-S05-003
+name: SetChargingMode Changes Behavior
+description: |
+  Verifies SetChargingMode command changes the charging mode.
+
+pics_requirements:
+  - MASH.S.UC.EVC
+  - MASH.S.UC.EVC.S05
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Set charging mode to PRICE_OPTIMIZED
+    action: invoke
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      command: SetChargingMode
+      args:
+        mode: 3                    # PRICE_OPTIMIZED
+    expect:
+      invoke_success: true
+
+  - name: Verify chargingMode updated
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: chargingMode
+    expect:
+      read_success: true
+      value: 3                     # PRICE_OPTIMIZED
+
+postconditions:
+  - charging_mode_changed: true
+
+timeout: "10s"
+tags:
+  - evc
+  - ev-demand
+  - charging-mode

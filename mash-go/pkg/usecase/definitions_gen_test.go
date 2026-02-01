@@ -289,11 +289,12 @@ func TestMPD_MeasurementRequiredInBase(t *testing.T) {
 func TestLPP_EndpointTypes(t *testing.T) {
 	def := Registry[LPP]
 	expected := map[string]bool{
-		"INVERTER": true,
-		"BATTERY":  true,
+		"INVERTER":        true,
+		"BATTERY":         true,
+		"GRID_CONNECTION": true,
 	}
-	if len(def.EndpointTypes) != 2 {
-		t.Errorf("endpoint types count = %d, want 2", len(def.EndpointTypes))
+	if len(def.EndpointTypes) != 3 {
+		t.Errorf("endpoint types count = %d, want 3", len(def.EndpointTypes))
 	}
 	for _, et := range def.EndpointTypes {
 		if !expected[et] {

@@ -1,0 +1,142 @@
+# Test Suite: TOUT (Time of Use Tariff) Use Case Tests
+# Replaces EEBUS TOUT
+#
+# Scenarios:
+#   S00 (BASE): Tariff context + price signals
+
+---
+# ==========================================================================
+# TOUT BASE Scenario (S00)
+# ==========================================================================
+
+---
+id: TC-TOUT-S00-001
+name: SetTariff Sets Currency and Metadata
+description: |
+  Verifies SetTariff command sets the tariff currency and metadata.
+
+pics_requirements:
+  - MASH.S.UC.TOUT
+  - MASH.S.UC.TOUT.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Set tariff
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Tariff
+      command: SetTariff
+      args:
+        currency: "EUR"
+    expect:
+      invoke_success: true
+
+  - name: Verify currency is set
+    action: read
+    params:
+      endpoint: 1
+      feature: Tariff
+      attribute: currency
+    expect:
+      read_success: true
+      value: "EUR"
+
+postconditions:
+  - tariff_set: true
+
+timeout: "10s"
+tags:
+  - tout
+  - base
+  - tariff
+
+---
+id: TC-TOUT-S00-002
+name: SendPriceSignal With Price Slots Accepted
+description: |
+  Verifies SendPriceSignal with time-slotted prices is accepted
+  in the context of a tariff.
+
+pics_requirements:
+  - MASH.S.UC.TOUT
+  - MASH.S.UC.TOUT.S00
+
+preconditions:
+  - session_established: true
+  - tariff_set: true
+
+steps:
+  - name: Send price signal
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Signals
+      command: SendPriceSignal
+      args:
+        slots:
+          - duration: 3600
+            price: 280000          # 0.28 EUR/kWh (peak)
+            priceLevel: 8
+          - duration: 7200
+            price: 120000          # 0.12 EUR/kWh (off-peak)
+            priceLevel: 3
+          - duration: 3600
+            price: 200000          # 0.20 EUR/kWh (shoulder)
+            priceLevel: 5
+    expect:
+      invoke_success: true
+
+postconditions:
+  - tout_price_signal_sent: true
+
+timeout: "10s"
+tags:
+  - tout
+  - base
+  - price-signal
+
+---
+id: TC-TOUT-S00-003
+name: ClearSignals Removes Price Information
+description: |
+  Verifies ClearSignals removes the active price signal.
+
+pics_requirements:
+  - MASH.S.UC.TOUT
+  - MASH.S.UC.TOUT.S00
+
+preconditions:
+  - session_established: true
+  - tout_price_signal_sent: true
+
+steps:
+  - name: Clear signals
+    action: invoke
+    params:
+      endpoint: 1
+      feature: Signals
+      command: ClearSignals
+    expect:
+      invoke_success: true
+
+  - name: Verify priceSlots cleared
+    action: read
+    params:
+      endpoint: 1
+      feature: Signals
+      attribute: priceSlots
+    expect:
+      read_success: true
+      value_is_null: true
+
+postconditions:
+  - tout_signals_cleared: true
+
+timeout: "10s"
+tags:
+  - tout
+  - base
+  - clear-signals

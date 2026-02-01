@@ -16,6 +16,7 @@ endpointTypes:
   - WATER_HEATER
   - HVAC
   - APPLIANCE
+  - GRID_CONNECTION
 
 scenarios:
   - bit: 0

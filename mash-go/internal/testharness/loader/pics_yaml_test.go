@@ -10,7 +10,7 @@ import (
 func TestParsePICSYAML_DeviceMetadata(t *testing.T) {
 	yaml := `
 device:
-  vendor: "Example Corp"
+  vendor: "Reference"
   product: "Smart Charger Pro"
   model: "SCP-11"
   version: "1.0.0"
@@ -22,7 +22,7 @@ items:
 		t.Fatalf("Failed to parse YAML PICS: %v", err)
 	}
 
-	if pf.Device.Vendor != "Example Corp" {
+	if pf.Device.Vendor != "Reference" {
 		t.Errorf("Device vendor mismatch: expected 'Example Corp', got '%s'", pf.Device.Vendor)
 	}
 	if pf.Device.Product != "Smart Charger Pro" {
@@ -228,7 +228,7 @@ func TestLoadPICS_YAMLFile(t *testing.T) {
 	}
 
 	// Check device metadata
-	if pf.Device.Vendor != "Example Corp" {
+	if pf.Device.Vendor != "Reference" {
 		t.Errorf("Device vendor mismatch: expected 'Example Corp', got '%s'", pf.Device.Vendor)
 	}
 	if pf.Device.Product != "Smart Charger Pro" {

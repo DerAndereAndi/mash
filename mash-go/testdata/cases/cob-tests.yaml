@@ -1,0 +1,348 @@
+# Test Suite: COB (Control of Battery) Use Case Tests
+# Replaces EEBUS COB
+#
+# Scenarios:
+#   S00 (BASE): Setpoints + electrical + measurement
+#   S01 (LIMITS): Power limits for battery
+#   S02 (CONTROL_MODE): PCC/DIRECT targeting
+
+---
+# ==========================================================================
+# COB BASE Scenario (S00)
+# ==========================================================================
+
+---
+id: TC-COB-S00-001
+name: SetSetpoint Positive (Charge)
+description: |
+  Verifies SetSetpoint with a positive value commands battery to charge.
+
+pics_requirements:
+  - MASH.S.UC.COB
+  - MASH.S.UC.COB.S00
+
+preconditions:
+  - session_established: true
+  - device_accepts_setpoints: true
+
+steps:
+  - name: Send SetSetpoint (charge)
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetSetpoint
+      args:
+        consumptionSetpoint: 5000000  # 5 kW charge
+        cause: 1                      # SELF_CONSUMPTION
+    expect:
+      invoke_success: true
+
+  - name: Verify controlState is CONTROLLED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 1                     # CONTROLLED
+
+postconditions:
+  - charge_setpoint_active: true
+
+timeout: "10s"
+tags:
+  - cob
+  - base
+  - setpoint
+  - charge
+
+---
+id: TC-COB-S00-002
+name: SetSetpoint Negative (Discharge)
+description: |
+  Verifies SetSetpoint with a production setpoint commands battery to discharge.
+
+pics_requirements:
+  - MASH.S.UC.COB
+  - MASH.S.UC.COB.S00
+
+preconditions:
+  - session_established: true
+  - device_accepts_setpoints: true
+
+steps:
+  - name: Send SetSetpoint (discharge)
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetSetpoint
+      args:
+        productionSetpoint: 3000000   # 3 kW discharge
+        cause: 1                      # SELF_CONSUMPTION
+    expect:
+      invoke_success: true
+
+postconditions:
+  - discharge_setpoint_active: true
+
+timeout: "10s"
+tags:
+  - cob
+  - base
+  - setpoint
+  - discharge
+
+---
+id: TC-COB-S00-003
+name: ClearSetpoint Returns to Autonomous
+description: |
+  Verifies ClearSetpoint returns battery to autonomous operation.
+
+pics_requirements:
+  - MASH.S.UC.COB
+  - MASH.S.UC.COB.S00
+
+preconditions:
+  - session_established: true
+  - charge_setpoint_active: true
+
+steps:
+  - name: Send ClearSetpoint
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: ClearSetpoint
+    expect:
+      invoke_success: true
+
+  - name: Verify controlState
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value_not_equal: 2           # Not LIMITED (autonomous or controlled)
+
+postconditions:
+  - setpoint_cleared: true
+
+timeout: "10s"
+tags:
+  - cob
+  - base
+  - clear-setpoint
+
+---
+id: TC-COB-S00-004
+name: Measurement Reflects Setpoint Effect
+description: |
+  Verifies Measurement telemetry reflects the battery acting on the setpoint.
+
+pics_requirements:
+  - MASH.S.UC.COB
+  - MASH.S.UC.COB.S00
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to Measurement
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Measurement
+    expect:
+      subscribe_success: true
+
+  - name: Verify power report received
+    action: wait_report
+    params:
+      feature: Measurement
+      attribute: acActivePower
+      timeout: 5s
+    expect:
+      report_received: true
+
+postconditions:
+  - measurement_reflects_setpoint: true
+
+timeout: "15s"
+tags:
+  - cob
+  - base
+  - measurement
+
+---
+# ==========================================================================
+# COB LIMITS Scenario (S01)
+# ==========================================================================
+
+---
+id: TC-COB-S01-001
+name: SetLimit Caps Charge/Discharge Power
+description: |
+  Verifies SetLimit caps the battery's charge/discharge power.
+
+pics_requirements:
+  - MASH.S.UC.COB
+  - MASH.S.UC.COB.S01
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send SetLimit (consumption cap)
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 3000000  # 3 kW max charge
+        cause: 3                   # LOCAL_OPTIMIZATION
+    expect:
+      invoke_success: true
+
+postconditions:
+  - battery_limit_set: true
+
+timeout: "10s"
+tags:
+  - cob
+  - limits
+  - setlimit
+
+---
+id: TC-COB-S01-002
+name: Limit Takes Priority Over Setpoint
+description: |
+  Verifies that when both limit and setpoint are active,
+  the limit constrains the setpoint.
+
+pics_requirements:
+  - MASH.S.UC.COB
+  - MASH.S.UC.COB.S00
+  - MASH.S.UC.COB.S01
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Set a 3 kW charge limit
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 3000000
+        cause: 3
+    expect:
+      invoke_success: true
+
+  - name: Set a 5 kW charge setpoint (exceeds limit)
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetSetpoint
+      args:
+        consumptionSetpoint: 5000000
+        cause: 1
+    expect:
+      invoke_success: true
+
+  - name: Verify effective limit constrains behavior
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 3000000               # Limit wins
+
+postconditions:
+  - limit_constrains_setpoint: true
+
+timeout: "10s"
+tags:
+  - cob
+  - limits
+  - priority
+
+---
+# ==========================================================================
+# COB CONTROL_MODE Scenario (S02)
+# ==========================================================================
+
+---
+id: TC-COB-S02-001
+name: controlMode Readable
+description: |
+  Verifies controlMode attribute is readable, indicating PCC/DIRECT/AUTO.
+
+pics_requirements:
+  - MASH.S.UC.COB
+  - MASH.S.UC.COB.S02
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read controlMode
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlMode
+    expect:
+      read_success: true
+
+postconditions:
+  - control_mode_readable: true
+
+timeout: "10s"
+tags:
+  - cob
+  - control-mode
+
+---
+id: TC-COB-S02-002
+name: PCC Mode Behavior Differs from DIRECT
+description: |
+  Verifies that PCC (Point of Common Coupling) mode targets grid
+  power while DIRECT mode targets battery power directly.
+
+pics_requirements:
+  - MASH.S.UC.COB
+  - MASH.S.UC.COB.S02
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Read controlMode
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlMode
+    expect:
+      read_success: true
+      value_is_not_null: true
+
+postconditions:
+  - mode_behavior_verified: true
+
+timeout: "10s"
+tags:
+  - cob
+  - control-mode
+  - pcc

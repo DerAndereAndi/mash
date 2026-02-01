@@ -22,6 +22,7 @@ scenarios:
           - name: acceptsLimits
             requiredValue: true
           - name: isPausable
+            requiredValue: true
           - name: processState
           - name: optionalProcess
           - name: minRunDuration

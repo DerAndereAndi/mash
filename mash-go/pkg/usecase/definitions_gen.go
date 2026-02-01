@@ -15,7 +15,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		SpecVersion: "1.0",
 		Major:       1,
 		Minor:       0,
-		EndpointTypes: []string{"INVERTER", "EV_CHARGER", "BATTERY", "HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE"},
+		EndpointTypes: []string{"INVERTER", "EV_CHARGER", "BATTERY", "HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE", "GRID_CONNECTION"},
 		Scenarios: []ScenarioDef{
 			{
 				Bit:         0,
@@ -83,7 +83,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		SpecVersion: "1.0",
 		Major:       1,
 		Minor:       0,
-		EndpointTypes: []string{"INVERTER", "BATTERY"},
+		EndpointTypes: []string{"INVERTER", "BATTERY", "GRID_CONNECTION"},
 		Scenarios: []ScenarioDef{
 			{
 				Bit:         0,
@@ -141,7 +141,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				},
 			},
 		},
-		Commands: []string{"limit", "clear", "capacity", "override", "lpc-demo"},
+		Commands: []string{"limit", "clear", "capacity", "override"},
 	},
 	"MPD": {
 		Name:        "MPD",
@@ -597,7 +597,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 						Required:    true,
 						Attributes: []AttributeRequirement{
 							{Name: "acceptsLimits", AttrID: 10, RequiredValue: boolPtr(true)},
-							{Name: "isPausable", AttrID: 14},
+							{Name: "isPausable", AttrID: 14, RequiredValue: boolPtr(true)},
 							{Name: "processState", AttrID: 80},
 							{Name: "optionalProcess", AttrID: 81},
 							{Name: "minRunDuration", AttrID: 82},
