@@ -1231,7 +1231,7 @@ func TestLimitRejectReason(t *testing.T) {
 	}
 }
 
-func TestEnergyControlLPCLPPConstants(t *testing.T) {
+func TestEnergyControlGPLConstants(t *testing.T) {
 	// Test that new attribute IDs are in the expected range (73-76)
 	t.Run("ContractualAttributes", func(t *testing.T) {
 		if EnergyControlAttrContractualConsumptionMax != 73 {

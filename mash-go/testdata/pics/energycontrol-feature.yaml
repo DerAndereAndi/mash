@@ -119,14 +119,14 @@ items:
   MASH.S.E01.CTRL.A48: true        # failsafeDuration (seconds, default 7200)
 
   # ==========================================================================
-  # Contractual Limits (EMS/CEM only - LPC/LPP support)
+  # Contractual Limits (EMS/CEM only - GPL support)
   # ==========================================================================
 
   MASH.S.E01.CTRL.A49: false       # contractualConsumptionMax (EMS only)
   MASH.S.E01.CTRL.A4A: false       # contractualProductionMax (EMS only)
 
   # ==========================================================================
-  # Override Tracking (LPC/LPP support)
+  # Override Tracking (GPL support)
   # ==========================================================================
 
   MASH.S.E01.CTRL.A4B: true        # overrideReason (set when in OVERRIDE)
@@ -184,7 +184,7 @@ items:
   MASH.S.E01.CTRL.B_OPTOUT: true   # OptOut state filtering
 
   # ==========================================================================
-  # LPC/LPP Behavioral Capabilities
+  # GPL Behavioral Capabilities
   # ==========================================================================
 
   # SetLimit enhanced response fields

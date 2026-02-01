@@ -59,7 +59,7 @@ func TestEndToEnd_AllPages(t *testing.T) {
 
 	// Verify use case pages exist
 	expectedUseCases := []string{
-		"lpc", "lpp", "mpd", "evc", "cob", "floa",
+		"gpl", "mpd", "evc", "cob", "floa",
 		"itpcm", "ohpcf", "podf", "poen", "tout",
 	}
 	for _, slug := range expectedUseCases {

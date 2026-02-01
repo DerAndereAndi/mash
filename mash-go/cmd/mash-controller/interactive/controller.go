@@ -160,8 +160,8 @@ func (c *Controller) Run(ctx context.Context, cancel context.CancelFunc) {
 		case "plan":
 			c.cmdPlan(ctx, args)
 
-		case "lpc-demo", "lpp-demo":
-			c.cmdLpcDemo(ctx, args)
+		case "gpl-demo":
+			c.cmdGplDemo(ctx, args)
 
 		case "status":
 			c.cmdStatus()
@@ -218,7 +218,7 @@ MASH Controller Commands:
     signal <device-id> clear              - Clear all signals
     plan <device-id> request              - Request device to generate a plan
     plan <device-id> accept <plan-id>     - Accept a plan
-    lpc-demo <device-id>              - Run automated LPC/LPP demo sequence
+    gpl-demo <device-id>              - Run automated GPL demo sequence
 
   Certificate Management:
     cert                              - Show Zone CA and controller cert
@@ -597,9 +597,9 @@ func (c *Controller) cmdLimit(ctx context.Context, args []string) {
 		return
 	}
 
-	// Guard: check if device supports LPC
+	// Guard: check if device supports GPL
 	if !c.deviceSupportsCommand(deviceID, "limit") {
-		fmt.Fprintln(c.rl.Stdout(), "Device does not support LPC (limit command unavailable)")
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support GPL (limit command unavailable)")
 		return
 	}
 
@@ -688,7 +688,7 @@ func (c *Controller) cmdClear(ctx context.Context, args []string) {
 	}
 
 	if !c.deviceSupportsCommand(deviceID, "clear") {
-		fmt.Fprintln(c.rl.Stdout(), "Device does not support LPC (clear command unavailable)")
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support GPL (clear command unavailable)")
 		return
 	}
 
@@ -716,7 +716,7 @@ func (c *Controller) cmdPause(ctx context.Context, args []string) {
 	}
 
 	if !c.deviceSupportsCommand(deviceID, "limit") {
-		fmt.Fprintln(c.rl.Stdout(), "Device does not support LPC (pause command unavailable)")
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support GPL (pause command unavailable)")
 		return
 	}
 
@@ -744,7 +744,7 @@ func (c *Controller) cmdResume(ctx context.Context, args []string) {
 	}
 
 	if !c.deviceSupportsCommand(deviceID, "limit") {
-		fmt.Fprintln(c.rl.Stdout(), "Device does not support LPC (resume command unavailable)")
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support GPL (resume command unavailable)")
 		return
 	}
 
@@ -1101,11 +1101,11 @@ func (c *Controller) cmdPlan(ctx context.Context, args []string) {
 	}
 }
 
-// cmdLpcDemo runs an automated LPC/LPP demonstration sequence.
-func (c *Controller) cmdLpcDemo(ctx context.Context, args []string) {
+// cmdGplDemo runs an automated GPL demonstration sequence.
+func (c *Controller) cmdGplDemo(ctx context.Context, args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(c.rl.Stdout(), "Usage: lpc-demo <device-id>")
-		fmt.Fprintln(c.rl.Stdout(), "  Runs an automated LPC/LPP demo showing limit changes and state transitions")
+		fmt.Fprintln(c.rl.Stdout(), "Usage: gpl-demo <device-id>")
+		fmt.Fprintln(c.rl.Stdout(), "  Runs an automated GPL demo showing limit changes and state transitions")
 		return
 	}
 
@@ -1115,8 +1115,8 @@ func (c *Controller) cmdLpcDemo(ctx context.Context, args []string) {
 		return
 	}
 
-	if !c.deviceSupportsCommand(deviceID, "lpc-demo") {
-		fmt.Fprintln(c.rl.Stdout(), "Device does not support LPC (lpc-demo command unavailable)")
+	if !c.deviceSupportsCommand(deviceID, "gpl-demo") {
+		fmt.Fprintln(c.rl.Stdout(), "Device does not support GPL (gpl-demo command unavailable)")
 		return
 	}
 
@@ -1138,7 +1138,7 @@ func (c *Controller) cmdLpcDemo(ctx context.Context, args []string) {
 		return fmt.Sprintf("[%5.1fs]", time.Since(startTime).Seconds())
 	}
 
-	fmt.Fprintf(c.rl.Stdout(), "\n%s Starting LPC/LPP demo on %s\n", elapsed(), shortID)
+	fmt.Fprintf(c.rl.Stdout(), "\n%s Starting GPL demo on %s\n", elapsed(), shortID)
 	fmt.Fprintln(c.rl.Stdout(), "─────────────────────────────────────────────────────────")
 
 	// Step 1: Read initial capacity
@@ -1237,7 +1237,7 @@ func (c *Controller) cmdLpcDemo(ctx context.Context, args []string) {
 	}
 
 	fmt.Fprintln(c.rl.Stdout(), "─────────────────────────────────────────────────────────")
-	fmt.Fprintf(c.rl.Stdout(), "%s LPC/LPP demo complete\n\n", elapsed())
+	fmt.Fprintf(c.rl.Stdout(), "%s GPL demo complete\n\n", elapsed())
 }
 
 // ptr returns a pointer to the given value (helper for inline literals).

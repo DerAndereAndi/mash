@@ -42,7 +42,7 @@ func TestGenerateMkDocsYAML(t *testing.T) {
 	mustContain(t, output, "generated/features/energy-control.md")
 
 	// Generated use cases in nav
-	mustContain(t, output, "generated/usecases/lpc.md")
+	mustContain(t, output, "generated/usecases/gpl.md")
 
 	// Generated endpoints in nav
 	mustContain(t, output, "generated/endpoints/ev-charger.md")

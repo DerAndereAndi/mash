@@ -142,6 +142,37 @@ func generateGoSource(defs []*usecase.UseCaseDef, specVer string) string {
 				b.WriteString(fmt.Sprintf("\t\t\t\tName:        %q,\n", sd.Name))
 				b.WriteString(fmt.Sprintf("\t\t\t\tDescription: %q,\n", sd.Description))
 
+				if len(sd.Requires) > 0 {
+					b.WriteString("\t\t\t\tRequires: []string{")
+					for i, r := range sd.Requires {
+						if i > 0 {
+							b.WriteString(", ")
+						}
+						b.WriteString(fmt.Sprintf("%q", r))
+					}
+					b.WriteString("},\n")
+				}
+				if len(sd.RequiresAny) > 0 {
+					b.WriteString("\t\t\t\tRequiresAny: []string{")
+					for i, r := range sd.RequiresAny {
+						if i > 0 {
+							b.WriteString(", ")
+						}
+						b.WriteString(fmt.Sprintf("%q", r))
+					}
+					b.WriteString("},\n")
+				}
+				if len(sd.EndpointTypes) > 0 {
+					b.WriteString("\t\t\t\tEndpointTypes: []string{")
+					for i, et := range sd.EndpointTypes {
+						if i > 0 {
+							b.WriteString(", ")
+						}
+						b.WriteString(fmt.Sprintf("%q", et))
+					}
+					b.WriteString("},\n")
+				}
+
 				if len(sd.Features) > 0 {
 					b.WriteString("\t\t\t\tFeatures: []FeatureRequirement{\n")
 					for _, fr := range sd.Features {

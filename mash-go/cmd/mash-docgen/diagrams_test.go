@@ -83,7 +83,7 @@ func TestFeatureCrossRefDiagram(t *testing.T) {
 	output := FeatureCrossRefDiagram(m)
 
 	mustContain(t, output, "graph LR")
-	mustContain(t, output, "LPC")
+	mustContain(t, output, "GPL")
 	mustContain(t, output, "EnergyControl")
 	mustContain(t, output, "```mermaid")
 }
@@ -92,9 +92,9 @@ func TestFeatureCrossRefDiagram(t *testing.T) {
 
 func TestScenarioMapDiagram(t *testing.T) {
 	m := testModel(t)
-	uc := findUseCaseByName(m, "LPC")
+	uc := findUseCaseByName(m, "GPL")
 	if uc == nil {
-		t.Fatal("LPC not found")
+		t.Fatal("GPL not found")
 	}
 	output := ScenarioMapDiagram(uc)
 

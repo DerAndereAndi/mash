@@ -9,10 +9,13 @@ import (
 
 // RawScenarioDef is a scenario definition before name resolution.
 type RawScenarioDef struct {
-	Bit         uint8           `yaml:"bit"`
-	Name        string          `yaml:"name"`
-	Description string          `yaml:"description"`
-	Features    []RawFeatureReq `yaml:"features"`
+	Bit           uint8           `yaml:"bit"`
+	Name          string          `yaml:"name"`
+	Description   string          `yaml:"description"`
+	Requires      []string        `yaml:"requires"`
+	RequiresAny   []string        `yaml:"requiresAny"`
+	EndpointTypes []string        `yaml:"endpointTypes"`
+	Features      []RawFeatureReq `yaml:"features"`
 }
 
 // RawUseCaseDef is the YAML-level representation before name resolution.
@@ -83,9 +86,12 @@ func ResolveUseCaseDef(raw *RawUseCaseDef) (*UseCaseDef, error) {
 	if len(raw.Scenarios) > 0 {
 		for _, rs := range raw.Scenarios {
 			sd := ScenarioDef{
-				Bit:         ScenarioBit(rs.Bit),
-				Name:        rs.Name,
-				Description: rs.Description,
+				Bit:           ScenarioBit(rs.Bit),
+				Name:          rs.Name,
+				Description:   rs.Description,
+				Requires:      rs.Requires,
+				RequiresAny:   rs.RequiresAny,
+				EndpointTypes: rs.EndpointTypes,
 			}
 			for _, rf := range rs.Features {
 				fr, err := resolveFeatureReq(spec, rf)

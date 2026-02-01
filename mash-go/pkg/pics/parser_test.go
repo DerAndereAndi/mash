@@ -918,7 +918,7 @@ func TestParseFile_YAML(t *testing.T) {
 func TestParseUCCodes_KeyValue(t *testing.T) {
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.UC.MPD=1
 MASH.S.UC.EVC=0
 `
@@ -927,9 +927,9 @@ MASH.S.UC.EVC=0
 		t.Fatalf("ParseString failed: %v", err)
 	}
 
-	// UC.LPC should be present and true
-	if !pics.Has("MASH.S.UC.LPC") {
-		t.Error("expected MASH.S.UC.LPC to be present and true")
+	// UC.GPL should be present and true
+	if !pics.Has("MASH.S.UC.GPL") {
+		t.Error("expected MASH.S.UC.GPL to be present and true")
 	}
 
 	// UC.MPD should be present and true
@@ -946,15 +946,15 @@ MASH.S.UC.EVC=0
 	}
 
 	// UC codes should appear in device-level Features
-	foundUCLPC := false
+	foundUCGPL := false
 	for _, f := range pics.Features {
-		if f == "UC.LPC" {
-			foundUCLPC = true
+		if f == "UC.GPL" {
+			foundUCGPL = true
 			break
 		}
 	}
-	if !foundUCLPC {
-		t.Errorf("expected UC.LPC in device-level Features, got %v", pics.Features)
+	if !foundUCGPL {
+		t.Errorf("expected UC.GPL in device-level Features, got %v", pics.Features)
 	}
 }
 
@@ -963,8 +963,8 @@ func TestParseUCCodes_YAML(t *testing.T) {
   vendor: "Test"
 items:
   MASH.C: 1
-  MASH.C.UC.LPC: true
-  MASH.C.UC.LPP: true
+  MASH.C.UC.GPL: true
+  MASH.C.UC.EVC: true
   MASH.C.UC.MPD: true
 `
 	pics, err := ParseString(input)
@@ -976,12 +976,12 @@ items:
 		t.Errorf("expected Side=C, got %v", pics.Side)
 	}
 
-	if !pics.Has("MASH.C.UC.LPC") {
-		t.Error("expected MASH.C.UC.LPC to be present and true")
+	if !pics.Has("MASH.C.UC.GPL") {
+		t.Error("expected MASH.C.UC.GPL to be present and true")
 	}
 
-	if !pics.Has("MASH.C.UC.LPP") {
-		t.Error("expected MASH.C.UC.LPP to be present and true")
+	if !pics.Has("MASH.C.UC.EVC") {
+		t.Error("expected MASH.C.UC.EVC to be present and true")
 	}
 
 	if !pics.Has("MASH.C.UC.MPD") {
@@ -991,16 +991,16 @@ items:
 
 func TestParseUCCodes_ParsedCode(t *testing.T) {
 	input := `MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 `
 	pics, err := ParseString(input)
 	if err != nil {
 		t.Fatalf("ParseString failed: %v", err)
 	}
 
-	entry, ok := pics.ByCode["MASH.S.UC.LPC"]
+	entry, ok := pics.ByCode["MASH.S.UC.GPL"]
 	if !ok {
-		t.Fatal("expected MASH.S.UC.LPC in ByCode")
+		t.Fatal("expected MASH.S.UC.GPL in ByCode")
 	}
 
 	if entry.Code.Side != SideServer {
@@ -1009,15 +1009,15 @@ MASH.S.UC.LPC=1
 	if entry.Code.EndpointID != 0 {
 		t.Errorf("EndpointID = %d, want 0 (device-level)", entry.Code.EndpointID)
 	}
-	if entry.Code.Feature != "UC.LPC" {
-		t.Errorf("Feature = %s, want UC.LPC", entry.Code.Feature)
+	if entry.Code.Feature != "UC.GPL" {
+		t.Errorf("Feature = %s, want UC.GPL", entry.Code.Feature)
 	}
 }
 
 func TestPICS_HasUseCase(t *testing.T) {
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.UC.MPD=1
 MASH.S.UC.EVC=0
 `
@@ -1026,8 +1026,8 @@ MASH.S.UC.EVC=0
 		t.Fatalf("ParseString failed: %v", err)
 	}
 
-	if !pics.HasUseCase("LPC") {
-		t.Error("expected HasUseCase(LPC) to return true")
+	if !pics.HasUseCase("GPL") {
+		t.Error("expected HasUseCase(GPL) to return true")
 	}
 
 	if !pics.HasUseCase("MPD") {
@@ -1046,27 +1046,27 @@ MASH.S.UC.EVC=0
 func TestPICS_HasUseCase_Controller(t *testing.T) {
 	input := `
 MASH.C=1
-MASH.C.UC.LPC=1
-MASH.C.UC.LPP=1
+MASH.C.UC.GPL=1
+MASH.C.UC.EVC=1
 `
 	pics, err := ParseString(input)
 	if err != nil {
 		t.Fatalf("ParseString failed: %v", err)
 	}
 
-	if !pics.HasUseCase("LPC") {
-		t.Error("expected HasUseCase(LPC) to return true for controller")
+	if !pics.HasUseCase("GPL") {
+		t.Error("expected HasUseCase(GPL) to return true for controller")
 	}
 
-	if !pics.HasUseCase("LPP") {
-		t.Error("expected HasUseCase(LPP) to return true for controller")
+	if !pics.HasUseCase("EVC") {
+		t.Error("expected HasUseCase(EVC) to return true for controller")
 	}
 }
 
 func TestPICS_UseCases(t *testing.T) {
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.UC.MPD=1
 MASH.S.UC.EVC=0
 `
@@ -1083,8 +1083,8 @@ MASH.S.UC.EVC=0
 	}
 
 	// Should be sorted
-	if ucs[0] != "LPC" || ucs[1] != "MPD" {
-		t.Errorf("UseCases() = %v, want [LPC MPD]", ucs)
+	if ucs[0] != "GPL" || ucs[1] != "MPD" {
+		t.Errorf("UseCases() = %v, want [GPL MPD]", ucs)
 	}
 }
 

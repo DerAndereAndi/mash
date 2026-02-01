@@ -12,7 +12,7 @@ func featureSlug(name string) string {
 	return specparse.FeatureDirName(name)
 }
 
-// usecaseSlug converts "LPC" to "lpc".
+// usecaseSlug converts "GPL" to "gpl".
 func usecaseSlug(name string) string {
 	return strings.ToLower(name)
 }

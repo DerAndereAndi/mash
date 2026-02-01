@@ -2,7 +2,7 @@
 # EV Charger Device Profile
 #
 # Reference implementation: exercises all EV charger scenarios.
-# Use cases: LPC, MPD, EVC (all 6 scenarios), ITPCM, POEN
+# Use cases: GPL, MPD, EVC (all 6 scenarios), ITPCM, POEN
 
 # Device Identification
 device:
@@ -27,11 +27,12 @@ items:
   # Use case declarations with per-scenario codes
   # ==========================================================================
 
-  # LPC: Limit Power Consumption
-  MASH.S.UC.LPC: true
-  MASH.S.UC.LPC.S00: true          # BASE
-  MASH.S.UC.LPC.S01: true          # MEASUREMENT
-  MASH.S.UC.LPC.S02: true          # OVERRIDE
+  # GPL: Grid Power Limitation
+  MASH.S.UC.GPL: true
+  MASH.S.UC.GPL.S00: true          # BASE
+  MASH.S.UC.GPL.S01: true          # CONSUMPTION
+  MASH.S.UC.GPL.S03: true          # MEASUREMENT
+  MASH.S.UC.GPL.S04: true          # OVERRIDE
 
   # MPD: Monitor Power Device
   MASH.S.UC.MPD: true
@@ -114,7 +115,7 @@ items:
   MASH.S.E01.CTRL.A2A: true        # effectiveProductionSetpoint
   MASH.S.E01.CTRL.A2B: true        # myProductionSetpoint
 
-  # Override tracking (LPC OVERRIDE scenario)
+  # Override tracking (GPL OVERRIDE scenario)
   MASH.S.E01.CTRL.A4B: true        # overrideReason
   MASH.S.E01.CTRL.A4C: true        # overrideDirection
 

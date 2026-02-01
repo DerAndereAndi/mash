@@ -1,4 +1,4 @@
-// Package usecase defines use case definitions (LPC, LPP, MPD, EVC, etc.),
+// Package usecase defines use case definitions (GPL, MPD, EVC, etc.),
 // discovers device capabilities, and matches them against use case requirements.
 package usecase
 
@@ -6,16 +6,15 @@ package usecase
 type UseCaseName string
 
 const (
-	COB   UseCaseName = "COB"   // Control of Battery
-	EVC   UseCaseName = "EVC"   // EV Charging
-	FLOA  UseCaseName = "FLOA"  // Flexible Load
-	ITPCM UseCaseName = "ITPCM" // Incentive Table-based Power Consumption Management
-	LPC   UseCaseName = "LPC"   // Limit Power Consumption
-	LPP   UseCaseName = "LPP"   // Limit Power Production
+	GPL   UseCaseName = "GPL"   // Grid Power Limitation
 	MPD   UseCaseName = "MPD"   // Monitor Power Device
-	OHPCF UseCaseName = "OHPCF" // Optimized Heat Pump Control Flow
-	PODF  UseCaseName = "PODF"  // Power-on Demand Forecast
-	POEN  UseCaseName = "POEN"  // Power-on Energy Negotiation
+	EVC   UseCaseName = "EVC"   // EV Charging
+	COB   UseCaseName = "COB"   // Control of Battery
+	OHPCF UseCaseName = "OHPCF" // Heat Pump Compressor Flexibility
+	ITPCM UseCaseName = "ITPCM" // Incentive Table Power Consumption Management
+	FLOA  UseCaseName = "FLOA"  // Flexible Load
+	POEN  UseCaseName = "POEN"  // Power Envelope
+	PODF  UseCaseName = "PODF"  // Power Demand Forecast
 	TOUT  UseCaseName = "TOUT"  // Time of Use Tariff
 )
 
@@ -23,17 +22,16 @@ const (
 type UseCaseID uint16
 
 const (
-	LPCID   UseCaseID = 0x01
-	LPPID   UseCaseID = 0x02
-	MPDID   UseCaseID = 0x03
-	EVCID   UseCaseID = 0x04
-	COBID   UseCaseID = 0x05
-	FLOAID  UseCaseID = 0x06
-	ITPCMID UseCaseID = 0x07
-	OHPCFID UseCaseID = 0x08
+	GPLID   UseCaseID = 0x01
+	MPDID   UseCaseID = 0x02
+	EVCID   UseCaseID = 0x03
+	COBID   UseCaseID = 0x04
+	OHPCFID UseCaseID = 0x05
+	ITPCMID UseCaseID = 0x06
+	FLOAID  UseCaseID = 0x07
+	POENID  UseCaseID = 0x08
 	PODFID  UseCaseID = 0x09
-	POENID  UseCaseID = 0x0A
-	TOUTID  UseCaseID = 0x0B
+	TOUTID  UseCaseID = 0x0A
 )
 
 // ScenarioBit represents a single scenario bit position.
@@ -52,10 +50,13 @@ func (s ScenarioMap) Has(bit ScenarioBit) bool {
 
 // ScenarioDef describes a single scenario within a use case.
 type ScenarioDef struct {
-	Bit         ScenarioBit
-	Name        string
-	Description string
-	Features    []FeatureRequirement
+	Bit           ScenarioBit
+	Name          string
+	Description   string
+	Requires      []string // all listed scenarios must also be set
+	RequiresAny   []string // at least one must be set
+	EndpointTypes []string // per-scenario endpoint type filter
+	Features      []FeatureRequirement
 }
 
 // UseCaseDef describes the requirements of a single use case.

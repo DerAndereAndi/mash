@@ -66,10 +66,17 @@ func matchEndpoint(def *UseCaseDef, ep *EndpointProfile) MatchResult {
 
 	// Match each scenario independently
 	for _, scenario := range def.Scenarios {
+		// Per-scenario endpoint type filter
+		if len(scenario.EndpointTypes) > 0 && !containsType(scenario.EndpointTypes, ep.EndpointType) {
+			continue
+		}
 		if matchScenarioFeatures(scenario.Features, ep) {
 			result.Scenarios |= 1 << ScenarioMap(scenario.Bit)
 		}
 	}
+
+	// Enforce requires/requiresAny constraints
+	result.Scenarios = enforceScenarioConstraints(def, result.Scenarios)
 
 	// BASE must match for the use case to match
 	result.Matched = (result.Scenarios & ScenarioBASE) != 0
@@ -163,4 +170,69 @@ func checkCommands(freq FeatureRequirement, fp *FeatureProfile) bool {
 	}
 
 	return true
+}
+
+func containsType(types []string, target string) bool {
+	for _, t := range types {
+		if t == target {
+			return true
+		}
+	}
+	return false
+}
+
+// enforceScenarioConstraints iteratively clears scenario bits whose
+// Requires (all must be set) or RequiresAny (at least one must be set)
+// constraints are not satisfied, until stable.
+func enforceScenarioConstraints(def *UseCaseDef, scenarios ScenarioMap) ScenarioMap {
+	// Build name -> bit lookup
+	nameToBit := make(map[string]ScenarioBit, len(def.Scenarios))
+	for _, s := range def.Scenarios {
+		nameToBit[s.Name] = s.Bit
+	}
+
+	for {
+		changed := false
+		for _, s := range def.Scenarios {
+			bit := ScenarioMap(1) << ScenarioMap(s.Bit)
+			if scenarios&bit == 0 {
+				continue // already cleared
+			}
+
+			// Check Requires: all listed scenarios must be set
+			for _, req := range s.Requires {
+				if reqBit, ok := nameToBit[req]; ok {
+					if scenarios&(1<<ScenarioMap(reqBit)) == 0 {
+						scenarios &^= bit
+						changed = true
+						break
+					}
+				}
+			}
+			if scenarios&bit == 0 {
+				continue
+			}
+
+			// Check RequiresAny: at least one must be set
+			if len(s.RequiresAny) > 0 {
+				found := false
+				for _, req := range s.RequiresAny {
+					if reqBit, ok := nameToBit[req]; ok {
+						if scenarios&(1<<ScenarioMap(reqBit)) != 0 {
+							found = true
+							break
+						}
+					}
+				}
+				if !found {
+					scenarios &^= bit
+					changed = true
+				}
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	return scenarios
 }

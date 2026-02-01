@@ -9,10 +9,10 @@ import (
 )
 
 func TestUC001_DeviceWithRequiredFeatures(t *testing.T) {
-	// Device declares UC.LPC and has the required features (CTRL with acceptsLimits, ELEC)
+	// Device declares UC.GPL and has the required features (CTRL with acceptsLimits, ELEC)
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.E01=EV_CHARGER
 MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0A=1
@@ -37,10 +37,10 @@ MASH.S.E01.ELEC.A0A=1
 }
 
 func TestUC001_DeviceMissingRequiredFeature(t *testing.T) {
-	// Device declares UC.LPC but has no CTRL feature on any endpoint
+	// Device declares UC.GPL but has no CTRL feature on any endpoint
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.E01=EV_CHARGER
 MASH.S.E01.ELEC=1
 MASH.S.E01.MEAS=1
@@ -53,7 +53,7 @@ MASH.S.E01.MEAS=1
 	rule := NewUC001(usecase.Registry)
 	violations := rule.Check(p)
 
-	// Should have an error for missing EnergyControl (required for LPC)
+	// Should have an error for missing EnergyControl (required for GPL)
 	foundError := false
 	for _, v := range violations {
 		if v.Severity == pics.SeverityError {
@@ -67,10 +67,10 @@ MASH.S.E01.MEAS=1
 }
 
 func TestUC001_DeviceMissingElectrical(t *testing.T) {
-	// Device declares UC.LPC, has CTRL but missing Electrical (required for LPC)
+	// Device declares UC.GPL, has CTRL but missing Electrical (required for GPL)
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.E01=EV_CHARGER
 MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0A=1
@@ -99,8 +99,8 @@ func TestUC001_ControllerNoFeatureValidation(t *testing.T) {
 	// Controller PICS with UC codes should NOT produce feature-presence errors
 	input := `
 MASH.C=1
-MASH.C.UC.LPC=1
-MASH.C.UC.LPP=1
+MASH.C.UC.GPL=1
+MASH.C.UC.GPL=1
 MASH.C.UC.MPD=1
 `
 	p, err := pics.ParseString(input)
@@ -145,10 +145,10 @@ MASH.S.UC.UNKNOWN_UC=1
 }
 
 func TestUC001_MultipleUseCases(t *testing.T) {
-	// Device declares LPC and MPD -- both should be validated
+	// Device declares GPL and MPD -- both should be validated
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.UC.MPD=1
 MASH.S.E01=EV_CHARGER
 MASH.S.E01.CTRL=1
@@ -178,7 +178,7 @@ func TestUC001_DisabledUC(t *testing.T) {
 	// UC code present but set to 0 -- should not be validated
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=0
+MASH.S.UC.GPL=0
 `
 	p, err := pics.ParseString(input)
 	if err != nil {
@@ -194,10 +194,11 @@ MASH.S.UC.LPC=0
 }
 
 func TestUC001_MissingPresenceOnlyAttribute(t *testing.T) {
-	// LPC device with CTRL+ELEC but ELEC missing nominalMaxConsumption (A0A)
+	// GPL device with CONSUMPTION scenario declared but ELEC missing nominalMaxConsumption (A0A)
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
+MASH.S.UC.GPL.S01=1
 MASH.S.E01=EV_CHARGER
 MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0A=1
@@ -226,10 +227,10 @@ MASH.S.E01.ELEC=1
 }
 
 func TestUC001_PresenceOnlyAttributePresent(t *testing.T) {
-	// LPC device with CTRL+ELEC and ELEC.A0A present -- no warning
+	// GPL device with CTRL+ELEC and ELEC.A0A present -- no warning
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.E01=EV_CHARGER
 MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0A=1
@@ -307,10 +308,10 @@ MASH.S.E01.ELEC.A0A=1
 }
 
 func TestUC001_MissingRequiredCommands(t *testing.T) {
-	// LPC device with CTRL (A0A) and ELEC (A0A) but missing C01.Rsp and C02.Rsp
+	// GPL device with CTRL (A0A) and ELEC (A0A) but missing C01.Rsp and C02.Rsp
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.E01=EV_CHARGER
 MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0A=1
@@ -346,10 +347,10 @@ MASH.S.E01.ELEC.A0A=1
 }
 
 func TestUC001_RequiredCommandsPresent(t *testing.T) {
-	// LPC device with all required commands present -- no command errors
+	// GPL device with all required commands present -- no command errors
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.E01=EV_CHARGER
 MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0A=1
@@ -423,10 +424,10 @@ MASH.S.E01.ELEC.A0A=1
 }
 
 func TestUC001_EndpointTypeMismatch(t *testing.T) {
-	// LPC on PV_STRING endpoint (LPC does not allow PV_STRING)
+	// GPL on PV_STRING endpoint (GPL does not allow PV_STRING)
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.E01=PV_STRING
 MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0A=1
@@ -451,7 +452,7 @@ MASH.S.E01.ELEC.A0A=1
 		}
 	}
 	if !foundWarning {
-		t.Error("expected warning for LPC on PV_STRING endpoint")
+		t.Error("expected warning for GPL on PV_STRING endpoint")
 		for _, v := range violations {
 			t.Logf("  violation: [%s] %s", v.Severity, v.Message)
 		}
@@ -459,10 +460,10 @@ MASH.S.E01.ELEC.A0A=1
 }
 
 func TestUC001_EndpointTypeMatch(t *testing.T) {
-	// LPC on EV_CHARGER -- no endpoint type warning
+	// GPL on EV_CHARGER -- no endpoint type warning
 	input := `
 MASH.S=1
-MASH.S.UC.LPC=1
+MASH.S.UC.GPL=1
 MASH.S.E01=EV_CHARGER
 MASH.S.E01.CTRL=1
 MASH.S.E01.CTRL.A0A=1

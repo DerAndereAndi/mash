@@ -73,7 +73,7 @@ type ConnectedDevice struct {
 	PlanID         *uint32             // Current plan ID
 	PlanCommitment *features.Commitment // How firm the current plan is
 
-	// LPC/LPP state
+	// GPL state
 	LimitApplied      bool                        // Was last SetLimit applied?
 	RejectReason      *features.LimitRejectReason // Why limit was rejected
 	OverrideReason    *features.OverrideReason    // If in OVERRIDE state

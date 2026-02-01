@@ -2,7 +2,7 @@
 # Grid Connection Device Profile
 #
 # Reference implementation for a standalone grid connection point (smart meter).
-# Separate from lpc-lpp-ems.yaml which is an EMS-specific profile.
+# Separate from gpl-ems.yaml which is an EMS-specific profile.
 # Use cases: MPD
 
 # Device Identification

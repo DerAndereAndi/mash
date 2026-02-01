@@ -2,7 +2,7 @@
 # Battery Device Profile
 #
 # Reference implementation: exercises all battery scenarios.
-# Use cases: LPC, LPP, MPD, COB (all 3 scenarios), POEN
+# Use cases: GPL, MPD, COB (all 3 scenarios), POEN
 
 # Device Identification
 device:
@@ -26,17 +26,13 @@ items:
   # Use case declarations with per-scenario codes
   # ==========================================================================
 
-  # LPC: Limit Power Consumption
-  MASH.S.UC.LPC: true
-  MASH.S.UC.LPC.S00: true          # BASE
-  MASH.S.UC.LPC.S01: true          # MEASUREMENT
-  MASH.S.UC.LPC.S02: true          # OVERRIDE
-
-  # LPP: Limit Power Production
-  MASH.S.UC.LPP: true
-  MASH.S.UC.LPP.S00: true          # BASE
-  MASH.S.UC.LPP.S01: true          # MEASUREMENT
-  MASH.S.UC.LPP.S02: true          # OVERRIDE
+  # GPL: Grid Power Limitation
+  MASH.S.UC.GPL: true
+  MASH.S.UC.GPL.S00: true          # BASE
+  MASH.S.UC.GPL.S01: true          # CONSUMPTION
+  MASH.S.UC.GPL.S02: true          # PRODUCTION
+  MASH.S.UC.GPL.S03: true          # MEASUREMENT
+  MASH.S.UC.GPL.S04: true          # OVERRIDE
 
   # MPD: Monitor Power Device
   MASH.S.UC.MPD: true
@@ -81,7 +77,7 @@ items:
   MASH.S.E01.CTRL.A03: true        # optOutState
 
   # Control capabilities
-  MASH.S.E01.CTRL.A0A: true        # acceptsLimits (COB LIMITS + LPC/LPP)
+  MASH.S.E01.CTRL.A0A: true        # acceptsLimits (COB LIMITS + GPL)
   MASH.S.E01.CTRL.A0B: false       # acceptsCurrentLimits
   MASH.S.E01.CTRL.A0C: true        # acceptsSetpoints (COB BASE)
   MASH.S.E01.CTRL.A0E: true        # isPausable
@@ -91,7 +87,7 @@ items:
   MASH.S.E01.CTRL.A47: true        # failsafeProductionLimit
   MASH.S.E01.CTRL.A48: true        # failsafeDuration
 
-  # Power limit tracking (LPC/LPP)
+  # Power limit tracking (GPL)
   MASH.S.E01.CTRL.A14: true        # effectiveConsumptionLimit
   MASH.S.E01.CTRL.A15: true        # myConsumptionLimit
   MASH.S.E01.CTRL.A16: true        # effectiveProductionLimit

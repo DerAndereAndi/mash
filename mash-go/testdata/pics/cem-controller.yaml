@@ -21,17 +21,13 @@ items:
   # Use case declarations (client-side) with per-scenario codes
   # ==========================================================================
 
-  # LPC: Limit Power Consumption
-  MASH.C.UC.LPC: true
-  MASH.C.UC.LPC.S00: true            # BASE
-  MASH.C.UC.LPC.S01: true            # MEASUREMENT
-  MASH.C.UC.LPC.S02: true            # OVERRIDE
-
-  # LPP: Limit Power Production
-  MASH.C.UC.LPP: true
-  MASH.C.UC.LPP.S00: true            # BASE
-  MASH.C.UC.LPP.S01: true            # MEASUREMENT
-  MASH.C.UC.LPP.S02: true            # OVERRIDE
+  # GPL: Grid Power Limitation
+  MASH.C.UC.GPL: true
+  MASH.C.UC.GPL.S00: true            # BASE
+  MASH.C.UC.GPL.S01: true            # CONSUMPTION
+  MASH.C.UC.GPL.S02: true            # PRODUCTION
+  MASH.C.UC.GPL.S03: true            # MEASUREMENT
+  MASH.C.UC.GPL.S04: true            # OVERRIDE
 
   # MPD: Monitor Power Device
   MASH.C.UC.MPD: true

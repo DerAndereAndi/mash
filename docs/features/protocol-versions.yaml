@@ -13,17 +13,16 @@ versions:
       Plan: "1.0"
     shared: "1.0"
     usecases:
-      LPC:   { id: 0x01, major: 1, minor: 0 }
-      LPP:   { id: 0x02, major: 1, minor: 0 }
-      MPD:   { id: 0x03, major: 1, minor: 0 }
-      EVC:   { id: 0x04, major: 1, minor: 0 }
-      COB:   { id: 0x05, major: 1, minor: 0 }
-      FLOA:  { id: 0x06, major: 1, minor: 0 }
-      ITPCM: { id: 0x07, major: 1, minor: 0 }
-      OHPCF: { id: 0x08, major: 1, minor: 0 }
+      GPL:   { id: 0x01, major: 1, minor: 0 }
+      MPD:   { id: 0x02, major: 1, minor: 0 }
+      EVC:   { id: 0x03, major: 1, minor: 0 }
+      COB:   { id: 0x04, major: 1, minor: 0 }
+      OHPCF: { id: 0x05, major: 1, minor: 0 }
+      ITPCM: { id: 0x06, major: 1, minor: 0 }
+      FLOA:  { id: 0x07, major: 1, minor: 0 }
+      POEN:  { id: 0x08, major: 1, minor: 0 }
       PODF:  { id: 0x09, major: 1, minor: 0 }
-      POEN:  { id: 0x0A, major: 1, minor: 0 }
-      TOUT:  { id: 0x0B, major: 1, minor: 0 }
+      TOUT:  { id: 0x0A, major: 1, minor: 0 }
     feature_types:
       - { name: DeviceInfo, id: 0x01, description: "Device identity and structure" }
       - { name: Status, id: 0x02, description: "Operating state and fault information" }
@@ -47,14 +46,13 @@ versions:
       - { name: APPLIANCE, id: 0x09, description: "Generic controllable appliance" }
       - { name: SUB_METER, id: 0x0A, description: "Sub-meter / circuit monitor" }
     use_case_types:
-      - { name: LPC,   id: 0x01, description: "Limit Power Consumption" }
-      - { name: LPP,   id: 0x02, description: "Limit Power Production" }
-      - { name: MPD,   id: 0x03, description: "Monitor Power Device" }
-      - { name: EVC,   id: 0x04, description: "EV Charging" }
-      - { name: COB,   id: 0x05, description: "Control of Battery" }
-      - { name: FLOA,  id: 0x06, description: "Flexible Load" }
-      - { name: ITPCM, id: 0x07, description: "Incentive Table Power Consumption Management" }
-      - { name: OHPCF, id: 0x08, description: "Heat Pump Compressor Flexibility" }
+      - { name: GPL,   id: 0x01, description: "Grid Power Limitation" }
+      - { name: MPD,   id: 0x02, description: "Monitor Power Device" }
+      - { name: EVC,   id: 0x03, description: "EV Charging" }
+      - { name: COB,   id: 0x04, description: "Control of Battery" }
+      - { name: OHPCF, id: 0x05, description: "Heat Pump Compressor Flexibility" }
+      - { name: ITPCM, id: 0x06, description: "Incentive Table Power Consumption Management" }
+      - { name: FLOA,  id: 0x07, description: "Flexible Load" }
+      - { name: POEN,  id: 0x08, description: "Power Envelope" }
       - { name: PODF,  id: 0x09, description: "Power Demand Forecast" }
-      - { name: POEN,  id: 0x0A, description: "Power Envelope" }
-      - { name: TOUT,  id: 0x0B, description: "Time of Use Tariff" }
+      - { name: TOUT,  id: 0x0A, description: "Time of Use Tariff" }

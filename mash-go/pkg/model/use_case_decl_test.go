@@ -9,7 +9,7 @@ import (
 func TestUseCaseDecl_CBORRoundTrip(t *testing.T) {
 	decl := UseCaseDecl{
 		EndpointID: 1,
-		ID:         0x01, // LPC
+		ID:         0x01, // GPL
 		Major:      1,
 		Minor:      0,
 		Scenarios:  0x03, // BASE + MEASUREMENT
@@ -129,7 +129,7 @@ func TestUseCaseDecl_MinorZeroEncoded(t *testing.T) {
 func TestUseCaseDecl_ScenariosBaseOnly(t *testing.T) {
 	decl := UseCaseDecl{
 		EndpointID: 1,
-		ID:         0x0B, // TOUT
+		ID:         0x0A, // TOUT
 		Major:      1,
 		Minor:      0,
 		Scenarios:  0x01, // BASE only

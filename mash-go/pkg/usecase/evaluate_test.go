@@ -38,14 +38,14 @@ func TestEvaluateDevice_EVSE(t *testing.T) {
 
 	decls := EvaluateDevice(device, Registry)
 
-	// An EVSE with these features should match LPC, MPD, EVC at minimum
+	// An EVSE with these features should match GPL, MPD, EVC at minimum
 	declMap := make(map[uint16]*model.UseCaseDecl)
 	for _, d := range decls {
 		declMap[d.ID] = d
 	}
 
 	expectedUCs := map[UseCaseName]UseCaseID{
-		LPC: LPCID,
+		GPL: GPLID,
 		MPD: MPDID,
 		EVC: EVCID,
 	}
@@ -137,7 +137,7 @@ func TestEvaluateController_EndpointIDZero(t *testing.T) {
 func TestEvaluateController_SubsetRegistry(t *testing.T) {
 	// Custom smaller registry
 	subset := map[UseCaseName]*UseCaseDef{
-		"LPC": Registry["LPC"],
+		"GPL": Registry["GPL"],
 		"MPD": Registry["MPD"],
 	}
 
@@ -147,9 +147,9 @@ func TestEvaluateController_SubsetRegistry(t *testing.T) {
 		t.Fatalf("expected 2 declarations, got %d", len(decls))
 	}
 
-	// Should be sorted by ID: LPC (0x01), MPD (0x03)
-	if decls[0].ID != uint16(LPCID) {
-		t.Errorf("decls[0].ID = 0x%02X, want 0x%02X", decls[0].ID, LPCID)
+	// Should be sorted by ID: GPL (0x01), MPD (0x02)
+	if decls[0].ID != uint16(GPLID) {
+		t.Errorf("decls[0].ID = 0x%02X, want 0x%02X", decls[0].ID, GPLID)
 	}
 	if decls[1].ID != uint16(MPDID) {
 		t.Errorf("decls[1].ID = 0x%02X, want 0x%02X", decls[1].ID, MPDID)

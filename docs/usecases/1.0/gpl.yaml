@@ -1,0 +1,103 @@
+name: GPL
+id: 0x01
+fullName: Grid Power Limitation
+specVersion: "1.0"
+major: 1
+minor: 0
+description: >
+  Controller limits active power consumption and/or production of a device.
+  Replaces EEBUS LPC and LPP use cases. Supersedes LPC (0x01) and LPP (0x02).
+
+endpointTypes:
+  - INVERTER
+  - EV_CHARGER
+  - BATTERY
+  - HEAT_PUMP
+  - WATER_HEATER
+  - HVAC
+  - APPLIANCE
+  - GRID_CONNECTION
+
+scenarios:
+  - bit: 0
+    name: BASE
+    description: >
+      Shared control infrastructure: EnergyControl subscription with failsafe
+      duration and limit commands. Must be combined with at least one of
+      CONSUMPTION or PRODUCTION.
+    requiresAny:
+      - CONSUMPTION
+      - PRODUCTION
+    features:
+      - feature: EnergyControl
+        required: true
+        attributes:
+          - name: acceptsLimits
+            requiredValue: true
+          - name: failsafeDuration
+        commands:
+          - setLimit
+          - clearLimit
+        subscribe: all
+
+  - bit: 1
+    name: CONSUMPTION
+    description: >
+      Power consumption limiting. Controller reads nominal hardware maximum
+      and contractual grid maximum, and configures the failsafe consumption
+      limit.
+    requires:
+      - BASE
+    features:
+      - feature: Electrical
+        required: true
+        attributes:
+          - name: nominalMaxConsumption
+      - feature: EnergyControl
+        attributes:
+          - name: failsafeConsumptionLimit
+          - name: contractualConsumptionMax
+
+  - bit: 2
+    name: PRODUCTION
+    description: >
+      Power production (feed-in) limiting. Only applicable to bidirectional
+      endpoint types.
+    requires:
+      - BASE
+    endpointTypes:
+      - INVERTER
+      - BATTERY
+      - GRID_CONNECTION
+    features:
+      - feature: Electrical
+        required: true
+        attributes:
+          - name: nominalMaxProduction
+      - feature: EnergyControl
+        attributes:
+          - name: failsafeProductionLimit
+          - name: contractualProductionMax
+
+  - bit: 3
+    name: MEASUREMENT
+    description: Measurement telemetry for power monitoring.
+    features:
+      - feature: Measurement
+        subscribe: all
+
+  - bit: 4
+    name: OVERRIDE
+    description: Override tracking (DEC-049).
+    features:
+      - feature: EnergyControl
+        attributes:
+          - name: overrideReason
+          - name: overrideDirection
+
+commands:
+  - limit
+  - clear
+  - capacity
+  - override
+  - failsafe

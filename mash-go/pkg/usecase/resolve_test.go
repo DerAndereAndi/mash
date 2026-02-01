@@ -5,14 +5,14 @@ import (
 	"testing"
 )
 
-const testLPCYAML = `
-name: LPC
+const testGPLYAML = `
+name: GPL
 id: 0x01
-fullName: Limit Power Consumption
+fullName: Grid Power Limitation
 specVersion: "1.0"
 major: 1
 minor: 0
-description: Controller limits active power consumption of a device.
+description: Controller limits active power consumption and/or production of a device.
 
 endpointTypes:
   - INVERTER
@@ -22,33 +22,58 @@ endpointTypes:
   - WATER_HEATER
   - HVAC
   - APPLIANCE
+  - GRID_CONNECTION
 
 scenarios:
   - bit: 0
     name: BASE
-    description: Basic power limitation.
+    description: Shared control infrastructure.
+    requiresAny:
+      - CONSUMPTION
+      - PRODUCTION
     features:
       - feature: EnergyControl
         required: true
         attributes:
           - name: acceptsLimits
             requiredValue: true
+          - name: failsafeDuration
         commands:
           - setLimit
           - clearLimit
         subscribe: all
 
+  - bit: 1
+    name: CONSUMPTION
+    description: Power consumption limiting.
+    requires:
+      - BASE
+    features:
       - feature: Electrical
         required: true
         attributes:
           - name: nominalMaxConsumption
 
-  - bit: 1
+  - bit: 2
+    name: PRODUCTION
+    description: Power production limiting.
+    requires:
+      - BASE
+    endpointTypes:
+      - INVERTER
+      - BATTERY
+      - GRID_CONNECTION
+    features:
+      - feature: Electrical
+        required: true
+        attributes:
+          - name: nominalMaxProduction
+
+  - bit: 3
     name: MEASUREMENT
-    description: Measurement reporting.
+    description: Measurement telemetry.
     features:
       - feature: Measurement
-        required: true
         subscribe: all
 
 commands:
@@ -56,44 +81,47 @@ commands:
   - clear
   - capacity
   - override
-  - lpc-demo
+  - failsafe
 `
 
 func TestParseUseCaseYAML(t *testing.T) {
-	raw, err := ParseRawUseCaseDef([]byte(testLPCYAML))
+	raw, err := ParseRawUseCaseDef([]byte(testGPLYAML))
 	if err != nil {
 		t.Fatalf("ParseRawUseCaseDef: %v", err)
 	}
 
-	if raw.Name != "LPC" {
-		t.Errorf("name = %q, want LPC", raw.Name)
+	if raw.Name != "GPL" {
+		t.Errorf("name = %q, want GPL", raw.Name)
 	}
 	if raw.ID != 0x01 {
 		t.Errorf("id = 0x%02x, want 0x01", raw.ID)
 	}
-	if raw.FullName != "Limit Power Consumption" {
-		t.Errorf("fullName = %q, want 'Limit Power Consumption'", raw.FullName)
+	if raw.FullName != "Grid Power Limitation" {
+		t.Errorf("fullName = %q, want 'Grid Power Limitation'", raw.FullName)
 	}
 	if raw.SpecVersion != "1.0" {
 		t.Errorf("specVersion = %q, want '1.0'", raw.SpecVersion)
 	}
-	if len(raw.EndpointTypes) != 7 {
-		t.Errorf("endpointTypes length = %d, want 7", len(raw.EndpointTypes))
+	if len(raw.EndpointTypes) != 8 {
+		t.Errorf("endpointTypes length = %d, want 8", len(raw.EndpointTypes))
 	}
-	if len(raw.Scenarios) != 2 {
-		t.Errorf("scenarios length = %d, want 2", len(raw.Scenarios))
+	if len(raw.Scenarios) != 4 {
+		t.Errorf("scenarios length = %d, want 4", len(raw.Scenarios))
 	}
 	if len(raw.Commands) != 5 {
 		t.Errorf("commands length = %d, want 5", len(raw.Commands))
 	}
 
-	// Check BASE scenario first feature
+	// Check BASE scenario
 	base := raw.Scenarios[0]
 	if base.Name != "BASE" {
 		t.Errorf("scenarios[0].Name = %q, want BASE", base.Name)
 	}
-	if len(base.Features) != 2 {
-		t.Fatalf("scenarios[0].Features length = %d, want 2", len(base.Features))
+	if len(base.RequiresAny) != 2 {
+		t.Errorf("BASE.RequiresAny length = %d, want 2", len(base.RequiresAny))
+	}
+	if len(base.Features) != 1 {
+		t.Fatalf("scenarios[0].Features length = %d, want 1", len(base.Features))
 	}
 	ec := base.Features[0]
 	if ec.Feature != "EnergyControl" {
@@ -102,8 +130,8 @@ func TestParseUseCaseYAML(t *testing.T) {
 	if !ec.Required {
 		t.Error("feature[0].Required should be true")
 	}
-	if len(ec.Attributes) != 1 {
-		t.Errorf("feature[0].Attributes length = %d, want 1", len(ec.Attributes))
+	if len(ec.Attributes) != 2 {
+		t.Errorf("feature[0].Attributes length = %d, want 2", len(ec.Attributes))
 	}
 	if ec.Attributes[0].Name != "acceptsLimits" {
 		t.Errorf("feature[0].Attributes[0].Name = %q, want acceptsLimits", ec.Attributes[0].Name)
@@ -117,10 +145,28 @@ func TestParseUseCaseYAML(t *testing.T) {
 	if ec.Subscribe != "all" {
 		t.Errorf("feature[0].Subscribe = %q, want \"all\"", ec.Subscribe)
 	}
+
+	// Check CONSUMPTION scenario
+	cons := raw.Scenarios[1]
+	if cons.Name != "CONSUMPTION" {
+		t.Errorf("scenarios[1].Name = %q, want CONSUMPTION", cons.Name)
+	}
+	if len(cons.Requires) != 1 || cons.Requires[0] != "BASE" {
+		t.Errorf("CONSUMPTION.Requires = %v, want [BASE]", cons.Requires)
+	}
+
+	// Check PRODUCTION scenario
+	prod := raw.Scenarios[2]
+	if prod.Name != "PRODUCTION" {
+		t.Errorf("scenarios[2].Name = %q, want PRODUCTION", prod.Name)
+	}
+	if len(prod.EndpointTypes) != 3 {
+		t.Errorf("PRODUCTION.EndpointTypes length = %d, want 3", len(prod.EndpointTypes))
+	}
 }
 
 func TestResolveNames_Valid(t *testing.T) {
-	raw, err := ParseRawUseCaseDef([]byte(testLPCYAML))
+	raw, err := ParseRawUseCaseDef([]byte(testGPLYAML))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -130,16 +176,16 @@ func TestResolveNames_Valid(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 
-	if def.Name != LPC {
-		t.Errorf("name = %q, want LPC", def.Name)
+	if def.Name != GPL {
+		t.Errorf("name = %q, want GPL", def.Name)
 	}
 	if def.ID != 0x01 {
 		t.Errorf("ID = 0x%02x, want 0x01", def.ID)
 	}
 
 	// Check scenarios
-	if len(def.Scenarios) != 2 {
-		t.Fatalf("scenarios count = %d, want 2", len(def.Scenarios))
+	if len(def.Scenarios) != 4 {
+		t.Fatalf("scenarios count = %d, want 4", len(def.Scenarios))
 	}
 
 	base := def.Scenarios[0]
@@ -149,8 +195,11 @@ func TestResolveNames_Valid(t *testing.T) {
 	if base.Bit != 0 {
 		t.Errorf("scenario[0].Bit = %d, want 0", base.Bit)
 	}
-	if len(base.Features) != 2 {
-		t.Fatalf("scenario[0] features count = %d, want 2", len(base.Features))
+	if len(base.RequiresAny) != 2 {
+		t.Errorf("BASE.RequiresAny = %v, want 2 items", base.RequiresAny)
+	}
+	if len(base.Features) != 1 {
+		t.Fatalf("scenario[0] features count = %d, want 1", len(base.Features))
 	}
 
 	// Check EnergyControl feature
@@ -166,8 +215,8 @@ func TestResolveNames_Valid(t *testing.T) {
 	}
 
 	// Check acceptsLimits attribute
-	if len(ec.Attributes) != 1 {
-		t.Fatalf("ec attributes count = %d, want 1", len(ec.Attributes))
+	if len(ec.Attributes) != 2 {
+		t.Fatalf("ec attributes count = %d, want 2", len(ec.Attributes))
 	}
 	if ec.Attributes[0].AttrID != 10 {
 		t.Errorf("acceptsLimits AttrID = %d, want 10", ec.Attributes[0].AttrID)
@@ -192,37 +241,40 @@ func TestResolveNames_Valid(t *testing.T) {
 		t.Error("EnergyControl SubscribeAll should be true")
 	}
 
-	// Check Electrical feature
-	elec := base.Features[1]
-	if elec.FeatureID != 0x03 {
-		t.Errorf("Electrical FeatureID = 0x%02x, want 0x03", elec.FeatureID)
+	// Check CONSUMPTION scenario
+	cons := def.Scenarios[1]
+	if cons.Name != "CONSUMPTION" {
+		t.Errorf("scenario[1].Name = %q, want CONSUMPTION", cons.Name)
 	}
-	if !elec.Required {
-		t.Error("Electrical should be required")
+	if cons.Bit != 1 {
+		t.Errorf("scenario[1].Bit = %d, want 1", cons.Bit)
 	}
-	if len(elec.Attributes) != 1 {
-		t.Fatalf("elec attributes count = %d, want 1", len(elec.Attributes))
+	if len(cons.Requires) != 1 || cons.Requires[0] != "BASE" {
+		t.Errorf("CONSUMPTION.Requires = %v", cons.Requires)
 	}
-	if elec.Attributes[0].AttrID != 10 { // nominalMaxConsumption
-		t.Errorf("nominalMaxConsumption AttrID = %d, want 10", elec.Attributes[0].AttrID)
+
+	// Check PRODUCTION scenario
+	prod := def.Scenarios[2]
+	if prod.Name != "PRODUCTION" {
+		t.Errorf("scenario[2].Name = %q, want PRODUCTION", prod.Name)
+	}
+	if len(prod.EndpointTypes) != 3 {
+		t.Errorf("PRODUCTION.EndpointTypes = %v", prod.EndpointTypes)
 	}
 
 	// Check MEASUREMENT scenario
-	meas := def.Scenarios[1]
+	meas := def.Scenarios[3]
 	if meas.Name != "MEASUREMENT" {
-		t.Errorf("scenario[1].Name = %q, want MEASUREMENT", meas.Name)
+		t.Errorf("scenario[3].Name = %q, want MEASUREMENT", meas.Name)
 	}
-	if meas.Bit != 1 {
-		t.Errorf("scenario[1].Bit = %d, want 1", meas.Bit)
+	if meas.Bit != 3 {
+		t.Errorf("scenario[3].Bit = %d, want 3", meas.Bit)
 	}
 	if len(meas.Features) != 1 {
-		t.Fatalf("scenario[1] features count = %d, want 1", len(meas.Features))
+		t.Fatalf("scenario[3] features count = %d, want 1", len(meas.Features))
 	}
 	if meas.Features[0].FeatureID != 0x04 {
 		t.Errorf("Measurement FeatureID = 0x%02x, want 0x04", meas.Features[0].FeatureID)
-	}
-	if !meas.Features[0].Required {
-		t.Error("Measurement in MEASUREMENT scenario should be required")
 	}
 }
 

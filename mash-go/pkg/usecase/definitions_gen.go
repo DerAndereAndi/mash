@@ -7,11 +7,11 @@ package usecase
 
 // Registry maps use case names to their resolved definitions.
 var Registry = map[UseCaseName]*UseCaseDef{
-	"LPC": {
-		Name:        "LPC",
+	"GPL": {
+		Name:        "GPL",
 		ID:          0x01,
-		FullName:    "Limit Power Consumption",
-		Description: "Controller limits active power consumption of a device. Replaces EEBUS LPC use case.\n",
+		FullName:    "Grid Power Limitation",
+		Description: "Controller limits active power consumption and/or production of a device. Replaces EEBUS LPC and LPP use cases. Supersedes LPC (0x01) and LPP (0x02).\n",
 		SpecVersion: "1.0",
 		Major:       1,
 		Minor:       0,
@@ -20,7 +20,8 @@ var Registry = map[UseCaseName]*UseCaseDef{
 			{
 				Bit:         0,
 				Name:        "BASE",
-				Description: "Basic power consumption limiting.",
+				Description: "Shared control infrastructure: EnergyControl subscription with failsafe duration and limit commands. Must be combined with at least one of CONSUMPTION or PRODUCTION.\n",
+				RequiresAny: []string{"CONSUMPTION", "PRODUCTION"},
 				Features: []FeatureRequirement{
 					{
 						FeatureName: "EnergyControl",
@@ -28,6 +29,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 						Required:    true,
 						Attributes: []AttributeRequirement{
 							{Name: "acceptsLimits", AttrID: 10, RequiredValue: boolPtr(true)},
+							{Name: "failsafeDuration", AttrID: 72},
 						},
 						Commands: []CommandRequirement{
 							{Name: "setLimit", CommandID: 1},
@@ -35,6 +37,14 @@ var Registry = map[UseCaseName]*UseCaseDef{
 						},
 						SubscribeAll: true,
 					},
+				},
+			},
+			{
+				Bit:         1,
+				Name:        "CONSUMPTION",
+				Description: "Power consumption limiting. Controller reads nominal hardware maximum and contractual grid maximum, and configures the failsafe consumption limit.\n",
+				Requires: []string{"BASE"},
+				Features: []FeatureRequirement{
 					{
 						FeatureName: "Electrical",
 						FeatureID:   0x03,
@@ -43,12 +53,45 @@ var Registry = map[UseCaseName]*UseCaseDef{
 							{Name: "nominalMaxConsumption", AttrID: 10},
 						},
 					},
+					{
+						FeatureName: "EnergyControl",
+						FeatureID:   0x05,
+						Attributes: []AttributeRequirement{
+							{Name: "failsafeConsumptionLimit", AttrID: 70},
+							{Name: "contractualConsumptionMax", AttrID: 73},
+						},
+					},
 				},
 			},
 			{
-				Bit:         1,
+				Bit:         2,
+				Name:        "PRODUCTION",
+				Description: "Power production (feed-in) limiting. Only applicable to bidirectional endpoint types.\n",
+				Requires: []string{"BASE"},
+				EndpointTypes: []string{"INVERTER", "BATTERY", "GRID_CONNECTION"},
+				Features: []FeatureRequirement{
+					{
+						FeatureName: "Electrical",
+						FeatureID:   0x03,
+						Required:    true,
+						Attributes: []AttributeRequirement{
+							{Name: "nominalMaxProduction", AttrID: 11},
+						},
+					},
+					{
+						FeatureName: "EnergyControl",
+						FeatureID:   0x05,
+						Attributes: []AttributeRequirement{
+							{Name: "failsafeProductionLimit", AttrID: 71},
+							{Name: "contractualProductionMax", AttrID: 74},
+						},
+					},
+				},
+			},
+			{
+				Bit:         3,
 				Name:        "MEASUREMENT",
-				Description: "Measurement telemetry for consumption monitoring.",
+				Description: "Measurement telemetry for power monitoring.",
 				Features: []FeatureRequirement{
 					{
 						FeatureName: "Measurement",
@@ -58,7 +101,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				},
 			},
 			{
-				Bit:         2,
+				Bit:         4,
 				Name:        "OVERRIDE",
 				Description: "Override tracking (DEC-049).",
 				Features: []FeatureRequirement{
@@ -73,79 +116,11 @@ var Registry = map[UseCaseName]*UseCaseDef{
 				},
 			},
 		},
-		Commands: []string{"limit", "clear", "capacity", "override", "lpc-demo"},
-	},
-	"LPP": {
-		Name:        "LPP",
-		ID:          0x02,
-		FullName:    "Limit Power Production",
-		Description: "Controller limits active power production (feed-in) of a device. Replaces EEBUS LPP use case. Only applies to bidirectional devices.\n",
-		SpecVersion: "1.0",
-		Major:       1,
-		Minor:       0,
-		EndpointTypes: []string{"INVERTER", "BATTERY", "GRID_CONNECTION"},
-		Scenarios: []ScenarioDef{
-			{
-				Bit:         0,
-				Name:        "BASE",
-				Description: "Basic power production limiting.",
-				Features: []FeatureRequirement{
-					{
-						FeatureName: "EnergyControl",
-						FeatureID:   0x05,
-						Required:    true,
-						Attributes: []AttributeRequirement{
-							{Name: "acceptsLimits", AttrID: 10, RequiredValue: boolPtr(true)},
-						},
-						Commands: []CommandRequirement{
-							{Name: "setLimit", CommandID: 1},
-							{Name: "clearLimit", CommandID: 2},
-						},
-						SubscribeAll: true,
-					},
-					{
-						FeatureName: "Electrical",
-						FeatureID:   0x03,
-						Required:    true,
-						Attributes: []AttributeRequirement{
-							{Name: "nominalMaxProduction", AttrID: 11},
-						},
-					},
-				},
-			},
-			{
-				Bit:         1,
-				Name:        "MEASUREMENT",
-				Description: "Measurement telemetry for production monitoring.",
-				Features: []FeatureRequirement{
-					{
-						FeatureName: "Measurement",
-						FeatureID:   0x04,
-						SubscribeAll: true,
-					},
-				},
-			},
-			{
-				Bit:         2,
-				Name:        "OVERRIDE",
-				Description: "Override tracking.",
-				Features: []FeatureRequirement{
-					{
-						FeatureName: "EnergyControl",
-						FeatureID:   0x05,
-						Attributes: []AttributeRequirement{
-							{Name: "overrideReason", AttrID: 75},
-							{Name: "overrideDirection", AttrID: 76},
-						},
-					},
-				},
-			},
-		},
-		Commands: []string{"limit", "clear", "capacity", "override"},
+		Commands: []string{"limit", "clear", "capacity", "override", "failsafe"},
 	},
 	"MPD": {
 		Name:        "MPD",
-		ID:          0x03,
+		ID:          0x02,
 		FullName:    "Monitor Power Device",
 		Description: "Monitor power, energy, voltage, current, SoC, and operating state of any device. Replaces EEBUS MPC, MGCP, MOB, MOI, MPS.\n",
 		SpecVersion: "1.0",
@@ -198,7 +173,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 	},
 	"EVC": {
 		Name:        "EVC",
-		ID:          0x04,
+		ID:          0x03,
 		FullName:    "EV Charging",
 		Description: "Comprehensive EV charging management. Replaces EEBUS CEVC, DBEVC, EVSOC, OPEV, OSCEV, EVCC, EVSECC.\n",
 		SpecVersion: "1.0",
@@ -363,7 +338,7 @@ var Registry = map[UseCaseName]*UseCaseDef{
 	},
 	"COB": {
 		Name:        "COB",
-		ID:          0x05,
+		ID:          0x04,
 		FullName:    "Control of Battery",
 		Description: "Controller manages battery charge/discharge via setpoints or limits. Replaces EEBUS COB use case. Uses controlMode to select PCC or DIRECT targeting.\n",
 		SpecVersion: "1.0",
@@ -441,9 +416,136 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		},
 		Commands: []string{"setpoint", "limit", "clear"},
 	},
+	"OHPCF": {
+		Name:        "OHPCF",
+		ID:          0x05,
+		FullName:    "Heat Pump Compressor Flexibility",
+		Description: "Controller flexibly controls heat pump compressor with min run/pause constraints. Replaces EEBUS OHPCF use case. Uses process management with timing constraints.\n",
+		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
+		EndpointTypes: []string{"HEAT_PUMP"},
+		Scenarios: []ScenarioDef{
+			{
+				Bit:         0,
+				Name:        "BASE",
+				Description: "Heat pump control with process timing constraints.",
+				Features: []FeatureRequirement{
+					{
+						FeatureName: "EnergyControl",
+						FeatureID:   0x05,
+						Required:    true,
+						Attributes: []AttributeRequirement{
+							{Name: "acceptsLimits", AttrID: 10, RequiredValue: boolPtr(true)},
+							{Name: "isPausable", AttrID: 14, RequiredValue: boolPtr(true)},
+							{Name: "processState", AttrID: 80},
+							{Name: "optionalProcess", AttrID: 81},
+							{Name: "minRunDuration", AttrID: 82},
+							{Name: "minPauseDuration", AttrID: 83},
+							{Name: "maxRunDuration", AttrID: 84},
+							{Name: "maxPauseDuration", AttrID: 85},
+							{Name: "optionalProcessPower", AttrID: 86},
+						},
+						Commands: []CommandRequirement{
+							{Name: "setLimit", CommandID: 1},
+							{Name: "clearLimit", CommandID: 2},
+							{Name: "pause", CommandID: 9},
+							{Name: "resume", CommandID: 10},
+						},
+						SubscribeAll: true,
+					},
+					{
+						FeatureName: "Electrical",
+						FeatureID:   0x03,
+						Required:    true,
+						Attributes: []AttributeRequirement{
+							{Name: "nominalMaxConsumption", AttrID: 10},
+						},
+					},
+				},
+			},
+			{
+				Bit:         1,
+				Name:        "MEASUREMENT",
+				Description: "Measurement telemetry for heat pump monitoring.",
+				Features: []FeatureRequirement{
+					{
+						FeatureName: "Measurement",
+						FeatureID:   0x04,
+						SubscribeAll: true,
+					},
+				},
+			},
+		},
+		Commands: []string{"limit", "clear", "pause", "resume"},
+	},
+	"ITPCM": {
+		Name:        "ITPCM",
+		ID:          0x06,
+		FullName:    "Incentive Table Power Consumption Management",
+		Description: "Controller sends incentive signals; device responds with optimized power plan. Replaces EEBUS ITPCM use case. Uses Signals for incentives and Plan for response.\n",
+		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
+		EndpointTypes: []string{"HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE", "EV_CHARGER"},
+		Scenarios: []ScenarioDef{
+			{
+				Bit:         0,
+				Name:        "BASE",
+				Description: "Incentive signals and plan exchange.",
+				Features: []FeatureRequirement{
+					{
+						FeatureName: "Signals",
+						FeatureID:   0x08,
+						Required:    true,
+						Commands: []CommandRequirement{
+							{Name: "sendPriceSignal", CommandID: 1},
+							{Name: "clearSignals", CommandID: 4},
+						},
+						SubscribeAll: true,
+					},
+					{
+						FeatureName: "Plan",
+						FeatureID:   0x09,
+						Required:    true,
+						Commands: []CommandRequirement{
+							{Name: "requestPlan", CommandID: 1},
+							{Name: "acceptPlan", CommandID: 2},
+						},
+						SubscribeAll: true,
+					},
+				},
+			},
+			{
+				Bit:         1,
+				Name:        "ENERGY_CONTROL",
+				Description: "Device also supports direct energy control.",
+				Features: []FeatureRequirement{
+					{
+						FeatureName: "EnergyControl",
+						FeatureID:   0x05,
+						SubscribeAll: true,
+					},
+				},
+			},
+			{
+				Bit:         2,
+				Name:        "MEASUREMENT",
+				Description: "Measurement telemetry.",
+				Features: []FeatureRequirement{
+					{
+						FeatureName: "Measurement",
+						FeatureID:   0x04,
+						SubscribeAll: true,
+					},
+				},
+			},
+		},
+		Commands: []string{"signal", "plan"},
+	},
 	"FLOA": {
 		Name:        "FLOA",
-		ID:          0x06,
+		ID:          0x07,
 		FullName:    "Flexible Load",
 		Description: "Controller manages a generic flexible load via limits or setpoints. Replaces EEBUS flexible load patterns. Applies to any controllable device.\n",
 		SpecVersion: "1.0",
@@ -512,169 +614,9 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		},
 		Commands: []string{"limit", "clear"},
 	},
-	"ITPCM": {
-		Name:        "ITPCM",
-		ID:          0x07,
-		FullName:    "Incentive Table Power Consumption Management",
-		Description: "Controller sends incentive signals; device responds with optimized power plan. Replaces EEBUS ITPCM use case. Uses Signals for incentives and Plan for response.\n",
-		SpecVersion: "1.0",
-		Major:       1,
-		Minor:       0,
-		EndpointTypes: []string{"HEAT_PUMP", "WATER_HEATER", "HVAC", "APPLIANCE", "EV_CHARGER"},
-		Scenarios: []ScenarioDef{
-			{
-				Bit:         0,
-				Name:        "BASE",
-				Description: "Incentive signals and plan exchange.",
-				Features: []FeatureRequirement{
-					{
-						FeatureName: "Signals",
-						FeatureID:   0x08,
-						Required:    true,
-						Commands: []CommandRequirement{
-							{Name: "sendPriceSignal", CommandID: 1},
-							{Name: "clearSignals", CommandID: 4},
-						},
-						SubscribeAll: true,
-					},
-					{
-						FeatureName: "Plan",
-						FeatureID:   0x09,
-						Required:    true,
-						Commands: []CommandRequirement{
-							{Name: "requestPlan", CommandID: 1},
-							{Name: "acceptPlan", CommandID: 2},
-						},
-						SubscribeAll: true,
-					},
-				},
-			},
-			{
-				Bit:         1,
-				Name:        "ENERGY_CONTROL",
-				Description: "Device also supports direct energy control.",
-				Features: []FeatureRequirement{
-					{
-						FeatureName: "EnergyControl",
-						FeatureID:   0x05,
-						SubscribeAll: true,
-					},
-				},
-			},
-			{
-				Bit:         2,
-				Name:        "MEASUREMENT",
-				Description: "Measurement telemetry.",
-				Features: []FeatureRequirement{
-					{
-						FeatureName: "Measurement",
-						FeatureID:   0x04,
-						SubscribeAll: true,
-					},
-				},
-			},
-		},
-		Commands: []string{"signal", "plan"},
-	},
-	"OHPCF": {
-		Name:        "OHPCF",
-		ID:          0x08,
-		FullName:    "Heat Pump Compressor Flexibility",
-		Description: "Controller flexibly controls heat pump compressor with min run/pause constraints. Replaces EEBUS OHPCF use case. Uses process management with timing constraints.\n",
-		SpecVersion: "1.0",
-		Major:       1,
-		Minor:       0,
-		EndpointTypes: []string{"HEAT_PUMP"},
-		Scenarios: []ScenarioDef{
-			{
-				Bit:         0,
-				Name:        "BASE",
-				Description: "Heat pump control with process timing constraints.",
-				Features: []FeatureRequirement{
-					{
-						FeatureName: "EnergyControl",
-						FeatureID:   0x05,
-						Required:    true,
-						Attributes: []AttributeRequirement{
-							{Name: "acceptsLimits", AttrID: 10, RequiredValue: boolPtr(true)},
-							{Name: "isPausable", AttrID: 14, RequiredValue: boolPtr(true)},
-							{Name: "processState", AttrID: 80},
-							{Name: "optionalProcess", AttrID: 81},
-							{Name: "minRunDuration", AttrID: 82},
-							{Name: "minPauseDuration", AttrID: 83},
-							{Name: "maxRunDuration", AttrID: 84},
-							{Name: "maxPauseDuration", AttrID: 85},
-							{Name: "optionalProcessPower", AttrID: 86},
-						},
-						Commands: []CommandRequirement{
-							{Name: "setLimit", CommandID: 1},
-							{Name: "clearLimit", CommandID: 2},
-							{Name: "pause", CommandID: 9},
-							{Name: "resume", CommandID: 10},
-						},
-						SubscribeAll: true,
-					},
-					{
-						FeatureName: "Electrical",
-						FeatureID:   0x03,
-						Required:    true,
-						Attributes: []AttributeRequirement{
-							{Name: "nominalMaxConsumption", AttrID: 10},
-						},
-					},
-				},
-			},
-			{
-				Bit:         1,
-				Name:        "MEASUREMENT",
-				Description: "Measurement telemetry for heat pump monitoring.",
-				Features: []FeatureRequirement{
-					{
-						FeatureName: "Measurement",
-						FeatureID:   0x04,
-						SubscribeAll: true,
-					},
-				},
-			},
-		},
-		Commands: []string{"limit", "clear", "pause", "resume"},
-	},
-	"PODF": {
-		Name:        "PODF",
-		ID:          0x09,
-		FullName:    "Power Demand Forecast",
-		Description: "Device publishes its planned power demand as a forecast via Plan feature. Replaces EEBUS PODF use case. CEM exposes Plan to higher-tier controllers.\n",
-		SpecVersion: "1.0",
-		Major:       1,
-		Minor:       0,
-		Scenarios: []ScenarioDef{
-			{
-				Bit:         0,
-				Name:        "BASE",
-				Description: "Power demand forecast via Plan feature.",
-				Features: []FeatureRequirement{
-					{
-						FeatureName: "Plan",
-						FeatureID:   0x09,
-						Required:    true,
-						Attributes: []AttributeRequirement{
-							{Name: "commitment", AttrID: 3},
-							{Name: "startTime", AttrID: 10},
-							{Name: "endTime", AttrID: 11},
-							{Name: "totalEnergyPlanned", AttrID: 20},
-						},
-						Commands: []CommandRequirement{
-							{Name: "requestPlan", CommandID: 1},
-						},
-						SubscribeAll: true,
-					},
-				},
-			},
-		},
-	},
 	"POEN": {
 		Name:        "POEN",
-		ID:          0x0A,
+		ID:          0x08,
 		FullName:    "Power Envelope",
 		Description: "Controller sends time-slotted power constraints (envelope) to a device. Replaces EEBUS POEN use case. Uses constraint signals for all four bounds.\n",
 		SpecVersion: "1.0",
@@ -722,9 +664,42 @@ var Registry = map[UseCaseName]*UseCaseDef{
 		},
 		Commands: []string{"signal"},
 	},
+	"PODF": {
+		Name:        "PODF",
+		ID:          0x09,
+		FullName:    "Power Demand Forecast",
+		Description: "Device publishes its planned power demand as a forecast via Plan feature. Replaces EEBUS PODF use case. CEM exposes Plan to higher-tier controllers.\n",
+		SpecVersion: "1.0",
+		Major:       1,
+		Minor:       0,
+		Scenarios: []ScenarioDef{
+			{
+				Bit:         0,
+				Name:        "BASE",
+				Description: "Power demand forecast via Plan feature.",
+				Features: []FeatureRequirement{
+					{
+						FeatureName: "Plan",
+						FeatureID:   0x09,
+						Required:    true,
+						Attributes: []AttributeRequirement{
+							{Name: "commitment", AttrID: 3},
+							{Name: "startTime", AttrID: 10},
+							{Name: "endTime", AttrID: 11},
+							{Name: "totalEnergyPlanned", AttrID: 20},
+						},
+						Commands: []CommandRequirement{
+							{Name: "requestPlan", CommandID: 1},
+						},
+						SubscribeAll: true,
+					},
+				},
+			},
+		},
+	},
 	"TOUT": {
 		Name:        "TOUT",
-		ID:          0x0B,
+		ID:          0x0A,
 		FullName:    "Time of Use Tariff",
 		Description: "Controller sends time-of-use price signals to a device for local optimization. Replaces EEBUS TOUT use case. Device uses price information autonomously.\n",
 		SpecVersion: "1.0",
@@ -766,32 +741,30 @@ var Registry = map[UseCaseName]*UseCaseDef{
 
 // NameToID maps human-readable use case names to their wire IDs.
 var NameToID = map[UseCaseName]UseCaseID{
-	"LPC": 0x01,
-	"LPP": 0x02,
-	"MPD": 0x03,
-	"EVC": 0x04,
-	"COB": 0x05,
-	"FLOA": 0x06,
-	"ITPCM": 0x07,
-	"OHPCF": 0x08,
+	"GPL": 0x01,
+	"MPD": 0x02,
+	"EVC": 0x03,
+	"COB": 0x04,
+	"OHPCF": 0x05,
+	"ITPCM": 0x06,
+	"FLOA": 0x07,
+	"POEN": 0x08,
 	"PODF": 0x09,
-	"POEN": 0x0A,
-	"TOUT": 0x0B,
+	"TOUT": 0x0A,
 }
 
 // IDToName maps wire IDs to human-readable use case names.
 var IDToName = map[UseCaseID]UseCaseName{
-	0x01: "LPC",
-	0x02: "LPP",
-	0x03: "MPD",
-	0x04: "EVC",
-	0x05: "COB",
-	0x06: "FLOA",
-	0x07: "ITPCM",
-	0x08: "OHPCF",
+	0x01: "GPL",
+	0x02: "MPD",
+	0x03: "EVC",
+	0x04: "COB",
+	0x05: "OHPCF",
+	0x06: "ITPCM",
+	0x07: "FLOA",
+	0x08: "POEN",
 	0x09: "PODF",
-	0x0A: "POEN",
-	0x0B: "TOUT",
+	0x0A: "TOUT",
 }
 
 func boolPtr(v bool) *bool { return &v }

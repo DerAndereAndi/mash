@@ -41,8 +41,8 @@ func TestEVSEUseCases(t *testing.T) {
 		ucMap[uc.ID] = uc
 	}
 
-	// EVSE should match LPC, MPD, EVC at minimum
-	for _, id := range []usecase.UseCaseID{usecase.LPCID, usecase.MPDID, usecase.EVCID} {
+	// EVSE should match GPL, MPD, EVC at minimum
+	for _, id := range []usecase.UseCaseID{usecase.GPLID, usecase.MPDID, usecase.EVCID} {
 		uc, ok := ucMap[uint16(id)]
 		if !ok {
 			t.Errorf("expected use case 0x%02X to be declared", id)
@@ -129,8 +129,8 @@ func TestCEMUseCases(t *testing.T) {
 		ucMap[uc.ID] = uc
 	}
 
-	// CEM should declare at least LPC, LPP, MPD, EVC, COB
-	for _, id := range []usecase.UseCaseID{usecase.LPCID, usecase.LPPID, usecase.MPDID, usecase.EVCID, usecase.COBID} {
+	// CEM should declare at least GPL, MPD, EVC, COB
+	for _, id := range []usecase.UseCaseID{usecase.GPLID, usecase.MPDID, usecase.EVCID, usecase.COBID} {
 		uc, ok := ucMap[uint16(id)]
 		if !ok {
 			t.Errorf("expected use case 0x%02X to be declared", id)

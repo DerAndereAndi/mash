@@ -98,7 +98,7 @@ func TestGenerateFeaturePage_UseCaseBacklinks(t *testing.T) {
 	output := GenerateFeaturePage(m.FeatureByName["EnergyControl"], m)
 
 	mustContain(t, output, "Referenced by")
-	mustContain(t, output, "LPC")
+	mustContain(t, output, "GPL")
 }
 
 func TestGenerateFeaturePage_DesignDocLink(t *testing.T) {
@@ -121,22 +121,22 @@ func findUseCaseByName(m *DocModel, name string) *usecasePkg.RawUseCaseDef {
 
 func TestGenerateUseCasePage_Header(t *testing.T) {
 	m := testModel(t)
-	uc := findUseCaseByName(m, "LPC")
+	uc := findUseCaseByName(m, "GPL")
 	if uc == nil {
-		t.Fatal("LPC not found")
+		t.Fatal("GPL not found")
 	}
 	output := GenerateUseCasePage(uc, m)
 
-	mustContain(t, output, "# LPC")
-	mustContain(t, output, "Limit Power Consumption")
+	mustContain(t, output, "# GPL")
+	mustContain(t, output, "Grid Power Limitation")
 	mustContain(t, output, "0x01")
 }
 
 func TestGenerateUseCasePage_EndpointTypes(t *testing.T) {
 	m := testModel(t)
-	uc := findUseCaseByName(m, "LPC")
+	uc := findUseCaseByName(m, "GPL")
 	if uc == nil {
-		t.Fatal("LPC not found")
+		t.Fatal("GPL not found")
 	}
 	output := GenerateUseCasePage(uc, m)
 
@@ -147,9 +147,9 @@ func TestGenerateUseCasePage_EndpointTypes(t *testing.T) {
 
 func TestGenerateUseCasePage_ScenarioBreakdown(t *testing.T) {
 	m := testModel(t)
-	uc := findUseCaseByName(m, "LPC")
+	uc := findUseCaseByName(m, "GPL")
 	if uc == nil {
-		t.Fatal("LPC not found")
+		t.Fatal("GPL not found")
 	}
 	output := GenerateUseCasePage(uc, m)
 
@@ -160,9 +160,9 @@ func TestGenerateUseCasePage_ScenarioBreakdown(t *testing.T) {
 
 func TestGenerateUseCasePage_FeatureRequirements(t *testing.T) {
 	m := testModel(t)
-	uc := findUseCaseByName(m, "LPC")
+	uc := findUseCaseByName(m, "GPL")
 	if uc == nil {
-		t.Fatal("LPC not found")
+		t.Fatal("GPL not found")
 	}
 	output := GenerateUseCasePage(uc, m)
 
@@ -197,9 +197,9 @@ func TestGenerateUseCaseIndexPage(t *testing.T) {
 	output := GenerateUseCaseIndexPage(m)
 
 	mustContain(t, output, "# Use Case Reference")
-	mustContain(t, output, "LPC")
-	mustContain(t, output, "Limit Power Consumption")
-	mustContain(t, output, "lpc.md")
+	mustContain(t, output, "GPL")
+	mustContain(t, output, "Grid Power Limitation")
+	mustContain(t, output, "gpl.md")
 }
 
 func TestGenerateEndpointIndexPage(t *testing.T) {

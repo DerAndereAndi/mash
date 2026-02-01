@@ -42,8 +42,8 @@ func TestBuildDocModel_LoadsUseCases(t *testing.T) {
 		t.Fatalf("BuildDocModel failed: %v", err)
 	}
 
-	if len(m.UseCases) != 11 {
-		t.Errorf("len(UseCases) = %d, want 11", len(m.UseCases))
+	if len(m.UseCases) != 10 {
+		t.Errorf("len(UseCases) = %d, want 10", len(m.UseCases))
 	}
 
 	// Should be sorted by ID
@@ -124,7 +124,7 @@ func TestBuildDocModel_HasTypes(t *testing.T) {
 	if len(m.EndpointTypes) != 11 {
 		t.Errorf("len(EndpointTypes) = %d, want 11", len(m.EndpointTypes))
 	}
-	if len(m.UseCaseTypes) != 11 {
-		t.Errorf("len(UseCaseTypes) = %d, want 11", len(m.UseCaseTypes))
+	if len(m.UseCaseTypes) != 10 {
+		t.Errorf("len(UseCaseTypes) = %d, want 10", len(m.UseCaseTypes))
 	}
 }

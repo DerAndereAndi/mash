@@ -7,7 +7,7 @@ func TestDeviceUseCases_SupportedCommands(t *testing.T) {
 		DeviceID: "test-device",
 		Matches: []MatchResult{
 			{
-				UseCase:    LPC,
+				UseCase:    GPL,
 				Matched:    true,
 				EndpointID: 1,
 				Scenarios:  ScenarioBASE,
@@ -19,7 +19,7 @@ func TestDeviceUseCases_SupportedCommands(t *testing.T) {
 				Scenarios:  ScenarioBASE,
 			},
 			{
-				UseCase: LPP,
+				UseCase: EVC,
 				Matched: false,
 			},
 		},
@@ -27,12 +27,12 @@ func TestDeviceUseCases_SupportedCommands(t *testing.T) {
 
 	// Provide a registry for the test
 	du.registry = map[UseCaseName]*UseCaseDef{
-		LPC: {
-			Name:     LPC,
-			Commands: []string{"limit", "clear", "capacity", "override", "lpc-demo"},
+		GPL: {
+			Name:     GPL,
+			Commands: []string{"limit", "clear", "capacity", "override", "failsafe"},
 		},
-		LPP: {
-			Name:     LPP,
+		EVC: {
+			Name:     EVC,
 			Commands: []string{"limit", "clear"},
 		},
 		MPD: {
@@ -43,8 +43,8 @@ func TestDeviceUseCases_SupportedCommands(t *testing.T) {
 
 	cmds := du.SupportedCommands()
 
-	// LPC is matched, so its commands should be present
-	for _, cmd := range []string{"limit", "clear", "capacity", "override", "lpc-demo"} {
+	// GPL is matched, so its commands should be present
+	for _, cmd := range []string{"limit", "clear", "capacity", "override", "failsafe"} {
 		if !cmds[cmd] {
 			t.Errorf("expected command %q to be supported", cmd)
 		}
@@ -73,20 +73,20 @@ func TestDeviceUseCases_HasUseCase(t *testing.T) {
 	du := &DeviceUseCases{
 		DeviceID: "test-device",
 		Matches: []MatchResult{
-			{UseCase: LPC, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
+			{UseCase: GPL, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
 			{UseCase: MPD, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
-			{UseCase: LPP, Matched: false},
+			{UseCase: EVC, Matched: false},
 		},
 	}
 
-	if !du.HasUseCase(LPC) {
-		t.Error("expected HasUseCase(LPC) to be true")
+	if !du.HasUseCase(GPL) {
+		t.Error("expected HasUseCase(GPL) to be true")
 	}
 	if !du.HasUseCase(MPD) {
 		t.Error("expected HasUseCase(MPD) to be true")
 	}
-	if du.HasUseCase(LPP) {
-		t.Error("expected HasUseCase(LPP) to be false")
+	if du.HasUseCase(EVC) {
+		t.Error("expected HasUseCase(EVC) to be false")
 	}
 	if du.HasUseCase("CEVC") {
 		t.Error("expected HasUseCase(CEVC) to be false")
@@ -97,15 +97,15 @@ func TestDeviceUseCases_EndpointForUseCase(t *testing.T) {
 	du := &DeviceUseCases{
 		DeviceID: "test-device",
 		Matches: []MatchResult{
-			{UseCase: LPC, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
+			{UseCase: GPL, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
 			{UseCase: MPD, Matched: true, EndpointID: 2, Scenarios: ScenarioBASE},
-			{UseCase: LPP, Matched: false},
+			{UseCase: EVC, Matched: false},
 		},
 	}
 
-	epID, ok := du.EndpointForUseCase(LPC)
+	epID, ok := du.EndpointForUseCase(GPL)
 	if !ok || epID != 1 {
-		t.Errorf("expected EndpointForUseCase(LPC) = (1, true), got (%d, %v)", epID, ok)
+		t.Errorf("expected EndpointForUseCase(GPL) = (1, true), got (%d, %v)", epID, ok)
 	}
 
 	epID, ok = du.EndpointForUseCase(MPD)
@@ -113,9 +113,9 @@ func TestDeviceUseCases_EndpointForUseCase(t *testing.T) {
 		t.Errorf("expected EndpointForUseCase(MPD) = (2, true), got (%d, %v)", epID, ok)
 	}
 
-	_, ok = du.EndpointForUseCase(LPP)
+	_, ok = du.EndpointForUseCase(EVC)
 	if ok {
-		t.Error("expected EndpointForUseCase(LPP) to return false")
+		t.Error("expected EndpointForUseCase(EVC) to return false")
 	}
 
 	_, ok = du.EndpointForUseCase("CEVC")
@@ -140,9 +140,9 @@ func TestDeviceUseCases_MatchedUseCases(t *testing.T) {
 	du := &DeviceUseCases{
 		DeviceID: "test-device",
 		Matches: []MatchResult{
-			{UseCase: LPC, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
+			{UseCase: GPL, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
 			{UseCase: MPD, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
-			{UseCase: LPP, Matched: false},
+			{UseCase: EVC, Matched: false},
 		},
 	}
 
@@ -155,8 +155,8 @@ func TestDeviceUseCases_MatchedUseCases(t *testing.T) {
 	for _, n := range names {
 		found[n] = true
 	}
-	if !found[LPC] || !found[MPD] {
-		t.Errorf("expected LPC and MPD in matched use cases, got %v", names)
+	if !found[GPL] || !found[MPD] {
+		t.Errorf("expected GPL and MPD in matched use cases, got %v", names)
 	}
 }
 
@@ -164,29 +164,32 @@ func TestDeviceUseCases_ScenariosForUseCase(t *testing.T) {
 	du := &DeviceUseCases{
 		DeviceID: "test-device",
 		Matches: []MatchResult{
-			{UseCase: LPC, Matched: true, EndpointID: 1, Scenarios: 0x03}, // BASE + MEASUREMENT
+			{UseCase: GPL, Matched: true, EndpointID: 1, Scenarios: 0x0B}, // BASE + CONSUMPTION + MEASUREMENT
 			{UseCase: MPD, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
-			{UseCase: LPP, Matched: false},
+			{UseCase: EVC, Matched: false},
 		},
 	}
 
-	scenarios, ok := du.ScenariosForUseCase(LPC)
+	scenarios, ok := du.ScenariosForUseCase(GPL)
 	if !ok {
-		t.Fatal("expected ScenariosForUseCase(LPC) to return ok")
+		t.Fatal("expected ScenariosForUseCase(GPL) to return ok")
 	}
-	if scenarios != 0x03 {
-		t.Errorf("LPC scenarios = 0x%02X, want 0x03", scenarios)
+	if scenarios != 0x0B {
+		t.Errorf("GPL scenarios = 0x%02X, want 0x0B", scenarios)
 	}
 	if !scenarios.Has(0) {
 		t.Error("expected BASE to be set")
 	}
 	if !scenarios.Has(1) {
+		t.Error("expected CONSUMPTION to be set")
+	}
+	if !scenarios.Has(3) {
 		t.Error("expected MEASUREMENT to be set")
 	}
 
-	_, ok = du.ScenariosForUseCase(LPP)
+	_, ok = du.ScenariosForUseCase(EVC)
 	if ok {
-		t.Error("expected ScenariosForUseCase(LPP) to return false")
+		t.Error("expected ScenariosForUseCase(EVC) to return false")
 	}
 }
 

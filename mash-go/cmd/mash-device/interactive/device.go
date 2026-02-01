@@ -200,7 +200,7 @@ MASH Device Commands:
     power <kw>         - Set power value (kW, positive=consume, negative=produce)
     status             - Show device status
 
-  LPC/LPP Simulation:
+  GPL Simulation:
     override <reason>|clear  - Enter/exit OVERRIDE state
     contractual <kw> [kw]    - Set contractual limits (EMS mode)
     limit-status             - Show current limit state

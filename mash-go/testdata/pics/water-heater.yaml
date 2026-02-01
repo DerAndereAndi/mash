@@ -2,7 +2,7 @@
 # Water Heater Device Profile
 #
 # Reference implementation: exercises all water heater scenarios.
-# Use cases: LPC, MPD, FLOA, ITPCM, POEN
+# Use cases: GPL, MPD, FLOA, ITPCM, POEN
 
 # Device Identification
 device:
@@ -26,10 +26,11 @@ items:
   # Use case declarations with per-scenario codes
   # ==========================================================================
 
-  # LPC: Limit Power Consumption
-  MASH.S.UC.LPC: true
-  MASH.S.UC.LPC.S00: true          # BASE
-  MASH.S.UC.LPC.S01: true          # MEASUREMENT
+  # GPL: Grid Power Limitation
+  MASH.S.UC.GPL: true
+  MASH.S.UC.GPL.S00: true          # BASE
+  MASH.S.UC.GPL.S01: true          # CONSUMPTION
+  MASH.S.UC.GPL.S03: true          # MEASUREMENT
 
   # MPD: Monitor Power Device
   MASH.S.UC.MPD: true
@@ -79,7 +80,7 @@ items:
   MASH.S.E01.CTRL.A02: true        # controlState
 
   # Control capabilities
-  MASH.S.E01.CTRL.A0A: true        # acceptsLimits (LPC/FLOA)
+  MASH.S.E01.CTRL.A0A: true        # acceptsLimits (GPL/FLOA)
   MASH.S.E01.CTRL.A0B: false       # acceptsCurrentLimits
   MASH.S.E01.CTRL.A0C: true        # acceptsSetpoints (FLOA SETPOINTS)
   MASH.S.E01.CTRL.A0E: false       # isPausable

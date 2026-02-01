@@ -5,7 +5,7 @@ import "testing"
 // TestRegistry_AllKeysHaveConstants verifies every registry key has a matching UseCaseName constant.
 func TestRegistry_AllKeysHaveConstants(t *testing.T) {
 	knownConstants := map[UseCaseName]bool{
-		LPC: true, LPP: true, MPD: true, EVC: true,
+		GPL: true, MPD: true, EVC: true,
 		COB: true, FLOA: true, ITPCM: true, OHPCF: true,
 		PODF: true, POEN: true, TOUT: true,
 	}
@@ -16,32 +16,19 @@ func TestRegistry_AllKeysHaveConstants(t *testing.T) {
 	}
 }
 
-func TestRegistry_ContainsLPC(t *testing.T) {
-	def, ok := Registry[LPC]
+func TestRegistry_ContainsGPL(t *testing.T) {
+	def, ok := Registry[GPL]
 	if !ok {
-		t.Fatal("Registry missing LPC")
+		t.Fatal("Registry missing GPL")
 	}
-	if def.Name != LPC {
-		t.Errorf("name = %q, want LPC", def.Name)
+	if def.Name != GPL {
+		t.Errorf("name = %q, want GPL", def.Name)
 	}
-	if def.ID != LPCID {
-		t.Errorf("ID = 0x%02X, want 0x%02X", def.ID, LPCID)
+	if def.ID != GPLID {
+		t.Errorf("ID = 0x%02X, want 0x%02X", def.ID, GPLID)
 	}
-	if def.FullName != "Limit Power Consumption" {
+	if def.FullName != "Grid Power Limitation" {
 		t.Errorf("fullName = %q", def.FullName)
-	}
-}
-
-func TestRegistry_ContainsLPP(t *testing.T) {
-	def, ok := Registry[LPP]
-	if !ok {
-		t.Fatal("Registry missing LPP")
-	}
-	if def.Name != LPP {
-		t.Errorf("name = %q, want LPP", def.Name)
-	}
-	if def.ID != LPPID {
-		t.Errorf("ID = 0x%02X, want 0x%02X", def.ID, LPPID)
 	}
 }
 
@@ -71,11 +58,11 @@ func TestRegistry_ContainsEVC(t *testing.T) {
 	}
 }
 
-func TestLPC_EnergyControlRequired(t *testing.T) {
-	def := Registry[LPC]
+func TestGPL_EnergyControlRequired(t *testing.T) {
+	def := Registry[GPL]
 	base := def.BaseScenario()
 	if base == nil {
-		t.Fatal("LPC missing BASE scenario")
+		t.Fatal("GPL missing BASE scenario")
 	}
 	var ec *FeatureRequirement
 	for i := range base.Features {
@@ -85,7 +72,7 @@ func TestLPC_EnergyControlRequired(t *testing.T) {
 		}
 	}
 	if ec == nil {
-		t.Fatal("LPC BASE missing EnergyControl feature")
+		t.Fatal("GPL BASE missing EnergyControl feature")
 	}
 	if ec.FeatureID != 0x05 {
 		t.Errorf("EnergyControl FeatureID = 0x%02x, want 0x05", ec.FeatureID)
@@ -110,43 +97,84 @@ func TestLPC_EnergyControlRequired(t *testing.T) {
 	}
 }
 
-func TestLPC_ElectricalRequired(t *testing.T) {
-	def := Registry[LPC]
-	base := def.BaseScenario()
-	if base == nil {
-		t.Fatal("LPC missing BASE scenario")
+func TestGPL_ConsumptionScenario(t *testing.T) {
+	def := Registry[GPL]
+	var consScenario *ScenarioDef
+	for i := range def.Scenarios {
+		if def.Scenarios[i].Name == "CONSUMPTION" {
+			consScenario = &def.Scenarios[i]
+			break
+		}
 	}
+	if consScenario == nil {
+		t.Fatal("GPL missing CONSUMPTION scenario")
+	}
+	if consScenario.Bit != 1 {
+		t.Errorf("CONSUMPTION scenario bit = %d, want 1", consScenario.Bit)
+	}
+	// CONSUMPTION requires BASE
+	if len(consScenario.Requires) != 1 || consScenario.Requires[0] != "BASE" {
+		t.Errorf("CONSUMPTION requires = %v, want [BASE]", consScenario.Requires)
+	}
+	// CONSUMPTION needs Electrical with nominalMaxConsumption
 	var elec *FeatureRequirement
-	for i := range base.Features {
-		if base.Features[i].FeatureName == "Electrical" {
-			elec = &base.Features[i]
+	for i := range consScenario.Features {
+		if consScenario.Features[i].FeatureName == "Electrical" {
+			elec = &consScenario.Features[i]
 			break
 		}
 	}
 	if elec == nil {
-		t.Fatal("LPC BASE missing Electrical feature")
+		t.Fatal("CONSUMPTION missing Electrical feature")
 	}
 	if !elec.Required {
-		t.Error("Electrical should be required")
+		t.Error("Electrical should be required in CONSUMPTION")
 	}
-	if len(elec.Attributes) < 1 {
-		t.Fatal("missing attributes")
-	}
-	if elec.Attributes[0].Name != "nominalMaxConsumption" {
-		t.Errorf("attribute name = %q", elec.Attributes[0].Name)
-	}
-	if elec.Attributes[0].AttrID != 10 {
-		t.Errorf("nominalMaxConsumption AttrID = %d, want 10", elec.Attributes[0].AttrID)
+	if len(elec.Attributes) < 1 || elec.Attributes[0].Name != "nominalMaxConsumption" {
+		t.Errorf("Electrical attributes = %v", elec.Attributes)
 	}
 }
 
-func TestLPC_MeasurementScenario(t *testing.T) {
-	def := Registry[LPC]
-	// Measurement should be in the MEASUREMENT scenario (bit 1), not in BASE
-	if len(def.Scenarios) < 2 {
-		t.Fatalf("LPC should have at least 2 scenarios, got %d", len(def.Scenarios))
+func TestGPL_ProductionScenario(t *testing.T) {
+	def := Registry[GPL]
+	var prodScenario *ScenarioDef
+	for i := range def.Scenarios {
+		if def.Scenarios[i].Name == "PRODUCTION" {
+			prodScenario = &def.Scenarios[i]
+			break
+		}
 	}
-	// Find MEASUREMENT scenario
+	if prodScenario == nil {
+		t.Fatal("GPL missing PRODUCTION scenario")
+	}
+	if prodScenario.Bit != 2 {
+		t.Errorf("PRODUCTION scenario bit = %d, want 2", prodScenario.Bit)
+	}
+	// PRODUCTION has per-scenario endpointTypes
+	if len(prodScenario.EndpointTypes) != 3 {
+		t.Errorf("PRODUCTION endpointTypes = %v, want 3 types", prodScenario.EndpointTypes)
+	}
+	// PRODUCTION needs Electrical with nominalMaxProduction
+	var elec *FeatureRequirement
+	for i := range prodScenario.Features {
+		if prodScenario.Features[i].FeatureName == "Electrical" {
+			elec = &prodScenario.Features[i]
+			break
+		}
+	}
+	if elec == nil {
+		t.Fatal("PRODUCTION missing Electrical feature")
+	}
+	if len(elec.Attributes) < 1 || elec.Attributes[0].Name != "nominalMaxProduction" {
+		t.Errorf("Electrical attributes = %v", elec.Attributes)
+	}
+	if elec.Attributes[0].AttrID != 11 {
+		t.Errorf("nominalMaxProduction AttrID = %d, want 11", elec.Attributes[0].AttrID)
+	}
+}
+
+func TestGPL_MeasurementScenario(t *testing.T) {
+	def := Registry[GPL]
 	var measScenario *ScenarioDef
 	for i := range def.Scenarios {
 		if def.Scenarios[i].Name == "MEASUREMENT" {
@@ -155,10 +183,10 @@ func TestLPC_MeasurementScenario(t *testing.T) {
 		}
 	}
 	if measScenario == nil {
-		t.Fatal("LPC missing MEASUREMENT scenario")
+		t.Fatal("GPL missing MEASUREMENT scenario")
 	}
-	if measScenario.Bit != 1 {
-		t.Errorf("MEASUREMENT scenario bit = %d, want 1", measScenario.Bit)
+	if measScenario.Bit != 3 {
+		t.Errorf("MEASUREMENT scenario bit = %d, want 3", measScenario.Bit)
 	}
 	if len(measScenario.Features) == 0 {
 		t.Fatal("MEASUREMENT scenario has no features")
@@ -168,14 +196,14 @@ func TestLPC_MeasurementScenario(t *testing.T) {
 	}
 }
 
-func TestLPC_Commands(t *testing.T) {
-	def := Registry[LPC]
+func TestGPL_Commands(t *testing.T) {
+	def := Registry[GPL]
 	expected := map[string]bool{
 		"limit":    true,
 		"clear":    true,
 		"capacity": true,
 		"override": true,
-		"lpc-demo": true,
+		"failsafe": true,
 	}
 	if len(def.Commands) != len(expected) {
 		t.Errorf("commands count = %d, want %d", len(def.Commands), len(expected))
@@ -200,7 +228,6 @@ func TestEVC_BaseScenario(t *testing.T) {
 	if base == nil {
 		t.Fatal("EVC missing BASE scenario")
 	}
-	// Check EnergyControl is required in BASE
 	var ec *FeatureRequirement
 	for i := range base.Features {
 		if base.Features[i].FeatureName == "EnergyControl" {
@@ -214,7 +241,6 @@ func TestEVC_BaseScenario(t *testing.T) {
 	if !ec.Required {
 		t.Error("EnergyControl should be required")
 	}
-	// Check acceptsLimits = true
 	if len(ec.Attributes) < 1 {
 		t.Fatal("missing attributes")
 	}
@@ -286,15 +312,20 @@ func TestMPD_MeasurementRequiredInBase(t *testing.T) {
 	}
 }
 
-func TestLPP_EndpointTypes(t *testing.T) {
-	def := Registry[LPP]
+func TestGPL_EndpointTypes(t *testing.T) {
+	def := Registry[GPL]
 	expected := map[string]bool{
 		"INVERTER":        true,
+		"EV_CHARGER":      true,
 		"BATTERY":         true,
+		"HEAT_PUMP":       true,
+		"WATER_HEATER":    true,
+		"HVAC":            true,
+		"APPLIANCE":       true,
 		"GRID_CONNECTION": true,
 	}
-	if len(def.EndpointTypes) != 3 {
-		t.Errorf("endpoint types count = %d, want 3", len(def.EndpointTypes))
+	if len(def.EndpointTypes) != len(expected) {
+		t.Errorf("endpoint types count = %d, want %d", len(def.EndpointTypes), len(expected))
 	}
 	for _, et := range def.EndpointTypes {
 		if !expected[et] {
@@ -330,36 +361,9 @@ func TestRegistry_AllHaveBaseScenario(t *testing.T) {
 	}
 }
 
-func TestLPP_ElectricalNominalMaxProduction(t *testing.T) {
-	def := Registry[LPP]
-	base := def.BaseScenario()
-	if base == nil {
-		t.Fatal("LPP missing BASE scenario")
-	}
-	var elec *FeatureRequirement
-	for i := range base.Features {
-		if base.Features[i].FeatureName == "Electrical" {
-			elec = &base.Features[i]
-			break
-		}
-	}
-	if elec == nil {
-		t.Fatal("LPP BASE missing Electrical feature")
-	}
-	if len(elec.Attributes) < 1 {
-		t.Fatal("missing attributes")
-	}
-	if elec.Attributes[0].Name != "nominalMaxProduction" {
-		t.Errorf("attribute name = %q, want nominalMaxProduction", elec.Attributes[0].Name)
-	}
-	if elec.Attributes[0].AttrID != 11 {
-		t.Errorf("nominalMaxProduction AttrID = %d, want 11", elec.Attributes[0].AttrID)
-	}
-}
-
 func TestNameToID_Mapping(t *testing.T) {
-	if NameToID[LPC] != LPCID {
-		t.Errorf("NameToID[LPC] = 0x%02X, want 0x%02X", NameToID[LPC], LPCID)
+	if NameToID[GPL] != GPLID {
+		t.Errorf("NameToID[GPL] = 0x%02X, want 0x%02X", NameToID[GPL], GPLID)
 	}
 	if NameToID[EVC] != EVCID {
 		t.Errorf("NameToID[EVC] = 0x%02X, want 0x%02X", NameToID[EVC], EVCID)
@@ -367,10 +371,16 @@ func TestNameToID_Mapping(t *testing.T) {
 }
 
 func TestIDToName_Mapping(t *testing.T) {
-	if IDToName[LPCID] != LPC {
-		t.Errorf("IDToName[0x01] = %q, want LPC", IDToName[LPCID])
+	if IDToName[GPLID] != GPL {
+		t.Errorf("IDToName[0x01] = %q, want GPL", IDToName[GPLID])
 	}
 	if IDToName[EVCID] != EVC {
-		t.Errorf("IDToName[0x04] = %q, want EVC", IDToName[EVCID])
+		t.Errorf("IDToName[0x03] = %q, want EVC", IDToName[EVCID])
+	}
+}
+
+func TestRegistry_Size(t *testing.T) {
+	if len(Registry) != 10 {
+		t.Errorf("Registry size = %d, want 10", len(Registry))
 	}
 }

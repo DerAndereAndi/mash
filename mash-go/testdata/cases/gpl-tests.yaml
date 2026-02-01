@@ -1,8 +1,7 @@
-# Test Suite: LPC/LPP Use Case Tests
-# Verifies EEBUS LPC/LPP compatibility behaviors
+# Test Suite: GPL Use Case Tests
+# Verifies EEBUS GPL compatibility behaviors
 #
-# LPC = Limitation of Power Consumption
-# LPP = Limitation of Power Production
+# GPL = Grid Power Limitation (replaces LPC + LPP)
 #
 # Scenarios:
 #   S00 (BASE): Limits + electrical + failsafe
@@ -11,20 +10,20 @@
 
 ---
 # ==========================================================================
-# LPC BASE Scenario (S00)
+# GPL BASE Scenario (S00)
 # ==========================================================================
 
 ---
-# TC-LPC-S00-001: SetLimit accepted, controlState transitions to LIMITED
-id: TC-LPC-S00-001
+# TC-GPL-S00-001: SetLimit accepted, controlState transitions to LIMITED
+id: TC-GPL-S00-001
 name: SetLimit Accepted and Transitions to LIMITED
 description: |
   Verifies SetLimit is accepted and controlState transitions to LIMITED.
   Enhanced response includes applied, controlState fields per DEC-049.
 
 pics_requirements:
-  - MASH.S.UC.LPC
-  - MASH.S.UC.LPC.S00
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S00
 
 preconditions:
   - session_established: true
@@ -73,16 +72,16 @@ tags:
   - setlimit
 
 ---
-# TC-LPC-S00-002: ClearLimit returns to CONTROLLED
-id: TC-LPC-S00-002
+# TC-GPL-S00-002: ClearLimit returns to CONTROLLED
+id: TC-GPL-S00-002
 name: ClearLimit Returns to CONTROLLED
 description: |
   Verifies ClearLimit removes the active limit and returns
   controlState to CONTROLLED.
 
 pics_requirements:
-  - MASH.S.UC.LPC
-  - MASH.S.UC.LPC.S00
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S00
 
 preconditions:
   - session_established: true
@@ -128,16 +127,16 @@ tags:
   - clearlimit
 
 ---
-# TC-LPC-S00-003: Failsafe activates after failsafeDuration expires
-id: TC-LPC-S00-003
+# TC-GPL-S00-003: Failsafe activates after failsafeDuration expires
+id: TC-GPL-S00-003
 name: Failsafe Activates After Duration Expires
 description: |
   Verifies that after failsafeDuration expires without heartbeat,
   device transitions to FAILSAFE state and applies failsafeConsumptionLimit.
 
 pics_requirements:
-  - MASH.S.UC.LPC
-  - MASH.S.UC.LPC.S00
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S00
 
 preconditions:
   - session_established: true
@@ -189,16 +188,16 @@ tags:
   - failsafe
 
 ---
-# TC-LPC-S00-004: nominalMaxConsumption readable
-id: TC-LPC-S00-004
+# TC-GPL-S00-004: nominalMaxConsumption readable
+id: TC-GPL-S00-004
 name: Nominal Max Consumption Readable
 description: |
   Verifies that nominalMaxConsumption is readable on Electrical
-  feature, as required by LPC BASE.
+  feature, as required by GPL BASE.
 
 pics_requirements:
-  - MASH.S.UC.LPC
-  - MASH.S.UC.LPC.S00
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S00
 
 preconditions:
   - session_established: true
@@ -225,20 +224,20 @@ tags:
 
 ---
 # ==========================================================================
-# LPC MEASUREMENT Scenario (S01)
+# GPL MEASUREMENT Scenario (S01)
 # ==========================================================================
 
 ---
-# TC-LPC-S01-001: Subscribe to Measurement, receive telemetry
-id: TC-LPC-S01-001
+# TC-GPL-S01-001: Subscribe to Measurement, receive telemetry
+id: TC-GPL-S01-001
 name: Measurement Subscription Active
 description: |
   Verifies that Measurement feature supports subscription and
-  delivers telemetry updates during LPC operation.
+  delivers telemetry updates during GPL operation.
 
 pics_requirements:
-  - MASH.S.UC.LPC
-  - MASH.S.UC.LPC.S01
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S01
 
 preconditions:
   - session_established: true
@@ -272,17 +271,17 @@ tags:
   - subscribe
 
 ---
-# TC-LPC-S01-002: Power values reflect load changes
-id: TC-LPC-S01-002
+# TC-GPL-S01-002: Power values reflect load changes
+id: TC-GPL-S01-002
 name: Power Values Reflect Load Changes
 description: |
   Verifies that acActivePower changes when a limit is applied,
   reflecting the actual power consumption.
 
 pics_requirements:
-  - MASH.S.UC.LPC
-  - MASH.S.UC.LPC.S00
-  - MASH.S.UC.LPC.S01
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S00
+  - MASH.S.UC.GPL.S01
 
 preconditions:
   - session_established: true
@@ -332,20 +331,20 @@ tags:
 
 ---
 # ==========================================================================
-# LPC OVERRIDE Scenario (S02)
+# GPL OVERRIDE Scenario (S02)
 # ==========================================================================
 
 ---
-# TC-LPC-S02-001: Override attributes set during override
-id: TC-LPC-S02-001
+# TC-GPL-S02-001: Override attributes set during override
+id: TC-GPL-S02-001
 name: Override Reason and Direction Set During Override
 description: |
   Verifies that when device enters OVERRIDE state, the
   overrideReason and overrideDirection attributes are set.
 
 pics_requirements:
-  - MASH.S.UC.LPC
-  - MASH.S.UC.LPC.S02
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S02
 
 preconditions:
   - session_established: true
@@ -399,16 +398,16 @@ tags:
   - safety
 
 ---
-# TC-LPC-S02-002: Override attributes cleared when override exits
-id: TC-LPC-S02-002
+# TC-GPL-S02-002: Override attributes cleared when override exits
+id: TC-GPL-S02-002
 name: Override Attributes Cleared on Exit
 description: |
   Verifies that overrideReason and overrideDirection are
   cleared (null) when device exits OVERRIDE state.
 
 pics_requirements:
-  - MASH.S.UC.LPC
-  - MASH.S.UC.LPC.S02
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S02
 
 preconditions:
   - session_established: true
@@ -461,20 +460,20 @@ tags:
 
 ---
 # ==========================================================================
-# LPP BASE Scenario (S00)
+# GPL PRODUCTION BASE Scenario (S00)
 # ==========================================================================
 
 ---
-# TC-LPP-S00-001: Production limit accepted
-id: TC-LPP-S00-001
+# TC-GPL-S00-001: Production limit accepted
+id: TC-GPL-S00-001
 name: Production Limit Accepted
 description: |
   Verifies that production limits work correctly for
-  LPP (Limitation of Power Production) use case.
+  GPL (Grid Power Limitation) production scenario.
 
 pics_requirements:
-  - MASH.S.UC.LPP
-  - MASH.S.UC.LPP.S00
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S00
 
 preconditions:
   - session_established: true
@@ -523,16 +522,16 @@ tags:
   - production
 
 ---
-# TC-LPP-S00-002: ClearLimit restores autonomous production
-id: TC-LPP-S00-002
+# TC-GPL-S00-002: ClearLimit restores autonomous production
+id: TC-GPL-S00-002
 name: ClearLimit Restores Autonomous Production
 description: |
   Verifies that ClearLimit removes production limit and returns
   to CONTROLLED state.
 
 pics_requirements:
-  - MASH.S.UC.LPP
-  - MASH.S.UC.LPP.S00
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S00
 
 preconditions:
   - session_established: true
@@ -568,16 +567,16 @@ tags:
   - clearlimit
 
 ---
-# TC-LPP-S00-003: nominalMaxProduction readable
-id: TC-LPP-S00-003
+# TC-GPL-S00-003: nominalMaxProduction readable
+id: TC-GPL-S00-003
 name: Nominal Max Production Readable
 description: |
   Verifies that nominalMaxProduction is readable on Electrical,
-  as required by LPP BASE.
+  as required by GPL PRODUCTION.
 
 pics_requirements:
-  - MASH.S.UC.LPP
-  - MASH.S.UC.LPP.S00
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S00
 
 preconditions:
   - session_established: true
@@ -604,19 +603,19 @@ tags:
 
 ---
 # ==========================================================================
-# LPP MEASUREMENT Scenario (S01)
+# GPL PRODUCTION MEASUREMENT Scenario (S01)
 # ==========================================================================
 
 ---
-# TC-LPP-S01-001: Subscribe to Measurement for production monitoring
-id: TC-LPP-S01-001
+# TC-GPL-S01-001: Subscribe to Measurement for production monitoring
+id: TC-GPL-S01-001
 name: Measurement Subscription for Production
 description: |
   Verifies Measurement subscription delivers production telemetry.
 
 pics_requirements:
-  - MASH.S.UC.LPP
-  - MASH.S.UC.LPP.S01
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S01
 
 preconditions:
   - session_established: true
@@ -650,19 +649,19 @@ tags:
 
 ---
 # ==========================================================================
-# LPP OVERRIDE Scenario (S02)
+# GPL PRODUCTION OVERRIDE Scenario (S02)
 # ==========================================================================
 
 ---
-# TC-LPP-S02-001: Production override with reason
-id: TC-LPP-S02-001
+# TC-GPL-S02-001: Production override with reason
+id: TC-GPL-S02-001
 name: Production Override with Reason
 description: |
   Verifies override attributes are set for production direction.
 
 pics_requirements:
-  - MASH.S.UC.LPP
-  - MASH.S.UC.LPP.S02
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S02
 
 preconditions:
   - session_established: true
@@ -697,20 +696,20 @@ tags:
 
 ---
 # ==========================================================================
-# Shared LPC/LPP Tests (existing, re-tagged)
+# Shared GPL Tests (existing, re-tagged)
 # ==========================================================================
 
 ---
-# TC-LPC-011: Negative Limit Rejected
-id: TC-LPC-011
+# TC-GPL-011: Negative Limit Rejected
+id: TC-GPL-011
 name: Negative Limit Rejected
 description: |
   Verifies that negative limit values are rejected with
-  INVALID_VALUE reason per LPC spec requirement.
+  INVALID_VALUE reason per GPL spec requirement.
 
 pics_requirements:
-  - MASH.S.UC.LPC
-  - MASH.S.UC.LPC.S00
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S00
 
 preconditions:
   - session_established: true
@@ -757,16 +756,16 @@ tags:
   - negative
 
 ---
-# TC-LPC-012: Failsafe Duration Shared Between LPC/LPP
-id: TC-LPC-012
-name: Failsafe Duration Shared Between LPC/LPP
+# TC-GPL-012: Failsafe Duration Shared Between GPL
+id: TC-GPL-012
+name: Failsafe Duration Shared Between GPL
 description: |
   Verifies that failsafeDuration is a single shared value
   (not separate for consumption/production).
 
 pics_requirements:
-  - MASH.S.UC.LPC
-  - MASH.S.UC.LPC.S00
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S00
 
 preconditions:
   - session_established: true
@@ -804,17 +803,17 @@ tags:
   - failsafe
 
 ---
-# TC-LPC-013: SetLimit During Override Returns Device Override
-id: TC-LPC-013
+# TC-GPL-013: SetLimit During Override Returns Device Override
+id: TC-GPL-013
 name: SetLimit During Override Rejected
 description: |
   Verifies that SetLimit during OVERRIDE state returns
   applied=false with DEVICE_OVERRIDE reason.
 
 pics_requirements:
-  - MASH.S.UC.LPC
-  - MASH.S.UC.LPC.S00
-  - MASH.S.UC.LPC.S02
+  - MASH.S.UC.GPL
+  - MASH.S.UC.GPL.S00
+  - MASH.S.UC.GPL.S02
 
 preconditions:
   - session_established: true

@@ -26,9 +26,9 @@
 //
 // Examples:
 //
-//	MASH.S.UC.LPC=1         # Device supports Limit Power Consumption
+//	MASH.S.UC.GPL=1         # Device supports Grid Power Limitation
 //	MASH.S.UC.EVC=1         # Device supports EV Charging
-//	MASH.C.UC.LPC=1         # Controller supports LPC
+//	MASH.C.UC.GPL=1         # Controller supports GPL
 //	MASH.C.UC.MPD=1         # Controller supports Monitor Power Device
 //
 // UC codes are device-level (no endpoint prefix). The endpoint mapping is
@@ -43,7 +43,7 @@
 //	# Device PICS
 //	MASH.S=1
 //	MASH.S.VERSION=1
-//	MASH.S.UC.LPC=1         # Use case declaration
+//	MASH.S.UC.GPL=1         # Use case declaration
 //	MASH.S.CTRL=1
 //	MASH.S.CTRL.A01=1       # deviceType
 //	MASH.S.CTRL.C01.Rsp=1   # SetLimit

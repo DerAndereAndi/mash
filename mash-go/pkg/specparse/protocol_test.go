@@ -57,11 +57,11 @@ versions:
       DeviceInfo: "1.0"
     shared: "1.0"
     usecases:
-      LPC: { id: 0x01, major: 1, minor: 0 }
-      EVC: { id: 0x04, major: 1, minor: 0 }
+      GPL: { id: 0x01, major: 1, minor: 0 }
+      EVC: { id: 0x03, major: 1, minor: 0 }
     use_case_types:
-      - { name: LPC, id: 0x01, description: "Limit Power Consumption" }
-      - { name: EVC, id: 0x04, description: "EV Charging" }
+      - { name: GPL, id: 0x01, description: "Grid Power Limitation" }
+      - { name: EVC, id: 0x03, description: "EV Charging" }
 `
 	pv, err := ParseProtocolVersions([]byte(yamlStr))
 	if err != nil {
@@ -74,20 +74,20 @@ versions:
 	if len(ver.UseCases) != 2 {
 		t.Fatalf("len(usecases) = %d, want 2", len(ver.UseCases))
 	}
-	lpc, ok := ver.UseCases["LPC"]
+	gpl, ok := ver.UseCases["GPL"]
 	if !ok {
-		t.Fatal("LPC not found in usecases")
+		t.Fatal("GPL not found in usecases")
 	}
-	if lpc.ID != 0x01 || lpc.Major != 1 || lpc.Minor != 0 {
-		t.Errorf("LPC = %+v, want {ID:1, Major:1, Minor:0}", lpc)
+	if gpl.ID != 0x01 || gpl.Major != 1 || gpl.Minor != 0 {
+		t.Errorf("GPL = %+v, want {ID:1, Major:1, Minor:0}", gpl)
 	}
 
 	// UseCaseTypes
 	if len(ver.UseCaseTypes) != 2 {
 		t.Fatalf("len(use_case_types) = %d, want 2", len(ver.UseCaseTypes))
 	}
-	if ver.UseCaseTypes[0].Name != "LPC" || ver.UseCaseTypes[0].ID != 0x01 {
-		t.Errorf("use_case_types[0] = %+v, want LPC/0x01", ver.UseCaseTypes[0])
+	if ver.UseCaseTypes[0].Name != "GPL" || ver.UseCaseTypes[0].ID != 0x01 {
+		t.Errorf("use_case_types[0] = %+v, want GPL/0x01", ver.UseCaseTypes[0])
 	}
 }
 
@@ -110,10 +110,10 @@ func TestParseProtocolVersionsFile(t *testing.T) {
 	}
 
 	// New fields from real file
-	if len(ver.UseCases) != 11 {
-		t.Errorf("len(usecases) = %d, want 11", len(ver.UseCases))
+	if len(ver.UseCases) != 10 {
+		t.Errorf("len(usecases) = %d, want 10", len(ver.UseCases))
 	}
-	if len(ver.UseCaseTypes) != 11 {
-		t.Errorf("len(use_case_types) = %d, want 11", len(ver.UseCaseTypes))
+	if len(ver.UseCaseTypes) != 10 {
+		t.Errorf("len(use_case_types) = %d, want 10", len(ver.UseCaseTypes))
 	}
 }
