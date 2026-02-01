@@ -129,7 +129,6 @@ attributes:
     name: acceptsLimits
     type: bool
     access: readOnly
-    mandatory: true
     default: false
     description: "Accepts SetLimit command"
 

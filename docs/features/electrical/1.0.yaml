@@ -56,7 +56,6 @@ attributes:
     name: nominalMaxConsumption
     type: int64
     access: readOnly
-    mandatory: true
     default: 0
     unit: "mW"
     description: "Maximum consumption power"

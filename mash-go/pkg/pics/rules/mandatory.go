@@ -145,8 +145,6 @@ func NewMAN004() *MAN004 {
 func (r *MAN004) Check(p *pics.PICS) []pics.Violation {
 	mandatory := []struct{ id, name string }{
 		{"01", "state"},
-		{"02", "sessionId"},
-		{"03", "sessionStartTime"},
 		{"0A", "sessionEnergyCharged"},
 		{"28", "evDemandMode"},
 		{"46", "chargingMode"},

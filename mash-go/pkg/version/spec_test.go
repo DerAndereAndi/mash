@@ -224,7 +224,6 @@ func TestSpec10_ChargingSessionMandatoryAttrs(t *testing.T) {
 
 	wantIDs := map[uint16]string{
 		1: "state",
-		2: "sessionId",
 	}
 
 	gotIDs := make(map[uint16]string)

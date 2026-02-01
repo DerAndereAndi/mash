@@ -110,10 +110,7 @@ func (c *ChargingSession) SupportsMode(mode ChargingMode) bool {
 }
 
 // StartSession begins a new charging session.
-func (c *ChargingSession) StartSession(sessionID uint32, startTime uint64) error {
-	if err := c.SetSessionID(sessionID); err != nil {
-		return err
-	}
+func (c *ChargingSession) StartSession(startTime uint64) error {
 	if err := c.SetSessionStartTime(startTime); err != nil {
 		return err
 	}

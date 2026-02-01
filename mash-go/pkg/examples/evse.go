@@ -36,8 +36,7 @@ type EVSE struct {
 	limitResolver *features.LimitResolver
 
 	// Internal state
-	currentPower   int64 // mW - actual charging power
-	sessionCounter uint32
+	currentPower int64 // mW - actual charging power
 }
 
 // EVSEConfig contains configuration for creating an EVSE.
@@ -61,9 +60,7 @@ type EVSEConfig struct {
 
 // NewEVSE creates a new EVSE device with the given configuration.
 func NewEVSE(cfg EVSEConfig) *EVSE {
-	evse := &EVSE{
-		sessionCounter: 1,
-	}
+	evse := &EVSE{}
 
 	// Create device
 	evse.device = model.NewDevice(cfg.DeviceID, cfg.VendorID, cfg.ProductID)
@@ -302,10 +299,7 @@ func (e *EVSE) SimulateEVConnect(evSoC uint8, evCapacity uint64, demandMode feat
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	sessionID := e.sessionCounter
-	e.sessionCounter++
-
-	_ = e.chargingSession.StartSession(sessionID, uint64(time.Now().Unix()))
+	_ = e.chargingSession.StartSession(uint64(time.Now().Unix()))
 	_ = e.chargingSession.SetEVStateOfCharge(evSoC)
 	_ = e.chargingSession.SetEVBatteryCapacity(evCapacity)
 	_ = e.chargingSession.SetEVDemandMode(demandMode)

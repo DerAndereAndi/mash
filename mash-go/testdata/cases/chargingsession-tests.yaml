@@ -74,16 +74,14 @@ tags:
   - basic
 
 ---
-# TC-CHRG-002: StartSession Sets ID and Time
+# TC-CHRG-002: StartSession Sets Start Time
 id: TC-CHRG-002
-name: StartSession Sets ID and Time
+name: StartSession Sets Start Time
 description: |
-  Verifies that starting a session sets the session ID and
-  start time correctly.
+  Verifies that starting a session sets the start time correctly.
 
 pics_requirements:
   - MASH.S.CHRG
-  - MASH.S.CHRG.A02          # sessionId
   - MASH.S.CHRG.A03          # sessionStartTime
   - MASH.S.CHRG.B_LIFECYCLE
 
@@ -93,16 +91,6 @@ preconditions:
   - charging_state: PLUGGED_IN_CHARGING
 
 steps:
-  - name: Read session ID
-    action: read
-    params:
-      endpoint: 1
-      feature: ChargingSession
-      attribute: sessionId
-    expect:
-      read_success: true
-      value_greater_than: 0    # Session ID assigned
-
   - name: Read session start time
     action: read
     params:

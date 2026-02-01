@@ -225,13 +225,15 @@ func GenerateUseCasePage(uc *usecase.RawUseCaseDef, m *DocModel) string {
 
 	writeUseCaseHeader(&b, uc)
 	writeUseCaseEndpointTypes(&b, uc)
-	writeUseCaseScenarios(&b, uc, m)
 
-	// Scenario map diagram
+	// Scenario map diagram (before detailed breakdown)
 	if len(uc.Scenarios) > 0 {
 		b.WriteString("## Scenario Map\n\n")
 		b.WriteString(ScenarioMapDiagram(uc))
 	}
+
+	writeUseCaseScenarioMatrix(&b, uc)
+	writeUseCaseScenarios(&b, uc, m)
 
 	return b.String()
 }
@@ -261,6 +263,57 @@ func writeUseCaseEndpointTypes(b *strings.Builder, uc *usecase.RawUseCaseDef) {
 	b.WriteString("\n")
 }
 
+func writeUseCaseScenarioMatrix(b *strings.Builder, uc *usecase.RawUseCaseDef) {
+	if len(uc.Scenarios) == 0 || len(uc.EndpointTypes) == 0 {
+		return
+	}
+
+	b.WriteString("## Scenario / Endpoint Type Matrix\n\n")
+
+	// Header row
+	b.WriteString("| Endpoint Type |")
+	for _, sc := range uc.Scenarios {
+		fmt.Fprintf(b, " %s |", sc.Name)
+	}
+	b.WriteString("\n")
+
+	// Separator
+	b.WriteString("|---|")
+	for range uc.Scenarios {
+		b.WriteString(":---:|")
+	}
+	b.WriteString("\n")
+
+	// One row per endpoint type
+	for _, et := range uc.EndpointTypes {
+		fmt.Fprintf(b, "| %s |", et)
+		for _, sc := range uc.Scenarios {
+			if scenarioAppliesToEndpoint(sc, et) {
+				b.WriteString(" x |")
+			} else {
+				b.WriteString(" - |")
+			}
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+}
+
+// scenarioAppliesToEndpoint reports whether a scenario applies to the given
+// endpoint type. If the scenario defines its own EndpointTypes list, only those
+// are applicable; otherwise it inherits all top-level endpoint types.
+func scenarioAppliesToEndpoint(sc usecase.RawScenarioDef, et string) bool {
+	if len(sc.EndpointTypes) == 0 {
+		return true
+	}
+	for _, scET := range sc.EndpointTypes {
+		if scET == et {
+			return true
+		}
+	}
+	return false
+}
+
 func writeUseCaseScenarios(b *strings.Builder, uc *usecase.RawUseCaseDef, m *DocModel) {
 	if len(uc.Scenarios) == 0 {
 		return
@@ -274,25 +327,24 @@ func writeUseCaseScenarios(b *strings.Builder, uc *usecase.RawUseCaseDef, m *Doc
 			fmt.Fprintf(b, "%s\n\n", sc.Description)
 		}
 
+		// Scenario dependencies
+		if len(sc.Requires) > 0 {
+			fmt.Fprintf(b, "**Requires:** %s\n\n", strings.Join(sc.Requires, ", "))
+		}
+		if len(sc.RequiresAny) > 0 {
+			fmt.Fprintf(b, "**Requires any of:** %s\n\n", strings.Join(sc.RequiresAny, ", "))
+		}
+
+		// Per-scenario endpoint type restrictions
+		if len(sc.EndpointTypes) > 0 {
+			fmt.Fprintf(b, "**Endpoint types:** %s\n\n", strings.Join(sc.EndpointTypes, ", "))
+		}
+
 		for _, fr := range sc.Features {
-			reqLabel := "optional"
-			if fr.Required {
-				reqLabel = "required"
-			}
+			reqLabel := effectiveFeatureLabel(fr, sc, uc.Scenarios)
 			fmt.Fprintf(b, "#### %s (%s)\n\n", fr.Feature, reqLabel)
 
-			if len(fr.Attributes) > 0 {
-				b.WriteString("| Attribute | Constraint |\n")
-				b.WriteString("|-----------|------------|\n")
-				for _, attr := range fr.Attributes {
-					constraint := ""
-					if attr.RequiredValue != nil {
-						constraint = fmt.Sprintf("must be `%v`", *attr.RequiredValue)
-					}
-					fmt.Fprintf(b, "| `%s` | %s |\n", attr.Name, constraint)
-				}
-				b.WriteString("\n")
-			}
+			writeScenarioFeatureAttributes(b, fr, m)
 
 			if len(fr.Commands) > 0 {
 				b.WriteString("**Commands:** ")
@@ -312,6 +364,111 @@ func writeUseCaseScenarios(b *strings.Builder, uc *usecase.RawUseCaseDef, m *Doc
 }
 
 // --- Index pages ---
+
+// effectiveFeatureLabel returns the requirement label for a feature within a
+// scenario by resolving the requires dependency chain. If the feature is not
+// directly required but a scenario in the requires list marks it as required,
+// the label reflects the transitive dependency (e.g. "required via BASE").
+func effectiveFeatureLabel(fr usecase.RawFeatureReq, sc usecase.RawScenarioDef, scenarios []usecase.RawScenarioDef) string {
+	if fr.Required {
+		return "required"
+	}
+
+	// Build scenario lookup for dependency resolution.
+	byName := make(map[string]*usecase.RawScenarioDef, len(scenarios))
+	for i := range scenarios {
+		byName[scenarios[i].Name] = &scenarios[i]
+	}
+
+	// Walk the requires chain (breadth-first) looking for a scenario
+	// that marks this feature as required.
+	visited := make(map[string]bool)
+	queue := append([]string{}, sc.Requires...)
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		if visited[name] {
+			continue
+		}
+		visited[name] = true
+
+		dep, ok := byName[name]
+		if !ok {
+			continue
+		}
+		for _, depFr := range dep.Features {
+			if depFr.Feature == fr.Feature && depFr.Required {
+				return fmt.Sprintf("required via %s", name)
+			}
+		}
+		queue = append(queue, dep.Requires...)
+	}
+
+	return "optional"
+}
+
+// writeScenarioFeatureAttributes writes a merged attribute table for a feature
+// within a scenario. It combines the feature's mandatory attributes (from the
+// feature YAML) with the scenario-specific attribute constraints (from the use
+// case YAML), so the reader sees the complete picture without cross-referencing.
+func writeScenarioFeatureAttributes(b *strings.Builder, fr usecase.RawFeatureReq, m *DocModel) {
+	// Build lookup of scenario-specific attributes.
+	scenarioAttrs := make(map[string]*usecase.RawAttrReq, len(fr.Attributes))
+	for i := range fr.Attributes {
+		scenarioAttrs[fr.Attributes[i].Name] = &fr.Attributes[i]
+	}
+
+	type attrRow struct {
+		name       string
+		constraint string
+	}
+	var rows []attrRow
+	shown := make(map[string]bool)
+
+	// Feature-mandatory attributes first (in feature-defined order).
+	if featureDef, ok := m.FeatureByName[fr.Feature]; ok {
+		for _, attr := range featureDef.Attributes {
+			if !attr.Mandatory {
+				continue
+			}
+			if sc, ok := scenarioAttrs[attr.Name]; ok {
+				// Present in both: use the scenario constraint.
+				constraint := ""
+				if sc.RequiredValue != nil {
+					constraint = fmt.Sprintf("must be `%v`", *sc.RequiredValue)
+				}
+				rows = append(rows, attrRow{attr.Name, constraint})
+			} else {
+				// Feature-mandatory only: mark so the reader knows it exists.
+				rows = append(rows, attrRow{attr.Name, "*(always present)*"})
+			}
+			shown[attr.Name] = true
+		}
+	}
+
+	// Scenario-specific attributes that are not feature-mandatory.
+	for _, sa := range fr.Attributes {
+		if shown[sa.Name] {
+			continue
+		}
+		constraint := ""
+		if sa.RequiredValue != nil {
+			constraint = fmt.Sprintf("must be `%v`", *sa.RequiredValue)
+		}
+		rows = append(rows, attrRow{sa.Name, constraint})
+	}
+
+	if len(rows) == 0 {
+		return
+	}
+
+	b.WriteString("| Attribute | Constraint |\n")
+	b.WriteString("|-----------|------------|\n")
+	for _, r := range rows {
+		fmt.Fprintf(b, "| `%s` | %s |\n", r.name, r.constraint)
+	}
+	b.WriteString("\n")
+}
 
 // GenerateFeatureIndexPage produces the feature registry index page.
 func GenerateFeatureIndexPage(m *DocModel) string {

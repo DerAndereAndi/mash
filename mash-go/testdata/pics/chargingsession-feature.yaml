@@ -31,7 +31,6 @@ items:
   # ==========================================================================
 
   MASH.S.E01.CHRG.A01: true        # state (ChargingState enum)
-  MASH.S.E01.CHRG.A02: true        # sessionId (uint32)
   MASH.S.E01.CHRG.A03: true        # sessionStartTime (uint64, nullable)
   MASH.S.E01.CHRG.A04: true        # sessionEndTime (uint64, nullable)
 

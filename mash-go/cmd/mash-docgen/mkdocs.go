@@ -43,8 +43,7 @@ func GenerateMkDocsYAML(m *DocModel) string {
 	b.WriteString("    - navigation.top\n")
 	b.WriteString("    - search.highlight\n")
 	b.WriteString("    - search.suggest\n")
-	b.WriteString("    - content.code.copy\n")
-	b.WriteString("    - toc.integrate\n\n")
+	b.WriteString("    - content.code.copy\n\n")
 
 	// Docs directory
 	b.WriteString("docs_dir: docs\n\n")

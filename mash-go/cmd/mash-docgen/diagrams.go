@@ -102,6 +102,9 @@ func FeatureCrossRefDiagram(m *DocModel) string {
 
 // ScenarioMapDiagram returns a fenced Mermaid graph showing
 // scenarios and their required features for a use case.
+// Each scenario gets its own feature nodes so the hierarchy reads
+// left-to-right: UseCase -> Scenario -> Features.
+// Scenarios with restricted endpoint types are annotated.
 func ScenarioMapDiagram(uc *usecase.RawUseCaseDef) string {
 	var b strings.Builder
 
@@ -112,11 +115,19 @@ func ScenarioMapDiagram(uc *usecase.RawUseCaseDef) string {
 
 	for _, sc := range uc.Scenarios {
 		scID := sanitizeMermaidID("sc_" + uc.Name + "_" + sc.Name)
-		fmt.Fprintf(&b, "    %s[\"%s\"]\n", scID, sc.Name)
+
+		// Annotate scenario node with endpoint type restriction if present.
+		if len(sc.EndpointTypes) > 0 {
+			etList := strings.Join(sc.EndpointTypes, ", ")
+			fmt.Fprintf(&b, "    %s[\"%s<br/><small>%s</small>\"]\n", scID, sc.Name, etList)
+		} else {
+			fmt.Fprintf(&b, "    %s[\"%s\"]\n", scID, sc.Name)
+		}
 		fmt.Fprintf(&b, "    %s --> %s\n", ucID, scID)
 
 		for _, fr := range sc.Features {
-			fID := sanitizeMermaidID("f_" + fr.Feature)
+			// Unique ID per scenario so each scenario shows its own feature nodes.
+			fID := sanitizeMermaidID("f_" + sc.Name + "_" + fr.Feature)
 			fmt.Fprintf(&b, "    %s[\"%s\"]\n", fID, fr.Feature)
 			fmt.Fprintf(&b, "    %s --> %s\n", scID, fID)
 		}

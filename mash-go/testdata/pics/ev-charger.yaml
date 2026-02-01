@@ -162,7 +162,8 @@ items:
 
   # Mandatory
   MASH.S.E01.CHRG.A01: true        # state
-  MASH.S.E01.CHRG.A02: true        # sessionId
+
+  # Optional
   MASH.S.E01.CHRG.A03: true        # sessionStartTime
   MASH.S.E01.CHRG.A0A: true        # sessionEnergyCharged
   MASH.S.E01.CHRG.A28: true        # evDemandMode

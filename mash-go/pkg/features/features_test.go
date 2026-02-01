@@ -956,14 +956,11 @@ func TestChargingSession(t *testing.T) {
 	})
 
 	t.Run("StartEndSession", func(t *testing.T) {
-		err := cs.StartSession(12345, 1706180400)
+		err := cs.StartSession(1706180400)
 		if err != nil {
 			t.Fatalf("StartSession failed: %v", err)
 		}
 
-		if cs.SessionID() != 12345 {
-			t.Errorf("expected session ID 12345, got %d", cs.SessionID())
-		}
 		if cs.State() != ChargingStatePluggedInNoDemand {
 			t.Errorf("expected state PLUGGED_IN_NO_DEMAND, got %v", cs.State())
 		}
