@@ -1,4 +1,5 @@
 name: MPD
+id: 0x03
 fullName: Monitor Power Device
 specVersion: "1.0"
 major: 1
@@ -19,20 +20,30 @@ endpointTypes:
   - APPLIANCE
   - SUB_METER
 
-features:
-  - feature: Measurement
-    required: true
-    subscribe: all
+scenarios:
+  - bit: 0
+    name: BASE
+    description: Basic power monitoring.
+    features:
+      - feature: Measurement
+        required: true
+        subscribe: all
 
-  - feature: Electrical
-    required: false
-    attributes:
-      - name: nominalMaxConsumption
-      - name: nominalMaxProduction
-      - name: energyCapacity
+  - bit: 1
+    name: ELECTRICAL
+    description: Static electrical configuration.
+    features:
+      - feature: Electrical
+        attributes:
+          - name: nominalMaxConsumption
+          - name: nominalMaxProduction
+          - name: energyCapacity
 
-  - feature: Status
-    required: false
-    subscribe: all
+  - bit: 2
+    name: STATUS
+    description: Operating state and fault information.
+    features:
+      - feature: Status
+        subscribe: all
 
 commands: []

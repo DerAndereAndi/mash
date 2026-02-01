@@ -306,7 +306,7 @@ func TestDiscoverDevice_SingleEndpoint(t *testing.T) {
 }
 
 func TestDiscoverUseCases_FastPath(t *testing.T) {
-	// Mock client returns useCases attribute -> should build DeviceUseCases without probing
+	// Mock client returns useCases attribute with uint16 IDs -> fast path
 	client := &mockClient{
 		readFunc: func(_ context.Context, epID uint8, fID uint8, attrIDs []uint16) (map[uint16]any, error) {
 			if epID == 0 && fID == uint8(model.FeatureDeviceInfo) {
@@ -317,18 +317,20 @@ func TestDiscoverUseCases_FastPath(t *testing.T) {
 							uint64(2): uint64(0x05), // EV_CHARGER
 						},
 					},
-					21: []any{ // useCases
+					21: []any{ // useCases -- now with uint16 IDs
 						map[any]any{
-							uint64(1): uint64(1),   // endpointId
-							uint64(2): "LPC",        // name
-							uint64(3): uint64(1),    // major
-							uint64(4): uint64(0),    // minor
+							uint64(1): uint64(1),      // endpointId
+							uint64(2): uint64(0x01),    // ID: LPC
+							uint64(3): uint64(1),       // major
+							uint64(4): uint64(0),       // minor
+							uint64(5): uint64(0x03),    // scenarios: BASE + MEASUREMENT
 						},
 						map[any]any{
 							uint64(1): uint64(1),
-							uint64(2): "MPD",
+							uint64(2): uint64(0x03), // ID: MPD
 							uint64(3): uint64(1),
 							uint64(4): uint64(0),
+							uint64(5): uint64(0x01), // scenarios: BASE only
 						},
 					},
 				}, nil
@@ -356,6 +358,15 @@ func TestDiscoverUseCases_FastPath(t *testing.T) {
 	epID, ok := du.EndpointForUseCase(LPC)
 	if !ok || epID != 1 {
 		t.Errorf("EndpointForUseCase(LPC) = (%d, %v), want (1, true)", epID, ok)
+	}
+
+	// Verify scenarios
+	scenarios, ok := du.ScenariosForUseCase(LPC)
+	if !ok {
+		t.Fatal("expected ScenariosForUseCase(LPC) to return ok")
+	}
+	if scenarios != 0x03 {
+		t.Errorf("LPC scenarios = 0x%02X, want 0x03", scenarios)
 	}
 }
 
@@ -411,16 +422,18 @@ func TestDiscoverUseCases_FallbackToProbing(t *testing.T) {
 func TestParseUseCases_Valid(t *testing.T) {
 	raw := []any{
 		map[any]any{
-			uint64(1): uint64(1),
-			uint64(2): "LPC",
-			uint64(3): uint64(1),
-			uint64(4): uint64(0),
+			uint64(1): uint64(1),      // endpointId
+			uint64(2): uint64(0x01),   // ID: LPC
+			uint64(3): uint64(1),      // major
+			uint64(4): uint64(0),      // minor
+			uint64(5): uint64(0x07),   // scenarios
 		},
 		map[any]any{
 			uint64(1): uint64(2),
-			uint64(2): "EVC",
+			uint64(2): uint64(0x04), // ID: EVC
 			uint64(3): uint64(1),
 			uint64(4): uint64(2),
+			uint64(5): uint64(0x3F), // scenarios
 		},
 	}
 
@@ -431,10 +444,10 @@ func TestParseUseCases_Valid(t *testing.T) {
 	if len(decls) != 2 {
 		t.Fatalf("expected 2 decls, got %d", len(decls))
 	}
-	if decls[0].Name != "LPC" || decls[0].EndpointID != 1 || decls[0].Major != 1 || decls[0].Minor != 0 {
+	if decls[0].ID != 0x01 || decls[0].EndpointID != 1 || decls[0].Major != 1 || decls[0].Minor != 0 || decls[0].Scenarios != 0x07 {
 		t.Errorf("decl[0] = %+v", decls[0])
 	}
-	if decls[1].Name != "EVC" || decls[1].EndpointID != 2 || decls[1].Major != 1 || decls[1].Minor != 2 {
+	if decls[1].ID != 0x04 || decls[1].EndpointID != 2 || decls[1].Major != 1 || decls[1].Minor != 2 || decls[1].Scenarios != 0x3F {
 		t.Errorf("decl[1] = %+v", decls[1])
 	}
 }

@@ -1,4 +1,5 @@
 name: POEN
+id: 0x0A
 fullName: Power Envelope
 specVersion: "1.0"
 major: 1
@@ -16,22 +17,29 @@ endpointTypes:
   - HVAC
   - APPLIANCE
 
-features:
-  - feature: Signals
-    required: true
-    commands:
-      - sendConstraintSignal
-      - clearSignals
-    subscribe: all
+scenarios:
+  - bit: 0
+    name: BASE
+    description: Power envelope via constraint signals.
+    features:
+      - feature: Signals
+        required: true
+        commands:
+          - sendConstraintSignal
+          - clearSignals
+        subscribe: all
 
-  - feature: Electrical
-    required: true
-    attributes:
-      - name: nominalMaxConsumption
+      - feature: Electrical
+        required: true
+        attributes:
+          - name: nominalMaxConsumption
 
-  - feature: Measurement
-    required: false
-    subscribe: all
+  - bit: 1
+    name: MEASUREMENT
+    description: Measurement telemetry for envelope monitoring.
+    features:
+      - feature: Measurement
+        subscribe: all
 
 commands:
   - signal

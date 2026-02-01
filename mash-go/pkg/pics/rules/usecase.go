@@ -29,6 +29,9 @@ func RegisterUseCaseRules(registry *pics.RuleRegistry) {
 // UC001 validates that declared use cases have required features present on at
 // least one endpoint. For controllers (client-side), no feature validation is
 // performed since controllers are the client side of the interaction.
+//
+// Validation is per-scenario: BASE scenario features produce errors if missing;
+// non-BASE scenario features produce errors only if the scenario is declared.
 type UC001 struct {
 	*pics.BaseRule
 	registry map[usecase.UseCaseName]*usecase.UseCaseDef
@@ -63,115 +66,157 @@ func (r *UC001) Check(p *pics.PICS) []pics.Violation {
 			continue
 		}
 
-		// Check each required feature is present on at least one endpoint
-		for _, freq := range def.Features {
-			if !freq.Required {
-				continue
-			}
+		// Check BASE scenario features (always required)
+		base := def.BaseScenario()
+		if base != nil {
+			violations = append(violations, r.checkScenarioFeatures(p, ucName, base, true)...)
+		}
 
-			picsFeature, ok := featureNameToID[freq.FeatureName]
-			if !ok {
-				continue // Unknown feature mapping, skip
+		// Check non-BASE scenario features (only if scenario is declared in PICS)
+		for i := range def.Scenarios {
+			scenario := &def.Scenarios[i]
+			if scenario.Bit == 0 {
+				continue // Already checked BASE
 			}
-
-			// Find at least one endpoint that has this feature
-			eps := p.EndpointsWithFeature(picsFeature)
-			if len(eps) == 0 {
-				violations = append(violations, pics.Violation{
-					RuleID:   r.ID(),
-					Severity: pics.SeverityError,
-					Message: fmt.Sprintf("Use case %s requires %s (%s) but no endpoint declares it",
-						ucName, freq.FeatureName, picsFeature),
-					PICSCodes:  []string{fmt.Sprintf("MASH.S.UC.%s", ucName)},
-					Suggestion: fmt.Sprintf("Add %s feature to an appropriate endpoint", picsFeature),
-				})
-				continue
-			}
-
-			// Check required attributes (presence-only or value-checked)
-			for _, attr := range freq.Attributes {
-				attrID := fmt.Sprintf("%02X", attr.AttrID)
-				found := false
-				for _, ep := range eps {
-					code := fmt.Sprintf("MASH.S.E%02X.%s.A%s", ep.ID, picsFeature, strings.ToUpper(attrID))
-					if p.Has(code) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					violations = append(violations, pics.Violation{
-						RuleID:   r.ID(),
-						Severity: pics.SeverityWarning,
-						Message: fmt.Sprintf("Use case %s: %s.%s (A%s) expected to be declared",
-							ucName, picsFeature, attr.Name, strings.ToUpper(attrID)),
-						PICSCodes:  []string{fmt.Sprintf("MASH.S.UC.%s", ucName)},
-						Suggestion: fmt.Sprintf("Add attribute A%s to %s feature on an endpoint", strings.ToUpper(attrID), picsFeature),
-					})
-				}
-			}
-
-			// Check required commands
-			for _, cmd := range freq.Commands {
-				cmdID := fmt.Sprintf("%02X", cmd.CommandID)
-				found := false
-				for _, ep := range eps {
-					code := fmt.Sprintf("MASH.S.E%02X.%s.C%s.Rsp", ep.ID, picsFeature, strings.ToUpper(cmdID))
-					if p.Has(code) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					violations = append(violations, pics.Violation{
-						RuleID:   r.ID(),
-						Severity: pics.SeverityError,
-						Message: fmt.Sprintf("Use case %s: %s command %s (C%s.Rsp) required but not declared",
-							ucName, picsFeature, cmd.Name, strings.ToUpper(cmdID)),
-						PICSCodes:  []string{fmt.Sprintf("MASH.S.UC.%s", ucName)},
-						Suggestion: fmt.Sprintf("Add command C%s.Rsp to %s feature on an endpoint", strings.ToUpper(cmdID), picsFeature),
-					})
-				}
+			scenarioCode := fmt.Sprintf("MASH.S.UC.%s.S%02X", ucName, scenario.Bit)
+			if p.Has(scenarioCode) {
+				violations = append(violations, r.checkScenarioFeatures(p, ucName, scenario, false)...)
 			}
 		}
 
 		// Check endpoint type constraints
 		if len(def.EndpointTypes) > 0 {
-			allowed := make(map[string]bool, len(def.EndpointTypes))
-			for _, t := range def.EndpointTypes {
-				allowed[t] = true
-			}
+			violations = append(violations, r.checkEndpointTypes(p, ucName, def)...)
+		}
+	}
 
-			// Collect all endpoint types that have any required feature
-			hasMatchingType := false
-			var seenTypes []string
-			for _, freq := range def.Features {
-				if !freq.Required {
-					continue
-				}
-				picsFeature, ok := featureNameToID[freq.FeatureName]
-				if !ok {
-					continue
-				}
-				for _, ep := range p.EndpointsWithFeature(picsFeature) {
-					if allowed[ep.Type] {
-						hasMatchingType = true
-					}
-					seenTypes = append(seenTypes, ep.Type)
+	return violations
+}
+
+// checkScenarioFeatures validates features for a specific scenario.
+func (r *UC001) checkScenarioFeatures(p *pics.PICS, ucName string, scenario *usecase.ScenarioDef, isBase bool) []pics.Violation {
+	var violations []pics.Violation
+
+	for _, freq := range scenario.Features {
+		if !freq.Required {
+			continue
+		}
+
+		picsFeature, ok := featureNameToID[freq.FeatureName]
+		if !ok {
+			continue // Unknown feature mapping, skip
+		}
+
+		// Find at least one endpoint that has this feature
+		eps := p.EndpointsWithFeature(picsFeature)
+		if len(eps) == 0 {
+			severity := pics.SeverityError
+			if !isBase {
+				severity = pics.SeverityError // Scenario declared, so features are required
+			}
+			violations = append(violations, pics.Violation{
+				RuleID:   r.ID(),
+				Severity: severity,
+				Message: fmt.Sprintf("Use case %s requires %s (%s) but no endpoint declares it",
+					ucName, freq.FeatureName, picsFeature),
+				PICSCodes:  []string{fmt.Sprintf("MASH.S.UC.%s", ucName)},
+				Suggestion: fmt.Sprintf("Add %s feature to an appropriate endpoint", picsFeature),
+			})
+			continue
+		}
+
+		// Check required attributes (presence-only or value-checked)
+		for _, attr := range freq.Attributes {
+			attrID := fmt.Sprintf("%02X", attr.AttrID)
+			found := false
+			for _, ep := range eps {
+				code := fmt.Sprintf("MASH.S.E%02X.%s.A%s", ep.ID, picsFeature, strings.ToUpper(attrID))
+				if p.Has(code) {
+					found = true
+					break
 				}
 			}
-
-			if !hasMatchingType && len(seenTypes) > 0 {
+			if !found {
 				violations = append(violations, pics.Violation{
 					RuleID:   r.ID(),
 					Severity: pics.SeverityWarning,
-					Message: fmt.Sprintf("Use case %s: features found but not on allowed endpoint type (allowed: %s)",
-						ucName, strings.Join(def.EndpointTypes, ", ")),
+					Message: fmt.Sprintf("Use case %s: %s.%s (A%s) expected to be declared",
+						ucName, picsFeature, attr.Name, strings.ToUpper(attrID)),
 					PICSCodes:  []string{fmt.Sprintf("MASH.S.UC.%s", ucName)},
-					Suggestion: fmt.Sprintf("Place required features on an endpoint of type: %s", strings.Join(def.EndpointTypes, ", ")),
+					Suggestion: fmt.Sprintf("Add attribute A%s to %s feature on an endpoint", strings.ToUpper(attrID), picsFeature),
 				})
 			}
 		}
+
+		// Check required commands
+		for _, cmd := range freq.Commands {
+			cmdID := fmt.Sprintf("%02X", cmd.CommandID)
+			found := false
+			for _, ep := range eps {
+				code := fmt.Sprintf("MASH.S.E%02X.%s.C%s.Rsp", ep.ID, picsFeature, strings.ToUpper(cmdID))
+				if p.Has(code) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				violations = append(violations, pics.Violation{
+					RuleID:   r.ID(),
+					Severity: pics.SeverityError,
+					Message: fmt.Sprintf("Use case %s: %s command %s (C%s.Rsp) required but not declared",
+						ucName, picsFeature, cmd.Name, strings.ToUpper(cmdID)),
+					PICSCodes:  []string{fmt.Sprintf("MASH.S.UC.%s", ucName)},
+					Suggestion: fmt.Sprintf("Add command C%s.Rsp to %s feature on an endpoint", strings.ToUpper(cmdID), picsFeature),
+				})
+			}
+		}
+	}
+
+	return violations
+}
+
+// checkEndpointTypes validates that features are on allowed endpoint types.
+func (r *UC001) checkEndpointTypes(p *pics.PICS, ucName string, def *usecase.UseCaseDef) []pics.Violation {
+	var violations []pics.Violation
+
+	allowed := make(map[string]bool, len(def.EndpointTypes))
+	for _, t := range def.EndpointTypes {
+		allowed[t] = true
+	}
+
+	// Check BASE scenario features for endpoint type constraints
+	base := def.BaseScenario()
+	if base == nil {
+		return nil
+	}
+
+	hasMatchingType := false
+	var seenTypes []string
+	for _, freq := range base.Features {
+		if !freq.Required {
+			continue
+		}
+		picsFeature, ok := featureNameToID[freq.FeatureName]
+		if !ok {
+			continue
+		}
+		for _, ep := range p.EndpointsWithFeature(picsFeature) {
+			if allowed[ep.Type] {
+				hasMatchingType = true
+			}
+			seenTypes = append(seenTypes, ep.Type)
+		}
+	}
+
+	if !hasMatchingType && len(seenTypes) > 0 {
+		violations = append(violations, pics.Violation{
+			RuleID:   r.ID(),
+			Severity: pics.SeverityWarning,
+			Message: fmt.Sprintf("Use case %s: features found but not on allowed endpoint type (allowed: %s)",
+				ucName, strings.Join(def.EndpointTypes, ", ")),
+			PICSCodes:  []string{fmt.Sprintf("MASH.S.UC.%s", ucName)},
+			Suggestion: fmt.Sprintf("Place required features on an endpoint of type: %s", strings.Join(def.EndpointTypes, ", ")),
+		})
 	}
 
 	return violations

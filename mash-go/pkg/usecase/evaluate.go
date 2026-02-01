@@ -34,9 +34,10 @@ func EvaluateDevice(device DeviceEvaluator, registry map[UseCaseName]*UseCaseDef
 		}
 		decls = append(decls, &model.UseCaseDecl{
 			EndpointID: m.EndpointID,
-			Name:       string(m.UseCase),
+			ID:         uint16(def.ID),
 			Major:      def.Major,
 			Minor:      def.Minor,
+			Scenarios:  uint32(m.Scenarios),
 		})
 	}
 
@@ -45,19 +46,21 @@ func EvaluateDevice(device DeviceEvaluator, registry map[UseCaseName]*UseCaseDef
 
 // EvaluateController returns use case declarations for a controller.
 // Controllers declare all registered use cases with EndpointID 0,
-// indicating client-side support. Results are sorted by name for determinism.
+// indicating client-side support. Results are sorted by ID for determinism.
+// Controllers declare all defined scenarios for each use case.
 func EvaluateController(registry map[UseCaseName]*UseCaseDef) []*model.UseCaseDecl {
 	decls := make([]*model.UseCaseDecl, 0, len(registry))
-	for name, def := range registry {
+	for _, def := range registry {
 		decls = append(decls, &model.UseCaseDecl{
 			EndpointID: 0,
-			Name:       string(name),
+			ID:         uint16(def.ID),
 			Major:      def.Major,
 			Minor:      def.Minor,
+			Scenarios:  uint32(def.DefinedScenarioMask()),
 		})
 	}
 	sort.Slice(decls, func(i, j int) bool {
-		return decls[i].Name < decls[j].Name
+		return decls[i].ID < decls[j].ID
 	})
 	return decls
 }

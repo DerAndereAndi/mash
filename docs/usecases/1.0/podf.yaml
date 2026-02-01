@@ -1,4 +1,5 @@
 name: PODF
+id: 0x09
 fullName: Power Demand Forecast
 specVersion: "1.0"
 major: 1
@@ -9,16 +10,20 @@ description: >
 
 endpointTypes: []
 
-features:
-  - feature: Plan
-    required: true
-    attributes:
-      - name: commitment
-      - name: startTime
-      - name: endTime
-      - name: totalEnergyPlanned
-    commands:
-      - requestPlan
-    subscribe: all
+scenarios:
+  - bit: 0
+    name: BASE
+    description: Power demand forecast via Plan feature.
+    features:
+      - feature: Plan
+        required: true
+        attributes:
+          - name: commitment
+          - name: startTime
+          - name: endTime
+          - name: totalEnergyPlanned
+        commands:
+          - requestPlan
+        subscribe: all
 
 commands: []

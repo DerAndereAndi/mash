@@ -3,7 +3,7 @@
 > Tracking what we evaluated, decided, and declined
 
 **Created:** 2025-01-24
-**Last Updated:** 2026-01-31
+**Last Updated:** 2026-02-01
 
 ---
 
@@ -3311,11 +3311,11 @@ minor: 0
 Example for a CEM supporting all 11 use cases:
 ```cbor
 useCases: [
-  {1: 0, 2: "COB",   3: 1, 4: 0},
-  {1: 0, 2: "EVC",   3: 1, 4: 0},
-  {1: 0, 2: "LPC",   3: 1, 4: 0},
-  {1: 0, 2: "LPP",   3: 1, 4: 0},
-  {1: 0, 2: "MPD",   3: 1, 4: 0},
+  {1: 0, 2: 0x01, 3: 1, 4: 0, 5: 0x07},  // LPC, scenarios BASE+MEAS+OVERRIDE
+  {1: 0, 2: 0x02, 3: 1, 4: 0, 5: 0x07},  // LPP
+  {1: 0, 2: 0x03, 3: 1, 4: 0, 5: 0x07},  // MPD
+  {1: 0, 2: 0x04, 3: 1, 4: 0, 5: 0x3F},  // EVC (6 scenarios)
+  {1: 0, 2: 0x05, 3: 1, 4: 0, 5: 0x07},  // COB
   ...
 ]
 ```
@@ -3339,6 +3339,64 @@ useCases: [
 - No changes to wire format, ucgen generator, or discovery code
 
 **Related:** DEC-055 (use cases on the wire)
+
+---
+
+### DEC-057: Integer Use Case IDs and Scenario Bitmaps
+
+**Date:** 2026-02-01
+**Status:** Accepted
+
+**Context:** DEC-055 introduced use case declarations on the wire using string names (e.g., `"LPC"`). While functional, this was inconsistent with the rest of MASH where all identifiers (feature types, endpoint types, command IDs) are integers. Additionally, use cases had no way to express which optional scenarios a device supports -- everything was a flat list of features with required/optional flags.
+
+**Options Evaluated:**
+1. **Keep string names, add separate scenario field** -- Minimal change, but string names waste wire bytes and are inconsistent.
+2. **Integer IDs only** -- Compact and consistent, but doesn't address the optional scenario problem.
+3. **Integer IDs + scenario bitmap** (chosen) -- Compact wire format, consistent with MASH conventions, and introduces atomic scenario contracts inspired by Matter's FeatureMap.
+
+**Decision:** Replace string use case names with `uint16` IDs on the wire and add a `uint32` scenario bitmap to `UseCaseDecl`. Each use case defines named scenarios (BASE at bit 0, plus optional scenarios at bits 1+). Declaring a scenario is atomic -- all features in a scenario are present or none are.
+
+Wire format change:
+```cbor
+// Before (DEC-055):
+{1: endpointId, 2: "LPC",  3: 1, 4: 0}
+
+// After (DEC-057):
+{1: endpointId, 2: 0x01, 3: 1, 4: 0, 5: 0x03}
+//                 ^^^^                  ^^^^
+//              uint16 ID          scenario bitmap (BASE + MEASUREMENT)
+```
+
+Scenario structure (example LPC):
+- Bit 0 (BASE): EnergyControl(limits) + Electrical(maxConsumption) -- always required
+- Bit 1 (MEASUREMENT): Measurement feature -- optional
+- Bit 2 (OVERRIDE): Override tracking -- optional
+
+**Rationale:**
+
+- **Consistency:** All other MASH identifiers use integers. String names were the only exception.
+- **Compactness:** `uint16` is 2-3 bytes vs 3-5+ bytes for a string name. At 11 use cases per controller, this saves 30+ bytes per declaration set.
+- **Matter-inspired:** The scenario bitmap follows the same pattern as Matter's FeatureMap -- a single uint32 tells you exactly which optional capabilities are present.
+- **Atomic contracts:** No ambiguity about partial scenarios. If bit 1 is set, all features in scenario 1 must be present. This eliminates the O/M/C complexity that plagued EEBUS.
+- **Testable:** PICS validation can check per-scenario: BASE features produce errors if missing; non-BASE features produce errors only if the scenario is declared.
+
+**Impact:**
+
+- `UseCaseDecl` wire format: key 2 changes from string to uint16, key 5 added (uint32 scenarios)
+- `UseCaseDef` restructured: `Features []FeatureRequirement` replaced by `Scenarios []ScenarioDef`
+- Code generator (`mash-ucgen`): emits scenario-structured registry with `IDToName`/`NameToID` maps
+- Matcher: evaluates per-scenario independently; BASE must match for use case to match
+- PICS: generates per-scenario codes (`MASH.S.UC.LPC.S00`, `MASH.S.UC.LPC.S01`, etc.)
+- All 11 use case YAMLs restructured with `scenarios:` sections
+- Breaking wire change -- justified since protocol is pre-1.0
+
+**Declined Alternatives:**
+
+- **String names with scenario field:** Inconsistent with integer-based ID convention used everywhere else in MASH. More bytes on the wire for no benefit.
+- **Flat feature list with per-feature optionality flags:** This is what EEBUS does (O/M/C per use case element). It creates combinatorial explosion in testing and ambiguous partial support states.
+- **Per-scenario separate declarations:** One `UseCaseDecl` per scenario would be cleaner in some ways but wastes wire space and complicates deduplication.
+
+**Related:** DEC-055 (use cases on the wire), DEC-056 (controller-side declarations), DEC-035 (Matter-style capability discovery)
 
 ---
 
@@ -3470,3 +3528,4 @@ Key learnings:
 | 2026-01-31 | Added DEC-054: Endpoint-aware PICS format. Application feature codes scoped to endpoints (`MASH.S.E01.CTRL.A01`). Transport/pairing codes unchanged. Enables per-endpoint conformance validation. |
 | 2026-01-31 | Added DEC-053: Endpoint type conformance registry. Two-layer model: feature YAML defines superset, endpoint type registry defines per-type mandatory/recommended attributes. |
 | 2026-01-31 | Added DEC-055: Use cases on the wire. Adds `useCases` attribute to DeviceInfo with name + major.minor version + endpointId. REST API versioning model: minor = forward-compatible, major = new contract. Bundled with specVersion releases. Enables business logic testing and explicit device contracts. |
+| 2026-02-01 | Added DEC-057: Integer use case IDs and scenario bitmaps. Replaces string names with uint16 IDs on the wire. Adds uint32 scenario bitmap to UseCaseDecl. Matter-inspired atomic scenario contracts. All 11 use case YAMLs restructured with scenarios. |

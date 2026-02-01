@@ -39,16 +39,20 @@ func TestEvaluateDevice_EVSE(t *testing.T) {
 	decls := EvaluateDevice(device, Registry)
 
 	// An EVSE with these features should match LPC, MPD, EVC at minimum
-	declMap := make(map[string]*model.UseCaseDecl)
+	declMap := make(map[uint16]*model.UseCaseDecl)
 	for _, d := range decls {
-		declMap[d.Name] = d
+		declMap[d.ID] = d
 	}
 
-	expectedUCs := []string{"LPC", "MPD", "EVC"}
-	for _, name := range expectedUCs {
-		d, ok := declMap[name]
+	expectedUCs := map[UseCaseName]UseCaseID{
+		LPC: LPCID,
+		MPD: MPDID,
+		EVC: EVCID,
+	}
+	for name, id := range expectedUCs {
+		d, ok := declMap[uint16(id)]
 		if !ok {
-			t.Errorf("expected use case %s to match", name)
+			t.Errorf("expected use case %s (0x%02X) to match", name, id)
 			continue
 		}
 		if d.EndpointID != 1 {
@@ -60,6 +64,10 @@ func TestEvaluateDevice_EVSE(t *testing.T) {
 		if d.Minor != 0 {
 			t.Errorf("%s: Minor = %d, want 0", name, d.Minor)
 		}
+		// Verify scenarios bitmap is non-zero (at least BASE)
+		if d.Scenarios == 0 {
+			t.Errorf("%s: Scenarios should be non-zero", name)
+		}
 	}
 }
 
@@ -70,16 +78,16 @@ func TestEvaluateDevice_MeasurementOnly(t *testing.T) {
 
 	decls := EvaluateDevice(device, Registry)
 
-	// Should match MPD only (Measurement required, rest optional)
+	// Should match MPD only (Measurement required in BASE)
 	if len(decls) != 1 {
-		var names []string
+		var ids []uint16
 		for _, d := range decls {
-			names = append(names, d.Name)
+			ids = append(ids, d.ID)
 		}
-		t.Fatalf("expected 1 use case (MPD), got %d: %v", len(decls), names)
+		t.Fatalf("expected 1 use case (MPD), got %d: %v", len(decls), ids)
 	}
-	if decls[0].Name != "MPD" {
-		t.Errorf("expected MPD, got %s", decls[0].Name)
+	if decls[0].ID != uint16(MPDID) {
+		t.Errorf("expected MPD (0x%02X), got 0x%02X", MPDID, decls[0].ID)
 	}
 }
 
@@ -90,17 +98,17 @@ func TestEvaluateController_AllRegistered(t *testing.T) {
 		t.Fatalf("expected %d declarations, got %d", len(Registry), len(decls))
 	}
 
-	// Build lookup
-	declMap := make(map[string]*model.UseCaseDecl)
+	// Build lookup by ID
+	declMap := make(map[uint16]*model.UseCaseDecl)
 	for _, d := range decls {
-		declMap[d.Name] = d
+		declMap[d.ID] = d
 	}
 
 	// Verify all registry entries are present with correct versions
 	for name, def := range Registry {
-		d, ok := declMap[string(name)]
+		d, ok := declMap[uint16(def.ID)]
 		if !ok {
-			t.Errorf("missing declaration for %s", name)
+			t.Errorf("missing declaration for %s (0x%02X)", name, def.ID)
 			continue
 		}
 		if d.Major != def.Major {
@@ -108,6 +116,10 @@ func TestEvaluateController_AllRegistered(t *testing.T) {
 		}
 		if d.Minor != def.Minor {
 			t.Errorf("%s: Minor = %d, want %d", name, d.Minor, def.Minor)
+		}
+		// Verify scenarios bitmap includes all defined scenarios
+		if d.Scenarios != uint32(def.DefinedScenarioMask()) {
+			t.Errorf("%s: Scenarios = 0x%08X, want 0x%08X", name, d.Scenarios, def.DefinedScenarioMask())
 		}
 	}
 }
@@ -117,7 +129,7 @@ func TestEvaluateController_EndpointIDZero(t *testing.T) {
 
 	for _, d := range decls {
 		if d.EndpointID != 0 {
-			t.Errorf("%s: EndpointID = %d, want 0", d.Name, d.EndpointID)
+			t.Errorf("0x%02X: EndpointID = %d, want 0", d.ID, d.EndpointID)
 		}
 	}
 }
@@ -135,17 +147,17 @@ func TestEvaluateController_SubsetRegistry(t *testing.T) {
 		t.Fatalf("expected 2 declarations, got %d", len(decls))
 	}
 
-	// Should be sorted by name: LPC, MPD
-	if decls[0].Name != "LPC" {
-		t.Errorf("decls[0].Name = %s, want LPC", decls[0].Name)
+	// Should be sorted by ID: LPC (0x01), MPD (0x03)
+	if decls[0].ID != uint16(LPCID) {
+		t.Errorf("decls[0].ID = 0x%02X, want 0x%02X", decls[0].ID, LPCID)
 	}
-	if decls[1].Name != "MPD" {
-		t.Errorf("decls[1].Name = %s, want MPD", decls[1].Name)
+	if decls[1].ID != uint16(MPDID) {
+		t.Errorf("decls[1].ID = 0x%02X, want 0x%02X", decls[1].ID, MPDID)
 	}
 
 	for _, d := range decls {
 		if d.EndpointID != 0 {
-			t.Errorf("%s: EndpointID = %d, want 0", d.Name, d.EndpointID)
+			t.Errorf("0x%02X: EndpointID = %d, want 0", d.ID, d.EndpointID)
 		}
 	}
 }
@@ -163,16 +175,23 @@ func TestEvaluateDevice_CorrectVersions(t *testing.T) {
 	decls := EvaluateDevice(device, Registry)
 
 	for _, d := range decls {
-		def, ok := Registry[UseCaseName(d.Name)]
-		if !ok {
-			t.Errorf("declaration %s not in registry", d.Name)
+		// Find matching registry entry by ID
+		var def *UseCaseDef
+		for _, regDef := range Registry {
+			if uint16(regDef.ID) == d.ID {
+				def = regDef
+				break
+			}
+		}
+		if def == nil {
+			t.Errorf("declaration 0x%02X not in registry", d.ID)
 			continue
 		}
 		if d.Major != def.Major {
-			t.Errorf("%s: Major = %d, want %d", d.Name, d.Major, def.Major)
+			t.Errorf("0x%02X: Major = %d, want %d", d.ID, d.Major, def.Major)
 		}
 		if d.Minor != def.Minor {
-			t.Errorf("%s: Minor = %d, want %d", d.Name, d.Minor, def.Minor)
+			t.Errorf("0x%02X: Minor = %d, want %d", d.ID, d.Minor, def.Minor)
 		}
 	}
 }

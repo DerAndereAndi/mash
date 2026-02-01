@@ -7,26 +7,36 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// RawScenarioDef is a scenario definition before name resolution.
+type RawScenarioDef struct {
+	Bit         uint8           `yaml:"bit"`
+	Name        string          `yaml:"name"`
+	Description string          `yaml:"description"`
+	Features    []RawFeatureReq `yaml:"features"`
+}
+
 // RawUseCaseDef is the YAML-level representation before name resolution.
 type RawUseCaseDef struct {
-	Name          string              `yaml:"name"`
-	FullName      string              `yaml:"fullName"`
-	SpecVersion   string              `yaml:"specVersion"`
-	Major         uint8               `yaml:"major"`
-	Minor         uint8               `yaml:"minor"`
-	Description   string              `yaml:"description"`
-	EndpointTypes []string            `yaml:"endpointTypes"`
-	Features      []RawFeatureReq     `yaml:"features"`
-	Commands      []string            `yaml:"commands"`
+	Name          string           `yaml:"name"`
+	ID            uint16           `yaml:"id"`
+	FullName      string           `yaml:"fullName"`
+	SpecVersion   string           `yaml:"specVersion"`
+	Major         uint8            `yaml:"major"`
+	Minor         uint8            `yaml:"minor"`
+	Description   string           `yaml:"description"`
+	EndpointTypes []string         `yaml:"endpointTypes"`
+	Scenarios     []RawScenarioDef `yaml:"scenarios"`
+	Features      []RawFeatureReq  `yaml:"features"` // legacy flat format
+	Commands      []string         `yaml:"commands"`
 }
 
 // RawFeatureReq is a feature requirement before name resolution.
 type RawFeatureReq struct {
-	Feature       string            `yaml:"feature"`
-	Required      bool              `yaml:"required"`
-	Attributes    []RawAttrReq      `yaml:"attributes"`
-	Commands      []string          `yaml:"commands"`
-	Subscribe string `yaml:"subscribe"` // "all" = subscribe to all attributes (DEC-052)
+	Feature       string       `yaml:"feature"`
+	Required      bool         `yaml:"required"`
+	Attributes    []RawAttrReq `yaml:"attributes"`
+	Commands      []string     `yaml:"commands"`
+	Subscribe     string       `yaml:"subscribe"` // "all" = subscribe to all attributes (DEC-052)
 }
 
 // RawAttrReq is an attribute requirement before name resolution.
@@ -59,6 +69,7 @@ func ResolveUseCaseDef(raw *RawUseCaseDef) (*UseCaseDef, error) {
 
 	def := &UseCaseDef{
 		Name:          UseCaseName(raw.Name),
+		ID:            UseCaseID(raw.ID),
 		FullName:      raw.FullName,
 		Description:   raw.Description,
 		SpecVersion:   specVer,
@@ -68,12 +79,37 @@ func ResolveUseCaseDef(raw *RawUseCaseDef) (*UseCaseDef, error) {
 		Commands:      raw.Commands,
 	}
 
-	for _, rf := range raw.Features {
-		fr, err := resolveFeatureReq(spec, rf)
-		if err != nil {
-			return nil, fmt.Errorf("use case %s: %w", raw.Name, err)
+	// If scenarios are defined, resolve them
+	if len(raw.Scenarios) > 0 {
+		for _, rs := range raw.Scenarios {
+			sd := ScenarioDef{
+				Bit:         ScenarioBit(rs.Bit),
+				Name:        rs.Name,
+				Description: rs.Description,
+			}
+			for _, rf := range rs.Features {
+				fr, err := resolveFeatureReq(spec, rf)
+				if err != nil {
+					return nil, fmt.Errorf("use case %s scenario %s: %w", raw.Name, rs.Name, err)
+				}
+				sd.Features = append(sd.Features, *fr)
+			}
+			def.Scenarios = append(def.Scenarios, sd)
 		}
-		def.Features = append(def.Features, *fr)
+	} else if len(raw.Features) > 0 {
+		// Legacy flat format: wrap all features in a single BASE scenario
+		sd := ScenarioDef{
+			Bit:  0,
+			Name: "BASE",
+		}
+		for _, rf := range raw.Features {
+			fr, err := resolveFeatureReq(spec, rf)
+			if err != nil {
+				return nil, fmt.Errorf("use case %s: %w", raw.Name, err)
+			}
+			sd.Features = append(sd.Features, *fr)
+		}
+		def.Scenarios = append(def.Scenarios, sd)
 	}
 
 	return def, nil

@@ -1,4 +1,5 @@
 name: FLOA
+id: 0x06
 fullName: Flexible Load
 specVersion: "1.0"
 major: 1
@@ -13,25 +14,44 @@ endpointTypes:
   - HVAC
   - APPLIANCE
 
-features:
-  - feature: EnergyControl
-    required: true
-    attributes:
-      - name: acceptsLimits
-        requiredValue: true
-    commands:
-      - setLimit
-      - clearLimit
-    subscribe: all
+scenarios:
+  - bit: 0
+    name: BASE
+    description: Basic flexible load control via power limits.
+    features:
+      - feature: EnergyControl
+        required: true
+        attributes:
+          - name: acceptsLimits
+            requiredValue: true
+        commands:
+          - setLimit
+          - clearLimit
+        subscribe: all
 
-  - feature: Electrical
-    required: true
-    attributes:
-      - name: nominalMaxConsumption
+      - feature: Electrical
+        required: true
+        attributes:
+          - name: nominalMaxConsumption
 
-  - feature: Measurement
-    required: false
-    subscribe: all
+  - bit: 1
+    name: MEASUREMENT
+    description: Measurement telemetry for load monitoring.
+    features:
+      - feature: Measurement
+        subscribe: all
+
+  - bit: 2
+    name: SETPOINTS
+    description: Load also accepts setpoints.
+    features:
+      - feature: EnergyControl
+        attributes:
+          - name: acceptsSetpoints
+            requiredValue: true
+        commands:
+          - setSetpoint
+          - clearSetpoint
 
 commands:
   - limit

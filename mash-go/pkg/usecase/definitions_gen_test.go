@@ -24,6 +24,9 @@ func TestRegistry_ContainsLPC(t *testing.T) {
 	if def.Name != LPC {
 		t.Errorf("name = %q, want LPC", def.Name)
 	}
+	if def.ID != LPCID {
+		t.Errorf("ID = 0x%02X, want 0x%02X", def.ID, LPCID)
+	}
 	if def.FullName != "Limit Power Consumption" {
 		t.Errorf("fullName = %q", def.FullName)
 	}
@@ -36,6 +39,9 @@ func TestRegistry_ContainsLPP(t *testing.T) {
 	}
 	if def.Name != LPP {
 		t.Errorf("name = %q, want LPP", def.Name)
+	}
+	if def.ID != LPPID {
+		t.Errorf("ID = 0x%02X, want 0x%02X", def.ID, LPPID)
 	}
 }
 
@@ -67,15 +73,19 @@ func TestRegistry_ContainsEVC(t *testing.T) {
 
 func TestLPC_EnergyControlRequired(t *testing.T) {
 	def := Registry[LPC]
+	base := def.BaseScenario()
+	if base == nil {
+		t.Fatal("LPC missing BASE scenario")
+	}
 	var ec *FeatureRequirement
-	for i := range def.Features {
-		if def.Features[i].FeatureName == "EnergyControl" {
-			ec = &def.Features[i]
+	for i := range base.Features {
+		if base.Features[i].FeatureName == "EnergyControl" {
+			ec = &base.Features[i]
 			break
 		}
 	}
 	if ec == nil {
-		t.Fatal("LPC missing EnergyControl feature")
+		t.Fatal("LPC BASE missing EnergyControl feature")
 	}
 	if ec.FeatureID != 0x05 {
 		t.Errorf("EnergyControl FeatureID = 0x%02x, want 0x05", ec.FeatureID)
@@ -102,15 +112,19 @@ func TestLPC_EnergyControlRequired(t *testing.T) {
 
 func TestLPC_ElectricalRequired(t *testing.T) {
 	def := Registry[LPC]
+	base := def.BaseScenario()
+	if base == nil {
+		t.Fatal("LPC missing BASE scenario")
+	}
 	var elec *FeatureRequirement
-	for i := range def.Features {
-		if def.Features[i].FeatureName == "Electrical" {
-			elec = &def.Features[i]
+	for i := range base.Features {
+		if base.Features[i].FeatureName == "Electrical" {
+			elec = &base.Features[i]
 			break
 		}
 	}
 	if elec == nil {
-		t.Fatal("LPC missing Electrical feature")
+		t.Fatal("LPC BASE missing Electrical feature")
 	}
 	if !elec.Required {
 		t.Error("Electrical should be required")
@@ -126,20 +140,31 @@ func TestLPC_ElectricalRequired(t *testing.T) {
 	}
 }
 
-func TestLPC_MeasurementOptional(t *testing.T) {
+func TestLPC_MeasurementScenario(t *testing.T) {
 	def := Registry[LPC]
-	var meas *FeatureRequirement
-	for i := range def.Features {
-		if def.Features[i].FeatureName == "Measurement" {
-			meas = &def.Features[i]
+	// Measurement should be in the MEASUREMENT scenario (bit 1), not in BASE
+	if len(def.Scenarios) < 2 {
+		t.Fatalf("LPC should have at least 2 scenarios, got %d", len(def.Scenarios))
+	}
+	// Find MEASUREMENT scenario
+	var measScenario *ScenarioDef
+	for i := range def.Scenarios {
+		if def.Scenarios[i].Name == "MEASUREMENT" {
+			measScenario = &def.Scenarios[i]
 			break
 		}
 	}
-	if meas == nil {
-		t.Fatal("LPC missing Measurement feature")
+	if measScenario == nil {
+		t.Fatal("LPC missing MEASUREMENT scenario")
 	}
-	if meas.Required {
-		t.Error("Measurement should not be required")
+	if measScenario.Bit != 1 {
+		t.Errorf("MEASUREMENT scenario bit = %d, want 1", measScenario.Bit)
+	}
+	if len(measScenario.Features) == 0 {
+		t.Fatal("MEASUREMENT scenario has no features")
+	}
+	if measScenario.Features[0].FeatureName != "Measurement" {
+		t.Errorf("MEASUREMENT scenario feature = %q, want Measurement", measScenario.Features[0].FeatureName)
 	}
 }
 
@@ -169,45 +194,22 @@ func TestMPD_NoCommands(t *testing.T) {
 	}
 }
 
-func TestEVC_ChargingSessionRequired(t *testing.T) {
+func TestEVC_BaseScenario(t *testing.T) {
 	def := Registry[EVC]
-	var cs *FeatureRequirement
-	for i := range def.Features {
-		if def.Features[i].FeatureName == "ChargingSession" {
-			cs = &def.Features[i]
-			break
-		}
+	base := def.BaseScenario()
+	if base == nil {
+		t.Fatal("EVC missing BASE scenario")
 	}
-	if cs == nil {
-		t.Fatal("EVC missing ChargingSession feature")
-	}
-	if !cs.Required {
-		t.Error("ChargingSession should be required")
-	}
-	// Check evDemandMode attribute is present
-	found := false
-	for _, attr := range cs.Attributes {
-		if attr.Name == "evDemandMode" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("ChargingSession missing evDemandMode attribute")
-	}
-}
-
-func TestEVC_EnergyControlRequired(t *testing.T) {
-	def := Registry[EVC]
+	// Check EnergyControl is required in BASE
 	var ec *FeatureRequirement
-	for i := range def.Features {
-		if def.Features[i].FeatureName == "EnergyControl" {
-			ec = &def.Features[i]
+	for i := range base.Features {
+		if base.Features[i].FeatureName == "EnergyControl" {
+			ec = &base.Features[i]
 			break
 		}
 	}
 	if ec == nil {
-		t.Fatal("EVC missing EnergyControl feature")
+		t.Fatal("EVC BASE missing EnergyControl feature")
 	}
 	if !ec.Required {
 		t.Error("EnergyControl should be required")
@@ -225,20 +227,10 @@ func TestEVC_EnergyControlRequired(t *testing.T) {
 	}
 }
 
-func TestEVC_SignalsOptional(t *testing.T) {
+func TestEVC_HasMultipleScenarios(t *testing.T) {
 	def := Registry[EVC]
-	var sig *FeatureRequirement
-	for i := range def.Features {
-		if def.Features[i].FeatureName == "Signals" {
-			sig = &def.Features[i]
-			break
-		}
-	}
-	if sig == nil {
-		t.Fatal("EVC missing Signals feature")
-	}
-	if sig.Required {
-		t.Error("Signals should be optional")
+	if len(def.Scenarios) < 4 {
+		t.Errorf("EVC should have at least 4 scenarios, got %d", len(def.Scenarios))
 	}
 }
 
@@ -273,37 +265,24 @@ func TestMPD_EndpointTypes(t *testing.T) {
 	}
 }
 
-func TestMPD_MeasurementRequired(t *testing.T) {
+func TestMPD_MeasurementRequiredInBase(t *testing.T) {
 	def := Registry[MPD]
+	base := def.BaseScenario()
+	if base == nil {
+		t.Fatal("MPD missing BASE scenario")
+	}
 	var meas *FeatureRequirement
-	for i := range def.Features {
-		if def.Features[i].FeatureName == "Measurement" {
-			meas = &def.Features[i]
+	for i := range base.Features {
+		if base.Features[i].FeatureName == "Measurement" {
+			meas = &base.Features[i]
 			break
 		}
 	}
 	if meas == nil {
-		t.Fatal("MPD missing Measurement feature")
+		t.Fatal("MPD BASE missing Measurement feature")
 	}
 	if !meas.Required {
-		t.Error("Measurement should be required for MPD")
-	}
-}
-
-func TestMPD_StatusOptional(t *testing.T) {
-	def := Registry[MPD]
-	var status *FeatureRequirement
-	for i := range def.Features {
-		if def.Features[i].FeatureName == "Status" {
-			status = &def.Features[i]
-			break
-		}
-	}
-	if status == nil {
-		t.Fatal("MPD missing Status feature")
-	}
-	if status.Required {
-		t.Error("Status should be optional for MPD")
+		t.Error("Measurement should be required for MPD BASE")
 	}
 }
 
@@ -334,17 +313,37 @@ func TestRegistry_AllHaveVersion(t *testing.T) {
 	}
 }
 
+func TestRegistry_AllHaveID(t *testing.T) {
+	for name, def := range Registry {
+		if def.ID == 0 {
+			t.Errorf("%s: ID should be non-zero", name)
+		}
+	}
+}
+
+func TestRegistry_AllHaveBaseScenario(t *testing.T) {
+	for name, def := range Registry {
+		if def.BaseScenario() == nil {
+			t.Errorf("%s: missing BASE scenario", name)
+		}
+	}
+}
+
 func TestLPP_ElectricalNominalMaxProduction(t *testing.T) {
 	def := Registry[LPP]
+	base := def.BaseScenario()
+	if base == nil {
+		t.Fatal("LPP missing BASE scenario")
+	}
 	var elec *FeatureRequirement
-	for i := range def.Features {
-		if def.Features[i].FeatureName == "Electrical" {
-			elec = &def.Features[i]
+	for i := range base.Features {
+		if base.Features[i].FeatureName == "Electrical" {
+			elec = &base.Features[i]
 			break
 		}
 	}
 	if elec == nil {
-		t.Fatal("LPP missing Electrical feature")
+		t.Fatal("LPP BASE missing Electrical feature")
 	}
 	if len(elec.Attributes) < 1 {
 		t.Fatal("missing attributes")
@@ -354,5 +353,23 @@ func TestLPP_ElectricalNominalMaxProduction(t *testing.T) {
 	}
 	if elec.Attributes[0].AttrID != 11 {
 		t.Errorf("nominalMaxProduction AttrID = %d, want 11", elec.Attributes[0].AttrID)
+	}
+}
+
+func TestNameToID_Mapping(t *testing.T) {
+	if NameToID[LPC] != LPCID {
+		t.Errorf("NameToID[LPC] = 0x%02X, want 0x%02X", NameToID[LPC], LPCID)
+	}
+	if NameToID[EVC] != EVCID {
+		t.Errorf("NameToID[EVC] = 0x%02X, want 0x%02X", NameToID[EVC], EVCID)
+	}
+}
+
+func TestIDToName_Mapping(t *testing.T) {
+	if IDToName[LPCID] != LPC {
+		t.Errorf("IDToName[0x01] = %q, want LPC", IDToName[LPCID])
+	}
+	if IDToName[EVCID] != EVC {
+		t.Errorf("IDToName[0x04] = %q, want EVC", IDToName[EVCID])
 	}
 }

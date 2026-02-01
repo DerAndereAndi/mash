@@ -64,6 +64,18 @@ func TestMatchAll_LPC_FullMatch(t *testing.T) {
 	if len(du.MatchedUseCases()) == 0 {
 		t.Error("expected at least one matched use case")
 	}
+
+	// Verify scenarios matched
+	scenarios, ok := du.ScenariosForUseCase(LPC)
+	if !ok {
+		t.Fatal("expected ScenariosForUseCase(LPC) to return ok")
+	}
+	if !scenarios.Has(0) {
+		t.Error("expected BASE scenario (bit 0) to be set")
+	}
+	if !scenarios.Has(1) {
+		t.Error("expected MEASUREMENT scenario (bit 1) to be set since Measurement is present")
+	}
 }
 
 func TestMatchAll_LPC_MissingElectrical(t *testing.T) {
@@ -126,6 +138,7 @@ func TestMatchAll_LPC_AcceptsLimitsFalse(t *testing.T) {
 
 func TestMatchAll_LPC_MeasurementOptional(t *testing.T) {
 	// EnergyControl + Electrical present, Measurement absent
+	// BASE should match but MEASUREMENT scenario should not
 	profile := buildProfile("dev-1",
 		buildEndpoint(1, "EV_CHARGER",
 			buildFeature(0x05,
@@ -143,22 +156,19 @@ func TestMatchAll_LPC_MeasurementOptional(t *testing.T) {
 
 	du := MatchAll(profile, Registry)
 	if !du.HasUseCase(LPC) {
-		t.Error("LPC should match even without optional Measurement")
+		t.Error("LPC should match even without optional Measurement scenario")
 	}
 
-	// Check OptionalMissing
-	for _, m := range du.Matches {
-		if m.UseCase == LPC && m.Matched {
-			found := false
-			for _, om := range m.OptionalMissing {
-				if om == "Measurement" {
-					found = true
-				}
-			}
-			if !found {
-				t.Errorf("OptionalMissing should contain 'Measurement', got %v", m.OptionalMissing)
-			}
-		}
+	// Verify MEASUREMENT scenario is NOT set
+	scenarios, ok := du.ScenariosForUseCase(LPC)
+	if !ok {
+		t.Fatal("expected ScenariosForUseCase(LPC) to return ok")
+	}
+	if !scenarios.Has(0) {
+		t.Error("expected BASE scenario to be set")
+	}
+	if scenarios.Has(1) {
+		t.Error("MEASUREMENT scenario should NOT be set when Measurement is absent")
 	}
 }
 
@@ -352,5 +362,38 @@ func TestMatchAll_MultiEndpoint(t *testing.T) {
 	epID, _ := du.EndpointForUseCase(LPC)
 	if epID != 1 {
 		t.Errorf("LPC endpoint = %d, want 1", epID)
+	}
+}
+
+func TestMatchAll_ScenarioBitmap(t *testing.T) {
+	// Build a profile that matches BASE and MEASUREMENT scenarios for LPC
+	// but not OVERRIDE (since we don't set override-related attributes)
+	profile := buildProfile("dev-1",
+		buildEndpoint(1, "EV_CHARGER",
+			buildFeature(0x05,
+				[]uint16{1, 2, 10, 20, 75, 76},
+				[]uint8{1, 2},
+				map[uint16]any{10: true},
+			),
+			buildFeature(0x03,
+				[]uint16{1, 5, 10},
+				nil, nil,
+			),
+			buildFeature(0x04,
+				[]uint16{1},
+				nil, nil,
+			),
+		),
+	)
+
+	du := MatchAll(profile, Registry)
+	scenarios, ok := du.ScenariosForUseCase(LPC)
+	if !ok {
+		t.Fatal("expected LPC to match")
+	}
+
+	// BASE must be set
+	if !scenarios.Has(0) {
+		t.Error("expected BASE (bit 0) to be set")
 	}
 }

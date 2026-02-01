@@ -115,10 +115,16 @@ func buildFromDeclarations(deviceID string, decls []*model.UseCaseDecl, registry
 		registry: registry,
 	}
 	for _, d := range decls {
+		name, ok := IDToName[UseCaseID(d.ID)]
+		if !ok {
+			// Unknown use case ID, use hex representation
+			name = UseCaseName(fmt.Sprintf("0x%02X", d.ID))
+		}
 		du.Matches = append(du.Matches, MatchResult{
-			UseCase:    UseCaseName(d.Name),
+			UseCase:    name,
 			Matched:    true,
 			EndpointID: d.EndpointID,
+			Scenarios:  ScenarioMap(d.Scenarios),
 		})
 	}
 	return du
@@ -147,10 +153,10 @@ func parseUseCases(raw any) ([]*model.UseCaseDecl, error) {
 			}
 		}
 
-		// Parse name (key 2)
+		// Parse ID (key 2) -- now uint16
 		if v, ok := m[uint64(2)]; ok {
-			if s, ok := v.(string); ok {
-				d.Name = s
+			if id, ok := toUint16(v); ok {
+				d.ID = id
 			}
 		}
 
@@ -168,7 +174,14 @@ func parseUseCases(raw any) ([]*model.UseCaseDecl, error) {
 			}
 		}
 
-		if d.Name != "" {
+		// Parse scenarios (key 5)
+		if v, ok := m[uint64(5)]; ok {
+			if sc, ok := toUint32(v); ok {
+				d.Scenarios = sc
+			}
+		}
+
+		if d.ID != 0 {
 			decls = append(decls, d)
 		}
 	}

@@ -471,7 +471,7 @@ func setupDeviceMonitoring(deviceID string) {
 			continue
 		}
 		def := usecase.Registry[m.UseCase]
-		for _, freq := range def.Features {
+		for _, freq := range def.AllFeatures() {
 			if !freq.ShouldSubscribe() {
 				continue
 			}

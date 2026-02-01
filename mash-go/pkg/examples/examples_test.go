@@ -10,6 +10,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/interaction"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/service"
+	"github.com/mash-protocol/mash-go/pkg/usecase"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -34,24 +35,24 @@ func TestEVSEUseCases(t *testing.T) {
 		t.Fatal("expected EVSE to declare use cases")
 	}
 
-	// Build lookup
-	ucMap := make(map[string]*model.UseCaseDecl)
+	// Build lookup by ID
+	ucMap := make(map[uint16]*model.UseCaseDecl)
 	for _, uc := range ucs {
-		ucMap[uc.Name] = uc
+		ucMap[uc.ID] = uc
 	}
 
 	// EVSE should match LPC, MPD, EVC at minimum
-	for _, name := range []string{"LPC", "MPD", "EVC"} {
-		uc, ok := ucMap[name]
+	for _, id := range []usecase.UseCaseID{usecase.LPCID, usecase.MPDID, usecase.EVCID} {
+		uc, ok := ucMap[uint16(id)]
 		if !ok {
-			t.Errorf("expected use case %s to be declared", name)
+			t.Errorf("expected use case 0x%02X to be declared", id)
 			continue
 		}
 		if uc.EndpointID != 1 {
-			t.Errorf("%s: EndpointID = %d, want 1", name, uc.EndpointID)
+			t.Errorf("0x%02X: EndpointID = %d, want 1", id, uc.EndpointID)
 		}
 		if uc.Major != 1 {
-			t.Errorf("%s: Major = %d, want 1", name, uc.Major)
+			t.Errorf("0x%02X: Major = %d, want 1", id, uc.Major)
 		}
 	}
 }
@@ -122,31 +123,31 @@ func TestCEMUseCases(t *testing.T) {
 		t.Fatal("expected CEM to declare use cases")
 	}
 
-	// Build lookup
-	ucMap := make(map[string]*model.UseCaseDecl)
+	// Build lookup by ID
+	ucMap := make(map[uint16]*model.UseCaseDecl)
 	for _, uc := range ucs {
-		ucMap[uc.Name] = uc
+		ucMap[uc.ID] = uc
 	}
 
 	// CEM should declare at least LPC, LPP, MPD, EVC, COB
-	for _, name := range []string{"LPC", "LPP", "MPD", "EVC", "COB"} {
-		uc, ok := ucMap[name]
+	for _, id := range []usecase.UseCaseID{usecase.LPCID, usecase.LPPID, usecase.MPDID, usecase.EVCID, usecase.COBID} {
+		uc, ok := ucMap[uint16(id)]
 		if !ok {
-			t.Errorf("expected use case %s to be declared", name)
+			t.Errorf("expected use case 0x%02X to be declared", id)
 			continue
 		}
 		if uc.EndpointID != 0 {
-			t.Errorf("%s: EndpointID = %d, want 0", name, uc.EndpointID)
+			t.Errorf("0x%02X: EndpointID = %d, want 0", id, uc.EndpointID)
 		}
 		if uc.Major != 1 {
-			t.Errorf("%s: Major = %d, want 1", name, uc.Major)
+			t.Errorf("0x%02X: Major = %d, want 1", id, uc.Major)
 		}
 	}
 
 	// All declarations should have EndpointID 0
 	for _, uc := range ucs {
 		if uc.EndpointID != 0 {
-			t.Errorf("%s: EndpointID = %d, want 0 (controller-side)", uc.Name, uc.EndpointID)
+			t.Errorf("0x%02X: EndpointID = %d, want 0 (controller-side)", uc.ID, uc.EndpointID)
 		}
 	}
 }

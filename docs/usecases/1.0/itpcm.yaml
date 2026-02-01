@@ -1,4 +1,5 @@
 name: ITPCM
+id: 0x07
 fullName: Incentive Table Power Consumption Management
 specVersion: "1.0"
 major: 1
@@ -14,28 +15,38 @@ endpointTypes:
   - APPLIANCE
   - EV_CHARGER
 
-features:
-  - feature: Signals
-    required: true
-    commands:
-      - sendPriceSignal
-      - clearSignals
-    subscribe: all
+scenarios:
+  - bit: 0
+    name: BASE
+    description: Incentive signals and plan exchange.
+    features:
+      - feature: Signals
+        required: true
+        commands:
+          - sendPriceSignal
+          - clearSignals
+        subscribe: all
 
-  - feature: Plan
-    required: true
-    commands:
-      - requestPlan
-      - acceptPlan
-    subscribe: all
+      - feature: Plan
+        required: true
+        commands:
+          - requestPlan
+          - acceptPlan
+        subscribe: all
 
-  - feature: EnergyControl
-    required: false
-    subscribe: all
+  - bit: 1
+    name: ENERGY_CONTROL
+    description: Device also supports direct energy control.
+    features:
+      - feature: EnergyControl
+        subscribe: all
 
-  - feature: Measurement
-    required: false
-    subscribe: all
+  - bit: 2
+    name: MEASUREMENT
+    description: Measurement telemetry.
+    features:
+      - feature: Measurement
+        subscribe: all
 
 commands:
   - signal

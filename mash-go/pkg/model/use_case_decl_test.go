@@ -9,9 +9,10 @@ import (
 func TestUseCaseDecl_CBORRoundTrip(t *testing.T) {
 	decl := UseCaseDecl{
 		EndpointID: 1,
-		Name:       "LPC",
+		ID:         0x01, // LPC
 		Major:      1,
 		Minor:      0,
+		Scenarios:  0x03, // BASE + MEASUREMENT
 	}
 
 	data, err := cbor.Marshal(decl)
@@ -27,8 +28,8 @@ func TestUseCaseDecl_CBORRoundTrip(t *testing.T) {
 	if got.EndpointID != 1 {
 		t.Errorf("EndpointID = %d, want 1", got.EndpointID)
 	}
-	if got.Name != "LPC" {
-		t.Errorf("Name = %q, want LPC", got.Name)
+	if got.ID != 0x01 {
+		t.Errorf("ID = 0x%02x, want 0x01", got.ID)
 	}
 	if got.Major != 1 {
 		t.Errorf("Major = %d, want 1", got.Major)
@@ -36,14 +37,18 @@ func TestUseCaseDecl_CBORRoundTrip(t *testing.T) {
 	if got.Minor != 0 {
 		t.Errorf("Minor = %d, want 0", got.Minor)
 	}
+	if got.Scenarios != 0x03 {
+		t.Errorf("Scenarios = 0x%08x, want 0x03", got.Scenarios)
+	}
 }
 
 func TestUseCaseDecl_CBORIntegerKeys(t *testing.T) {
 	decl := UseCaseDecl{
 		EndpointID: 2,
-		Name:       "EVC",
+		ID:         0x04, // EVC
 		Major:      1,
 		Minor:      3,
+		Scenarios:  0x3F, // 6 scenarios
 	}
 
 	data, err := cbor.Marshal(decl)
@@ -64,11 +69,11 @@ func TestUseCaseDecl_CBORIntegerKeys(t *testing.T) {
 		t.Errorf("key 1 = %v, want 2", v)
 	}
 
-	// Key 2 = name
+	// Key 2 = ID (now uint16)
 	if v, ok := raw[2]; !ok {
-		t.Error("missing key 2 (name)")
-	} else if v != "EVC" {
-		t.Errorf("key 2 = %v, want EVC", v)
+		t.Error("missing key 2 (id)")
+	} else if v != uint64(0x04) {
+		t.Errorf("key 2 = %v, want 0x04", v)
 	}
 
 	// Key 3 = major
@@ -84,15 +89,23 @@ func TestUseCaseDecl_CBORIntegerKeys(t *testing.T) {
 	} else if v != uint64(3) {
 		t.Errorf("key 4 = %v, want 3", v)
 	}
+
+	// Key 5 = scenarios
+	if v, ok := raw[5]; !ok {
+		t.Error("missing key 5 (scenarios)")
+	} else if v != uint64(0x3F) {
+		t.Errorf("key 5 = %v, want 0x3F", v)
+	}
 }
 
 func TestUseCaseDecl_MinorZeroEncoded(t *testing.T) {
 	// minor=0 must still appear in CBOR (no omitempty)
 	decl := UseCaseDecl{
 		EndpointID: 1,
-		Name:       "MPD",
+		ID:         0x03, // MPD
 		Major:      1,
 		Minor:      0,
+		Scenarios:  0x01, // BASE only
 	}
 
 	data, err := cbor.Marshal(decl)
@@ -107,5 +120,32 @@ func TestUseCaseDecl_MinorZeroEncoded(t *testing.T) {
 
 	if _, ok := raw[4]; !ok {
 		t.Error("key 4 (minor) missing -- zero values must be encoded")
+	}
+	if _, ok := raw[5]; !ok {
+		t.Error("key 5 (scenarios) missing -- must always be encoded")
+	}
+}
+
+func TestUseCaseDecl_ScenariosBaseOnly(t *testing.T) {
+	decl := UseCaseDecl{
+		EndpointID: 1,
+		ID:         0x0B, // TOUT
+		Major:      1,
+		Minor:      0,
+		Scenarios:  0x01, // BASE only
+	}
+
+	data, err := cbor.Marshal(decl)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var got UseCaseDecl
+	if err := cbor.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if got.Scenarios != 0x01 {
+		t.Errorf("Scenarios = 0x%08x, want 0x01 (BASE only)", got.Scenarios)
 	}
 }

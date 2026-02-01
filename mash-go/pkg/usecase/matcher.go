@@ -19,6 +19,9 @@ func MatchAll(profile *DeviceProfile, defs map[UseCaseName]*UseCaseDef) *DeviceU
 			result := matchEndpoint(def, ep)
 			if result.Matched && !best.Matched {
 				best = result
+			} else if result.Matched && result.Scenarios > best.Scenarios {
+				// Prefer endpoint with more scenarios matched
+				best = result
 			}
 		}
 
@@ -61,45 +64,63 @@ func matchEndpoint(def *UseCaseDef, ep *EndpointProfile) MatchResult {
 		}
 	}
 
-	allRequired := true
-
-	for _, freq := range def.Features {
-		fp, featurePresent := ep.Features[freq.FeatureID]
-
-		if !featurePresent {
-			if freq.Required {
-				result.MissingRequired = append(result.MissingRequired, freq.FeatureName)
-				allRequired = false
-			} else {
-				result.OptionalMissing = append(result.OptionalMissing, freq.FeatureName)
-			}
-			continue
+	// Match each scenario independently
+	for _, scenario := range def.Scenarios {
+		if matchScenarioFeatures(scenario.Features, ep) {
+			result.Scenarios |= 1 << ScenarioMap(scenario.Bit)
 		}
+	}
 
-		// Check required attributes
-		if !checkAttributes(freq, fp) {
-			if freq.Required {
-				result.MissingRequired = append(result.MissingRequired, freq.FeatureName+" (attributes)")
-				allRequired = false
-			} else {
-				result.OptionalMissing = append(result.OptionalMissing, freq.FeatureName+" (attributes)")
-			}
-			continue
-		}
+	// BASE must match for the use case to match
+	result.Matched = (result.Scenarios & ScenarioBASE) != 0
 
-		// Check required commands
-		if !checkCommands(freq, fp) {
-			if freq.Required {
-				result.MissingRequired = append(result.MissingRequired, freq.FeatureName+" (commands)")
-				allRequired = false
-			} else {
-				result.OptionalMissing = append(result.OptionalMissing, freq.FeatureName+" (commands)")
+	// If BASE didn't match, collect missing info
+	if !result.Matched {
+		base := def.BaseScenario()
+		if base != nil {
+			for _, freq := range base.Features {
+				if !freq.Required {
+					continue
+				}
+				fp, featurePresent := ep.Features[freq.FeatureID]
+				if !featurePresent {
+					result.MissingRequired = append(result.MissingRequired, freq.FeatureName)
+					continue
+				}
+				if !checkAttributes(freq, fp) {
+					result.MissingRequired = append(result.MissingRequired, freq.FeatureName+" (attributes)")
+					continue
+				}
+				if !checkCommands(freq, fp) {
+					result.MissingRequired = append(result.MissingRequired, freq.FeatureName+" (commands)")
+				}
 			}
 		}
 	}
 
-	result.Matched = allRequired
 	return result
+}
+
+// matchScenarioFeatures checks if all features in a scenario are satisfied.
+// Scenarios are atomic: ALL features must be present for the scenario to match,
+// regardless of the Required flag (which only affects PICS validation severity).
+func matchScenarioFeatures(features []FeatureRequirement, ep *EndpointProfile) bool {
+	for _, freq := range features {
+		fp, featurePresent := ep.Features[freq.FeatureID]
+		if !featurePresent {
+			return false
+		}
+
+		if !checkAttributes(freq, fp) {
+			return false
+		}
+
+		if !checkCommands(freq, fp) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func checkAttributes(freq FeatureRequirement, fp *FeatureProfile) bool {

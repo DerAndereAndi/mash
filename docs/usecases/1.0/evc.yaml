@@ -1,76 +1,117 @@
 name: EVC
+id: 0x04
 fullName: EV Charging
 specVersion: "1.0"
 major: 1
 minor: 0
 description: >
-  Comprehensive EV charging management: monitoring, limits, setpoints,
-  bidirectional V2G, and coordinated charging via price signals and plans.
+  Comprehensive EV charging management.
   Replaces EEBUS CEVC, DBEVC, EVSOC, OPEV, OSCEV, EVCC, EVSECC.
 
 endpointTypes:
   - EV_CHARGER
 
-features:
-  - feature: EnergyControl
-    required: true
-    attributes:
-      - name: acceptsLimits
-        requiredValue: true
-      - name: acceptsSetpoints
-      - name: acceptsCurrentLimits
-      - name: acceptsCurrentSetpoints
-    commands:
-      - setLimit
-      - clearLimit
-      - setSetpoint
-      - clearSetpoint
-      - setCurrentLimits
-      - clearCurrentLimits
-    subscribe: all
+scenarios:
+  - bit: 0
+    name: BASE
+    description: Basic EV charging with power limits and measurement.
+    features:
+      - feature: EnergyControl
+        required: true
+        attributes:
+          - name: acceptsLimits
+            requiredValue: true
+        commands:
+          - setLimit
+          - clearLimit
+        subscribe: all
 
-  - feature: ChargingSession
-    required: true
-    attributes:
-      - name: evDemandMode
-      - name: evMinEnergyRequest
-      - name: evMaxEnergyRequest
-      - name: evTargetEnergyRequest
-      - name: evDepartureTime
-      - name: evStateOfCharge
-      - name: evBatteryCapacity
-      - name: evMinStateOfCharge
-      - name: evTargetStateOfCharge
-      - name: evMinDischargingRequest
-      - name: evMaxDischargingRequest
-      - name: evDischargeBelowTargetPermitted
-    commands:
-      - setChargingMode
-    subscribe: all
+      - feature: Electrical
+        required: true
+        attributes:
+          - name: nominalMaxConsumption
 
-  - feature: Signals
-    required: false
-    commands:
-      - sendPriceSignal
-      - sendConstraintSignal
-    subscribe: all
+      - feature: Measurement
+        required: true
+        subscribe: all
 
-  - feature: Plan
-    required: false
-    commands:
-      - requestPlan
-      - acceptPlan
-    subscribe: all
+  - bit: 1
+    name: SOC_REPORTING
+    description: EVSE/controller handle SoC from EV when available.
+    features:
+      - feature: ChargingSession
+        attributes:
+          - name: evStateOfCharge
+          - name: evBatteryCapacity
+          - name: evMinStateOfCharge
+          - name: evTargetStateOfCharge
+        subscribe: all
 
-  - feature: Electrical
-    required: true
-    attributes:
-      - name: nominalMaxConsumption
-      - name: nominalMaxProduction
+  - bit: 2
+    name: ASYMMETRIC_CHARGING
+    description: Per-phase current limits for asymmetric charging.
+    features:
+      - feature: EnergyControl
+        attributes:
+          - name: acceptsCurrentLimits
+            requiredValue: true
+        commands:
+          - setCurrentLimits
+          - clearCurrentLimits
 
-  - feature: Measurement
-    required: true
-    subscribe: all
+  - bit: 3
+    name: V2G_DISCHARGE
+    description: Bidirectional V2G with setpoints and discharge.
+    features:
+      - feature: EnergyControl
+        attributes:
+          - name: acceptsSetpoints
+            requiredValue: true
+          - name: acceptsCurrentSetpoints
+        commands:
+          - setSetpoint
+          - clearSetpoint
+
+      - feature: Electrical
+        attributes:
+          - name: nominalMaxProduction
+
+      - feature: ChargingSession
+        attributes:
+          - name: evMinDischargingRequest
+          - name: evMaxDischargingRequest
+          - name: evDischargeBelowTargetPermitted
+
+  - bit: 4
+    name: COORDINATED
+    description: Price signals and plans for coordinated charging.
+    features:
+      - feature: Signals
+        commands:
+          - sendPriceSignal
+          - sendConstraintSignal
+        subscribe: all
+
+      - feature: Plan
+        commands:
+          - requestPlan
+          - acceptPlan
+        subscribe: all
+
+  - bit: 5
+    name: EV_DEMAND
+    description: EV energy/departure requests for scheduling.
+    features:
+      - feature: ChargingSession
+        attributes:
+          - name: evDemandMode
+          - name: evMinEnergyRequest
+          - name: evMaxEnergyRequest
+          - name: evTargetEnergyRequest
+          - name: evDepartureTime
+        commands:
+          - setChargingMode
+        subscribe: all
 
 commands:
   - setpoint

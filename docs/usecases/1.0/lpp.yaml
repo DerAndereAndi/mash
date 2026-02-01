@@ -1,4 +1,5 @@
 name: LPP
+id: 0x02
 fullName: Limit Power Production
 specVersion: "1.0"
 major: 1
@@ -11,25 +12,41 @@ endpointTypes:
   - INVERTER
   - BATTERY
 
-features:
-  - feature: EnergyControl
-    required: true
-    attributes:
-      - name: acceptsLimits
-        requiredValue: true
-    commands:
-      - setLimit
-      - clearLimit
-    subscribe: all
+scenarios:
+  - bit: 0
+    name: BASE
+    description: Basic power production limiting.
+    features:
+      - feature: EnergyControl
+        required: true
+        attributes:
+          - name: acceptsLimits
+            requiredValue: true
+        commands:
+          - setLimit
+          - clearLimit
+        subscribe: all
 
-  - feature: Electrical
-    required: true
-    attributes:
-      - name: nominalMaxProduction
+      - feature: Electrical
+        required: true
+        attributes:
+          - name: nominalMaxProduction
 
-  - feature: Measurement
-    required: false
-    subscribe: all
+  - bit: 1
+    name: MEASUREMENT
+    description: Measurement telemetry for production monitoring.
+    features:
+      - feature: Measurement
+        subscribe: all
+
+  - bit: 2
+    name: OVERRIDE
+    description: Override tracking.
+    features:
+      - feature: EnergyControl
+        attributes:
+          - name: overrideReason
+          - name: overrideDirection
 
 commands:
   - limit

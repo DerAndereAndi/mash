@@ -1,4 +1,5 @@
 name: COB
+id: 0x05
 fullName: Control of Battery
 specVersion: "1.0"
 major: 1
@@ -10,29 +11,50 @@ description: >
 endpointTypes:
   - BATTERY
 
-features:
-  - feature: EnergyControl
-    required: true
-    attributes:
-      - name: acceptsSetpoints
-        requiredValue: true
-      - name: controlMode
-    commands:
-      - setSetpoint
-      - clearSetpoint
-      - setLimit
-      - clearLimit
-    subscribe: all
+scenarios:
+  - bit: 0
+    name: BASE
+    description: Battery control via setpoints with electrical config and measurement.
+    features:
+      - feature: EnergyControl
+        required: true
+        attributes:
+          - name: acceptsSetpoints
+            requiredValue: true
+        commands:
+          - setSetpoint
+          - clearSetpoint
+        subscribe: all
 
-  - feature: Electrical
-    required: true
-    attributes:
-      - name: nominalMaxConsumption
-      - name: nominalMaxProduction
+      - feature: Electrical
+        required: true
+        attributes:
+          - name: nominalMaxConsumption
+          - name: nominalMaxProduction
 
-  - feature: Measurement
-    required: true
-    subscribe: all
+      - feature: Measurement
+        required: true
+        subscribe: all
+
+  - bit: 1
+    name: LIMITS
+    description: Battery also accepts power limits.
+    features:
+      - feature: EnergyControl
+        attributes:
+          - name: acceptsLimits
+            requiredValue: true
+        commands:
+          - setLimit
+          - clearLimit
+
+  - bit: 2
+    name: CONTROL_MODE
+    description: Control mode attribute for PCC/DIRECT targeting.
+    features:
+      - feature: EnergyControl
+        attributes:
+          - name: controlMode
 
 commands:
   - setpoint

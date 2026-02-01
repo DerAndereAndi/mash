@@ -107,8 +107,8 @@ func TestDeviceInfo(t *testing.T) {
 
 	t.Run("SetUseCases", func(t *testing.T) {
 		ucs := []*model.UseCaseDecl{
-			{EndpointID: 1, Name: "LPC", Major: 1, Minor: 0},
-			{EndpointID: 1, Name: "MPD", Major: 1, Minor: 0},
+			{EndpointID: 1, ID: 0x01, Major: 1, Minor: 0, Scenarios: 0x01},
+			{EndpointID: 1, ID: 0x03, Major: 1, Minor: 0, Scenarios: 0x01},
 		}
 		err := di.SetUseCases(ucs)
 		if err != nil {
@@ -119,14 +119,14 @@ func TestDeviceInfo(t *testing.T) {
 		if len(got) != 2 {
 			t.Fatalf("expected 2 use cases, got %d", len(got))
 		}
-		if got[0].Name != "LPC" {
-			t.Errorf("expected first use case LPC, got %s", got[0].Name)
+		if got[0].ID != 0x01 {
+			t.Errorf("expected first use case ID 0x01, got 0x%02X", got[0].ID)
 		}
 		if got[0].EndpointID != 1 {
 			t.Errorf("expected endpointId 1, got %d", got[0].EndpointID)
 		}
-		if got[1].Name != "MPD" {
-			t.Errorf("expected second use case MPD, got %s", got[1].Name)
+		if got[1].ID != 0x03 {
+			t.Errorf("expected second use case ID 0x03, got 0x%02X", got[1].ID)
 		}
 	})
 

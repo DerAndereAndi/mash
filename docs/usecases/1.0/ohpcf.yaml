@@ -1,4 +1,5 @@
 name: OHPCF
+id: 0x08
 fullName: Heat Pump Compressor Flexibility
 specVersion: "1.0"
 major: 1
@@ -10,35 +11,42 @@ description: >
 endpointTypes:
   - HEAT_PUMP
 
-features:
-  - feature: EnergyControl
-    required: true
-    attributes:
-      - name: acceptsLimits
-        requiredValue: true
-      - name: isPausable
-      - name: processState
-      - name: optionalProcess
-      - name: minRunDuration
-      - name: minPauseDuration
-      - name: maxRunDuration
-      - name: maxPauseDuration
-      - name: optionalProcessPower
-    commands:
-      - setLimit
-      - clearLimit
-      - pause
-      - resume
-    subscribe: all
+scenarios:
+  - bit: 0
+    name: BASE
+    description: Heat pump control with process timing constraints.
+    features:
+      - feature: EnergyControl
+        required: true
+        attributes:
+          - name: acceptsLimits
+            requiredValue: true
+          - name: isPausable
+          - name: processState
+          - name: optionalProcess
+          - name: minRunDuration
+          - name: minPauseDuration
+          - name: maxRunDuration
+          - name: maxPauseDuration
+          - name: optionalProcessPower
+        commands:
+          - setLimit
+          - clearLimit
+          - pause
+          - resume
+        subscribe: all
 
-  - feature: Electrical
-    required: true
-    attributes:
-      - name: nominalMaxConsumption
+      - feature: Electrical
+        required: true
+        attributes:
+          - name: nominalMaxConsumption
 
-  - feature: Measurement
-    required: false
-    subscribe: all
+  - bit: 1
+    name: MEASUREMENT
+    description: Measurement telemetry for heat pump monitoring.
+    features:
+      - feature: Measurement
+        subscribe: all
 
 commands:
   - limit

@@ -1,4 +1,5 @@
 name: TOUT
+id: 0x0B
 fullName: Time of Use Tariff
 specVersion: "1.0"
 major: 1
@@ -9,20 +10,24 @@ description: >
 
 endpointTypes: []
 
-features:
-  - feature: Tariff
-    required: true
-    attributes:
-      - name: currency
-    commands:
-      - setTariff
+scenarios:
+  - bit: 0
+    name: BASE
+    description: Time-of-use tariff and price signals.
+    features:
+      - feature: Tariff
+        required: true
+        attributes:
+          - name: currency
+        commands:
+          - setTariff
 
-  - feature: Signals
-    required: true
-    commands:
-      - sendPriceSignal
-      - clearSignals
-    subscribe: all
+      - feature: Signals
+        required: true
+        commands:
+          - sendPriceSignal
+          - clearSignals
+        subscribe: all
 
 commands:
   - signal

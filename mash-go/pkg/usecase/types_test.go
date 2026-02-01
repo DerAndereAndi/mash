@@ -10,11 +10,13 @@ func TestDeviceUseCases_SupportedCommands(t *testing.T) {
 				UseCase:    LPC,
 				Matched:    true,
 				EndpointID: 1,
+				Scenarios:  ScenarioBASE,
 			},
 			{
 				UseCase:    MPD,
 				Matched:    true,
 				EndpointID: 1,
+				Scenarios:  ScenarioBASE,
 			},
 			{
 				UseCase: LPP,
@@ -71,8 +73,8 @@ func TestDeviceUseCases_HasUseCase(t *testing.T) {
 	du := &DeviceUseCases{
 		DeviceID: "test-device",
 		Matches: []MatchResult{
-			{UseCase: LPC, Matched: true, EndpointID: 1},
-			{UseCase: MPD, Matched: true, EndpointID: 1},
+			{UseCase: LPC, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
+			{UseCase: MPD, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
 			{UseCase: LPP, Matched: false},
 		},
 	}
@@ -95,8 +97,8 @@ func TestDeviceUseCases_EndpointForUseCase(t *testing.T) {
 	du := &DeviceUseCases{
 		DeviceID: "test-device",
 		Matches: []MatchResult{
-			{UseCase: LPC, Matched: true, EndpointID: 1},
-			{UseCase: MPD, Matched: true, EndpointID: 2},
+			{UseCase: LPC, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
+			{UseCase: MPD, Matched: true, EndpointID: 2, Scenarios: ScenarioBASE},
 			{UseCase: LPP, Matched: false},
 		},
 	}
@@ -138,8 +140,8 @@ func TestDeviceUseCases_MatchedUseCases(t *testing.T) {
 	du := &DeviceUseCases{
 		DeviceID: "test-device",
 		Matches: []MatchResult{
-			{UseCase: LPC, Matched: true, EndpointID: 1},
-			{UseCase: MPD, Matched: true, EndpointID: 1},
+			{UseCase: LPC, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
+			{UseCase: MPD, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
 			{UseCase: LPP, Matched: false},
 		},
 	}
@@ -155,5 +157,105 @@ func TestDeviceUseCases_MatchedUseCases(t *testing.T) {
 	}
 	if !found[LPC] || !found[MPD] {
 		t.Errorf("expected LPC and MPD in matched use cases, got %v", names)
+	}
+}
+
+func TestDeviceUseCases_ScenariosForUseCase(t *testing.T) {
+	du := &DeviceUseCases{
+		DeviceID: "test-device",
+		Matches: []MatchResult{
+			{UseCase: LPC, Matched: true, EndpointID: 1, Scenarios: 0x03}, // BASE + MEASUREMENT
+			{UseCase: MPD, Matched: true, EndpointID: 1, Scenarios: ScenarioBASE},
+			{UseCase: LPP, Matched: false},
+		},
+	}
+
+	scenarios, ok := du.ScenariosForUseCase(LPC)
+	if !ok {
+		t.Fatal("expected ScenariosForUseCase(LPC) to return ok")
+	}
+	if scenarios != 0x03 {
+		t.Errorf("LPC scenarios = 0x%02X, want 0x03", scenarios)
+	}
+	if !scenarios.Has(0) {
+		t.Error("expected BASE to be set")
+	}
+	if !scenarios.Has(1) {
+		t.Error("expected MEASUREMENT to be set")
+	}
+
+	_, ok = du.ScenariosForUseCase(LPP)
+	if ok {
+		t.Error("expected ScenariosForUseCase(LPP) to return false")
+	}
+}
+
+func TestScenarioMap_Has(t *testing.T) {
+	sm := ScenarioMap(0x07) // bits 0, 1, 2
+
+	if !sm.Has(0) {
+		t.Error("expected bit 0 to be set")
+	}
+	if !sm.Has(1) {
+		t.Error("expected bit 1 to be set")
+	}
+	if !sm.Has(2) {
+		t.Error("expected bit 2 to be set")
+	}
+	if sm.Has(3) {
+		t.Error("expected bit 3 to NOT be set")
+	}
+}
+
+func TestUseCaseDef_AllFeatures(t *testing.T) {
+	def := &UseCaseDef{
+		Scenarios: []ScenarioDef{
+			{Bit: 0, Name: "BASE", Features: []FeatureRequirement{
+				{FeatureName: "A", FeatureID: 1},
+				{FeatureName: "B", FeatureID: 2},
+			}},
+			{Bit: 1, Name: "OPT", Features: []FeatureRequirement{
+				{FeatureName: "B", FeatureID: 2}, // duplicate
+				{FeatureName: "C", FeatureID: 3},
+			}},
+		},
+	}
+
+	all := def.AllFeatures()
+	if len(all) != 3 {
+		t.Errorf("AllFeatures() returned %d features, want 3", len(all))
+	}
+}
+
+func TestUseCaseDef_BaseScenario(t *testing.T) {
+	def := &UseCaseDef{
+		Scenarios: []ScenarioDef{
+			{Bit: 0, Name: "BASE"},
+			{Bit: 1, Name: "OPT"},
+		},
+	}
+
+	base := def.BaseScenario()
+	if base == nil {
+		t.Fatal("expected non-nil BaseScenario")
+	}
+	if base.Name != "BASE" {
+		t.Errorf("BaseScenario name = %q, want BASE", base.Name)
+	}
+}
+
+func TestUseCaseDef_DefinedScenarioMask(t *testing.T) {
+	def := &UseCaseDef{
+		Scenarios: []ScenarioDef{
+			{Bit: 0, Name: "BASE"},
+			{Bit: 1, Name: "S1"},
+			{Bit: 3, Name: "S3"},
+		},
+	}
+
+	mask := def.DefinedScenarioMask()
+	// bits 0, 1, 3 -> 0b1011 = 0x0B
+	if mask != 0x0B {
+		t.Errorf("DefinedScenarioMask = 0x%02X, want 0x0B", mask)
 	}
 }

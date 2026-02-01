@@ -11,9 +11,10 @@ import (
 func TestGenerator_ProducesValidGo(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Write a minimal valid YAML
+	// Write a minimal valid YAML with scenarios
 	yamlContent := `
 name: TEST
+id: 0xFF
 fullName: Test Use Case
 specVersion: "1.0"
 major: 1
@@ -21,16 +22,25 @@ minor: 0
 description: A test use case.
 endpointTypes:
   - EV_CHARGER
-features:
-  - feature: EnergyControl
-    required: true
-    attributes:
-      - name: acceptsLimits
-        requiredValue: true
-    commands:
-      - setLimit
-    subscriptions:
-      - controlState
+scenarios:
+  - bit: 0
+    name: BASE
+    description: Base scenario.
+    features:
+      - feature: EnergyControl
+        required: true
+        attributes:
+          - name: acceptsLimits
+            requiredValue: true
+        commands:
+          - setLimit
+        subscribe: all
+  - bit: 1
+    name: MEASUREMENT
+    description: Measurement scenario.
+    features:
+      - feature: Measurement
+        required: true
 commands:
   - test-cmd
 `
@@ -68,6 +78,27 @@ commands:
 	if !strings.Contains(content, `"TEST"`) {
 		t.Error("missing TEST use case")
 	}
+	if !strings.Contains(content, "ID:") {
+		t.Error("missing ID field in generated output")
+	}
+	if !strings.Contains(content, "0xFF") || !strings.Contains(content, "0xff") {
+		// Accept either case for hex
+		if !strings.Contains(content, "0xFF") && !strings.Contains(content, "0xff") {
+			t.Error("missing hex ID value in generated output")
+		}
+	}
+	if !strings.Contains(content, "Scenarios:") {
+		t.Error("missing Scenarios field in generated output")
+	}
+	if !strings.Contains(content, "ScenarioDef") {
+		t.Error("missing ScenarioDef type in generated output")
+	}
+	if !strings.Contains(content, "NameToID") {
+		t.Error("missing NameToID map")
+	}
+	if !strings.Contains(content, "IDToName") {
+		t.Error("missing IDToName map")
+	}
 	if !strings.Contains(content, "Major:") {
 		t.Error("missing Major field in generated output")
 	}
@@ -75,32 +106,7 @@ commands:
 		t.Error("missing Minor field in generated output")
 	}
 
-	// Verify it compiles by writing a main.go that imports it
-	mainDir := filepath.Join(tmpDir, "check")
-	if err := os.MkdirAll(mainDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Copy the generated file into a temp package to compile-check
-	checkFile := filepath.Join(mainDir, "check.go")
-	checkContent := `package main
-
-import "fmt"
-
-` + content + `
-
-func main() {
-	fmt.Println(len(Registry))
-}
-`
-	// Replace package name for standalone compilation
-	checkContent = strings.Replace(checkContent, "package usecase", "// generated", 1)
-
-	if err := os.WriteFile(checkFile, []byte(checkContent), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Just verify syntax with go vet on the generated file itself
+	// Just verify syntax with gofmt
 	cmd := exec.Command("gofmt", "-e", outputFile)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -137,11 +143,15 @@ func TestGenerator_UnknownFeature_Fails(t *testing.T) {
 
 	yamlContent := `
 name: BAD
+id: 0xFE
 fullName: Bad Use Case
 specVersion: "1.0"
-features:
-  - feature: NoSuchFeature
-    required: true
+scenarios:
+  - bit: 0
+    name: BASE
+    features:
+      - feature: NoSuchFeature
+        required: true
 commands: []
 `
 	if err := os.WriteFile(filepath.Join(inputDir, "bad.yaml"), []byte(yamlContent), 0o644); err != nil {

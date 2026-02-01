@@ -79,9 +79,9 @@ func runGenerator(inputDir, outputFile, specVer string) error {
 		return fmt.Errorf("no YAML files found in %s", inputDir)
 	}
 
-	// Sort by name for deterministic output
+	// Sort by ID for deterministic output
 	sort.Slice(defs, func(i, j int) bool {
-		return defs[i].Name < defs[j].Name
+		return defs[i].ID < defs[j].ID
 	})
 
 	// Generate Go source
@@ -106,12 +106,15 @@ func generateGoSource(defs []*usecase.UseCaseDef, specVer string) string {
 	b.WriteString(specVer)
 	b.WriteString("\n\n")
 	b.WriteString("package usecase\n\n")
+
+	// Registry keyed by UseCaseName (primary lookup for existing code)
 	b.WriteString("// Registry maps use case names to their resolved definitions.\n")
 	b.WriteString("var Registry = map[UseCaseName]*UseCaseDef{\n")
 
 	for _, def := range defs {
 		b.WriteString(fmt.Sprintf("\t%q: {\n", string(def.Name)))
 		b.WriteString(fmt.Sprintf("\t\tName:        %q,\n", string(def.Name)))
+		b.WriteString(fmt.Sprintf("\t\tID:          0x%02X,\n", uint16(def.ID)))
 		b.WriteString(fmt.Sprintf("\t\tFullName:    %q,\n", def.FullName))
 		b.WriteString(fmt.Sprintf("\t\tDescription: %q,\n", def.Description))
 		b.WriteString(fmt.Sprintf("\t\tSpecVersion: %q,\n", def.SpecVersion))
@@ -130,41 +133,21 @@ func generateGoSource(defs []*usecase.UseCaseDef, specVer string) string {
 			b.WriteString("},\n")
 		}
 
-		// Features
-		if len(def.Features) > 0 {
-			b.WriteString("\t\tFeatures: []FeatureRequirement{\n")
-			for _, fr := range def.Features {
+		// Scenarios
+		if len(def.Scenarios) > 0 {
+			b.WriteString("\t\tScenarios: []ScenarioDef{\n")
+			for _, sd := range def.Scenarios {
 				b.WriteString("\t\t\t{\n")
-				b.WriteString(fmt.Sprintf("\t\t\t\tFeatureName: %q,\n", fr.FeatureName))
-				b.WriteString(fmt.Sprintf("\t\t\t\tFeatureID:   0x%02x,\n", fr.FeatureID))
-				b.WriteString(fmt.Sprintf("\t\t\t\tRequired:    %v,\n", fr.Required))
+				b.WriteString(fmt.Sprintf("\t\t\t\tBit:         %d,\n", sd.Bit))
+				b.WriteString(fmt.Sprintf("\t\t\t\tName:        %q,\n", sd.Name))
+				b.WriteString(fmt.Sprintf("\t\t\t\tDescription: %q,\n", sd.Description))
 
-				// Attributes
-				if len(fr.Attributes) > 0 {
-					b.WriteString("\t\t\t\tAttributes: []AttributeRequirement{\n")
-					for _, ar := range fr.Attributes {
-						b.WriteString("\t\t\t\t\t{")
-						b.WriteString(fmt.Sprintf("Name: %q, AttrID: %d", ar.Name, ar.AttrID))
-						if ar.RequiredValue != nil {
-							b.WriteString(fmt.Sprintf(", RequiredValue: boolPtr(%v)", *ar.RequiredValue))
-						}
-						b.WriteString("},\n")
+				if len(sd.Features) > 0 {
+					b.WriteString("\t\t\t\tFeatures: []FeatureRequirement{\n")
+					for _, fr := range sd.Features {
+						writeFeatureReq(&b, &fr, "\t\t\t\t\t")
 					}
 					b.WriteString("\t\t\t\t},\n")
-				}
-
-				// Commands
-				if len(fr.Commands) > 0 {
-					b.WriteString("\t\t\t\tCommands: []CommandRequirement{\n")
-					for _, cr := range fr.Commands {
-						b.WriteString(fmt.Sprintf("\t\t\t\t\t{Name: %q, CommandID: %d},\n", cr.Name, cr.CommandID))
-					}
-					b.WriteString("\t\t\t\t},\n")
-				}
-
-				// Subscriptions
-				if fr.SubscribeAll {
-					b.WriteString("\t\t\t\tSubscribeAll: true,\n")
 				}
 
 				b.WriteString("\t\t\t},\n")
@@ -188,7 +171,63 @@ func generateGoSource(defs []*usecase.UseCaseDef, specVer string) string {
 	}
 
 	b.WriteString("}\n\n")
+
+	// NameToID map
+	b.WriteString("// NameToID maps human-readable use case names to their wire IDs.\n")
+	b.WriteString("var NameToID = map[UseCaseName]UseCaseID{\n")
+	for _, def := range defs {
+		b.WriteString(fmt.Sprintf("\t%q: 0x%02X,\n", string(def.Name), uint16(def.ID)))
+	}
+	b.WriteString("}\n\n")
+
+	// IDToName map
+	b.WriteString("// IDToName maps wire IDs to human-readable use case names.\n")
+	b.WriteString("var IDToName = map[UseCaseID]UseCaseName{\n")
+	for _, def := range defs {
+		b.WriteString(fmt.Sprintf("\t0x%02X: %q,\n", uint16(def.ID), string(def.Name)))
+	}
+	b.WriteString("}\n\n")
+
 	b.WriteString("func boolPtr(v bool) *bool { return &v }\n")
 
 	return b.String()
+}
+
+func writeFeatureReq(b *strings.Builder, fr *usecase.FeatureRequirement, indent string) {
+	b.WriteString(indent + "{\n")
+	b.WriteString(fmt.Sprintf("%s\tFeatureName: %q,\n", indent, fr.FeatureName))
+	b.WriteString(fmt.Sprintf("%s\tFeatureID:   0x%02x,\n", indent, fr.FeatureID))
+	if fr.Required {
+		b.WriteString(fmt.Sprintf("%s\tRequired:    true,\n", indent))
+	}
+
+	// Attributes
+	if len(fr.Attributes) > 0 {
+		b.WriteString(fmt.Sprintf("%s\tAttributes: []AttributeRequirement{\n", indent))
+		for _, ar := range fr.Attributes {
+			b.WriteString(fmt.Sprintf("%s\t\t{", indent))
+			b.WriteString(fmt.Sprintf("Name: %q, AttrID: %d", ar.Name, ar.AttrID))
+			if ar.RequiredValue != nil {
+				b.WriteString(fmt.Sprintf(", RequiredValue: boolPtr(%v)", *ar.RequiredValue))
+			}
+			b.WriteString("},\n")
+		}
+		b.WriteString(fmt.Sprintf("%s\t},\n", indent))
+	}
+
+	// Commands
+	if len(fr.Commands) > 0 {
+		b.WriteString(fmt.Sprintf("%s\tCommands: []CommandRequirement{\n", indent))
+		for _, cr := range fr.Commands {
+			b.WriteString(fmt.Sprintf("%s\t\t{Name: %q, CommandID: %d},\n", indent, cr.Name, cr.CommandID))
+		}
+		b.WriteString(fmt.Sprintf("%s\t},\n", indent))
+	}
+
+	// Subscriptions
+	if fr.SubscribeAll {
+		b.WriteString(fmt.Sprintf("%s\tSubscribeAll: true,\n", indent))
+	}
+
+	b.WriteString(indent + "},\n")
 }
