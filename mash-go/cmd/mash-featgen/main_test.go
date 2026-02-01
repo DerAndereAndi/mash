@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/mash-protocol/mash-go/pkg/specparse"
 )
 
 var multiSpace = regexp.MustCompile(`\s+`)
@@ -27,9 +29,9 @@ func TestFeatureDirName(t *testing.T) {
 		{"Measurement", "measurement"},
 	}
 	for _, tt := range tests {
-		got := featureDirName(tt.in)
+		got := specparse.FeatureDirName(tt.in)
 		if got != tt.want {
-			t.Errorf("featureDirName(%q) = %q, want %q", tt.in, got, tt.want)
+			t.Errorf("FeatureDirName(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }

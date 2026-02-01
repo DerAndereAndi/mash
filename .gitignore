@@ -1,2 +1,7 @@
 # Claude Code
 .claude/
+
+# Generated documentation (reproducible from YAML via mash-docgen)
+docs/generated/
+docs/index.md
+mkdocs.yml

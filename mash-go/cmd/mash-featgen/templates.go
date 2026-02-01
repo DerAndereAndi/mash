@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+
+	"github.com/mash-protocol/mash-go/pkg/specparse"
 )
 
 // funcMap provides helper functions available to all templates.
@@ -73,7 +75,7 @@ type constructorAttrData struct {
 // enumsData holds data for the enums template.
 type enumsData struct {
 	Prefix string
-	Enums  []RawEnumDef
+	Enums  []specparse.RawEnumDef
 }
 
 // --- Template definitions ---
@@ -278,7 +280,7 @@ Parameters: []model.ParameterMetadata{
 
 // modelTypeData holds data for model type generation templates.
 type modelTypeData struct {
-	Types []RawModelTypeDef
+	Types []specparse.RawModelTypeDef
 }
 
 const featureTypesTmpl = `{{define "featureTypes"}}

@@ -3,18 +3,20 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/mash-protocol/mash-go/pkg/specparse"
 )
 
-func statusDef() *RawFeatureDef {
-	return &RawFeatureDef{
+func statusDef() *specparse.RawFeatureDef {
+	return &specparse.RawFeatureDef{
 		Name:     "Status",
 		ID:       0x02,
 		Revision: 1,
-		Enums: []RawEnumDef{
+		Enums: []specparse.RawEnumDef{
 			{
 				Name: "OperatingState",
 				Type: "uint8",
-				Values: []RawEnumValue{
+				Values: []specparse.RawEnumValue{
 					{Name: "UNKNOWN", Value: 0x00, Description: "State not known"},
 					{Name: "OFFLINE", Value: 0x01},
 					{Name: "STANDBY", Value: 0x02},
@@ -27,7 +29,7 @@ func statusDef() *RawFeatureDef {
 				},
 			},
 		},
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 1, Name: "operatingState", Type: "uint8", Enum: "OperatingState", Access: "readOnly", Mandatory: true, Default: "UNKNOWN", Description: "Current operating state"},
 			{ID: 2, Name: "stateDetail", Type: "uint32", Access: "readOnly", Nullable: true, Description: "Vendor-specific state detail code"},
 			{ID: 3, Name: "faultCode", Type: "uint32", Access: "readOnly", Nullable: true, Description: "Fault/error code when state=FAULT"},
@@ -79,13 +81,13 @@ func TestGenerateEnumType(t *testing.T) {
 }
 
 func TestGenerateSharedEnumType(t *testing.T) {
-	shared := &RawSharedTypes{
+	shared := &specparse.RawSharedTypes{
 		Version: "1.0",
-		Enums: []RawEnumDef{
+		Enums: []specparse.RawEnumDef{
 			{
 				Name: "Phase",
 				Type: "uint8",
-				Values: []RawEnumValue{
+				Values: []specparse.RawEnumValue{
 					{Name: "A", Value: 0x00},
 					{Name: "B", Value: 0x01},
 					{Name: "C", Value: 0x02},
@@ -208,11 +210,11 @@ func TestGenerateSetter_NullableType(t *testing.T) {
 }
 
 func TestGenerateGetter_SimpleNumericType(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "Electrical",
 		ID:       0x03,
 		Revision: 1,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 1, Name: "phaseCount", Type: "uint8", Access: "readOnly", Default: 1, Description: "Number of phases"},
 		},
 	}
@@ -226,11 +228,11 @@ func TestGenerateGetter_SimpleNumericType(t *testing.T) {
 }
 
 func TestGenerateGetter_MapType(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "Measurement",
 		ID:       0x04,
 		Revision: 1,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 10, Name: "acActivePowerPerPhase", Type: "map", MapKeyType: "Phase", MapValueType: "int64", Access: "readOnly", Nullable: true, Description: "Active power per phase"},
 		},
 	}
@@ -244,11 +246,11 @@ func TestGenerateGetter_MapType(t *testing.T) {
 }
 
 func TestGenerateSetter_MapType(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "Electrical",
 		ID:       0x03,
 		Revision: 1,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 2, Name: "phaseMapping", Type: "map", MapKeyType: "Phase", MapValueType: "GridPhase", Access: "readOnly", Description: "Device phase to grid phase mapping"},
 		},
 	}
@@ -261,11 +263,11 @@ func TestGenerateSetter_MapType(t *testing.T) {
 }
 
 func TestGenerateCommandConstants(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{ID: 1, Name: "setLimit", Mandatory: true, Description: "Set power limits"},
 			{ID: 2, Name: "clearLimit", Mandatory: true, Description: "Remove limits"},
 		},
@@ -280,19 +282,19 @@ func TestGenerateCommandConstants(t *testing.T) {
 }
 
 func TestGenerateCommandStructs(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{
 				ID:   1,
 				Name: "setLimit",
-				Parameters: []RawParameterDef{
+				Parameters: []specparse.RawParameterDef{
 					{Name: "consumptionLimit", Type: "int64", Required: false},
 					{Name: "cause", Type: "uint8", Enum: "LimitCause", Required: true},
 				},
-				Response: []RawParameterDef{
+				Response: []specparse.RawParameterDef{
 					{Name: "applied", Type: "bool", Required: true},
 					{Name: "rejectReason", Type: "uint8", Enum: "LimitRejectReason", Required: false},
 				},
@@ -316,13 +318,13 @@ func TestGenerateCommandStructs(t *testing.T) {
 }
 
 func TestGenerateCallbackSetter(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{ID: 1, Name: "setLimit", Description: "Set power limits",
-				Response: []RawParameterDef{
+				Response: []specparse.RawParameterDef{
 					{Name: "applied", Type: "bool", Required: true},
 					{Name: "controlState", Type: "uint8", Enum: "ControlState", Required: true},
 				},
@@ -343,11 +345,11 @@ func TestGenerateCallbackSetter(t *testing.T) {
 }
 
 func TestGenerateBoolGetter(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 10, Name: "acceptsLimits", Type: "bool", Access: "readOnly", Default: false, Description: "Accepts SetLimit command"},
 		},
 	}
@@ -481,11 +483,11 @@ func TestEnumValueSuffix_Initialisms(t *testing.T) {
 }
 
 func TestGenerateConstants_Initialisms(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "Measurement",
 		ID:       0x04,
 		Revision: 1,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 1, Name: "acActivePower", Type: "int64", Access: "readOnly", Nullable: true, Description: "Active power"},
 			{ID: 40, Name: "dcPower", Type: "int64", Access: "readOnly", Nullable: true, Description: "DC power"},
 		},
@@ -500,11 +502,11 @@ func TestGenerateConstants_Initialisms(t *testing.T) {
 }
 
 func TestGenerateGetters_Initialisms(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "DeviceInfo",
 		ID:       0x06,
 		Revision: 1,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 1, Name: "deviceId", Type: "string", Access: "readOnly", Description: "Device identifier"},
 		},
 	}
@@ -517,11 +519,11 @@ func TestGenerateGetters_Initialisms(t *testing.T) {
 }
 
 func TestGenerateSetters_Initialisms(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "DeviceInfo",
 		ID:       0x06,
 		Revision: 1,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 1, Name: "deviceId", Type: "string", Access: "readOnly", Description: "Device identifier"},
 		},
 	}
@@ -534,15 +536,15 @@ func TestGenerateSetters_Initialisms(t *testing.T) {
 }
 
 func TestGenerateEnums_Initialisms(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "ChargingSession",
 		ID:       0x07,
 		Revision: 1,
-		Enums: []RawEnumDef{
+		Enums: []specparse.RawEnumDef{
 			{
 				Name: "EVIDType",
 				Type: "uint8",
-				Values: []RawEnumValue{
+				Values: []specparse.RawEnumValue{
 					{Name: "PCID", Value: 0x00},
 					{Name: "MAC_EUI48", Value: 0x01},
 					{Name: "RFID", Value: 0x03},
@@ -567,13 +569,13 @@ func TestGenerateEnums_Initialisms(t *testing.T) {
 }
 
 func TestGenerateEnums_SharedInitialisms(t *testing.T) {
-	shared := &RawSharedTypes{
+	shared := &specparse.RawSharedTypes{
 		Version: "1.0",
-		Enums: []RawEnumDef{
+		Enums: []specparse.RawEnumDef{
 			{
 				Name: "PhasePair",
 				Type: "uint8",
-				Values: []RawEnumValue{
+				Values: []specparse.RawEnumValue{
 					{Name: "AB", Value: 0x00},
 					{Name: "BC", Value: 0x01},
 					{Name: "CA", Value: 0x02},
@@ -596,18 +598,18 @@ func TestGenerateEnums_SharedInitialisms(t *testing.T) {
 func TestIsSimpleResponse(t *testing.T) {
 	tests := []struct {
 		name string
-		cmd  RawCommandDef
+		cmd  specparse.RawCommandDef
 		want bool
 	}{
-		{"no response", RawCommandDef{Name: "resume"}, true},
-		{"success only", RawCommandDef{Name: "pause", Response: []RawParameterDef{
+		{"no response", specparse.RawCommandDef{Name: "resume"}, true},
+		{"success only", specparse.RawCommandDef{Name: "pause", Response: []specparse.RawParameterDef{
 			{Name: "success", Type: "bool", Required: true},
 		}}, true},
-		{"complex response", RawCommandDef{Name: "setLimit", Response: []RawParameterDef{
+		{"complex response", specparse.RawCommandDef{Name: "setLimit", Response: []specparse.RawParameterDef{
 			{Name: "applied", Type: "bool", Required: true},
 			{Name: "controlState", Type: "uint8", Enum: "ControlState", Required: true},
 		}}, false},
-		{"non-success bool", RawCommandDef{Name: "removeZone", Response: []RawParameterDef{
+		{"non-success bool", specparse.RawCommandDef{Name: "removeZone", Response: []specparse.RawParameterDef{
 			{Name: "removed", Type: "bool", Required: true},
 		}}, false},
 	}
@@ -625,13 +627,13 @@ func TestIsSimpleResponse(t *testing.T) {
 func TestHasParameters(t *testing.T) {
 	tests := []struct {
 		name string
-		cmd  RawCommandDef
+		cmd  specparse.RawCommandDef
 		want bool
 	}{
-		{"with params", RawCommandDef{Name: "pause", Parameters: []RawParameterDef{
+		{"with params", specparse.RawCommandDef{Name: "pause", Parameters: []specparse.RawParameterDef{
 			{Name: "duration", Type: "uint32"},
 		}}, true},
-		{"no params", RawCommandDef{Name: "resume"}, false},
+		{"no params", specparse.RawCommandDef{Name: "resume"}, false},
 	}
 
 	for _, tt := range tests {
@@ -647,26 +649,26 @@ func TestHasParameters(t *testing.T) {
 func TestTypedHandlerType(t *testing.T) {
 	tests := []struct {
 		name string
-		cmd  RawCommandDef
+		cmd  specparse.RawCommandDef
 		want string
 	}{
 		{
 			"no params, no response",
-			RawCommandDef{Name: "resume"},
+			specparse.RawCommandDef{Name: "resume"},
 			"func(ctx context.Context) error",
 		},
 		{
 			"params, simple response",
-			RawCommandDef{Name: "pause", Parameters: []RawParameterDef{
+			specparse.RawCommandDef{Name: "pause", Parameters: []specparse.RawParameterDef{
 				{Name: "duration", Type: "uint32", Required: false},
 			}},
 			"func(ctx context.Context, req PauseRequest) error",
 		},
 		{
 			"params, complex response",
-			RawCommandDef{Name: "setLimit", Parameters: []RawParameterDef{
+			specparse.RawCommandDef{Name: "setLimit", Parameters: []specparse.RawParameterDef{
 				{Name: "consumptionLimit", Type: "int64", Required: false},
-			}, Response: []RawParameterDef{
+			}, Response: []specparse.RawParameterDef{
 				{Name: "applied", Type: "bool", Required: true},
 				{Name: "controlState", Type: "uint8", Enum: "ControlState", Required: true},
 			}},
@@ -674,9 +676,9 @@ func TestTypedHandlerType(t *testing.T) {
 		},
 		{
 			"params, complex response (removeZone)",
-			RawCommandDef{Name: "removeZone", Parameters: []RawParameterDef{
+			specparse.RawCommandDef{Name: "removeZone", Parameters: []specparse.RawParameterDef{
 				{Name: "zoneId", Type: "string", Required: true},
-			}, Response: []RawParameterDef{
+			}, Response: []specparse.RawParameterDef{
 				{Name: "removed", Type: "bool", Required: true},
 			}},
 			"func(ctx context.Context, req RemoveZoneRequest) (RemoveZoneResponse, error)",
@@ -694,11 +696,11 @@ func TestTypedHandlerType(t *testing.T) {
 }
 
 func TestGenerateHandler_SimpleNoParams(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{ID: 8, Name: "resume", Description: "Resume operation"},
 		},
 	}
@@ -717,13 +719,13 @@ func TestGenerateHandler_SimpleNoParams(t *testing.T) {
 }
 
 func TestGenerateHandler_SimpleWithParams(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{ID: 7, Name: "pause", Description: "Pause operation",
-				Parameters: []RawParameterDef{
+				Parameters: []specparse.RawParameterDef{
 					{Name: "duration", Type: "uint32", Required: false},
 				},
 			},
@@ -745,19 +747,19 @@ func TestGenerateHandler_SimpleWithParams(t *testing.T) {
 }
 
 func TestGenerateHandler_ComplexResponse(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{ID: 1, Name: "setLimit", Description: "Set power limits",
-				Parameters: []RawParameterDef{
+				Parameters: []specparse.RawParameterDef{
 					{Name: "consumptionLimit", Type: "int64", Required: false},
 					{Name: "productionLimit", Type: "int64", Required: false},
 					{Name: "duration", Type: "uint32", Required: false},
 					{Name: "cause", Type: "uint8", Enum: "LimitCause", Required: true},
 				},
-				Response: []RawParameterDef{
+				Response: []specparse.RawParameterDef{
 					{Name: "applied", Type: "bool", Required: true},
 					{Name: "controlState", Type: "uint8", Enum: "ControlState", Required: true},
 					{Name: "effectiveConsumptionLimit", Type: "int64", Required: false},
@@ -787,13 +789,13 @@ func TestGenerateHandler_ComplexResponse(t *testing.T) {
 }
 
 func TestGenerateCallbackSetter_Typed(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{ID: 7, Name: "pause", Description: "Pause operation",
-				Parameters: []RawParameterDef{
+				Parameters: []specparse.RawParameterDef{
 					{Name: "duration", Type: "uint32", Required: false},
 				},
 			},
@@ -809,22 +811,22 @@ func TestGenerateCallbackSetter_Typed(t *testing.T) {
 }
 
 func TestGenerateStruct_TypedFields(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{ID: 1, Name: "setLimit", Description: "Set power limits",
-				Parameters: []RawParameterDef{
+				Parameters: []specparse.RawParameterDef{
 					{Name: "consumptionLimit", Type: "int64", Required: false},
 				},
-				Response: []RawParameterDef{
+				Response: []specparse.RawParameterDef{
 					{Name: "applied", Type: "bool", Required: true},
 					{Name: "controlState", Type: "uint8", Enum: "ControlState", Required: true},
 				},
 			},
 			{ID: 7, Name: "pause", Description: "Pause operation",
-				Parameters: []RawParameterDef{
+				Parameters: []specparse.RawParameterDef{
 					{Name: "duration", Type: "uint32", Required: false},
 				},
 			},
@@ -843,11 +845,11 @@ func TestGenerateStruct_TypedFields(t *testing.T) {
 }
 
 func TestGenerateNoResponseStruct_SimpleCommand(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{ID: 8, Name: "resume", Description: "Resume operation"},
 		},
 	}
@@ -864,11 +866,11 @@ func TestGenerateNoResponseStruct_SimpleCommand(t *testing.T) {
 // --- Phase C: Ptr setter tests ---
 
 func TestGenerateSetters_NullablePtr(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 20, Name: "effectiveConsumptionLimit", Type: "int64", Access: "readOnly", Nullable: true, Description: "Effective consumption limit"},
 		},
 	}
@@ -888,11 +890,11 @@ func TestGenerateSetters_NullablePtr(t *testing.T) {
 }
 
 func TestGenerateSetters_NonNullableNoPtr(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "Electrical",
 		ID:       0x03,
 		Revision: 1,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 1, Name: "phaseCount", Type: "uint8", Access: "readOnly", Default: 1, Description: "Number of phases"},
 		},
 	}
@@ -908,16 +910,16 @@ func TestGenerateSetters_NonNullableNoPtr(t *testing.T) {
 }
 
 func TestGenerateSetters_NullableEnumPtr(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Enums: []RawEnumDef{
-			{Name: "OverrideReason", Type: "uint8", Values: []RawEnumValue{
+		Enums: []specparse.RawEnumDef{
+			{Name: "OverrideReason", Type: "uint8", Values: []specparse.RawEnumValue{
 				{Name: "SELF_PROTECTION", Value: 0x00},
 			}},
 		},
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 75, Name: "overrideReason", Type: "uint8", Enum: "OverrideReason", Access: "readOnly", Nullable: true, Description: "Override reason"},
 		},
 	}
@@ -947,29 +949,29 @@ func mustNotContain(t *testing.T, output, substr string) {
 
 // --- Phase D: Typed array support tests ---
 
-func chargingSessionDef() *RawFeatureDef {
-	return &RawFeatureDef{
+func chargingSessionDef() *specparse.RawFeatureDef {
+	return &specparse.RawFeatureDef{
 		Name:     "ChargingSession",
 		ID:       0x06,
 		Revision: 1,
-		Enums: []RawEnumDef{
-			{Name: "EVIDType", Type: "uint8", Description: "Type of EV identification", Values: []RawEnumValue{
+		Enums: []specparse.RawEnumDef{
+			{Name: "EVIDType", Type: "uint8", Description: "Type of EV identification", Values: []specparse.RawEnumValue{
 				{Name: "PCID", Value: 0x00},
 				{Name: "VIN", Value: 0x04},
 			}},
-			{Name: "ChargingMode", Type: "uint8", Description: "Charging optimization strategy", Values: []RawEnumValue{
+			{Name: "ChargingMode", Type: "uint8", Description: "Charging optimization strategy", Values: []specparse.RawEnumValue{
 				{Name: "OFF", Value: 0x00},
 				{Name: "PV_SURPLUS_ONLY", Value: 0x01},
 			}},
 		},
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{
 				ID: 20, Name: "evIdentifications", Type: "array", Access: "readOnly", Nullable: true,
 				Description: "List of EV identifiers",
-				Items: &RawArrayItemDef{
+				Items: &specparse.RawArrayItemDef{
 					Type:       "object",
 					StructName: "EVIdentification",
-					Fields: []RawArrayFieldDef{
+					Fields: []specparse.RawArrayFieldDef{
 						{Name: "type", Type: "uint8", Enum: "EVIDType"},
 						{Name: "value", Type: "string"},
 					},
@@ -978,7 +980,7 @@ func chargingSessionDef() *RawFeatureDef {
 			{
 				ID: 71, Name: "supportedChargingModes", Type: "array", Access: "readOnly",
 				Description: "Optimization modes EVSE supports",
-				Items: &RawArrayItemDef{
+				Items: &specparse.RawArrayItemDef{
 					Type: "uint8",
 					Enum: "ChargingMode",
 				},
@@ -1101,7 +1103,7 @@ func TestToEndpointGoName(t *testing.T) {
 }
 
 func TestGenerateFeatureTypes(t *testing.T) {
-	types := []RawModelTypeDef{
+	types := []specparse.RawModelTypeDef{
 		{Name: "DeviceInfo", ID: 0x01, Description: "Device identity and structure"},
 		{Name: "Status", ID: 0x02, Description: "Operating state and fault information"},
 		{Name: "EnergyControl", ID: 0x05, Description: "Limits, setpoints, and control commands"},
@@ -1147,7 +1149,7 @@ func TestGenerateFeatureTypes_EmptyInput(t *testing.T) {
 }
 
 func TestGenerateEndpointTypes(t *testing.T) {
-	types := []RawModelTypeDef{
+	types := []specparse.RawModelTypeDef{
 		{Name: "DEVICE_ROOT", ID: 0x00, Description: "Device-level metadata (always endpoint 0)"},
 		{Name: "EV_CHARGER", ID: 0x05, Description: "EVSE / wallbox"},
 		{Name: "HVAC", ID: 0x08, Description: "HVAC system"},
@@ -1176,7 +1178,7 @@ func TestGenerateEndpointTypes(t *testing.T) {
 }
 
 func TestGenerateEndpointTypes_HVAC(t *testing.T) {
-	types := []RawModelTypeDef{
+	types := []specparse.RawModelTypeDef{
 		{Name: "HVAC", ID: 0x08, Description: "HVAC system"},
 	}
 
@@ -1192,11 +1194,11 @@ func TestGenerateEndpointTypes_HVAC(t *testing.T) {
 }
 
 func TestValidateFeatureIDs_Match(t *testing.T) {
-	types := []RawModelTypeDef{
+	types := []specparse.RawModelTypeDef{
 		{Name: "DeviceInfo", ID: 0x01},
 		{Name: "Status", ID: 0x02},
 	}
-	defs := []*RawFeatureDef{
+	defs := []*specparse.RawFeatureDef{
 		{Name: "DeviceInfo", ID: 0x01},
 		{Name: "Status", ID: 0x02},
 	}
@@ -1208,11 +1210,11 @@ func TestValidateFeatureIDs_Match(t *testing.T) {
 }
 
 func TestValidateFeatureIDs_IDMismatch(t *testing.T) {
-	types := []RawModelTypeDef{
+	types := []specparse.RawModelTypeDef{
 		{Name: "DeviceInfo", ID: 0x01},
 		{Name: "Status", ID: 0x05},
 	}
-	defs := []*RawFeatureDef{
+	defs := []*specparse.RawFeatureDef{
 		{Name: "DeviceInfo", ID: 0x01},
 		{Name: "Status", ID: 0x02},
 	}
@@ -1227,10 +1229,10 @@ func TestValidateFeatureIDs_IDMismatch(t *testing.T) {
 }
 
 func TestValidateFeatureIDs_MissingEntry(t *testing.T) {
-	types := []RawModelTypeDef{
+	types := []specparse.RawModelTypeDef{
 		{Name: "DeviceInfo", ID: 0x01},
 	}
-	defs := []*RawFeatureDef{
+	defs := []*specparse.RawFeatureDef{
 		{Name: "DeviceInfo", ID: 0x01},
 		{Name: "Status", ID: 0x02},
 	}

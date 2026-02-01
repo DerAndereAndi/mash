@@ -1,4 +1,4 @@
-.PHONY: build test test-unit test-integration generate mocks usecases features install-mockery lint clean help
+.PHONY: build test test-unit test-integration generate mocks usecases features docs install-mockery lint clean help
 
 # Build all packages
 build:
@@ -37,6 +37,13 @@ features:
 		-model-output pkg/model/ \
 		-spec-output pkg/version/specs/1.0.yaml
 
+# Generate documentation site (Markdown + MkDocs config)
+docs:
+	go run ./cmd/mash-docgen \
+		-docs ../docs \
+		-output ../docs/generated \
+		-version 1.0
+
 # Generate use case definitions from YAML
 usecases:
 	go run ./cmd/mash-ucgen -input ../docs/usecases/1.0 -output pkg/usecase/definitions_gen.go -version 1.0
@@ -66,6 +73,7 @@ help:
 	@echo "  test-unit           - Run unit tests only (fast)"
 	@echo "  test-integration    - Run integration tests"
 	@echo "  generate/mocks      - Generate mock files"
+	@echo "  docs                - Generate documentation site"
 	@echo "  install-mockery     - Install mockery v2"
 	@echo "  lint                - Run golangci-lint"
 	@echo "  clean               - Remove generated files"

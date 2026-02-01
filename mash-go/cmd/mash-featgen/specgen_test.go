@@ -3,12 +3,14 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/mash-protocol/mash-go/pkg/specparse"
 )
 
 func TestDeriveSpecManifest_StatusFeature(t *testing.T) {
-	features := []*RawFeatureDef{statusDef()}
+	features := []*specparse.RawFeatureDef{statusDef()}
 
-	output, err := DeriveSpecManifest(features, "1.0", "MASH Protocol Specification v1.0 – Initial release")
+	output, err := DeriveSpecManifest(features, "1.0", "MASH Protocol Specification v1.0 -- Initial release")
 	if err != nil {
 		t.Fatalf("DeriveSpecManifest failed: %v", err)
 	}
@@ -29,21 +31,21 @@ func TestDeriveSpecManifest_StatusFeature(t *testing.T) {
 }
 
 func TestDeriveSpecManifest_MandatoryFeature(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:      "DeviceInfo",
 		ID:        0x01,
 		Revision:  1,
 		Mandatory: true,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 1, Name: "deviceId", Type: "string", Access: "readOnly", Mandatory: true},
 			{ID: 5, Name: "vendorId", Type: "uint32", Access: "readOnly"},
 		},
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{ID: 0x10, Name: "removeZone", Mandatory: true},
 		},
 	}
 
-	output, err := DeriveSpecManifest([]*RawFeatureDef{def}, "1.0", "test")
+	output, err := DeriveSpecManifest([]*specparse.RawFeatureDef{def}, "1.0", "test")
 	if err != nil {
 		t.Fatalf("DeriveSpecManifest failed: %v", err)
 	}
@@ -55,21 +57,21 @@ func TestDeriveSpecManifest_MandatoryFeature(t *testing.T) {
 }
 
 func TestDeriveSpecManifest_WithCommands(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "EnergyControl",
 		ID:       0x05,
 		Revision: 1,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 1, Name: "deviceType", Type: "uint8", Access: "readOnly", Mandatory: true},
 		},
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{ID: 1, Name: "setLimit", Mandatory: true},
 			{ID: 2, Name: "clearLimit", Mandatory: true},
 			{ID: 3, Name: "setCurrentLimits"},
 		},
 	}
 
-	output, err := DeriveSpecManifest([]*RawFeatureDef{def}, "1.0", "test")
+	output, err := DeriveSpecManifest([]*specparse.RawFeatureDef{def}, "1.0", "test")
 	if err != nil {
 		t.Fatalf("DeriveSpecManifest failed: %v", err)
 	}
@@ -83,16 +85,16 @@ func TestDeriveSpecManifest_WithCommands(t *testing.T) {
 }
 
 func TestDeriveSpecManifest_NoOptionalAttributes(t *testing.T) {
-	def := &RawFeatureDef{
+	def := &specparse.RawFeatureDef{
 		Name:     "Simple",
 		ID:       0x10,
 		Revision: 1,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 1, Name: "value", Type: "uint8", Access: "readOnly", Mandatory: true},
 		},
 	}
 
-	output, err := DeriveSpecManifest([]*RawFeatureDef{def}, "1.0", "test")
+	output, err := DeriveSpecManifest([]*specparse.RawFeatureDef{def}, "1.0", "test")
 	if err != nil {
 		t.Fatalf("DeriveSpecManifest failed: %v", err)
 	}
@@ -107,7 +109,7 @@ func TestDeriveSpecManifest_NoOptionalAttributes(t *testing.T) {
 func TestDeriveSpecManifest_NoCommands(t *testing.T) {
 	def := statusDef()
 
-	output, err := DeriveSpecManifest([]*RawFeatureDef{def}, "1.0", "test")
+	output, err := DeriveSpecManifest([]*specparse.RawFeatureDef{def}, "1.0", "test")
 	if err != nil {
 		t.Fatalf("DeriveSpecManifest failed: %v", err)
 	}
@@ -119,9 +121,9 @@ func TestDeriveSpecManifest_NoCommands(t *testing.T) {
 }
 
 func TestDeriveSpecManifest_FeatureOrder(t *testing.T) {
-	features := []*RawFeatureDef{
-		{Name: "Status", ID: 0x02, Revision: 1, Attributes: []RawAttributeDef{{ID: 1, Name: "state", Mandatory: true}}},
-		{Name: "DeviceInfo", ID: 0x01, Revision: 1, Mandatory: true, Attributes: []RawAttributeDef{{ID: 1, Name: "id", Mandatory: true}}},
+	features := []*specparse.RawFeatureDef{
+		{Name: "Status", ID: 0x02, Revision: 1, Attributes: []specparse.RawAttributeDef{{ID: 1, Name: "state", Mandatory: true}}},
+		{Name: "DeviceInfo", ID: 0x01, Revision: 1, Mandatory: true, Attributes: []specparse.RawAttributeDef{{ID: 1, Name: "id", Mandatory: true}}},
 	}
 
 	output, err := DeriveSpecManifest(features, "1.0", "test")
@@ -141,20 +143,20 @@ func TestDeriveSpecManifest_FeatureOrder(t *testing.T) {
 }
 
 func TestDeriveSpecManifest_HexIDs(t *testing.T) {
-	def := &RawFeatureDef{
-		Name:     "DeviceInfo",
-		ID:       0x01,
-		Revision: 1,
+	def := &specparse.RawFeatureDef{
+		Name:      "DeviceInfo",
+		ID:        0x01,
+		Revision:  1,
 		Mandatory: true,
-		Attributes: []RawAttributeDef{
+		Attributes: []specparse.RawAttributeDef{
 			{ID: 1, Name: "deviceId", Type: "string", Access: "readOnly", Mandatory: true},
 		},
-		Commands: []RawCommandDef{
+		Commands: []specparse.RawCommandDef{
 			{ID: 0x10, Name: "removeZone", Mandatory: true},
 		},
 	}
 
-	output, err := DeriveSpecManifest([]*RawFeatureDef{def}, "1.0", "test")
+	output, err := DeriveSpecManifest([]*specparse.RawFeatureDef{def}, "1.0", "test")
 	if err != nil {
 		t.Fatalf("DeriveSpecManifest failed: %v", err)
 	}

@@ -1,4 +1,7 @@
-package main
+// Package specparse provides shared YAML parsing types and functions for
+// MASH protocol specification files. Both mash-featgen and mash-docgen
+// import this package.
+package specparse
 
 import (
 	"fmt"
@@ -87,33 +90,6 @@ type RawParameterDef struct {
 	Description string `yaml:"description"`
 }
 
-// RawSharedTypes represents shared type definitions loaded from YAML.
-type RawSharedTypes struct {
-	Version string       `yaml:"version"`
-	Enums   []RawEnumDef `yaml:"enums"`
-}
-
-// RawProtocolVersions represents the protocol version mapping.
-type RawProtocolVersions struct {
-	Versions map[string]RawProtocolVersion `yaml:"versions"`
-}
-
-// RawModelTypeDef represents a type definition in the model registry (feature or endpoint types).
-type RawModelTypeDef struct {
-	Name        string `yaml:"name"`
-	ID          int    `yaml:"id"`
-	Description string `yaml:"description"`
-}
-
-// RawProtocolVersion maps feature names to version strings and includes model type registries.
-type RawProtocolVersion struct {
-	Description   string            `yaml:"description"`
-	Features      map[string]string `yaml:"features"`
-	Shared        string            `yaml:"shared"`
-	FeatureTypes  []RawModelTypeDef `yaml:"feature_types"`
-	EndpointTypes []RawModelTypeDef `yaml:"endpoint_types"`
-}
-
 // ParseFeatureDef parses a feature definition from YAML bytes.
 func ParseFeatureDef(data []byte) (*RawFeatureDef, error) {
 	var def RawFeatureDef
@@ -126,24 +102,6 @@ func ParseFeatureDef(data []byte) (*RawFeatureDef, error) {
 	return &def, nil
 }
 
-// ParseSharedTypes parses shared type definitions from YAML bytes.
-func ParseSharedTypes(data []byte) (*RawSharedTypes, error) {
-	var shared RawSharedTypes
-	if err := yaml.Unmarshal(data, &shared); err != nil {
-		return nil, fmt.Errorf("parsing shared types: %w", err)
-	}
-	return &shared, nil
-}
-
-// ParseProtocolVersions parses protocol version mappings from YAML bytes.
-func ParseProtocolVersions(data []byte) (*RawProtocolVersions, error) {
-	var pv RawProtocolVersions
-	if err := yaml.Unmarshal(data, &pv); err != nil {
-		return nil, fmt.Errorf("parsing protocol versions: %w", err)
-	}
-	return &pv, nil
-}
-
 // LoadFeatureDef loads and parses a feature definition from a file.
 func LoadFeatureDef(path string) (*RawFeatureDef, error) {
 	data, err := os.ReadFile(path)
@@ -151,22 +109,4 @@ func LoadFeatureDef(path string) (*RawFeatureDef, error) {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
 	}
 	return ParseFeatureDef(data)
-}
-
-// LoadSharedTypes loads and parses shared types from a file.
-func LoadSharedTypes(path string) (*RawSharedTypes, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
-	}
-	return ParseSharedTypes(data)
-}
-
-// LoadProtocolVersions loads and parses protocol version mappings from a file.
-func LoadProtocolVersions(path string) (*RawProtocolVersions, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
-	}
-	return ParseProtocolVersions(data)
 }

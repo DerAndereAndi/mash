@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mash-protocol/mash-go/pkg/specparse"
 	"golang.org/x/tools/imports"
 )
 
@@ -34,7 +35,7 @@ func main() {
 
 func run(featuresDir, sharedPath, protocolPath, version, outputDir, modelOutput, specOutput string) error {
 	// Load shared types
-	shared, err := LoadSharedTypes(sharedPath)
+	shared, err := specparse.LoadSharedTypes(sharedPath)
 	if err != nil {
 		return fmt.Errorf("loading shared types: %w", err)
 	}
@@ -42,9 +43,9 @@ func run(featuresDir, sharedPath, protocolPath, version, outputDir, modelOutput,
 	// Load protocol versions to determine which features/versions to generate
 	var featureVersions map[string]string
 	var specDescription string
-	var ver RawProtocolVersion
+	var ver specparse.RawProtocolVersion
 	if protocolPath != "" {
-		pv, err := LoadProtocolVersions(protocolPath)
+		pv, err := specparse.LoadProtocolVersions(protocolPath)
 		if err != nil {
 			return fmt.Errorf("loading protocol versions: %w", err)
 		}
@@ -105,14 +106,14 @@ func run(featuresDir, sharedPath, protocolPath, version, outputDir, modelOutput,
 	fmt.Printf("  generated %s\n", sharedOutPath)
 
 	// Load and generate each feature
-	var allDefs []*RawFeatureDef
+	var allDefs []*specparse.RawFeatureDef
 
 	for featureName, featureVer := range featureVersions {
 		// Convert feature name to directory name (e.g., "DeviceInfo" -> "device-info")
-		dirName := featureDirName(featureName)
+		dirName := specparse.FeatureDirName(featureName)
 		yamlPath := filepath.Join(featuresDir, dirName, featureVer+".yaml")
 
-		def, err := LoadFeatureDef(yamlPath)
+		def, err := specparse.LoadFeatureDef(yamlPath)
 		if err != nil {
 			return fmt.Errorf("loading feature %s: %w", featureName, err)
 		}
@@ -169,18 +170,6 @@ func writeFormatted(path string, code string) error {
 		return fmt.Errorf("goimports %s: %w", filepath.Base(path), err)
 	}
 	return os.WriteFile(path, formatted, 0o644)
-}
-
-// featureDirName converts "DeviceInfo" to "device-info", "EnergyControl" to "energy-control".
-func featureDirName(name string) string {
-	var result strings.Builder
-	for i, r := range name {
-		if i > 0 && r >= 'A' && r <= 'Z' {
-			result.WriteByte('-')
-		}
-		result.WriteRune(r)
-	}
-	return strings.ToLower(result.String())
 }
 
 // featureFileName converts "DeviceInfo" to "device_info", "EnergyControl" to "energy_control".

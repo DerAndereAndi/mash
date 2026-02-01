@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/mash-protocol/mash-go/pkg/specparse"
 )
 
 // DeriveSpecManifest produces the spec manifest YAML from parsed feature definitions.
 // Features are sorted by ID. The output matches the structure of pkg/version/specs/1.0.yaml.
-func DeriveSpecManifest(features []*RawFeatureDef, version, description string) (string, error) {
+func DeriveSpecManifest(features []*specparse.RawFeatureDef, version, description string) (string, error) {
 	// Sort features by ID
-	sorted := make([]*RawFeatureDef, len(features))
+	sorted := make([]*specparse.RawFeatureDef, len(features))
 	copy(sorted, features)
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].ID < sorted[j].ID
@@ -29,14 +31,14 @@ func DeriveSpecManifest(features []*RawFeatureDef, version, description string) 
 	return b.String(), nil
 }
 
-func writeFeatureSpec(b *strings.Builder, def *RawFeatureDef) {
+func writeFeatureSpec(b *strings.Builder, def *specparse.RawFeatureDef) {
 	fmt.Fprintf(b, "  %s:\n", def.Name)
 	fmt.Fprintf(b, "    id: 0x%02X\n", def.ID)
 	fmt.Fprintf(b, "    revision: %d\n", def.Revision)
 	fmt.Fprintf(b, "    mandatory: %v\n", def.Mandatory)
 
 	// Partition attributes into mandatory and optional
-	var mandatory, optional []RawAttributeDef
+	var mandatory, optional []specparse.RawAttributeDef
 	for _, attr := range def.Attributes {
 		if attr.Mandatory {
 			mandatory = append(mandatory, attr)
@@ -62,7 +64,7 @@ func writeFeatureSpec(b *strings.Builder, def *RawFeatureDef) {
 	}
 
 	// Partition commands into mandatory and optional
-	var mandatoryCmds, optionalCmds []RawCommandDef
+	var mandatoryCmds, optionalCmds []specparse.RawCommandDef
 	for _, cmd := range def.Commands {
 		if cmd.Mandatory {
 			mandatoryCmds = append(mandatoryCmds, cmd)
