@@ -326,6 +326,185 @@ func TestParseDirection(t *testing.T) {
 	}
 }
 
+func TestFormatSnapshotEvent(t *testing.T) {
+	ts := time.Date(2026, 1, 28, 10, 15, 32, 123456000, time.UTC)
+	event := log.Event{
+		Timestamp:    ts,
+		ConnectionID: "abc12345-6789-0123-4567-890abcdef012",
+		Direction:    log.DirectionOut,
+		Layer:        log.LayerService,
+		Category:     log.CategorySnapshot,
+		Snapshot: &log.CapabilitySnapshotEvent{
+			Local: &log.DeviceSnapshot{
+				DeviceID:    "device-001",
+				SpecVersion: "1.0",
+				Endpoints: []log.EndpointSnapshot{
+					{
+						ID:   0,
+						Type: 0x00, // DEVICE_ROOT
+						Features: []log.FeatureSnapshot{
+							{
+								ID:            0x01, // DeviceInfo
+								FeatureMap:    0x0001,
+								AttributeList: []uint16{1, 2, 3, 12, 20, 21},
+							},
+						},
+					},
+					{
+						ID:    1,
+						Type:  0x05, // EV_CHARGER
+						Label: "Wallbox",
+						Features: []log.FeatureSnapshot{
+							{
+								ID:            0x03, // Electrical
+								FeatureMap:    0x0001,
+								AttributeList: []uint16{1, 2, 3, 4, 5, 6, 7, 8},
+							},
+							{
+								ID:            0x04, // Measurement
+								FeatureMap:    0x0003,
+								AttributeList: []uint16{1, 2, 3, 4, 5, 6},
+							},
+						},
+					},
+				},
+				UseCases: []log.UseCaseSnapshot{
+					{EndpointID: 1, ID: 0x01, Major: 1, Minor: 0, Scenarios: 0x07},
+				},
+			},
+			Remote: &log.DeviceSnapshot{
+				DeviceID: "controller-001",
+				Endpoints: []log.EndpointSnapshot{
+					{
+						ID:   0,
+						Type: 0x00, // DEVICE_ROOT
+					},
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	formatEvent(&buf, event)
+	output := buf.String()
+
+	// Check header
+	if !strings.Contains(output, "Snapshot") {
+		t.Errorf("expected Snapshot in header, got: %s", output)
+	}
+
+	// Check local device ID
+	if !strings.Contains(output, "device-001") {
+		t.Errorf("expected device-001, got: %s", output)
+	}
+
+	// Check endpoint types
+	if !strings.Contains(output, "DEVICE_ROOT") {
+		t.Errorf("expected DEVICE_ROOT, got: %s", output)
+	}
+	if !strings.Contains(output, "EV_CHARGER") {
+		t.Errorf("expected EV_CHARGER, got: %s", output)
+	}
+
+	// Check feature names
+	if !strings.Contains(output, "DeviceInfo") {
+		t.Errorf("expected DeviceInfo feature, got: %s", output)
+	}
+	if !strings.Contains(output, "Electrical") {
+		t.Errorf("expected Electrical feature, got: %s", output)
+	}
+
+	// Check featureMap
+	if !strings.Contains(output, "featureMap=0x0001") {
+		t.Errorf("expected featureMap=0x0001, got: %s", output)
+	}
+
+	// Check remote section
+	if !strings.Contains(output, "Remote:") {
+		t.Errorf("expected Remote: section, got: %s", output)
+	}
+	if !strings.Contains(output, "controller-001") {
+		t.Errorf("expected controller-001, got: %s", output)
+	}
+}
+
+func TestFormatSnapshotEvent_NoRemote(t *testing.T) {
+	ts := time.Date(2026, 1, 28, 10, 15, 32, 123456000, time.UTC)
+	event := log.Event{
+		Timestamp:    ts,
+		ConnectionID: "abc12345-6789-0123-4567-890abcdef012",
+		Direction:    log.DirectionOut,
+		Layer:        log.LayerService,
+		Category:     log.CategorySnapshot,
+		Snapshot: &log.CapabilitySnapshotEvent{
+			Local: &log.DeviceSnapshot{
+				DeviceID: "device-002",
+				Endpoints: []log.EndpointSnapshot{
+					{ID: 0, Type: 0x00},
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	formatEvent(&buf, event)
+	output := buf.String()
+
+	// Check local section appears
+	if !strings.Contains(output, "Local:") {
+		t.Errorf("expected Local: section, got: %s", output)
+	}
+	if !strings.Contains(output, "device-002") {
+		t.Errorf("expected device-002, got: %s", output)
+	}
+
+	// Remote section should NOT appear
+	if strings.Contains(output, "Remote:") {
+		t.Errorf("expected no Remote: section, got: %s", output)
+	}
+}
+
+func TestParseCategoryFlag_Snapshot(t *testing.T) {
+	got, err := parseCategory("snapshot")
+	if err != nil {
+		t.Fatalf("parseCategory(%q) returned error: %v", "snapshot", err)
+	}
+	if got != log.CategorySnapshot {
+		t.Errorf("parseCategory(%q) = %v, want %v", "snapshot", got, log.CategorySnapshot)
+	}
+
+	// Case-insensitive
+	got, err = parseCategory("SNAPSHOT")
+	if err != nil {
+		t.Fatalf("parseCategory(%q) returned error: %v", "SNAPSHOT", err)
+	}
+	if got != log.CategorySnapshot {
+		t.Errorf("parseCategory(%q) = %v, want %v", "SNAPSHOT", got, log.CategorySnapshot)
+	}
+}
+
+func TestFilterBySnapshotCategory(t *testing.T) {
+	events := []log.Event{
+		{Category: log.CategoryMessage},
+		{Category: log.CategorySnapshot, Snapshot: &log.CapabilitySnapshotEvent{}},
+		{Category: log.CategoryState},
+		{Category: log.CategorySnapshot, Snapshot: &log.CapabilitySnapshotEvent{}},
+	}
+
+	cat := log.CategorySnapshot
+	filter := ViewFilter{Category: &cat}
+
+	filtered := filterEvents(events, filter)
+	if len(filtered) != 2 {
+		t.Errorf("expected 2 snapshot events, got %d", len(filtered))
+	}
+	for _, e := range filtered {
+		if e.Category != log.CategorySnapshot {
+			t.Errorf("expected snapshot category, got %v", e.Category)
+		}
+	}
+}
+
 func TestParseCategory(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -337,6 +516,7 @@ func TestParseCategory(t *testing.T) {
 		{"control", log.CategoryControl, false},
 		{"state", log.CategoryState, false},
 		{"error", log.CategoryError, false},
+		{"snapshot", log.CategorySnapshot, false},
 		{"invalid", 0, true},
 	}
 

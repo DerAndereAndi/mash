@@ -34,6 +34,10 @@ type ZoneSession struct {
 	protocolLogger log.Logger
 	connID         string
 
+	// Capability snapshot tracking (optional)
+	snapshotPolicy SnapshotPolicy
+	snapshot       *snapshotTracker
+
 	// Bidirectional support: client for sending requests to controller
 	client *interaction.Client
 	sender *TransportRequestSender
@@ -79,6 +83,7 @@ func (s *ZoneSession) OnMessage(data []byte) {
 	logger := s.logger
 	protocolLogger := s.protocolLogger
 	connID := s.connID
+	snapshot := s.snapshot
 	s.mu.RUnlock()
 
 	// Check for renewal messages first (MsgType 30-33 at key 1)
@@ -102,10 +107,10 @@ func (s *ZoneSession) OnMessage(data []byte) {
 		s.handleRequest(data)
 	case wire.MessageTypeResponse:
 		// Response to a request we sent - deliver to client
-		s.handleResponse(data, client, logger, protocolLogger, connID)
+		s.handleResponse(data, client, logger, protocolLogger, connID, snapshot)
 	case wire.MessageTypeNotification:
 		// Notification from controller (subscription update) - deliver to client
-		s.handleNotification(data, client, logger, protocolLogger, connID)
+		s.handleNotification(data, client, logger, protocolLogger, connID, snapshot)
 	default:
 		// Unknown message type - ignore
 	}
@@ -151,7 +156,7 @@ func (s *ZoneSession) sendErrorResponse(messageID uint32, status wire.Status, me
 }
 
 // handleResponse processes a response to a request we sent to the controller.
-func (s *ZoneSession) handleResponse(data []byte, client *interaction.Client, logger *slog.Logger, protocolLogger log.Logger, connID string) {
+func (s *ZoneSession) handleResponse(data []byte, client *interaction.Client, logger *slog.Logger, protocolLogger log.Logger, connID string, snapshot *snapshotTracker) {
 	resp, err := wire.DecodeResponse(data)
 	if err != nil {
 		if logger != nil {
@@ -163,11 +168,14 @@ func (s *ZoneSession) handleResponse(data []byte, client *interaction.Client, lo
 	}
 	// Log the incoming response
 	s.logIncomingResponse(protocolLogger, connID, resp)
+	if snapshot != nil {
+		snapshot.onMessageLogged()
+	}
 	client.HandleResponse(resp)
 }
 
 // handleNotification processes a notification from the controller (subscription update).
-func (s *ZoneSession) handleNotification(data []byte, client *interaction.Client, logger *slog.Logger, protocolLogger log.Logger, connID string) {
+func (s *ZoneSession) handleNotification(data []byte, client *interaction.Client, logger *slog.Logger, protocolLogger log.Logger, connID string, snapshot *snapshotTracker) {
 	notif, err := wire.DecodeNotification(data)
 	if err != nil {
 		if logger != nil {
@@ -179,6 +187,9 @@ func (s *ZoneSession) handleNotification(data []byte, client *interaction.Client
 	}
 	// Log the incoming notification
 	s.logIncomingNotification(protocolLogger, connID, notif)
+	if snapshot != nil {
+		snapshot.onMessageLogged()
+	}
 	if logger != nil {
 		logger.Debug("handleNotification: received notification from controller",
 			"zoneID", s.zoneID,
@@ -294,6 +305,14 @@ func (s *ZoneSession) SetLogger(logger *slog.Logger) {
 	s.logger = logger
 }
 
+// SetSnapshotPolicy sets the policy for periodic capability snapshot emission.
+// Must be called before SetProtocolLogger to take effect.
+func (s *ZoneSession) SetSnapshotPolicy(policy SnapshotPolicy) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshotPolicy = policy
+}
+
 // SetProtocolLogger sets the protocol logger and connection ID.
 // Events logged will include the connectionID for correlation.
 // This also sets the logger on the embedded ProtocolHandler.
@@ -304,6 +323,12 @@ func (s *ZoneSession) SetProtocolLogger(logger log.Logger, connectionID string) 
 	s.connID = connectionID
 	// Also set on the protocol handler for request/response logging
 	s.handler.SetLogger(logger, connectionID)
+
+	// Create snapshot tracker and emit initial snapshot
+	device := s.handler.Device()
+	s.snapshot = newSnapshotTracker(s.snapshotPolicy, device, logger, connectionID, log.RoleDevice)
+	s.handler.SetOnMessageLogged(s.snapshot.onMessageLogged)
+	s.snapshot.emitInitialSnapshot()
 }
 
 // SubscriptionCount returns the number of active subscriptions.

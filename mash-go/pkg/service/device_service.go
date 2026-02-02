@@ -440,7 +440,8 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 	}
 	s.mu.RUnlock()
 
-	// Set protocol logger if configured
+	// Set snapshot policy and protocol logger if configured
+	zoneSession.SetSnapshotPolicy(s.config.SnapshotPolicy)
 	if s.protocolLogger != nil {
 		connID := generateConnectionID()
 		zoneSession.SetProtocolLogger(s.protocolLogger, connID)
@@ -593,7 +594,8 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	zoneSession.SetLogger(s.logger)
 	zoneSession.SetZoneType(cert.ZoneTypeLocal)
 
-	// Set protocol logger if configured
+	// Set snapshot policy and protocol logger if configured
+	zoneSession.SetSnapshotPolicy(s.config.SnapshotPolicy)
 	if s.protocolLogger != nil {
 		connID := generateConnectionID()
 		zoneSession.SetProtocolLogger(s.protocolLogger, connID)

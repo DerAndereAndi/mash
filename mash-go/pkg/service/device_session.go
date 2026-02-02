@@ -36,6 +36,10 @@ type DeviceSession struct {
 	protocolLogger log.Logger
 	connID         string
 
+	// Capability snapshot tracking (optional)
+	snapshotPolicy SnapshotPolicy
+	snapshot       *snapshotTracker
+
 	// Bidirectional support: handler for incoming requests from the device.
 	// Optional - only set if controller exposes features to devices.
 	handler *ProtocolHandler
@@ -74,6 +78,7 @@ func (s *DeviceSession) OnMessage(data []byte) {
 	logger := s.logger
 	protocolLogger := s.protocolLogger
 	connID := s.connID
+	snapshot := s.snapshot
 	renewalHandler := s.renewalHandler
 	s.mu.RUnlock()
 
@@ -114,6 +119,9 @@ func (s *DeviceSession) OnMessage(data []byte) {
 		}
 		// Log the incoming response
 		s.logResponse(protocolLogger, connID, resp)
+		if snapshot != nil {
+			snapshot.onMessageLogged()
+		}
 		client.HandleResponse(resp)
 
 	case wire.MessageTypeNotification:
@@ -129,6 +137,9 @@ func (s *DeviceSession) OnMessage(data []byte) {
 		}
 		// Log the incoming notification
 		s.logNotification(protocolLogger, connID, notif)
+		if snapshot != nil {
+			snapshot.onMessageLogged()
+		}
 		if logger != nil {
 			logger.Debug("OnMessage: received notification",
 				"deviceID", s.deviceID,
@@ -203,6 +214,14 @@ func (s *DeviceSession) SetLogger(logger *slog.Logger) {
 	s.logger = logger
 }
 
+// SetSnapshotPolicy sets the policy for periodic capability snapshot emission.
+// Must be called before SetProtocolLogger to take effect.
+func (s *DeviceSession) SetSnapshotPolicy(policy SnapshotPolicy) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshotPolicy = policy
+}
+
 // SetProtocolLogger sets the protocol logger and connection ID.
 // Events logged will include the connectionID for correlation.
 func (s *DeviceSession) SetProtocolLogger(logger log.Logger, connectionID string) {
@@ -210,6 +229,14 @@ func (s *DeviceSession) SetProtocolLogger(logger log.Logger, connectionID string
 	defer s.mu.Unlock()
 	s.protocolLogger = logger
 	s.connID = connectionID
+
+	// Create snapshot tracker and emit initial snapshot.
+	// For controller-side sessions, localDevice is nil unless SetExposedDevice is called.
+	s.snapshot = newSnapshotTracker(s.snapshotPolicy, nil, logger, connectionID, log.RoleController)
+	if s.handler != nil {
+		s.handler.SetOnMessageLogged(s.snapshot.onMessageLogged)
+	}
+	s.snapshot.emitInitialSnapshot()
 }
 
 // Read reads attributes from a feature on the device.
@@ -353,6 +380,24 @@ func (s *DeviceSession) SetExposedDevice(device *model.Device) {
 
 	// Wire up notification sender so NotifyAttributeChange can send to device
 	s.handler.SetSendNotification(s.SendNotification)
+
+	// Propagate logger and snapshot tracker to the new handler
+	if s.protocolLogger != nil {
+		s.handler.SetLogger(s.protocolLogger, s.connID)
+	}
+	if s.snapshot != nil {
+		s.handler.SetOnMessageLogged(s.snapshot.onMessageLogged)
+	}
+}
+
+// SetRemoteSnapshotCache updates the cached remote device snapshot on the
+// snapshot tracker. Subsequent snapshot emissions will include this data.
+func (s *DeviceSession) SetRemoteSnapshotCache(snap *log.DeviceSnapshot) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.snapshot != nil {
+		s.snapshot.setRemoteCache(snap)
+	}
 }
 
 // handleRequest processes an incoming request from the device and sends a response.

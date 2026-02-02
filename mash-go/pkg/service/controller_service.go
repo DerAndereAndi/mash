@@ -439,7 +439,8 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 	// Create device session for operational messaging
 	deviceSession := NewDeviceSession(deviceID, framedConn)
 
-	// Set protocol logger if configured
+	// Set snapshot policy and protocol logger if configured
+	deviceSession.SetSnapshotPolicy(s.config.SnapshotPolicy)
 	if s.protocolLogger != nil {
 		connID := s.generateControllerConnID()
 		deviceSession.SetProtocolLogger(s.protocolLogger, connID)
@@ -477,6 +478,11 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 		deviceSession.Close()
 		conn.Close()
 		return nil, fmt.Errorf("%w: %v", ErrCommissionFailed, err)
+	}
+
+	// Read remote device capabilities for snapshot tracking
+	if snap := readRemoteCapabilities(ctx, deviceSession); snap != nil {
+		deviceSession.SetRemoteSnapshotCache(snap)
 	}
 
 	// Persist state immediately after commissioning
@@ -1082,7 +1088,8 @@ func (s *ControllerService) attemptReconnection(ctx context.Context, svc *discov
 	// Create device session
 	session := NewDeviceSession(svc.DeviceID, framedConn)
 
-	// Set protocol logger if configured
+	// Set snapshot policy and protocol logger if configured
+	session.SetSnapshotPolicy(s.config.SnapshotPolicy)
 	if s.protocolLogger != nil {
 		connID := s.generateControllerConnID()
 		session.SetProtocolLogger(s.protocolLogger, connID)
@@ -1108,6 +1115,11 @@ func (s *ControllerService) attemptReconnection(ctx context.Context, svc *discov
 			Error:    err,
 		})
 		return
+	}
+
+	// Read remote device capabilities for snapshot tracking
+	if snap := readRemoteCapabilities(ctx, session); snap != nil {
+		session.SetRemoteSnapshotCache(snap)
 	}
 
 	// Emit reconnected event

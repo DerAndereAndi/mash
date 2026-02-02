@@ -3,7 +3,7 @@
 > Tracking what we evaluated, decided, and declined
 
 **Created:** 2025-01-24
-**Last Updated:** 2026-02-01
+**Last Updated:** 2026-02-02
 
 ---
 
@@ -3400,6 +3400,71 @@ Scenario structure (example LPC):
 
 ---
 
+### DEC-058: Capability Snapshots in Protocol Logs
+
+**Date:** 2026-02-02
+**Status:** Proposed
+
+**Context:** On long-lived TLS/TCP connections, device capability metadata -- endpoints, features, use cases, scenarios, featureMap, attributeList -- is exchanged once at connection establishment and never repeated. If protocol logs are rotated, truncated, or begin recording mid-session, the initial discovery data is lost. A log analyst can no longer determine what the remote device supports, making the remaining log data difficult to interpret.
+
+This is a known pain point from EEBUS/SPINE, where `NodeManagementDetailedDiscovery` is exchanged once and then relied upon for the life of the connection. Matter mitigates this incidentally through UDP-forced re-subscriptions (priming reports every MaxInterval), but this is a transport artifact, not a deliberate observability mechanism. MASH's reliable TCP transport means connections can persist for days or weeks without re-exchanging capabilities.
+
+The problem affects both sides of the connection and is compounded by the fact that third-party devices control their own logging -- we cannot mandate log retention policies.
+
+**Options Evaluated:**
+1. **Protocol-level metadata snapshot message** -- New control message type emitted periodically on the wire.
+2. **Enhanced subscription heartbeats** -- Include global attributes (featureMap, attributeList) in every heartbeat notification.
+3. **Capability inference from partial logs** -- Offline tool that reconstructs capabilities from protocol traffic patterns.
+4. **Capability snapshots in protocol logs** (chosen) -- Periodic log events containing complete device model snapshots, with a configurable hybrid trigger policy.
+
+**Decision:** Add a logging-layer capability snapshot mechanism. The application configures a `SnapshotPolicy` on the stack with three parameters: `MaxInterval` (time trigger), `MaxMessages` (message count trigger), and `MinMessages` (floor for the time trigger). A snapshot is emitted when either `MaxMessages` is reached or `MaxInterval` elapses with at least `MinMessages` logged since the last snapshot. An initial snapshot always fires at session establishment.
+
+Each snapshot contains the complete device model of both the local device and the connected remote peer (endpoints, features, featureMap, attributeList, commandList, use cases, scenarios).
+
+```go
+type SnapshotPolicy struct {
+    MaxInterval time.Duration  // Time trigger (fires only if MinMessages met)
+    MaxMessages int            // Message count trigger (fires unconditionally)
+    MinMessages int            // Floor for time trigger (prevents snapshot spam on idle connections)
+}
+
+// Default: 30 min / 1000 messages / 50 message floor
+```
+
+The hybrid trigger with MinMessages floor ensures:
+- Busy connections (high log growth, high rotation risk): frequent snapshots proportional to traffic
+- Normal connections: periodic snapshots at MaxInterval
+- Near-idle connections (few messages, low rotation risk): time trigger suppressed, snapshots only at MaxMessages
+- Idle connections: initial snapshot only
+
+**Rationale:**
+
+- **Logging-layer, not protocol-layer:** The problem is about log observability, not protocol correctness. No wire overhead, no spec change required, no impact on third-party implementations.
+- **Hybrid trigger:** Pure time-based triggers waste log space on idle connections. Pure count-based triggers miss idle connections entirely. The hybrid with MinMessages floor adapts the snapshot frequency to the actual forensic risk.
+- **Both sides included:** Each snapshot contains local + remote capabilities. On the controller side, remote data is cached after initial discovery reads (free due to DEC-051 immutability). On the device side, remote data is populated from commissioning certificate info and any exposed controller model.
+- **Negligible overhead:** A typical snapshot is 400-600 bytes CBOR. With default policy, busy connections produce ~22 KB/hour of snapshot data; quiet connections produce near zero.
+
+**Impact:**
+
+- New `SnapshotPolicy` struct in `pkg/service/types.go`, added to `DeviceConfig` and `ControllerConfig`
+- New `snapshotTracker` in `pkg/service/snapshot_tracker.go` embedded in ZoneSession and DeviceSession
+- New `CategorySnapshot` and `CapabilitySnapshotEvent` types in `pkg/log/event.go`
+- Controller reads full remote device capabilities after commissioning/reconnection (extends existing `checkDeviceVersion` pattern)
+- `mash-log` tool extended: snapshot display in `view`, snapshot statistics in `stats`, `--annotate` flag for human-readable ID resolution
+
+**Declined Alternatives:**
+
+- **Protocol-level metadata snapshot message (option 1):** Requires a spec change affecting all implementations. The problem is about log forensics, not protocol behavior. Wire overhead is unnecessary when the data is already in memory locally.
+- **Enhanced subscription heartbeats (option 2):** Per-feature only -- no single message captures the full device model. Doesn't include endpoint structure or use case declarations. The current implementation already includes global attributes in subscribe-all heartbeats (DEC-052).
+- **Capability inference from partial logs (option 3):** Best-effort only. Cannot discover endpoints/features with no traffic. Cannot reconstruct use case declarations or device identity. High implementation complexity for uncertain results. May be valuable as a supplementary tool but not as the primary solution.
+- **Sidecar index file:** A `.mlog.idx` file that stores the latest snapshot per connection. Useful optimization for log rotation scenarios but not needed as the primary mechanism.
+
+**Related:** DEC-051 (attributeList immutability), DEC-052 (feature-level subscriptions), DEC-055 (use cases on the wire), DEC-035 (capability discovery)
+
+**Design Document:** [docs/design/capability-snapshots.md](design/capability-snapshots.md)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -3529,3 +3594,4 @@ Key learnings:
 | 2026-01-31 | Added DEC-053: Endpoint type conformance registry. Two-layer model: feature YAML defines superset, endpoint type registry defines per-type mandatory/recommended attributes. |
 | 2026-01-31 | Added DEC-055: Use cases on the wire. Adds `useCases` attribute to DeviceInfo with name + major.minor version + endpointId. REST API versioning model: minor = forward-compatible, major = new contract. Bundled with specVersion releases. Enables business logic testing and explicit device contracts. |
 | 2026-02-01 | Added DEC-057: Integer use case IDs and scenario bitmaps. Replaces string names with uint16 IDs on the wire. Adds uint32 scenario bitmap to UseCaseDecl. Matter-inspired atomic scenario contracts. All 11 use case YAMLs restructured with scenarios. |
+| 2026-02-02 | Added DEC-058: Capability snapshots in protocol logs. Logging-layer mechanism to periodically emit device model snapshots with hybrid time/count trigger and MinMessages floor. Addresses discovery data loss on long-lived connections. |

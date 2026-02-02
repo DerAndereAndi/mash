@@ -46,8 +46,9 @@ type ProtocolHandler struct {
 	onInvoke InvokeCallback
 
 	// Protocol logging (optional)
-	logger log.Logger
-	connID string
+	logger          log.Logger
+	connID          string
+	onMessageLogged func()
 }
 
 // NewProtocolHandler creates a new protocol handler for a device.
@@ -147,6 +148,13 @@ func (h *ProtocolHandler) SetLogger(logger log.Logger, connectionID string) {
 	h.connID = connectionID
 }
 
+// SetOnMessageLogged sets the callback invoked after each protocol message is logged.
+func (h *ProtocolHandler) SetOnMessageLogged(fn func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onMessageLogged = fn
+}
+
 // HandleRequest processes a protocol request and returns a response.
 func (h *ProtocolHandler) HandleRequest(req *wire.Request) *wire.Response {
 	startTime := time.Now()
@@ -199,6 +207,7 @@ func (h *ProtocolHandler) logRequest(req *wire.Request) {
 	h.mu.RLock()
 	logger := h.logger
 	connID := h.connID
+	onLogged := h.onMessageLogged
 	h.mu.RUnlock()
 
 	if logger == nil {
@@ -224,6 +233,10 @@ func (h *ProtocolHandler) logRequest(req *wire.Request) {
 			Payload:    req.Payload,
 		},
 	})
+
+	if onLogged != nil {
+		onLogged()
+	}
 }
 
 // logResponse logs an outgoing response event.
@@ -231,6 +244,7 @@ func (h *ProtocolHandler) logResponse(resp *wire.Response, processingTime time.D
 	h.mu.RLock()
 	logger := h.logger
 	connID := h.connID
+	onLogged := h.onMessageLogged
 	h.mu.RUnlock()
 
 	if logger == nil {
@@ -253,6 +267,10 @@ func (h *ProtocolHandler) logResponse(resp *wire.Response, processingTime time.D
 			ProcessingTime: &processingTime,
 		},
 	})
+
+	if onLogged != nil {
+		onLogged()
+	}
 }
 
 // handleRead processes a Read request.

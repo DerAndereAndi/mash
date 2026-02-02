@@ -152,6 +152,54 @@ func TestStatsTimeRange(t *testing.T) {
 	}
 }
 
+func TestStatsCountsSnapshots(t *testing.T) {
+	ts := time.Date(2026, 1, 28, 10, 0, 0, 0, time.UTC)
+	events := []log.Event{
+		{Timestamp: ts, Category: log.CategoryMessage},
+		{Timestamp: ts, Category: log.CategorySnapshot, Snapshot: &log.CapabilitySnapshotEvent{}},
+		{Timestamp: ts, Category: log.CategorySnapshot, Snapshot: &log.CapabilitySnapshotEvent{}},
+		{Timestamp: ts, Category: log.CategoryMessage},
+	}
+
+	path := createTestLogFile(t, events)
+
+	var buf bytes.Buffer
+	err := RunStats(path, &buf)
+	if err != nil {
+		t.Fatalf("RunStats failed: %v", err)
+	}
+
+	output := buf.String()
+
+	if !strings.Contains(output, "SNAPSHOT:") {
+		t.Errorf("expected SNAPSHOT category in output, got:\n%s", output)
+	}
+}
+
+func TestStatsLastSnapshotPerConnection(t *testing.T) {
+	ts := time.Date(2026, 1, 28, 10, 0, 0, 0, time.UTC)
+	events := []log.Event{
+		{Timestamp: ts, ConnectionID: "conn-aaaa-1111", Category: log.CategorySnapshot, Snapshot: &log.CapabilitySnapshotEvent{}},
+		{Timestamp: ts.Add(time.Minute), ConnectionID: "conn-aaaa-1111", Category: log.CategorySnapshot, Snapshot: &log.CapabilitySnapshotEvent{}},
+		{Timestamp: ts, ConnectionID: "conn-bbbb-2222", Category: log.CategorySnapshot, Snapshot: &log.CapabilitySnapshotEvent{}},
+	}
+
+	path := createTestLogFile(t, events)
+
+	var buf bytes.Buffer
+	err := RunStats(path, &buf)
+	if err != nil {
+		t.Fatalf("RunStats failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Each connection with snapshots should report snapshot count
+	if !strings.Contains(output, "Snapshots:") {
+		t.Errorf("expected Snapshots: in connection output, got:\n%s", output)
+	}
+}
+
 func TestStatsErrorCount(t *testing.T) {
 	ts := time.Date(2026, 1, 28, 10, 0, 0, 0, time.UTC)
 	events := []log.Event{

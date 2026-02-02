@@ -25,11 +25,13 @@ type Stats struct {
 
 // ConnectionStats holds statistics for a single connection.
 type ConnectionStats struct {
-	FirstSeen time.Time
-	LastSeen  time.Time
-	Events    int
-	DeviceID  string
-	ZoneID    string
+	FirstSeen      time.Time
+	LastSeen       time.Time
+	Events         int
+	DeviceID       string
+	ZoneID         string
+	SnapshotCount  int
+	LastSnapshotAt time.Time
 }
 
 // RunStats analyzes the log file and prints statistics.
@@ -89,6 +91,14 @@ func RunStats(path string, w io.Writer) error {
 			conn.ZoneID = event.ZoneID
 		}
 
+		// Count snapshots per connection
+		if event.Snapshot != nil {
+			conn.SnapshotCount++
+			if event.Timestamp.After(conn.LastSnapshotAt) {
+				conn.LastSnapshotAt = event.Timestamp
+			}
+		}
+
 		// Count errors
 		if event.Error != nil {
 			stats.Errors++
@@ -127,7 +137,7 @@ func printStats(w io.Writer, stats *Stats) {
 
 	// Events by category
 	fmt.Fprintln(w, "Events by Category:")
-	for _, cat := range []log.Category{log.CategoryMessage, log.CategoryControl, log.CategoryState, log.CategoryError} {
+	for _, cat := range []log.Category{log.CategoryMessage, log.CategoryControl, log.CategoryState, log.CategoryError, log.CategorySnapshot} {
 		if count := stats.EventsByCategory[cat]; count > 0 {
 			fmt.Fprintf(w, "  %-12s %d\n", cat.String()+":", count)
 		}
@@ -172,6 +182,10 @@ func printStats(w io.Writer, stats *Stats) {
 			}
 			if c.stats.ZoneID != "" {
 				fmt.Fprintf(w, "           Zone: %s\n", c.stats.ZoneID)
+			}
+			if c.stats.SnapshotCount > 0 {
+				fmt.Fprintf(w, "           Snapshots: %d (last: %s)\n",
+					c.stats.SnapshotCount, c.stats.LastSnapshotAt.Format(time.RFC3339))
 			}
 		}
 	}

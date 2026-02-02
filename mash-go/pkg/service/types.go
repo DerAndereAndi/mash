@@ -166,6 +166,9 @@ type DeviceConfig struct {
 	// Default: 500ms.
 	ErrorDelayMax time.Duration
 
+	// SnapshotPolicy controls when capability snapshots are emitted to the protocol log.
+	SnapshotPolicy SnapshotPolicy
+
 	// Logger is the optional logger for debug output.
 	// If nil, logging is disabled.
 	Logger *slog.Logger
@@ -224,6 +227,9 @@ type ControllerConfig struct {
 	// Default: 5 seconds.
 	PairingRequestPollInterval time.Duration
 
+	// SnapshotPolicy controls when capability snapshots are emitted to the protocol log.
+	SnapshotPolicy SnapshotPolicy
+
 	// Logger is the optional logger for debug output.
 	// If nil, logging is disabled.
 	Logger *slog.Logger
@@ -231,6 +237,34 @@ type ControllerConfig struct {
 	// ProtocolLogger receives structured protocol events for debugging.
 	// Set to nil to disable protocol logging.
 	ProtocolLogger log.Logger
+}
+
+// SnapshotPolicy controls when capability snapshots are emitted to the protocol log.
+type SnapshotPolicy struct {
+	// MaxInterval is the maximum time between snapshots. The time trigger
+	// only fires if at least MinMessages have been logged since the last
+	// snapshot. Zero disables time-based triggering.
+	MaxInterval time.Duration
+
+	// MaxMessages is the maximum number of protocol messages logged for a
+	// connection before a snapshot is emitted. Zero disables count-based triggering.
+	MaxMessages int
+
+	// MinMessages is the minimum number of messages that must have been
+	// logged since the last snapshot for the time-based trigger to fire.
+	// This prevents snapshots from dominating the log on near-idle connections.
+	// The message-count trigger (MaxMessages) is not affected by this floor.
+	// Zero means the time trigger fires unconditionally.
+	MinMessages int
+}
+
+// DefaultSnapshotPolicy returns a SnapshotPolicy with sensible defaults.
+func DefaultSnapshotPolicy() SnapshotPolicy {
+	return SnapshotPolicy{
+		MaxInterval: 30 * time.Minute,
+		MaxMessages: 1000,
+		MinMessages: 50,
+	}
 }
 
 // BackoffConfig configures exponential backoff for reconnection.
@@ -273,9 +307,10 @@ func DefaultDeviceConfig() DeviceConfig {
 			3000 * time.Millisecond,  // Tier 3: attempts 7-10, 3s delay
 			10000 * time.Millisecond, // Tier 4: attempts 11+, 10s delay
 		},
-		GenericErrors: true,
-		ErrorDelayMin: 100 * time.Millisecond,
-		ErrorDelayMax: 500 * time.Millisecond,
+		GenericErrors:  true,
+		ErrorDelayMin:  100 * time.Millisecond,
+		ErrorDelayMax:  500 * time.Millisecond,
+		SnapshotPolicy: DefaultSnapshotPolicy(),
 	}
 }
 
@@ -296,6 +331,7 @@ func DefaultControllerConfig() ControllerConfig {
 			Multiplier:      2.0,
 			MaxRetries:      0,
 		},
+		SnapshotPolicy: DefaultSnapshotPolicy(),
 	}
 }
 

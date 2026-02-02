@@ -757,6 +757,125 @@ func TestDeviceSession_LogsIncomingNotification(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// DeviceSession Snapshot Integration Tests
+// =============================================================================
+
+func TestDeviceSession_EmitsInitialSnapshot(t *testing.T) {
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	logger := &snapshotCapturingLogger{}
+	session.SetSnapshotPolicy(SnapshotPolicy{MaxMessages: 1000})
+	session.SetProtocolLogger(logger, "conn-snap-ds-1")
+
+	if logger.snapshotCount() != 1 {
+		t.Fatalf("expected 1 initial snapshot, got %d", logger.snapshotCount())
+	}
+
+	event := logger.lastEvent()
+	if event.Category != log.CategorySnapshot {
+		t.Errorf("Category: got %v, want %v", event.Category, log.CategorySnapshot)
+	}
+	if event.LocalRole != log.RoleController {
+		t.Errorf("LocalRole: got %v, want %v", event.LocalRole, log.RoleController)
+	}
+	if event.ConnectionID != "conn-snap-ds-1" {
+		t.Errorf("ConnectionID: got %q, want %q", event.ConnectionID, "conn-snap-ds-1")
+	}
+	// Controller session without exposed device - Local should be nil
+	if event.Snapshot == nil {
+		t.Fatal("Snapshot is nil")
+	}
+	if event.Snapshot.Local != nil {
+		t.Errorf("Snapshot.Local: expected nil for controller without exposed device, got %+v", event.Snapshot.Local)
+	}
+}
+
+func TestDeviceSession_SnapshotOnMessageCount(t *testing.T) {
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	logger := &snapshotCapturingLogger{}
+	session.SetSnapshotPolicy(SnapshotPolicy{MaxMessages: 2})
+	session.SetProtocolLogger(logger, "conn-snap-ds-2")
+
+	// Initial snapshot
+	if logger.snapshotCount() != 1 {
+		t.Fatalf("expected 1 initial snapshot, got %d", logger.snapshotCount())
+	}
+
+	// Send 2 responses to trigger message-based snapshot
+	for i := uint32(1); i <= 2; i++ {
+		resp := &wire.Response{
+			MessageID: i,
+			Status:    wire.StatusSuccess,
+			Payload:   map[uint16]any{1: "test"},
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		session.OnMessage(respData)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if logger.snapshotCount() != 2 {
+		t.Fatalf("expected 2 snapshots (initial + triggered), got %d", logger.snapshotCount())
+	}
+}
+
+func TestDeviceSession_RemoteCacheInSnapshot(t *testing.T) {
+	conn := &mockDeviceSessionConn{}
+	session := NewDeviceSession("device-1", conn)
+	defer session.Close()
+
+	logger := &snapshotCapturingLogger{}
+	session.SetSnapshotPolicy(SnapshotPolicy{MaxMessages: 1})
+	session.SetProtocolLogger(logger, "conn-snap-ds-3")
+
+	// Initial snapshot
+	if logger.snapshotCount() != 1 {
+		t.Fatalf("expected 1 initial snapshot, got %d", logger.snapshotCount())
+	}
+
+	// Set remote cache
+	remote := &log.DeviceSnapshot{
+		DeviceID: "remote-device",
+		Endpoints: []log.EndpointSnapshot{
+			{ID: 0, Type: 0x00},
+		},
+	}
+	session.SetRemoteSnapshotCache(remote)
+
+	// Send 1 response to trigger another snapshot
+	resp := &wire.Response{
+		MessageID: 1,
+		Status:    wire.StatusSuccess,
+		Payload:   map[uint16]any{1: "test"},
+	}
+	respData, _ := wire.EncodeResponse(resp)
+	session.OnMessage(respData)
+
+	time.Sleep(50 * time.Millisecond)
+
+	if logger.snapshotCount() != 2 {
+		t.Fatalf("expected 2 snapshots, got %d", logger.snapshotCount())
+	}
+
+	// The last event should be the triggered snapshot with remote data
+	event := logger.lastEvent()
+	if event.Snapshot == nil {
+		t.Fatal("Snapshot is nil")
+	}
+	if event.Snapshot.Remote == nil {
+		t.Fatal("Snapshot.Remote is nil after setting remote cache")
+	}
+	if event.Snapshot.Remote.DeviceID != "remote-device" {
+		t.Errorf("Remote.DeviceID: got %q, want %q", event.Snapshot.Remote.DeviceID, "remote-device")
+	}
+}
+
 func TestDeviceSession_NoProtocolLoggerNoPanic(t *testing.T) {
 	conn := &mockDeviceSessionConn{}
 	session := NewDeviceSession("device-1", conn)

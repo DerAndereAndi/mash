@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/log"
+	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/usecase"
 )
 
 // ViewFilter specifies criteria for filtering events in the view command.
@@ -37,6 +39,8 @@ func formatEvent(w io.Writer, event log.Event) {
 		typeLabel = "State"
 	case event.ControlMsg != nil:
 		typeLabel = event.ControlMsg.Type.String()
+	case event.Snapshot != nil:
+		typeLabel = "Snapshot"
 	case event.Error != nil:
 		typeLabel = "Error"
 	default:
@@ -61,6 +65,8 @@ func formatEvent(w io.Writer, event log.Event) {
 		formatStateChangeDetails(w, event.StateChange)
 	case event.ControlMsg != nil:
 		// Control messages are simple, no extra details needed
+	case event.Snapshot != nil:
+		formatSnapshotDetails(w, event.Snapshot)
 	case event.Error != nil:
 		formatErrorDetails(w, event.Error)
 	}
@@ -152,6 +158,49 @@ func formatErrorDetails(w io.Writer, err *log.ErrorEventData) {
 	}
 }
 
+// formatSnapshotDetails writes capability snapshot details.
+func formatSnapshotDetails(w io.Writer, snap *log.CapabilitySnapshotEvent) {
+	if snap.Local != nil {
+		fmt.Fprintf(w, "  Local: %s\n", snap.Local.DeviceID)
+		formatDeviceSnapshot(w, snap.Local, "    ")
+	}
+	if snap.Remote != nil {
+		fmt.Fprintf(w, "  Remote: %s\n", snap.Remote.DeviceID)
+		formatDeviceSnapshot(w, snap.Remote, "    ")
+	}
+}
+
+// formatDeviceSnapshot writes the endpoint/feature tree for a device snapshot.
+func formatDeviceSnapshot(w io.Writer, ds *log.DeviceSnapshot, indent string) {
+	for _, ep := range ds.Endpoints {
+		epTypeName := model.EndpointType(ep.Type).String()
+		if ep.Label != "" {
+			fmt.Fprintf(w, "%sEndpoint %d (%s) %q\n", indent, ep.ID, epTypeName, ep.Label)
+		} else {
+			fmt.Fprintf(w, "%sEndpoint %d (%s)\n", indent, ep.ID, epTypeName)
+		}
+		for _, f := range ep.Features {
+			fName := model.FeatureType(f.ID).String()
+			fmt.Fprintf(w, "%s  %s [featureMap=0x%04x, attrs=%d, cmds=%d]\n",
+				indent, fName, f.FeatureMap, len(f.AttributeList), len(f.CommandList))
+		}
+	}
+	if len(ds.UseCases) > 0 {
+		fmt.Fprintf(w, "%sUseCases:", indent)
+		for i, uc := range ds.UseCases {
+			name := string(usecase.IDToName[usecase.UseCaseID(uc.ID)])
+			if name == "" {
+				name = fmt.Sprintf("0x%02X", uc.ID)
+			}
+			if i > 0 {
+				fmt.Fprint(w, ",")
+			}
+			fmt.Fprintf(w, " %s(%d.%d) scenarios=0x%02x", name, uc.Major, uc.Minor, uc.Scenarios)
+		}
+		fmt.Fprintln(w)
+	}
+}
+
 // formatDuration formats a duration for display.
 func formatDuration(d time.Duration) string {
 	if d < time.Millisecond {
@@ -233,8 +282,10 @@ func parseCategory(s string) (log.Category, error) {
 		return log.CategoryState, nil
 	case "error":
 		return log.CategoryError, nil
+	case "snapshot":
+		return log.CategorySnapshot, nil
 	default:
-		return 0, fmt.Errorf("invalid category: %s (must be message, control, state, or error)", s)
+		return 0, fmt.Errorf("invalid category: %s (must be message, control, state, error, or snapshot)", s)
 	}
 }
 

@@ -42,6 +42,7 @@ type Event struct {
 	StateChange *StateChangeEvent `cbor:"12,keyasint,omitempty"` // Connection/session state
 	ControlMsg  *ControlMsgEvent  `cbor:"13,keyasint,omitempty"` // Ping/pong/close
 	Error       *ErrorEventData   `cbor:"14,keyasint,omitempty"` // Errors at any layer
+	Snapshot    *CapabilitySnapshotEvent `cbor:"15,keyasint,omitempty"` // Capability snapshot
 }
 
 // Direction indicates the direction of message flow.
@@ -104,6 +105,8 @@ const (
 	CategoryState Category = 2
 	// CategoryError indicates an error event.
 	CategoryError Category = 3
+	// CategorySnapshot indicates a capability snapshot event.
+	CategorySnapshot Category = 4
 )
 
 // String returns the category name.
@@ -117,6 +120,8 @@ func (c Category) String() string {
 		return "STATE"
 	case CategoryError:
 		return "ERROR"
+	case CategorySnapshot:
+		return "SNAPSHOT"
 	default:
 		return "UNKNOWN"
 	}
@@ -302,4 +307,77 @@ type ErrorEventData struct {
 
 	// Context describes what operation was being performed.
 	Context string `cbor:"4,keyasint,omitempty"`
+}
+
+// CapabilitySnapshotEvent is logged periodically and contains the complete
+// device model for both sides of the connection.
+type CapabilitySnapshotEvent struct {
+	// Local is the snapshot of the local device model.
+	Local *DeviceSnapshot `cbor:"1,keyasint"`
+
+	// Remote is the snapshot of the remote peer's device model.
+	Remote *DeviceSnapshot `cbor:"2,keyasint,omitempty"`
+}
+
+// DeviceSnapshot captures the complete capability state of a device.
+type DeviceSnapshot struct {
+	// DeviceID is the device identifier.
+	DeviceID string `cbor:"1,keyasint"`
+
+	// SpecVersion is the MASH specification version.
+	SpecVersion string `cbor:"2,keyasint,omitempty"`
+
+	// Endpoints lists all endpoints on the device.
+	Endpoints []EndpointSnapshot `cbor:"3,keyasint"`
+
+	// UseCases lists declared use cases.
+	UseCases []UseCaseSnapshot `cbor:"4,keyasint,omitempty"`
+}
+
+// EndpointSnapshot captures the state of an endpoint.
+type EndpointSnapshot struct {
+	// ID is the endpoint ID (0 = DEVICE_ROOT).
+	ID uint8 `cbor:"1,keyasint"`
+
+	// Type is the endpoint type.
+	Type uint8 `cbor:"2,keyasint"`
+
+	// Label is an optional human-readable label.
+	Label string `cbor:"3,keyasint,omitempty"`
+
+	// Features lists all features on this endpoint.
+	Features []FeatureSnapshot `cbor:"4,keyasint"`
+}
+
+// FeatureSnapshot captures the capability state of a feature.
+type FeatureSnapshot struct {
+	// ID is the feature type ID.
+	ID uint16 `cbor:"1,keyasint"`
+
+	// FeatureMap is the capability bitmap.
+	FeatureMap uint32 `cbor:"2,keyasint"`
+
+	// AttributeList is the list of supported attribute IDs.
+	AttributeList []uint16 `cbor:"3,keyasint"`
+
+	// CommandList is the list of supported command IDs.
+	CommandList []uint8 `cbor:"4,keyasint,omitempty"`
+}
+
+// UseCaseSnapshot captures a declared use case.
+type UseCaseSnapshot struct {
+	// EndpointID is the endpoint this use case applies to.
+	EndpointID uint8 `cbor:"1,keyasint"`
+
+	// ID is the use case identifier.
+	ID uint16 `cbor:"2,keyasint"`
+
+	// Major is the major version.
+	Major uint8 `cbor:"3,keyasint"`
+
+	// Minor is the minor version.
+	Minor uint8 `cbor:"4,keyasint"`
+
+	// Scenarios is the bitmap of supported scenarios.
+	Scenarios uint32 `cbor:"5,keyasint"`
 }

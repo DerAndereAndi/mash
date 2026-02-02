@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -786,6 +787,97 @@ func TestZoneSession_CloseStopsClient(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Error("Request did not complete after session close")
+	}
+}
+
+// ============================================================================
+// Snapshot Integration Tests
+// ============================================================================
+
+func TestZoneSession_EmitsInitialSnapshot(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockSendableConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	logger := &snapshotCapturingLogger{}
+	session.SetSnapshotPolicy(SnapshotPolicy{MaxMessages: 1000})
+	session.SetProtocolLogger(logger, "conn-snap-1")
+
+	if logger.snapshotCount() != 1 {
+		t.Fatalf("expected 1 initial snapshot, got %d", logger.snapshotCount())
+	}
+
+	event := logger.lastEvent()
+	if event.Category != log.CategorySnapshot {
+		t.Errorf("Category: got %v, want %v", event.Category, log.CategorySnapshot)
+	}
+	if event.Snapshot == nil {
+		t.Fatal("Snapshot is nil")
+	}
+	if event.Snapshot.Local == nil {
+		t.Fatal("Snapshot.Local is nil")
+	}
+	if event.Snapshot.Local.DeviceID != "test-device" {
+		t.Errorf("Local.DeviceID: got %q, want %q", event.Snapshot.Local.DeviceID, "test-device")
+	}
+	if event.LocalRole != log.RoleDevice {
+		t.Errorf("LocalRole: got %v, want %v", event.LocalRole, log.RoleDevice)
+	}
+	if event.ConnectionID != "conn-snap-1" {
+		t.Errorf("ConnectionID: got %q, want %q", event.ConnectionID, "conn-snap-1")
+	}
+}
+
+func TestZoneSession_SnapshotOnMessageCount(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockSendableConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	logger := &snapshotCapturingLogger{}
+	// Each request generates 2 handler log events (logRequest + logResponse).
+	// With MaxMessages=4, after 2 requests (=4 events) we trigger a snapshot.
+	session.SetSnapshotPolicy(SnapshotPolicy{MaxMessages: 4})
+	session.SetProtocolLogger(logger, "conn-snap-2")
+
+	// Initial snapshot
+	if logger.snapshotCount() != 1 {
+		t.Fatalf("expected 1 initial snapshot, got %d", logger.snapshotCount())
+	}
+
+	// Send 2 read requests (4 handler log events -> triggers snapshot)
+	for i := uint32(1); i <= 2; i++ {
+		req := &wire.Request{
+			MessageID:  i,
+			Operation:  wire.OpRead,
+			EndpointID: 0,
+			FeatureID:  uint8(model.FeatureDeviceInfo),
+		}
+		reqData, _ := wire.EncodeRequest(req)
+		session.OnMessage(reqData)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if logger.snapshotCount() != 2 {
+		t.Fatalf("expected 2 snapshots (initial + triggered), got %d", logger.snapshotCount())
+	}
+}
+
+func TestZoneSession_NoSnapshotWithoutLogger(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockSendableConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	// No SetProtocolLogger call - process messages normally, should not panic.
+	for i := uint32(1); i <= 5; i++ {
+		req := &wire.Request{
+			MessageID:  i,
+			Operation:  wire.OpRead,
+			EndpointID: 0,
+			FeatureID:  uint8(model.FeatureDeviceInfo),
+		}
+		reqData, _ := wire.EncodeRequest(req)
+		session.OnMessage(reqData)
 	}
 }
 
