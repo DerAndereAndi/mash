@@ -1,0 +1,1139 @@
+# Test Suite: TLS Profile Tests
+# Verifies TLS 1.3 requirements for MASH connections
+#
+# Spec: docs/testing/behavior/tls-profile.md
+#
+# Key concepts:
+# - TLS 1.3 only (no 1.2 fallback)
+# - Mandatory cipher: TLS_AES_128_GCM_SHA256
+# - Mandatory key exchange: secp256r1 (P-256)
+# - ALPN: mash/1
+# - No session resumption or 0-RTT
+# - Certificate chain depth max 2
+# - Mutual auth for operational, self-signed for commissioning
+
+---
+# TC-TLS-VERSION-001: TLS 1.3 Accepted
+id: TC-TLS-VERSION-001
+name: TLS 1.3 Handshake Succeeds
+description: |
+  Verifies that a TLS 1.3 handshake completes successfully when the
+  client offers TLS 1.3.
+
+pics_requirements:
+  - MASH.S.TLS.VERSION=1.3
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with TLS 1.3
+    action: connect
+    params:
+      tls_version: "1.3"
+      alpn: "mash/1"
+    expect:
+      connected: true
+      negotiated_version: "1.3"
+
+postconditions:
+  - tls_1_3_accepted: true
+
+timeout: "10s"
+tags:
+  - tls
+  - version
+  - handshake
+
+---
+# TC-TLS-VERSION-002: TLS 1.2 Rejected
+id: TC-TLS-VERSION-002
+name: TLS 1.2 Only Offer Rejected
+description: |
+  Verifies that the device rejects connections offering only TLS 1.2,
+  responding with a protocol_version alert.
+
+pics_requirements:
+  - MASH.S.TLS.VERSION=1.3
+  - MASH.S.TLS.FALLBACK_DISABLED=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Attempt connection with TLS 1.2 only
+    action: connect
+    params:
+      tls_version: "1.2"
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: protocol_version
+
+postconditions:
+  - tls_1_2_rejected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - version
+  - negative
+
+---
+# TC-TLS-VERSION-003: TLS 1.3 Selected from Mixed Offer
+id: TC-TLS-VERSION-003
+name: Server Selects TLS 1.3 from Mixed Offer
+description: |
+  Verifies that when the client offers both TLS 1.2 and 1.3, the
+  server selects TLS 1.3.
+
+pics_requirements:
+  - MASH.S.TLS.VERSION=1.3
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect offering TLS 1.2 and 1.3
+    action: connect
+    params:
+      tls_version: "1.2,1.3"
+      alpn: "mash/1"
+    expect:
+      connected: true
+      negotiated_version: "1.3"
+
+postconditions:
+  - tls_1_3_selected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - version
+  - negotiation
+
+---
+# TC-TLS-CIPHER-001: AES-128-GCM Accepted
+id: TC-TLS-CIPHER-001
+name: AES-128-GCM Cipher Suite Accepted
+description: |
+  Verifies that the mandatory TLS_AES_128_GCM_SHA256 cipher suite
+  is accepted and handshake completes successfully.
+
+pics_requirements:
+  - MASH.S.TLS.CS_AES_128_GCM=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect offering AES-128-GCM
+    action: connect
+    params:
+      cipher_suites:
+        - TLS_AES_128_GCM_SHA256
+      alpn: "mash/1"
+    expect:
+      connected: true
+      negotiated_cipher: TLS_AES_128_GCM_SHA256
+
+postconditions:
+  - aes_128_gcm_accepted: true
+
+timeout: "10s"
+tags:
+  - tls
+  - cipher
+  - mandatory
+
+---
+# TC-TLS-CIPHER-002: AES-256-GCM Accepted
+id: TC-TLS-CIPHER-002
+name: AES-256-GCM Cipher Suite Accepted
+description: |
+  Verifies that the recommended TLS_AES_256_GCM_SHA384 cipher suite
+  is accepted when offered.
+
+pics_requirements:
+  - MASH.S.TLS.CS_AES_256_GCM=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect offering AES-256-GCM
+    action: connect
+    params:
+      cipher_suites:
+        - TLS_AES_256_GCM_SHA384
+      alpn: "mash/1"
+    expect:
+      connected: true
+      negotiated_cipher: TLS_AES_256_GCM_SHA384
+
+postconditions:
+  - aes_256_gcm_accepted: true
+
+timeout: "10s"
+tags:
+  - tls
+  - cipher
+  - recommended
+
+---
+# TC-TLS-CIPHER-003: No Common Cipher Rejected
+id: TC-TLS-CIPHER-003
+name: No Common Cipher Suite Causes Handshake Failure
+description: |
+  Verifies that offering only prohibited cipher suites (e.g., CCM)
+  causes a handshake_failure alert.
+
+pics_requirements:
+  - MASH.S.TLS.CS_AES_128_GCM=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Attempt connection with only CCM cipher
+    action: connect
+    params:
+      cipher_suites:
+        - TLS_AES_128_CCM_SHA256
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: handshake_failure
+
+postconditions:
+  - no_common_cipher_rejected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - cipher
+  - negative
+
+---
+# TC-TLS-CIPHER-004: Cipher Preference Order
+id: TC-TLS-CIPHER-004
+name: Server Respects Client Cipher Preference Order
+description: |
+  Verifies that the server selects the first cipher from the client's
+  offer list that the server supports.
+
+pics_requirements:
+  - MASH.S.TLS.CS_AES_128_GCM=1
+  - MASH.S.TLS.CS_AES_256_GCM=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with AES-256 before AES-128
+    action: connect
+    params:
+      cipher_suites:
+        - TLS_AES_256_GCM_SHA384
+        - TLS_AES_128_GCM_SHA256
+      alpn: "mash/1"
+    expect:
+      connected: true
+      negotiated_cipher: TLS_AES_256_GCM_SHA384
+
+postconditions:
+  - cipher_preference_respected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - cipher
+  - preference
+
+---
+# TC-TLS-KX-001: P-256 Key Exchange Accepted
+id: TC-TLS-KX-001
+name: P-256 (secp256r1) Key Exchange Accepted
+description: |
+  Verifies that the mandatory secp256r1 (P-256) key exchange group
+  is accepted and handshake succeeds.
+
+pics_requirements:
+  - MASH.S.TLS.KX_P256=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with P-256 key share
+    action: connect
+    params:
+      key_exchange_groups:
+        - secp256r1
+      alpn: "mash/1"
+    expect:
+      connected: true
+      negotiated_group: secp256r1
+
+postconditions:
+  - p256_accepted: true
+
+timeout: "10s"
+tags:
+  - tls
+  - key-exchange
+  - mandatory
+
+---
+# TC-TLS-KX-002: X25519 Key Exchange Accepted
+id: TC-TLS-KX-002
+name: X25519 Key Exchange Accepted (If Supported)
+description: |
+  Verifies that X25519 key exchange is accepted when the device
+  supports it (recommended, not mandatory).
+
+pics_requirements:
+  - MASH.S.TLS.KX_X25519=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with X25519 key share
+    action: connect
+    params:
+      key_exchange_groups:
+        - x25519
+      alpn: "mash/1"
+    expect:
+      connected: true
+      negotiated_group: x25519
+
+postconditions:
+  - x25519_accepted: true
+
+timeout: "10s"
+tags:
+  - tls
+  - key-exchange
+  - recommended
+
+---
+# TC-TLS-KX-003: HelloRetryRequest for Missing Key Share
+id: TC-TLS-KX-003
+name: HelloRetryRequest When Server Needs Different Group
+description: |
+  Verifies that when the client offers only X25519 key share but
+  the server needs P-256, the server sends HelloRetryRequest and
+  the handshake completes after the client provides P-256.
+
+pics_requirements:
+  - MASH.S.TLS.KX_P256=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with X25519 only, server needs P-256
+    action: connect
+    params:
+      key_exchange_groups:
+        - x25519
+      force_hello_retry: true
+      alpn: "mash/1"
+    expect:
+      connected: true
+      hello_retry_request: true
+      negotiated_group: secp256r1
+
+postconditions:
+  - hello_retry_succeeded: true
+
+timeout: "15s"
+tags:
+  - tls
+  - key-exchange
+  - hello-retry
+
+---
+# TC-TLS-KX-004: No Common Group Rejected
+id: TC-TLS-KX-004
+name: No Common Key Exchange Group Causes Failure
+description: |
+  Verifies that offering only prohibited key exchange groups (e.g.,
+  P-521) causes a handshake_failure alert.
+
+pics_requirements:
+  - MASH.S.TLS.KX_P256=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Attempt connection with P-521 only
+    action: connect
+    params:
+      key_exchange_groups:
+        - secp521r1
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: handshake_failure
+
+postconditions:
+  - no_common_group_rejected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - key-exchange
+  - negative
+
+---
+# TC-TLS-ALPN-001: mash/1 ALPN Accepted
+id: TC-TLS-ALPN-001
+name: ALPN mash/1 Protocol Negotiated
+description: |
+  Verifies that the ALPN protocol identifier "mash/1" is accepted
+  and confirmed during the handshake.
+
+pics_requirements:
+  - MASH.S.TLS.EXT_ALPN=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with ALPN mash/1
+    action: connect
+    params:
+      alpn: "mash/1"
+    expect:
+      connected: true
+      negotiated_alpn: "mash/1"
+
+postconditions:
+  - alpn_accepted: true
+
+timeout: "10s"
+tags:
+  - tls
+  - alpn
+  - protocol
+
+---
+# TC-TLS-ALPN-002: Wrong ALPN Protocol Rejected
+id: TC-TLS-ALPN-002
+name: Wrong ALPN Protocol Causes Alert
+description: |
+  Verifies that offering only an unsupported ALPN protocol (e.g.,
+  http/1.1) causes a no_application_protocol alert.
+
+pics_requirements:
+  - MASH.S.TLS.EXT_ALPN=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with wrong ALPN
+    action: connect
+    params:
+      alpn: "http/1.1"
+    expect:
+      connected: false
+      tls_alert: no_application_protocol
+
+postconditions:
+  - wrong_alpn_rejected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - alpn
+  - negative
+
+---
+# TC-TLS-ALPN-003: Missing ALPN Handled
+id: TC-TLS-ALPN-003
+name: Missing ALPN Extension Rejected or Warned
+description: |
+  Verifies that when the client sends no ALPN extension, the server
+  either rejects with no_application_protocol or logs a warning.
+
+pics_requirements:
+  - MASH.S.TLS.EXT_ALPN=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect without ALPN
+    action: connect
+    params:
+      alpn: null
+    expect:
+      connected: false
+      tls_alert: no_application_protocol
+
+postconditions:
+  - missing_alpn_handled: true
+
+timeout: "10s"
+tags:
+  - tls
+  - alpn
+  - negative
+
+---
+# TC-TLS-CHAIN-001: Valid Chain Depth 2 Accepted
+id: TC-TLS-CHAIN-001
+name: Valid Certificate Chain Depth 2 Accepted
+description: |
+  Verifies that a valid certificate chain (Zone CA + leaf cert)
+  is accepted during operational TLS handshake.
+
+pics_requirements:
+  - MASH.S.TLS.CERT_CHAIN_MAX_DEPTH=2
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with valid chain (Zone CA + leaf)
+    action: connect
+    params:
+      cert_chain:
+        - leaf_cert
+        - zone_ca_cert
+      alpn: "mash/1"
+    expect:
+      connected: true
+      chain_validated: true
+
+postconditions:
+  - valid_chain_accepted: true
+
+timeout: "10s"
+tags:
+  - tls
+  - chain
+  - depth
+
+---
+# TC-TLS-CHAIN-002: Chain Too Deep Rejected
+id: TC-TLS-CHAIN-002
+name: Certificate Chain Depth 3 Rejected
+description: |
+  Verifies that a certificate chain with 3 certificates (too deep)
+  is rejected during validation.
+
+pics_requirements:
+  - MASH.S.TLS.CERT_CHAIN_MAX_DEPTH=2
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with chain depth 3
+    action: connect
+    params:
+      cert_chain:
+        - leaf_cert
+        - intermediate_ca
+        - root_ca
+      alpn: "mash/1"
+    expect:
+      connected: false
+      error: chain_too_deep
+
+postconditions:
+  - deep_chain_rejected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - chain
+  - negative
+
+---
+# TC-TLS-CHAIN-003: Leaf Only Chain Accepted
+id: TC-TLS-CHAIN-003
+name: Leaf Certificate Only Chain Accepted
+description: |
+  Verifies that presenting only the leaf certificate (without Zone CA
+  in chain) is accepted, since the recipient validates against its
+  locally stored Zone CA.
+
+pics_requirements:
+  - MASH.S.TLS.CERT_CHAIN_MAX_DEPTH=2
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with leaf only (no CA in chain)
+    action: connect
+    params:
+      cert_chain:
+        - leaf_cert
+      alpn: "mash/1"
+    expect:
+      connected: true
+      chain_validated: true
+
+postconditions:
+  - leaf_only_accepted: true
+
+timeout: "10s"
+tags:
+  - tls
+  - chain
+  - leaf-only
+
+---
+# TC-TLS-CHAIN-004: Wrong CA in Chain Rejected
+id: TC-TLS-CHAIN-004
+name: Wrong Zone CA in Chain Rejected
+description: |
+  Verifies that presenting a chain with a different Zone CA cert
+  (not the local zone's CA) causes validation failure.
+
+pics_requirements:
+  - MASH.S.TLS.CERT_CHAIN_MAX_DEPTH=2
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with wrong CA in chain
+    action: connect
+    params:
+      cert_chain:
+        - leaf_cert
+        - wrong_zone_ca
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: unknown_ca
+
+postconditions:
+  - wrong_ca_rejected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - chain
+  - negative
+
+---
+# TC-TLS-ALERT-001: Close Notify Handled
+id: TC-TLS-ALERT-001
+name: Close Notify Triggers Graceful Close
+description: |
+  Verifies that sending close_notify alert causes the peer to respond
+  with close_notify and close the connection gracefully.
+
+pics_requirements:
+  - MASH.S.TLS.VERSION=1.3
+
+preconditions:
+  - device_commissioned: true
+  - connection_established: true
+
+steps:
+  - name: Send close_notify
+    action: send_tls_alert
+    params:
+      alert: close_notify
+    expect:
+      peer_close_notify: true
+      connection_closed: true
+
+postconditions:
+  - graceful_close: true
+
+timeout: "10s"
+tags:
+  - tls
+  - alert
+  - close
+
+---
+# TC-TLS-ALERT-002: Bad Certificate Alert
+id: TC-TLS-ALERT-002
+name: Invalid Certificate Triggers bad_certificate Alert
+description: |
+  Verifies that presenting an invalid certificate (corrupted signature)
+  causes a bad_certificate alert.
+
+pics_requirements:
+  - MASH.S.TLS.VERSION=1.3
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with invalid cert
+    action: connect
+    params:
+      cert_chain:
+        - invalid_signature_cert
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: bad_certificate
+
+postconditions:
+  - bad_cert_alerted: true
+
+timeout: "10s"
+tags:
+  - tls
+  - alert
+  - bad-certificate
+
+---
+# TC-TLS-ALERT-003: Expired Certificate Alert
+id: TC-TLS-ALERT-003
+name: Expired Certificate Triggers certificate_expired Alert
+description: |
+  Verifies that presenting an expired certificate causes a
+  certificate_expired alert.
+
+pics_requirements:
+  - MASH.S.TLS.VERSION=1.3
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with expired cert
+    action: connect
+    params:
+      cert_chain:
+        - expired_cert
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: certificate_expired
+
+postconditions:
+  - expired_cert_alerted: true
+
+timeout: "10s"
+tags:
+  - tls
+  - alert
+  - expired
+
+---
+# TC-TLS-ALERT-004: Unknown CA Alert
+id: TC-TLS-ALERT-004
+name: Wrong Zone Certificate Triggers unknown_ca Alert
+description: |
+  Verifies that presenting a certificate signed by a different Zone CA
+  causes an unknown_ca alert.
+
+pics_requirements:
+  - MASH.S.TLS.VERSION=1.3
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with wrong zone cert
+    action: connect
+    params:
+      cert_chain:
+        - wrong_zone_cert
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: unknown_ca
+
+postconditions:
+  - unknown_ca_alerted: true
+
+timeout: "10s"
+tags:
+  - tls
+  - alert
+  - unknown-ca
+
+---
+# TC-TLS-CTRL-001: Controller Presents Operational Certificate
+id: TC-TLS-CTRL-001
+name: Controller Presents Operational Certificate in Handshake
+description: |
+  Verifies that during operational TLS connection, the controller
+  presents its operational certificate as the client certificate.
+
+pics_requirements:
+  - MASH.S.TLS.MUTUAL_AUTH_OPERATIONAL=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with controller operational cert
+    action: connect
+    params:
+      client_cert: controller_operational
+      alpn: "mash/1"
+    expect:
+      connected: true
+      mutual_auth: true
+
+postconditions:
+  - controller_cert_presented: true
+
+timeout: "10s"
+tags:
+  - tls
+  - controller
+  - mutual-auth
+
+---
+# TC-TLS-CTRL-002: Controller Certificate Signed by Zone CA
+id: TC-TLS-CTRL-002
+name: Device Verifies Controller Certificate Signed by Zone CA
+description: |
+  Verifies that the device successfully validates the controller's
+  operational certificate is signed by the Zone CA.
+
+pics_requirements:
+  - MASH.S.TLS.MUTUAL_AUTH_OPERATIONAL=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with valid controller cert
+    action: connect
+    params:
+      client_cert: controller_operational
+      alpn: "mash/1"
+    expect:
+      connected: true
+      controller_cert_verified: true
+
+postconditions:
+  - controller_cert_valid: true
+
+timeout: "10s"
+tags:
+  - tls
+  - controller
+  - zone-ca
+
+---
+# TC-TLS-CTRL-003: Expired Controller Certificate Rejected
+id: TC-TLS-CTRL-003
+name: Expired Controller Certificate Rejected by Device
+description: |
+  Verifies that the device rejects an expired controller certificate
+  with a bad_certificate TLS alert.
+
+pics_requirements:
+  - MASH.S.TLS.MUTUAL_AUTH_OPERATIONAL=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with expired controller cert
+    action: connect
+    params:
+      client_cert: controller_expired
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: bad_certificate
+
+postconditions:
+  - expired_controller_rejected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - controller
+  - expired
+  - negative
+
+---
+# TC-TLS-CTRL-004: Controller Certificate from Wrong Zone CA Rejected
+id: TC-TLS-CTRL-004
+name: Controller Certificate from Different Zone Rejected
+description: |
+  Verifies that the device rejects a controller certificate signed
+  by a different Zone CA with an unknown_ca alert.
+
+pics_requirements:
+  - MASH.S.TLS.MUTUAL_AUTH_OPERATIONAL=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with wrong zone controller cert
+    action: connect
+    params:
+      client_cert: controller_wrong_zone
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: unknown_ca
+
+postconditions:
+  - wrong_zone_controller_rejected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - controller
+  - wrong-zone
+  - negative
+
+---
+# TC-TLS-CTRL-005: Controller Certificate Missing clientAuth EKU Rejected
+id: TC-TLS-CTRL-005
+name: Controller Certificate Without clientAuth EKU Rejected
+description: |
+  Verifies that the device rejects a controller certificate that
+  is missing the clientAuth extended key usage.
+
+pics_requirements:
+  - MASH.S.TLS.MUTUAL_AUTH_OPERATIONAL=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with controller cert missing clientAuth
+    action: connect
+    params:
+      client_cert: controller_no_client_auth
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: bad_certificate
+
+postconditions:
+  - missing_eku_rejected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - controller
+  - eku
+  - negative
+
+---
+# TC-TLS-CTRL-006: Controller Certificate with CA:TRUE Rejected
+id: TC-TLS-CTRL-006
+name: Controller Certificate with CA Flag Rejected
+description: |
+  Verifies that the device rejects a controller certificate that
+  has basicConstraints CA:TRUE (must be end-entity).
+
+pics_requirements:
+  - MASH.S.TLS.MUTUAL_AUTH_OPERATIONAL=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with controller cert having CA:TRUE
+    action: connect
+    params:
+      client_cert: controller_ca_true
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: bad_certificate
+
+postconditions:
+  - ca_true_rejected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - controller
+  - ca-flag
+  - negative
+
+---
+# TC-TLS-CTRL-007: Commissioning Without Controller Certificate
+id: TC-TLS-CTRL-007
+name: Commissioning Handshake Succeeds Without Controller Certificate
+description: |
+  Verifies that during PASE commissioning, the TLS handshake
+  succeeds without the controller presenting a certificate (real
+  authentication happens via SPAKE2+).
+
+pics_requirements:
+  - MASH.S.TLS.SELF_SIGNED_COMMISSIONING=1
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Connect without client cert for commissioning
+    action: connect
+    params:
+      client_cert: none
+      alpn: "mash/1"
+    expect:
+      connected: true
+      self_signed_accepted: true
+
+postconditions:
+  - commissioning_no_client_cert: true
+
+timeout: "10s"
+tags:
+  - tls
+  - controller
+  - commissioning
+
+---
+# TC-TLS-CTRL-008: Controller Certificate Before notBefore Rejected
+id: TC-TLS-CTRL-008
+name: Not-Yet-Valid Controller Certificate Rejected
+description: |
+  Verifies that the device rejects a controller certificate whose
+  notBefore date is in the future (not yet valid).
+
+pics_requirements:
+  - MASH.S.TLS.MUTUAL_AUTH_OPERATIONAL=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with not-yet-valid controller cert
+    action: connect
+    params:
+      client_cert: controller_not_yet_valid
+      alpn: "mash/1"
+    expect:
+      connected: false
+      tls_alert: bad_certificate
+
+postconditions:
+  - not_yet_valid_rejected: true
+
+timeout: "10s"
+tags:
+  - tls
+  - controller
+  - not-yet-valid
+  - negative
+
+---
+# TC-TLS-RESUME-001: No Session Ticket Sent
+id: TC-TLS-RESUME-001
+name: Server Does Not Send NewSessionTicket
+description: |
+  Verifies that after a complete TLS handshake, the server does not
+  send a NewSessionTicket message (session resumption is prohibited).
+
+pics_requirements:
+  - MASH.S.TLS.EXT_SESSION_TICKET=0
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Complete TLS handshake
+    action: connect
+    params:
+      alpn: "mash/1"
+    expect:
+      connected: true
+
+  - name: Verify no session ticket received
+    action: verify_tls_state
+    expect:
+      session_ticket_received: false
+
+postconditions:
+  - no_session_ticket: true
+
+timeout: "10s"
+tags:
+  - tls
+  - resume
+  - session-ticket
+
+---
+# TC-TLS-RESUME-002: PSK Extension Ignored
+id: TC-TLS-RESUME-002
+name: Server Ignores PSK Extension from Client
+description: |
+  Verifies that if the client sends a pre_shared_key extension,
+  the server ignores it and performs a full handshake.
+
+pics_requirements:
+  - MASH.S.TLS.EXT_SESSION_TICKET=0
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with PSK extension
+    action: connect
+    params:
+      send_psk: true
+      alpn: "mash/1"
+    expect:
+      connected: true
+      full_handshake: true
+      psk_used: false
+
+postconditions:
+  - psk_ignored: true
+
+timeout: "10s"
+tags:
+  - tls
+  - resume
+  - psk
+  - negative
+
+---
+# TC-TLS-RESUME-003: Early Data Ignored
+id: TC-TLS-RESUME-003
+name: Server Ignores Early Data (0-RTT)
+description: |
+  Verifies that if the client sends an early_data extension,
+  the server ignores it and performs a full handshake. 0-RTT
+  is prohibited due to replay attack risk.
+
+pics_requirements:
+  - MASH.S.TLS.EXT_EARLY_DATA=0
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with early_data extension
+    action: connect
+    params:
+      send_early_data: true
+      alpn: "mash/1"
+    expect:
+      connected: true
+      full_handshake: true
+      early_data_accepted: false
+
+postconditions:
+  - early_data_ignored: true
+
+timeout: "10s"
+tags:
+  - tls
+  - resume
+  - early-data
+  - negative

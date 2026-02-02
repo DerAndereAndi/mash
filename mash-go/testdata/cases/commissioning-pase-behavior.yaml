@@ -1,0 +1,217 @@
+# Test Suite: Commissioning PASE Behavior Tests
+# Verifies PASE (SPAKE2+) edge cases and error handling
+#
+# Spec: docs/testing/behavior/commissioning-pase.md
+#
+# Key concepts:
+# - SPAKE2+ with P-256 group, SHA-256, HKDF-SHA256
+# - 8-digit setup code, 27-bit entropy
+# - PASE timeout 30s, returns to ADVERTISING
+# - Oracle attack prevention via constant-time responses
+
+---
+# TC-PASE-001: Successful PASE -> PASE_VERIFIED
+id: TC-PASE-001
+name: Successful PASE Handshake Completes
+description: |
+  Verifies that a complete PASE handshake with correct setup code
+  transitions device to PASE_VERIFIED state.
+
+pics_requirements:
+  - D.COMM.PASE
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - tls_connection_established: true
+
+steps:
+  - name: Perform PASE with correct setup code
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      session_established: true
+      key_length: 32
+      key_not_zero: true
+      state: PASE_VERIFIED
+
+postconditions:
+  - pase_verified: true
+
+timeout: "15s"
+tags:
+  - commissioning
+  - pase
+  - success
+
+---
+# TC-PASE-002: Wrong Setup Code Fails Verification
+id: TC-PASE-002
+name: Wrong Setup Code Causes VERIFICATION_FAILED
+description: |
+  Verifies that an incorrect setup code causes PASE to fail with
+  a verification error. The device returns to ADVERTISING state.
+
+pics_requirements:
+  - D.COMM.PASE
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - tls_connection_established: true
+
+steps:
+  - name: Attempt PASE with wrong setup code
+    action: commission
+    params:
+      setup_code: "00000000"       # Wrong code
+    expect:
+      session_established: false
+      error: VERIFICATION_FAILED
+
+  - name: Verify device returned to ADVERTISING
+    action: verify_commissioning_state
+    expect:
+      state: ADVERTISING
+
+postconditions:
+  - pase_failed: true
+
+timeout: "15s"
+tags:
+  - commissioning
+  - pase
+  - negative
+  - wrong-code
+
+---
+# TC-PASE-003: PASE Timeout Returns to ADVERTISING
+id: TC-PASE-003
+name: PASE Timeout After 30 Seconds
+description: |
+  Verifies that if the PASE handshake is not completed within 30 seconds,
+  the device times out and returns to ADVERTISING state.
+
+pics_requirements:
+  - D.COMM.PASE
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - tls_connection_established: true
+
+steps:
+  - name: Send X value but do not complete PASE
+    action: send_pase_x
+    params:
+      setup_code: "12345678"
+      halt_after_x: true
+    expect:
+      x_sent: true
+
+  - name: Wait for PASE timeout
+    action: wait
+    params:
+      duration: "35s"
+
+  - name: Verify device returned to ADVERTISING
+    action: verify_commissioning_state
+    expect:
+      state: ADVERTISING
+
+postconditions:
+  - pase_timed_out: true
+
+timeout: "45s"
+tags:
+  - commissioning
+  - pase
+  - timeout
+
+---
+# TC-PASE-004: Invalid X Value Causes Close
+id: TC-PASE-004
+name: Invalid SPAKE2+ X Value Causes Close
+description: |
+  Verifies that sending an invalid X value (point not on curve)
+  causes the device to close the connection.
+
+pics_requirements:
+  - D.COMM.PASE
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - tls_connection_established: true
+
+steps:
+  - name: Send invalid X value (not on P-256 curve)
+    action: send_pase_x
+    params:
+      invalid_point: true
+    expect:
+      connection_closed: true
+      error: INVALID_PARAMETER
+
+postconditions:
+  - invalid_x_rejected: true
+
+timeout: "10s"
+tags:
+  - commissioning
+  - pase
+  - negative
+  - security
+
+---
+# TC-PASE-005: Replay X Generates Fresh Y Each Time
+id: TC-PASE-005
+name: Replay X Gets Fresh Y (No Y Reuse)
+description: |
+  Verifies that even if the same X value is sent twice, the device
+  generates a fresh Y each time. Prevents replay/correlation attacks.
+
+pics_requirements:
+  - D.COMM.PASE
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - tls_connection_established: true
+
+steps:
+  - name: Send X and capture Y response
+    action: send_pase_x
+    params:
+      setup_code: "12345678"
+      capture_y: true
+    expect:
+      y_received: true
+      save_as: y_value_1
+
+  - name: Reset and reconnect
+    action: reset_pase_session
+
+  - name: Send same X value again
+    action: send_pase_x
+    params:
+      setup_code: "12345678"
+      capture_y: true
+    expect:
+      y_received: true
+      save_as: y_value_2
+
+  - name: Verify Y values are different
+    action: compare
+    params:
+      left: y_value_1
+      operator: "!="
+      right: y_value_2
+    expect:
+      comparison_true: true
+
+postconditions:
+  - y_values_fresh: true
+
+timeout: "20s"
+tags:
+  - commissioning
+  - pase
+  - security
+  - replay

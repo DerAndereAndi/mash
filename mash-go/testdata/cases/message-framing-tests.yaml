@@ -1,0 +1,892 @@
+# Test Suite: Message Framing Tests
+# Verifies wire-level message encoding, CBOR parsing, and compatibility
+#
+# Spec: docs/testing/behavior/message-framing.md
+#
+# Key concepts:
+# - 4-byte big-endian length prefix, max 65536 bytes
+# - CBOR encoding with integer keys
+# - Unknown keys ignored (forward compatibility)
+# - Duplicate keys invalid; NaN/Infinity invalid
+# - Null vs absent vs zero semantics
+
+---
+# TC-CBOR-001: Valid Map with Integer Keys Parses
+id: TC-CBOR-001
+name: Valid CBOR Map with Integer Keys
+description: |
+  Verifies that a well-formed CBOR map with integer keys is
+  parsed successfully.
+
+pics_requirements:
+  - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
+  - MASH.S.CBOR.KEY_ORDER_REQUIRED=0
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send valid CBOR request with integer keys
+    action: send_raw
+    params:
+      message_type: request
+      cbor_map:
+        1: 1                       # messageId
+        2: 1                       # operation (Read)
+        3: 0                       # endpointId
+        4: 1                       # featureId
+    expect:
+      parse_success: true
+      response_received: true
+
+postconditions:
+  - valid_cbor_parsed: true
+
+timeout: "5s"
+tags:
+  - cbor
+  - parsing
+  - basic
+
+---
+# TC-CBOR-002: Keys Out of Order Parses
+id: TC-CBOR-002
+name: CBOR Keys Out of Order Parse Successfully
+description: |
+  Verifies that CBOR maps with keys in non-ascending order are
+  parsed successfully. Key ordering is NOT required.
+
+pics_requirements:
+  - MASH.S.CBOR.KEY_ORDER_REQUIRED=0
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send CBOR map with keys out of order
+    action: send_raw
+    params:
+      message_type: request
+      cbor_map:
+        4: 1                       # featureId first
+        1: 1                       # messageId second
+        3: 0                       # endpointId third
+        2: 1                       # operation last
+    expect:
+      parse_success: true
+      response_received: true
+
+postconditions:
+  - unordered_keys_ok: true
+
+timeout: "5s"
+tags:
+  - cbor
+  - parsing
+  - key-order
+
+---
+# TC-CBOR-003: Duplicate Keys Return INVALID_PARAMETER
+id: TC-CBOR-003
+name: Duplicate CBOR Keys Rejected
+description: |
+  Verifies that a CBOR message with duplicate keys is rejected
+  with status INVALID_PARAMETER.
+
+pics_requirements:
+  - MASH.S.CBOR.DUPLICATE_KEYS_ERROR=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send CBOR map with duplicate key
+    action: send_raw
+    params:
+      message_type: request
+      cbor_bytes_hex: "a3010101010300"  # key 1 appears twice
+    expect:
+      error_status: INVALID_PARAMETER
+      error_message_contains: "Duplicate key"
+
+postconditions:
+  - duplicate_keys_rejected: true
+
+timeout: "5s"
+tags:
+  - cbor
+  - parsing
+  - negative
+  - duplicate
+
+---
+# TC-CBOR-004: Unknown Key 99 Ignored
+id: TC-CBOR-004
+name: Unknown CBOR Key Ignored (Forward Compatibility)
+description: |
+  Verifies that unknown keys are silently ignored and known keys
+  are processed normally.
+
+pics_requirements:
+  - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send request with unknown key 99
+    action: send_raw
+    params:
+      message_type: request
+      cbor_map:
+        1: 1                       # messageId
+        2: 1                       # operation
+        3: 0                       # endpointId
+        4: 1                       # featureId
+        99: "future-field"         # Unknown key - should be ignored
+    expect:
+      parse_success: true
+      response_received: true
+
+postconditions:
+  - unknown_key_ignored: true
+
+timeout: "5s"
+tags:
+  - cbor
+  - parsing
+  - forward-compatibility
+
+---
+# TC-CBOR-005: String Key Causes Error
+id: TC-CBOR-005
+name: String CBOR Key Rejected at Protocol Level
+description: |
+  Verifies that CBOR maps with string keys (instead of integer keys)
+  are rejected at the protocol level.
+
+pics_requirements:
+  - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send CBOR map with string key
+    action: send_raw
+    params:
+      message_type: request
+      cbor_map_string_keys:
+        "messageId": 1
+        "operation": 1
+    expect:
+      parse_success: false
+      error_status: INVALID_PARAMETER
+
+postconditions:
+  - string_key_rejected: true
+
+timeout: "5s"
+tags:
+  - cbor
+  - parsing
+  - negative
+  - string-key
+
+---
+# TC-CBOR-006: NaN Value Causes INVALID_PARAMETER
+id: TC-CBOR-006
+name: NaN Float Value Rejected
+description: |
+  Verifies that CBOR messages containing NaN float values are
+  rejected with INVALID_PARAMETER.
+
+pics_requirements:
+  - MASH.S.CBOR.FLOAT64_ONLY=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send message with NaN value
+    action: send_raw
+    params:
+      message_type: request
+      cbor_bytes_hex: "a201f97e00"  # {1: NaN}
+    expect:
+      error_status: INVALID_PARAMETER
+
+postconditions:
+  - nan_rejected: true
+
+timeout: "5s"
+tags:
+  - cbor
+  - parsing
+  - negative
+  - nan
+
+---
+# TC-CBOR-007: Infinity Value Causes INVALID_PARAMETER
+id: TC-CBOR-007
+name: Infinity Float Value Rejected
+description: |
+  Verifies that CBOR messages containing Infinity float values are
+  rejected with INVALID_PARAMETER.
+
+pics_requirements:
+  - MASH.S.CBOR.FLOAT64_ONLY=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send message with Infinity value
+    action: send_raw
+    params:
+      message_type: request
+      cbor_bytes_hex: "a201f97c00"  # {1: Infinity}
+    expect:
+      error_status: INVALID_PARAMETER
+
+postconditions:
+  - infinity_rejected: true
+
+timeout: "5s"
+tags:
+  - cbor
+  - parsing
+  - negative
+  - infinity
+
+---
+# TC-FRAME-001: Valid Small Message Parses
+id: TC-FRAME-001
+name: Valid Small Message Frame Parses
+description: |
+  Verifies that a valid small message with correct 4-byte length prefix
+  is parsed successfully.
+
+pics_requirements:
+  - MASH.S.FRAME.MAX_SIZE=65536
+  - MASH.S.FRAME.LENGTH_BYTES=4
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send small framed message
+    action: send_raw_frame
+    params:
+      payload_size: 256
+      valid_cbor: true
+    expect:
+      parse_success: true
+      response_received: true
+
+postconditions:
+  - small_frame_ok: true
+
+timeout: "5s"
+tags:
+  - frame
+  - parsing
+  - basic
+
+---
+# TC-FRAME-002: Valid Large Message (64KB) Parses
+id: TC-FRAME-002
+name: Valid Maximum Size Message Frame Parses
+description: |
+  Verifies that a message at the maximum size (65536 bytes) is
+  parsed successfully.
+
+pics_requirements:
+  - MASH.S.FRAME.MAX_SIZE=65536
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send maximum-size framed message
+    action: send_raw_frame
+    params:
+      payload_size: 65536
+      valid_cbor: true
+    expect:
+      parse_success: true
+
+postconditions:
+  - max_frame_ok: true
+
+timeout: "10s"
+tags:
+  - frame
+  - parsing
+  - max-size
+
+---
+# TC-FRAME-003: Oversized Length Causes FATAL Close
+id: TC-FRAME-003
+name: Oversized Frame Length Causes Connection Close
+description: |
+  Verifies that a length field > 65536 causes an immediate FATAL
+  connection close. The payload is NOT read.
+
+pics_requirements:
+  - MASH.S.FRAME.MAX_SIZE=65536
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send frame with oversized length
+    action: send_raw_frame
+    params:
+      length_override: 65537      # 1 byte over maximum
+      payload_size: 0             # Don't actually send payload
+    expect:
+      connection_closed: true
+      error: FATAL
+
+postconditions:
+  - oversized_fatal: true
+
+timeout: "5s"
+tags:
+  - frame
+  - parsing
+  - negative
+  - fatal
+
+---
+# TC-FRAME-004: Zero Length Causes FATAL Close
+id: TC-FRAME-004
+name: Zero Frame Length Causes Connection Close
+description: |
+  Verifies that a length field of zero causes an immediate FATAL
+  connection close.
+
+pics_requirements:
+  - MASH.S.FRAME.MAX_SIZE=65536
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send frame with zero length
+    action: send_raw_frame
+    params:
+      length_override: 0
+    expect:
+      connection_closed: true
+      error: FATAL
+
+postconditions:
+  - zero_length_fatal: true
+
+timeout: "5s"
+tags:
+  - frame
+  - parsing
+  - negative
+  - fatal
+
+---
+# TC-FRAME-005: Truncated Length Prefix Waits
+id: TC-FRAME-005
+name: Truncated Length Prefix Waits for More Data
+description: |
+  Verifies that when fewer than 4 bytes are available for the length
+  field, the parser waits for more data rather than erroring.
+
+pics_requirements:
+  - MASH.S.FRAME.LENGTH_BYTES=4
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send partial length prefix (3 bytes)
+    action: send_raw_bytes
+    params:
+      bytes_hex: "000001"          # Only 3 of 4 length bytes
+    expect:
+      connection_open: true        # Should still be waiting
+
+  - name: Send remaining byte and valid payload
+    action: send_raw_bytes
+    params:
+      bytes_hex: "05"              # Complete length = 5
+      followed_by_cbor_payload: true
+      payload_size: 5
+    expect:
+      parse_success: true
+
+postconditions:
+  - truncated_length_waited: true
+
+timeout: "10s"
+tags:
+  - frame
+  - parsing
+  - partial
+
+---
+# TC-FRAME-006: Truncated Payload Waits
+id: TC-FRAME-006
+name: Truncated Payload Waits for More Data
+description: |
+  Verifies that when the payload is shorter than the declared length,
+  the parser waits for more data.
+
+pics_requirements:
+  - MASH.S.FRAME.LENGTH_BYTES=4
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send length prefix declaring 16 bytes then only 5
+    action: send_raw_bytes
+    params:
+      bytes_hex: "00000010"        # Length = 16
+      followed_by_bytes: 5        # Only 5 bytes of payload
+    expect:
+      connection_open: true        # Waiting for remaining 11 bytes
+
+  - name: Send remaining payload bytes
+    action: send_raw_bytes
+    params:
+      remaining_bytes: 11
+    expect:
+      parse_success: true
+
+postconditions:
+  - truncated_payload_waited: true
+
+timeout: "10s"
+tags:
+  - frame
+  - parsing
+  - partial
+
+---
+# TC-INT-001: Max uint32 Parses
+id: TC-INT-001
+name: Maximum uint32 Value Parses
+description: |
+  Verifies that the maximum uint32 value (4294967295) is parsed correctly.
+
+pics_requirements:
+  - MASH.S.INT.MAX_INT64=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send message with max uint32 value
+    action: send_raw
+    params:
+      message_type: request
+      cbor_map:
+        1: 4294967295              # Max uint32 as messageId
+        2: 1
+        3: 0
+        4: 1
+    expect:
+      parse_success: true
+
+postconditions:
+  - max_uint32_ok: true
+
+timeout: "5s"
+tags:
+  - integer
+  - parsing
+  - uint32
+
+---
+# TC-INT-002: Max int64 Parses
+id: TC-INT-002
+name: Maximum int64 Value Parses
+description: |
+  Verifies that the maximum int64 value (9223372036854775807) is
+  parsed correctly for power values.
+
+pics_requirements:
+  - MASH.S.INT.MAX_INT64=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send message with max int64 attribute value
+    action: send_raw
+    params:
+      message_type: attribute_value
+      value: 9223372036854775807
+    expect:
+      parse_success: true
+
+postconditions:
+  - max_int64_ok: true
+
+timeout: "5s"
+tags:
+  - integer
+  - parsing
+  - int64
+
+---
+# TC-INT-003: Negative int64 Parses
+id: TC-INT-003
+name: Negative int64 Value Parses
+description: |
+  Verifies that negative int64 values (production/discharge convention)
+  are parsed correctly.
+
+pics_requirements:
+  - MASH.S.INT.MAX_INT64=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send message with negative int64 value
+    action: send_raw
+    params:
+      message_type: attribute_value
+      value: -9223372036854775808
+    expect:
+      parse_success: true
+
+postconditions:
+  - negative_int64_ok: true
+
+timeout: "5s"
+tags:
+  - integer
+  - parsing
+  - int64
+  - negative
+
+---
+# TC-INT-004: Value Exceeds Range Causes CONSTRAINT_ERROR
+id: TC-INT-004
+name: Value Out of Range Returns CONSTRAINT_ERROR
+description: |
+  Verifies that a value exceeding the field's defined range (e.g.,
+  endpointId > 255) returns CONSTRAINT_ERROR.
+
+pics_requirements:
+  - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send request with endpointId = 256 (exceeds uint8)
+    action: send_raw
+    params:
+      message_type: request
+      cbor_map:
+        1: 1
+        2: 1
+        3: 256                     # endpointId > 255
+        4: 1
+    expect:
+      error_status: CONSTRAINT_ERROR
+
+postconditions:
+  - range_error_returned: true
+
+timeout: "5s"
+tags:
+  - integer
+  - parsing
+  - negative
+  - constraint
+
+---
+# TC-NULL-001: Explicit Null Field
+id: TC-NULL-001
+name: Explicit Null Value Recognized
+description: |
+  Verifies that a key with explicit null value (CBOR 0xF6) is
+  treated as "field explicitly has no value."
+
+pics_requirements:
+  - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send attribute write with explicit null
+    action: write
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: myConsumptionLimit
+      value: null
+    expect:
+      write_success: true
+
+  - name: Read attribute back
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: myConsumptionLimit
+    expect:
+      read_success: true
+      value_is_null: true
+
+postconditions:
+  - null_recognized: true
+
+timeout: "5s"
+tags:
+  - null
+  - cbor
+  - semantics
+
+---
+# TC-NULL-002: Key Absent Uses Default
+id: TC-NULL-002
+name: Absent Key Uses Default Value
+description: |
+  Verifies that when an optional key is absent from a message,
+  the default value is used.
+
+pics_requirements:
+  - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send SetLimit without duration (absent = indefinite)
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+        # duration intentionally omitted
+    expect:
+      invoke_success: true
+
+  - name: Wait to verify limit persists (no timer)
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Verify limit still active (default = indefinite)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 5000000
+
+postconditions:
+  - default_applied: true
+
+timeout: "10s"
+tags:
+  - null
+  - absent
+  - default
+
+---
+# TC-NULL-003: Value Zero is Not Null
+id: TC-NULL-003
+name: Zero Value is Distinct from Null
+description: |
+  Verifies that a field set to zero is different from null.
+  Zero means "limit of zero" (full stop), not "no limit."
+
+pics_requirements:
+  - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Set limit to zero
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 0
+    expect:
+      invoke_success: true
+
+  - name: Read limit
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 0                     # Zero, not null
+      value_is_not_null: true
+
+postconditions:
+  - zero_not_null: true
+
+timeout: "5s"
+tags:
+  - null
+  - zero
+  - semantics
+
+---
+# TC-NULL-004: Required Field Missing Returns INVALID_PARAMETER
+id: TC-NULL-004
+name: Missing Required Field Returns Error
+description: |
+  Verifies that when a required field is missing from a request,
+  the response is INVALID_PARAMETER.
+
+pics_requirements:
+  - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send request missing required operation field
+    action: send_raw
+    params:
+      message_type: request
+      cbor_map:
+        1: 1                       # messageId
+        # 2: operation MISSING
+        3: 0                       # endpointId
+        4: 1                       # featureId
+    expect:
+      error_status: INVALID_PARAMETER
+      error_message_contains: "Missing required field"
+
+postconditions:
+  - missing_field_rejected: true
+
+timeout: "5s"
+tags:
+  - null
+  - required
+  - negative
+
+---
+# TC-COMPAT-001: Future Key Ignored
+id: TC-COMPAT-001
+name: Future Protocol Key Ignored
+description: |
+  Verifies that a key from the reserved range (100-255) in a request
+  is silently ignored, and the rest of the message is processed normally.
+
+pics_requirements:
+  - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send request with future key 200
+    action: send_raw
+    params:
+      message_type: request
+      cbor_map:
+        1: 1
+        2: 1
+        3: 0
+        4: 1
+        200: "future-protocol-field"
+    expect:
+      parse_success: true
+      response_received: true
+
+postconditions:
+  - future_key_ignored: true
+
+timeout: "5s"
+tags:
+  - compatibility
+  - forward
+  - future-key
+
+---
+# TC-COMPAT-002: Extra Array Element Ignored
+id: TC-COMPAT-002
+name: Extra Array Elements Ignored
+description: |
+  Verifies that when an array contains more elements than expected,
+  the extra elements are ignored and known elements are processed.
+
+pics_requirements:
+  - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send request with extra array elements
+    action: send_raw
+    params:
+      message_type: request
+      extra_array_elements: true
+    expect:
+      parse_success: true
+      response_received: true
+
+postconditions:
+  - extra_array_ignored: true
+
+timeout: "5s"
+tags:
+  - compatibility
+  - forward
+  - array
+
+---
+# TC-COMPAT-003: Unknown Enum Treated as Unknown
+id: TC-COMPAT-003
+name: Unknown Enum Value Treated as Unknown
+description: |
+  Verifies that an unrecognized enum value is treated as "unknown"
+  rather than causing a parse error.
+
+pics_requirements:
+  - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send message with unknown enum value
+    action: send_raw
+    params:
+      message_type: attribute_value
+      attribute: operatingState
+      value: 255                   # Unknown OperatingState value
+    expect:
+      parse_success: true
+      value_treated_as_unknown: true
+
+postconditions:
+  - unknown_enum_handled: true
+
+timeout: "5s"
+tags:
+  - compatibility
+  - forward
+  - enum

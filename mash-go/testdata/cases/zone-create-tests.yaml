@@ -1,0 +1,158 @@
+# Test Suite: Zone Creation Tests
+# Verifies zone CA generation and zone identity
+#
+# Spec: docs/testing/behavior/zone-lifecycle.md (zone creation section)
+#
+# Key concepts:
+# - Zone CA: ECDSA P-256, 99-year validity
+# - Zone ID = SHA-256(Zone CA DER)[0:8] (16 hex chars)
+# - Zone metadata persistence
+
+---
+# TC-ZONE-CREATE-001: Create Zone with Valid CA and ID
+id: TC-ZONE-CREATE-001
+name: Zone Creation Generates Valid CA and ID
+description: |
+  Verifies that creating a new zone generates a Zone CA certificate
+  with correct parameters and derives a unique Zone ID from the
+  CA fingerprint.
+
+pics_requirements:
+  - MASH.C.ZONE.CREATE
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Create a new zone
+    action: controller_action
+    params:
+      action: create_zone
+      zone_name: "Test Zone"
+      zone_type: LOCAL
+    expect:
+      zone_created: true
+      zone_id_present: true
+      zone_id_length: 16
+
+  - name: Verify Zone CA certificate properties
+    action: verify_zone_ca
+    expect:
+      algorithm: ECDSA_P256
+      basic_constraints_ca: true
+      path_length: 1
+      validity_years_min: 90
+
+  - name: Verify Zone ID derived from fingerprint
+    action: verify_zone_id_derivation
+    expect:
+      id_matches_sha256_prefix: true
+
+postconditions:
+  - zone_created_with_ca: true
+
+timeout: "10s"
+tags:
+  - zone
+  - creation
+  - ca
+  - identity
+
+---
+# TC-ZONE-CREATE-002: Zone ID Uniqueness
+id: TC-ZONE-CREATE-002
+name: Different Zones Get Different IDs
+description: |
+  Verifies that two separately created zones have different Zone IDs
+  (derived from different CA key pairs).
+
+pics_requirements:
+  - MASH.C.ZONE.CREATE
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Create first zone
+    action: controller_action
+    params:
+      action: create_zone
+      zone_name: "Zone A"
+      zone_type: LOCAL
+    expect:
+      zone_created: true
+      save_zone_id: zone_id_a
+
+  - name: Create second zone
+    action: controller_action
+    params:
+      action: create_zone
+      zone_name: "Zone B"
+      zone_type: GRID
+    expect:
+      zone_created: true
+      save_zone_id: zone_id_b
+
+  - name: Verify IDs are different
+    action: compare
+    params:
+      left: zone_id_a
+      operator: "!="
+      right: zone_id_b
+    expect:
+      comparison_true: true
+
+postconditions:
+  - zone_ids_unique: true
+
+timeout: "10s"
+tags:
+  - zone
+  - creation
+  - uniqueness
+
+---
+# TC-ZONE-CREATE-003: Zone Metadata Stored
+id: TC-ZONE-CREATE-003
+name: Zone Metadata Persisted After Creation
+description: |
+  Verifies that zone metadata (name, type, priority, creation time)
+  is stored and can be retrieved after zone creation.
+
+pics_requirements:
+  - MASH.C.ZONE.CREATE
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Create zone with metadata
+    action: controller_action
+    params:
+      action: create_zone
+      zone_name: "Home Energy"
+      zone_type: LOCAL
+    expect:
+      zone_created: true
+      save_zone_id: zone_id
+
+  - name: Read zone metadata
+    action: controller_action
+    params:
+      action: get_zone_metadata
+      zone_id_ref: zone_id
+    expect:
+      zone_name: "Home Energy"
+      zone_type: LOCAL
+      zone_priority: 2
+      created_at_recent: true
+
+postconditions:
+  - metadata_persisted: true
+
+timeout: "10s"
+tags:
+  - zone
+  - creation
+  - metadata
+  - persistence

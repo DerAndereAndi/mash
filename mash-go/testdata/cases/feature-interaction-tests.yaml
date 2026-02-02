@@ -1,0 +1,866 @@
+# Test Suite: Feature Interaction Tests
+# Verifies cross-feature interaction semantics
+#
+# Spec: docs/testing/behavior/feature-interactions.md
+#
+# Key concepts:
+# - 4-layer interaction hierarchy: Hardware > Policy > Scheduled > Operational
+# - Most restrictive limit wins across all sources
+# - Signals + EnergyControl limit stacking
+# - ChargingSession + EnergyControl interaction
+# - Process + Control State orthogonal state machines
+
+---
+# TC-FI-001: Signals + EnergyControl Limit Stacking
+id: TC-FI-001
+name: Signals + EnergyControl Limit Stacking
+description: |
+  Verifies that when both Signals (CONSTRAINT type) and EnergyControl
+  provide limits, the most restrictive wins.
+
+  effectiveLimit = min(Electrical.max, EnergyControl.limit, Signals.slot.maxPower)
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.F02              # SIGNALS
+  - MASH.S.CTRL.F00              # CORE
+
+preconditions:
+  - session_established: true
+  - energycontrol_limit_set: true
+  - signal_active: true
+
+steps:
+  - name: Set EnergyControl limit to 7.4 kW
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 7400000
+    expect:
+      invoke_success: true
+
+  - name: Set Signal with maxPower 5 kW
+    action: write
+    params:
+      endpoint: 1
+      feature: Signals
+      attribute: schedule
+      value:
+        slots:
+          - duration: 3600
+            maxPower: 5000000
+    expect:
+      write_success: true
+
+  - name: Read effective consumption limit
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_max: 5000000           # Most restrictive wins
+
+postconditions:
+  - most_restrictive_applied: true
+
+timeout: "10s"
+tags:
+  - feature-interaction
+  - signals
+  - energycontrol
+  - limit
+
+---
+# TC-FI-002: Signal Slot Boundary Transition
+id: TC-FI-002
+name: Signal Slot Boundary Transition
+description: |
+  Verifies that when a Signal slot boundary is reached, effective values
+  are recalculated within 1 second and subscription notification is sent.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.F02              # SIGNALS
+  - MASH.S.PROTO.SUBSCRIPTION
+
+preconditions:
+  - session_established: true
+  - subscription_active: true
+
+steps:
+  - name: Set Signal with two slots
+    action: write
+    params:
+      endpoint: 1
+      feature: Signals
+      attribute: schedule
+      value:
+        slots:
+          - duration: 3
+            maxPower: 5000000
+          - duration: 3600
+            maxPower: 10000000
+    expect:
+      write_success: true
+
+  - name: Verify initial slot constraint
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_max: 5000000
+
+  - name: Wait for slot boundary (3 seconds)
+    action: wait
+    params:
+      duration: "4s"
+
+  - name: Verify new slot constraint applied
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_max: 10000000
+
+  - name: Verify subscription notification received
+    action: wait_for_notification
+    params:
+      timeout: "2s"
+    expect:
+      notification_received: true
+      changed_attribute: effectiveConsumptionLimit
+
+postconditions:
+  - slot_boundary_handled: true
+
+timeout: "15s"
+tags:
+  - feature-interaction
+  - signals
+  - slot-boundary
+
+---
+# TC-FI-003: Signal Expiry Returns to EnergyControl
+id: TC-FI-003
+name: Signal Expiry Returns to EnergyControl
+description: |
+  Verifies that when the last Signal slot ends, Signal constraint is
+  removed and EnergyControl limits still apply.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.F02
+  - MASH.S.PROTO.SUBSCRIPTION
+
+preconditions:
+  - session_established: true
+  - subscription_active: true
+
+steps:
+  - name: Set EnergyControl limit to 7.4 kW
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 7400000
+    expect:
+      invoke_success: true
+
+  - name: Set Signal with single short slot
+    action: write
+    params:
+      endpoint: 1
+      feature: Signals
+      attribute: schedule
+      value:
+        slots:
+          - duration: 3
+            maxPower: 3700000
+    expect:
+      write_success: true
+
+  - name: Verify combined limit active
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_max: 3700000
+
+  - name: Wait for Signal expiry
+    action: wait
+    params:
+      duration: "4s"
+
+  - name: Verify limit returned to EnergyControl value
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 7400000
+
+postconditions:
+  - signal_expired_to_energycontrol: true
+
+timeout: "15s"
+tags:
+  - feature-interaction
+  - signals
+  - expiry
+
+---
+# TC-FI-004: Electrical Update Caps Effective Limit
+id: TC-FI-004
+name: Electrical Update Caps Effective Limit
+description: |
+  Verifies that when Electrical.nominalMaxConsumption decreases (e.g., EV
+  with lower capability connects), the effective limit is capped but the
+  controller's myConsumptionLimit is preserved.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.ELEC
+  - MASH.S.CTRL.B_EFFECTIVE
+
+preconditions:
+  - session_established: true
+  - device_type: EVSE
+
+steps:
+  - name: Set controller limit to 11 kW
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 11000000
+    expect:
+      invoke_success: true
+
+  - name: Simulate EV connect at 7.4 kW
+    action: device_local_action
+    params:
+      action: ev_connect
+      max_power: 7400000
+    expect:
+      action_triggered: true
+
+  - name: Read myConsumptionLimit (should be unchanged)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: myConsumptionLimit
+    expect:
+      read_success: true
+      value: 11000000
+
+  - name: Read effectiveConsumptionLimit (should be capped)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 7400000
+
+postconditions:
+  - effective_capped_by_electrical: true
+
+timeout: "15s"
+tags:
+  - feature-interaction
+  - electrical
+  - effective
+
+---
+# TC-FI-005: ChargingMode PV_SURPLUS_ONLY with Limit
+id: TC-FI-005
+name: ChargingMode PV_SURPLUS_ONLY with Limit
+description: |
+  Verifies that when chargingMode is PV_SURPLUS_ONLY and no PV surplus
+  is available, the device does not charge even if EnergyControl limit allows.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CSESS
+  - MASH.S.CSESS.A_CHARGING_MODE
+
+preconditions:
+  - session_established: true
+  - ev_connected: true
+  - no_pv_surplus: true
+
+steps:
+  - name: Set charging mode to PV_SURPLUS_ONLY
+    action: write
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: chargingMode
+      value: PV_SURPLUS_ONLY
+    expect:
+      write_success: true
+
+  - name: Set EnergyControl limit to 7.4 kW
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 7400000
+    expect:
+      invoke_success: true
+
+  - name: Read charging state
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: state
+    expect:
+      read_success: true
+      value_not: CHARGING           # Not charging without surplus
+
+postconditions:
+  - pv_mode_respected: true
+
+timeout: "10s"
+tags:
+  - feature-interaction
+  - chargingsession
+  - pv-surplus
+
+---
+# TC-FI-006: Pause Command Overrides stopDelay
+id: TC-FI-006
+name: Pause Command Overrides stopDelay
+description: |
+  Verifies that an explicit Pause command causes the device to stop
+  without waiting the full stopDelay period.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A0E              # isPausable
+  - MASH.S.CTRL.C09.Rsp          # Pause
+  - MASH.S.CSESS
+
+preconditions:
+  - session_established: true
+  - ev_charging: true
+  - stop_delay_configured: 120
+
+steps:
+  - name: Send Pause command
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Pause
+    expect:
+      invoke_success: true
+
+  - name: Wait briefly for EVSE safe stop
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Verify device has stopped (not waiting full 120s)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x04                  # PAUSED
+
+postconditions:
+  - pause_overrides_delay: true
+
+timeout: "15s"
+tags:
+  - feature-interaction
+  - pause
+  - stopDelay
+
+---
+# TC-FI-007: Process Continues During FAILSAFE
+id: TC-FI-007
+name: Process Continues During FAILSAFE
+description: |
+  Verifies that when controlState transitions to FAILSAFE, a running
+  process (processState = RUNNING) continues uninterrupted.
+  ControlState and ProcessState are orthogonal.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A01              # controlState
+  - MASH.S.CTRL.A02              # processState
+
+preconditions:
+  - session_established: true
+  - process_state: RUNNING
+  - control_state: CONTROLLED
+
+steps:
+  - name: Verify process is RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03                  # RUNNING
+
+  - name: Disconnect controller to trigger FAILSAFE
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait for failsafe detection
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Reconnect and read process state
+    action: connect
+    params:
+      insecure: true
+
+  - name: Verify process is still RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03                  # RUNNING (unchanged)
+
+  - name: Verify control state is FAILSAFE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value_in: [0x04, 0x05]      # FAILSAFE or similar
+
+postconditions:
+  - process_continues_during_failsafe: true
+
+timeout: "30s"
+tags:
+  - feature-interaction
+  - failsafe
+  - process
+  - orthogonal
+
+---
+# TC-FI-008: Multi-Zone Signal Priority
+id: TC-FI-008
+name: Multi-Zone Signal Priority
+description: |
+  Verifies that when multiple zones send Signals, the highest-priority
+  zone's signal wins (GRID > LOCAL).
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.F02              # SIGNALS
+  - MASH.S.ZONE
+  - MASH.S.ZONE.GRID
+  - MASH.S.ZONE.LOCAL
+
+preconditions:
+  - session_established: true
+  - two_zones_connected: true
+
+steps:
+  - name: Zone 1 (GRID) sends Signal with maxPower 3 kW
+    action: invoke_as_zone
+    params:
+      zone: GRID
+      endpoint: 1
+      feature: Signals
+      command: WriteSchedule
+      args:
+        slots:
+          - duration: 3600
+            maxPower: 3000000
+    expect:
+      invoke_success: true
+
+  - name: Zone 2 (LOCAL) sends Signal with maxPower 5 kW
+    action: invoke_as_zone
+    params:
+      zone: LOCAL
+      endpoint: 1
+      feature: Signals
+      command: WriteSchedule
+      args:
+        slots:
+          - duration: 3600
+            maxPower: 5000000
+    expect:
+      invoke_success: true
+
+  - name: Verify GRID signal constraint active
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_max: 3000000           # GRID priority wins
+
+postconditions:
+  - grid_priority_signal: true
+
+timeout: "10s"
+tags:
+  - feature-interaction
+  - signals
+  - multi-zone
+  - priority
+
+---
+# TC-FI-009: EnergyControl Limit vs Signal - Both Apply
+id: TC-FI-009
+name: EnergyControl Limit vs Signal - Both Apply
+description: |
+  Verifies that EnergyControl limits (from all zones, most restrictive)
+  and Signal constraints (from highest priority zone) both apply,
+  and the overall most restrictive value wins.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.F02
+  - MASH.S.ZONE
+
+preconditions:
+  - session_established: true
+  - two_zones_connected: true
+
+steps:
+  - name: Zone 1 (GRID) sets EnergyControl limit 6 kW
+    action: invoke_as_zone
+    params:
+      zone: GRID
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 6000000
+    expect:
+      invoke_success: true
+
+  - name: Zone 2 (LOCAL) sends Signal with maxPower 4 kW
+    action: invoke_as_zone
+    params:
+      zone: LOCAL
+      endpoint: 1
+      feature: Signals
+      command: WriteSchedule
+      args:
+        slots:
+          - duration: 3600
+            maxPower: 4000000
+    expect:
+      invoke_success: true
+
+  - name: Read effective limit
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_max: 4000000           # min(6000000, 4000000)
+
+postconditions:
+  - both_constraints_applied: true
+
+timeout: "10s"
+tags:
+  - feature-interaction
+  - energycontrol
+  - signals
+  - combined
+
+---
+# TC-FI-010: V2G Discharge Constrained by EV
+id: TC-FI-010
+name: V2G Discharge Constrained by EV
+description: |
+  Verifies that when V2G discharge is requested but EV constraints
+  limit discharge capability, the EV constraints are respected.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.F01              # PRODUCTION
+  - MASH.S.CSESS
+  - MASH.S.CSESS.A_V2G
+
+preconditions:
+  - session_established: true
+  - ev_connected: true
+  - ev_supports_v2g: true
+
+steps:
+  - name: Set production setpoint to 5 kW discharge
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetSetpoint
+      args:
+        productionSetpoint: 5000000
+    expect:
+      invoke_success: true
+
+  - name: Read EV discharge constraint
+    action: read
+    params:
+      endpoint: 1
+      feature: ChargingSession
+      attribute: evMaxDischargingRequest
+    expect:
+      read_success: true
+      save_as: ev_max_discharge
+
+  - name: Verify discharge respects EV constraints
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveProductionSetpoint
+    expect:
+      read_success: true
+      value_max_ref: ev_max_discharge
+
+postconditions:
+  - ev_constraints_respected: true
+
+timeout: "10s"
+tags:
+  - feature-interaction
+  - v2g
+  - discharge
+  - ev-constraint
+
+---
+# TC-FI-011: Electrical Increase Restores Original Limit
+id: TC-FI-011
+name: Electrical Increase Restores Original Limit
+description: |
+  Verifies that when Electrical capability increases (e.g., EV disconnects),
+  the controller's original myConsumptionLimit is restored as the effective
+  limit (no longer capped by lower Electrical value).
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.ELEC
+  - MASH.S.CTRL.B_EFFECTIVE
+
+preconditions:
+  - session_established: true
+  - device_type: EVSE
+  - ev_connected: true
+  - effective_limit_capped: true
+
+steps:
+  - name: Verify effective limit is capped by EV
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 7400000               # Capped by 7.4 kW EV
+
+  - name: Read myConsumptionLimit (higher than effective)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: myConsumptionLimit
+    expect:
+      read_success: true
+      value: 11000000
+
+  - name: Simulate EV disconnect
+    action: device_local_action
+    params:
+      action: ev_disconnect
+    expect:
+      action_triggered: true
+
+  - name: Read effective limit (should restore to controller's limit)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 11000000              # Controller's original limit now applies
+
+postconditions:
+  - original_limit_restored: true
+
+timeout: "15s"
+tags:
+  - feature-interaction
+  - electrical
+  - restore
+
+---
+# TC-FI-012: SCHEDULED Process Starts During FAILSAFE
+id: TC-FI-012
+name: SCHEDULED Process Starts During FAILSAFE
+description: |
+  Verifies that a SCHEDULED process starts at its scheduled time
+  even when the device is in FAILSAFE state. User intent is preserved.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A01
+  - MASH.S.CTRL.A02
+  - MASH.S.CTRL.B_PROCESS
+
+preconditions:
+  - session_established: true
+  - process_state: SCHEDULED
+  - scheduled_start_in: 5
+
+steps:
+  - name: Verify process is SCHEDULED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x02                  # SCHEDULED
+
+  - name: Disconnect controller to trigger FAILSAFE
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait for scheduled start time + buffer
+    action: wait
+    params:
+      duration: "8s"
+
+  - name: Reconnect and check process state
+    action: connect
+    params:
+      insecure: true
+
+  - name: Verify process transitioned to RUNNING
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03                  # RUNNING (started despite FAILSAFE)
+
+postconditions:
+  - scheduled_started_in_failsafe: true
+
+timeout: "30s"
+tags:
+  - feature-interaction
+  - failsafe
+  - scheduled
+  - process
+
+---
+# TC-FI-013: Signal Slot with No Limit Falls Through
+id: TC-FI-013
+name: Signal Slot with No Limit Falls Through
+description: |
+  Verifies that a Signal slot without maxPower (price-only) does not
+  constrain the effective limit. EnergyControl limit applies alone.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.F02
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Set EnergyControl limit to 7.4 kW
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 7400000
+    expect:
+      invoke_success: true
+
+  - name: Set Signal with price-only slot (no maxPower)
+    action: write
+    params:
+      endpoint: 1
+      feature: Signals
+      attribute: schedule
+      value:
+        slots:
+          - duration: 3600
+            price: 1500
+    expect:
+      write_success: true
+
+  - name: Read effective limit
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 7400000               # Signal has no maxPower, doesn't constrain
+
+postconditions:
+  - price_only_signal_no_constraint: true
+
+timeout: "10s"
+tags:
+  - feature-interaction
+  - signals
+  - price-only

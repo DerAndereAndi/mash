@@ -1,0 +1,114 @@
+# Test Suite: Device-to-Device Zone Verification Tests
+# Verifies peer device certificate validation within zones
+#
+# Spec: docs/testing/behavior/zone-lifecycle.md (D2D section)
+#
+# Key concepts:
+# - Devices in same zone verify each other via Zone CA
+# - Different zone CAs cause verification failure
+# - Expired peer certs cause verification failure
+
+---
+# TC-D2D-001: Same Zone Verify Success
+id: TC-D2D-001
+name: Devices in Same Zone Verify Successfully
+description: |
+  Verifies that two devices commissioned to the same zone can
+  verify each other's certificates (signed by same Zone CA).
+
+pics_requirements:
+  - D.CERT.D2D
+  - D.ZONE.MULTI
+
+preconditions:
+  - two_devices_same_zone: true
+
+steps:
+  - name: Device A verifies Device B's certificate
+    action: device_verify_peer
+    params:
+      verifier: device_a
+      peer: device_b
+    expect:
+      verification_success: true
+      same_zone_ca: true
+
+postconditions:
+  - same_zone_verified: true
+
+timeout: "10s"
+tags:
+  - d2d
+  - zone
+  - verification
+  - success
+
+---
+# TC-D2D-002: Different Zone Verify Fails
+id: TC-D2D-002
+name: Devices in Different Zones Fail Verification
+description: |
+  Verifies that devices from different zones (different Zone CAs)
+  cannot verify each other's certificates.
+
+pics_requirements:
+  - D.CERT.D2D
+
+preconditions:
+  - two_devices_different_zones: true
+
+steps:
+  - name: Device A (Zone 1) verifies Device B (Zone 2)
+    action: device_verify_peer
+    params:
+      verifier: device_a
+      peer: device_b
+    expect:
+      verification_success: false
+      error: unknown_ca
+
+postconditions:
+  - different_zone_rejected: true
+
+timeout: "10s"
+tags:
+  - d2d
+  - zone
+  - verification
+  - negative
+
+---
+# TC-D2D-003: Expired Peer Certificate Fails
+id: TC-D2D-003
+name: Expired Peer Device Certificate Fails Verification
+description: |
+  Verifies that a device rejects an expired peer certificate
+  even if it was signed by the same Zone CA.
+
+pics_requirements:
+  - D.CERT.D2D
+
+preconditions:
+  - two_devices_same_zone: true
+  - device_b_cert_expired: true
+
+steps:
+  - name: Device A verifies expired Device B cert
+    action: device_verify_peer
+    params:
+      verifier: device_a
+      peer: device_b
+    expect:
+      verification_success: false
+      error: certificate_expired
+
+postconditions:
+  - expired_peer_rejected: true
+
+timeout: "10s"
+tags:
+  - d2d
+  - zone
+  - verification
+  - expired
+  - negative

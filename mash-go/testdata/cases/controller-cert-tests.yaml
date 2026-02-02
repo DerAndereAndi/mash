@@ -1,0 +1,281 @@
+# Test Suite: Controller Certificate Tests
+# Verifies controller certificate lifecycle
+#
+# Spec: docs/testing/behavior/zone-lifecycle.md (controller certs section)
+#
+# Key concepts:
+# - Controller cert auto-generated on zone creation
+# - Loaded from storage on restart
+# - Renewal at 30 days before expiry
+# - Controller ID stable across renewal
+
+---
+# TC-CTRL-CERT-001: Auto-Generate on Zone Creation
+id: TC-CTRL-CERT-001
+name: Controller Certificate Auto-Generated
+description: |
+  Verifies that when a zone is created, the controller automatically
+  generates its own operational certificate signed by the Zone CA.
+
+pics_requirements:
+  - MASH.C.ZONE.CREATE
+  - MASH.C.CERT.AUTO
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Create a new zone
+    action: controller_action
+    params:
+      action: create_zone
+      zone_name: "Test Zone"
+      zone_type: LOCAL
+    expect:
+      zone_created: true
+
+  - name: Verify controller cert was generated
+    action: verify_controller_cert
+    expect:
+      cert_present: true
+      signed_by_zone_ca: true
+      not_expired: true
+
+postconditions:
+  - controller_cert_auto_generated: true
+
+timeout: "10s"
+tags:
+  - controller
+  - certificate
+  - auto-generate
+
+---
+# TC-CTRL-CERT-002: Load Existing Cert on Restart
+id: TC-CTRL-CERT-002
+name: Controller Certificate Loaded on Restart
+description: |
+  Verifies that after restart, the controller loads its existing
+  certificate from storage rather than generating a new one.
+
+pics_requirements:
+  - MASH.C.CERT.PERSIST
+
+preconditions:
+  - zone_created: true
+  - controller_has_cert: true
+
+steps:
+  - name: Record current controller cert fingerprint
+    action: controller_action
+    params:
+      action: get_cert_fingerprint
+    expect:
+      save_as: original_fingerprint
+
+  - name: Restart controller
+    action: controller_action
+    params:
+      action: restart
+    expect:
+      restarted: true
+
+  - name: Verify same cert loaded
+    action: controller_action
+    params:
+      action: get_cert_fingerprint
+    expect:
+      value_equals: original_fingerprint
+
+postconditions:
+  - cert_loaded_from_storage: true
+
+timeout: "15s"
+tags:
+  - controller
+  - certificate
+  - persistence
+  - restart
+
+---
+# TC-CTRL-CERT-003: Renewal at 30 Days Before Expiry
+id: TC-CTRL-CERT-003
+name: Controller Certificate Renewal Triggered
+description: |
+  Verifies that the controller initiates certificate renewal when
+  its certificate is within 30 days of expiry.
+
+pics_requirements:
+  - MASH.C.CERT.RENEW
+
+preconditions:
+  - zone_created: true
+  - controller_cert_near_expiry: true
+
+steps:
+  - name: Set controller cert to 29 days from expiry
+    action: controller_action
+    params:
+      action: set_cert_expiry_days
+      days_remaining: 29
+    expect:
+      action_triggered: true
+
+  - name: Trigger renewal check
+    action: controller_action
+    params:
+      action: check_renewal
+    expect:
+      renewal_initiated: true
+
+  - name: Verify new cert issued
+    action: verify_controller_cert
+    expect:
+      cert_present: true
+      not_expired: true
+      validity_days_min: 300
+
+postconditions:
+  - cert_renewed: true
+
+timeout: "15s"
+tags:
+  - controller
+  - certificate
+  - renewal
+
+---
+# TC-CTRL-CERT-004: Renewal Doesn't Disrupt Sessions
+id: TC-CTRL-CERT-004
+name: Certificate Renewal Without Session Disruption
+description: |
+  Verifies that controller certificate renewal does not disrupt
+  existing connections with devices.
+
+pics_requirements:
+  - MASH.C.CERT.RENEW
+
+preconditions:
+  - zone_created: true
+  - device_connected: true
+
+steps:
+  - name: Verify connection active before renewal
+    action: ping
+    expect:
+      pong_received: true
+
+  - name: Trigger controller cert renewal
+    action: controller_action
+    params:
+      action: renew_cert
+    expect:
+      renewal_success: true
+
+  - name: Verify connection still active after renewal
+    action: ping
+    expect:
+      pong_received: true
+
+  - name: Verify reads still work
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorId
+    expect:
+      read_success: true
+
+postconditions:
+  - session_undisrupted: true
+
+timeout: "15s"
+tags:
+  - controller
+  - certificate
+  - renewal
+  - session
+
+---
+# TC-CTRL-CERT-005: Controller ID Stable Across Renewal
+id: TC-CTRL-CERT-005
+name: Controller ID Unchanged After Certificate Renewal
+description: |
+  Verifies that the controller's identity (derived from cert)
+  remains the same after certificate renewal.
+
+pics_requirements:
+  - MASH.C.CERT.RENEW
+
+preconditions:
+  - zone_created: true
+
+steps:
+  - name: Record controller ID before renewal
+    action: controller_action
+    params:
+      action: get_controller_id
+    expect:
+      save_as: original_id
+
+  - name: Renew controller cert
+    action: controller_action
+    params:
+      action: renew_cert
+    expect:
+      renewal_success: true
+
+  - name: Verify controller ID unchanged
+    action: controller_action
+    params:
+      action: get_controller_id
+    expect:
+      value_equals: original_id
+
+postconditions:
+  - controller_id_stable: true
+
+timeout: "10s"
+tags:
+  - controller
+  - certificate
+  - renewal
+  - identity
+
+---
+# TC-CTRL-CERT-006: Certificate Matches Zone CA
+id: TC-CTRL-CERT-006
+name: Controller Certificate Signed by Correct Zone CA
+description: |
+  Verifies that the controller certificate is signed by the
+  Zone CA of the zone it belongs to.
+
+pics_requirements:
+  - MASH.C.CERT.AUTO
+
+preconditions:
+  - zone_created: true
+
+steps:
+  - name: Get Zone CA fingerprint
+    action: controller_action
+    params:
+      action: get_zone_ca_fingerprint
+    expect:
+      save_as: zone_ca_fp
+
+  - name: Get controller cert issuer
+    action: verify_controller_cert
+    expect:
+      cert_present: true
+      issuer_fingerprint_equals: zone_ca_fp
+
+postconditions:
+  - cert_matches_zone_ca: true
+
+timeout: "10s"
+tags:
+  - controller
+  - certificate
+  - zone-ca
+  - chain

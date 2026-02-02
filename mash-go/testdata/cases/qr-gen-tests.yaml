@@ -1,0 +1,208 @@
+# Test Suite: QR Code Generation Tests
+# Verifies QR code creation and management
+#
+# Spec: docs/testing/behavior/zone-lifecycle.md (QR section)
+# Spec: docs/testing/behavior/discovery.md (QR format)
+#
+# Key concepts:
+# - QR format: MASH:<version>:<discriminator>:<setupcode>
+# - Generated at factory or boot
+# - Unique per device (random discriminator + setup code)
+# - Reset regenerates QR
+
+---
+# TC-QR-GEN-001: Factory QR Present at Boot
+id: TC-QR-GEN-001
+name: QR Code Available at Device Boot
+description: |
+  Verifies that a device has a valid QR code payload available
+  at boot (from factory provisioning or auto-generation).
+
+pics_requirements:
+  - D.COMM.QR
+
+preconditions:
+  - device_booted: true
+
+steps:
+  - name: Read QR code payload
+    action: device_local_action
+    params:
+      action: get_qr_payload
+    expect:
+      qr_present: true
+      format_valid: true           # MASH:<ver>:<D>:<code>
+      version: 1
+      discriminator_length: 4
+      setup_code_length: 8
+
+postconditions:
+  - qr_available_at_boot: true
+
+timeout: "5s"
+tags:
+  - qr
+  - boot
+  - factory
+
+---
+# TC-QR-GEN-002: Reset Regenerates QR
+id: TC-QR-GEN-002
+name: Factory Reset Generates New QR Code
+description: |
+  Verifies that after a factory reset, a new QR code is generated
+  with a different discriminator and setup code.
+
+pics_requirements:
+  - D.COMM.QR
+
+preconditions:
+  - device_booted: true
+
+steps:
+  - name: Read current QR payload
+    action: device_local_action
+    params:
+      action: get_qr_payload
+    expect:
+      qr_present: true
+      save_as: original_qr
+
+  - name: Perform factory reset
+    action: device_local_action
+    params:
+      action: factory_reset
+    expect:
+      action_triggered: true
+
+  - name: Wait for device reboot
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Read new QR payload
+    action: device_local_action
+    params:
+      action: get_qr_payload
+    expect:
+      qr_present: true
+      save_as: new_qr
+
+  - name: Verify QR changed
+    action: compare
+    params:
+      left: original_qr
+      operator: "!="
+      right: new_qr
+    expect:
+      comparison_true: true
+
+postconditions:
+  - qr_regenerated: true
+
+timeout: "15s"
+tags:
+  - qr
+  - reset
+  - regenerate
+
+---
+# TC-QR-GEN-003: QR Unique Per Device
+id: TC-QR-GEN-003
+name: Different Devices Have Different QR Codes
+description: |
+  Verifies that two devices produce different QR codes (different
+  discriminators and setup codes). Tests randomness.
+
+pics_requirements:
+  - D.COMM.QR
+
+preconditions:
+  - two_devices_booted: true
+
+steps:
+  - name: Read QR from device 1
+    action: device_local_action
+    params:
+      device: device_1
+      action: get_qr_payload
+    expect:
+      save_as: qr_device_1
+
+  - name: Read QR from device 2
+    action: device_local_action
+    params:
+      device: device_2
+      action: get_qr_payload
+    expect:
+      save_as: qr_device_2
+
+  - name: Verify QR codes differ
+    action: compare
+    params:
+      left: qr_device_1
+      operator: "!="
+      right: qr_device_2
+    expect:
+      comparison_true: true
+
+postconditions:
+  - qr_unique: true
+
+timeout: "10s"
+tags:
+  - qr
+  - uniqueness
+  - random
+
+---
+# TC-QR-GEN-004: Display Mode (if capable)
+id: TC-QR-GEN-004
+name: QR Code Display Mode
+description: |
+  Verifies that devices with display capability can show the QR code
+  when entering commissioning mode. The display should show the QR
+  code for the commissioning window duration (120s).
+
+pics_requirements:
+  - D.COMM.QR
+  - D.COMM.DISPLAY
+
+preconditions:
+  - device_has_display: true
+
+steps:
+  - name: Enter commissioning mode
+    action: device_local_action
+    params:
+      action: enter_commissioning_mode
+    expect:
+      action_triggered: true
+
+  - name: Verify QR displayed
+    action: device_local_action
+    params:
+      action: check_display
+    expect:
+      qr_displayed: true
+
+  - name: Wait for commissioning window to close
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Verify QR still displayed (within window)
+    action: device_local_action
+    params:
+      action: check_display
+    expect:
+      qr_displayed: true
+
+postconditions:
+  - qr_display_mode: true
+
+timeout: "15s"
+tags:
+  - qr
+  - display
+  - commissioning

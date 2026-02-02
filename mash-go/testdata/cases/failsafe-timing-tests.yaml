@@ -1,0 +1,625 @@
+# Test Suite: Failsafe Timing Tests
+# Verifies connection loss detection, failsafe timing, and recovery
+#
+# Spec: docs/testing/behavior/failsafe-timing.md
+#
+# Key concepts:
+# - Max detection delay: 95 seconds (3 x 30s ping + 5s timeout)
+# - FAILSAFE transition within 1 second of detection
+# - failsafeDuration: 2-24 hours (default 4 hours)
+# - Reconnection before duration expires returns to CONTROLLED
+# - Timer accuracy: +/- 1% or +/- 60 seconds
+
+---
+# TC-FAIL-001: Maximum Detection Delay
+id: TC-FAIL-001
+name: Maximum Connection Loss Detection Delay
+description: |
+  Verifies that connection loss is detected within 95 seconds
+  (3 x 30s ping interval + 5s final timeout). In practice, clean
+  disconnects are detected immediately.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DETECTION_MAX
+  - MASH.S.PROTO.KEEPALIVE
+
+preconditions:
+  - session_established: true
+  - control_state: CONTROLLED
+
+steps:
+  - name: Record time before network block
+    action: record_time
+    params:
+      name: block_start
+
+  - name: Block all network traffic to device
+    action: network_partition
+    params:
+      block: true
+    expect:
+      partition_active: true
+
+  - name: Wait for failsafe detection
+    action: wait
+    params:
+      duration: "100s"
+
+  - name: Restore network and reconnect
+    action: network_partition
+    params:
+      block: false
+
+  - name: Reconnect and verify FAILSAFE entered
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify control state transitioned
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value_in: [0x04, 0x05]      # FAILSAFE or AUTONOMOUS
+
+  - name: Verify detection was within 95 seconds
+    action: verify_timing
+    params:
+      reference: block_start
+      max_duration: "95s"
+    expect:
+      within_limit: true
+
+postconditions:
+  - detection_within_max: true
+
+timeout: "120s"
+tags:
+  - failsafe
+  - detection
+  - timing
+
+---
+# TC-FAIL-002: Failsafe Limit Application
+id: TC-FAIL-002
+name: Failsafe Limit Applied Within 1 Second
+description: |
+  Verifies that failsafe limits are applied within 1 second of
+  FAILSAFE state transition.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A46              # failsafeConsumptionLimit
+  - MASH.S.CTRL.A48              # failsafeDuration
+
+preconditions:
+  - session_established: true
+  - control_state: CONTROLLED
+  - failsafe_configured: true
+
+steps:
+  - name: Read configured failsafe limit
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: failsafeConsumptionLimit
+    expect:
+      read_success: true
+      save_as: failsafe_limit
+
+  - name: Set normal limit higher than failsafe
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 10000000
+    expect:
+      invoke_success: true
+
+  - name: Disconnect to trigger failsafe
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait for failsafe detection
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Reconnect and verify failsafe limit active
+    action: connect
+    params:
+      insecure: true
+
+  - name: Verify effective limit equals failsafe limit
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_equals: failsafe_limit
+
+postconditions:
+  - failsafe_limit_applied: true
+
+timeout: "30s"
+tags:
+  - failsafe
+  - limit
+  - application
+
+---
+# TC-FAIL-003: Reconnection Clears Failsafe
+id: TC-FAIL-003
+name: Reconnection During FAILSAFE Returns to CONTROLLED
+description: |
+  Verifies that if a controller reconnects before failsafeDuration
+  expires, the device returns to CONTROLLED state and the failsafe
+  timer is cancelled.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A48
+
+preconditions:
+  - session_established: true
+  - control_state: CONTROLLED
+
+steps:
+  - name: Disconnect to trigger failsafe
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait for failsafe to be detected
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Reconnect with valid credentials
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify control state returned to CONTROLLED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x01                  # CONTROLLED
+
+postconditions:
+  - failsafe_cleared_on_reconnect: true
+
+timeout: "30s"
+tags:
+  - failsafe
+  - reconnection
+  - controlled
+
+---
+# TC-FAIL-004: Failsafe Persists Across Reconnect Attempts
+id: TC-FAIL-004
+name: Failsafe Persists Until Successful Reconnect
+description: |
+  Verifies that failed reconnection attempts do not clear FAILSAFE
+  state. Only a fully successful TLS connection clears failsafe.
+
+pics_requirements:
+  - MASH.S.CTRL
+
+preconditions:
+  - session_established: true
+  - control_state: CONTROLLED
+
+steps:
+  - name: Disconnect to trigger failsafe
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait for failsafe detection
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Attempt reconnect with invalid cert (should fail)
+    action: connect
+    params:
+      invalid_cert: true
+    expect:
+      connection_established: false
+
+  - name: Reconnect with valid credentials
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify was still in FAILSAFE until valid reconnect
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x01                  # Now CONTROLLED after valid reconnect
+
+postconditions:
+  - failsafe_persists_until_valid: true
+
+timeout: "30s"
+tags:
+  - failsafe
+  - reconnection
+  - persistence
+
+---
+# TC-FAIL-005: Failsafe Notification Sent
+id: TC-FAIL-005
+name: AUTONOMOUS Transition After Duration Expires
+description: |
+  Verifies that when failsafeDuration expires without reconnection,
+  the device transitions to AUTONOMOUS.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A48
+
+preconditions:
+  - session_established: true
+  - failsafe_duration_short: 5     # Use short duration for testing
+
+steps:
+  - name: Disconnect to trigger failsafe
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait for failsafe duration to expire plus buffer
+    action: wait
+    params:
+      duration: "10s"
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify control state is AUTONOMOUS
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x00                  # AUTONOMOUS
+
+postconditions:
+  - autonomous_after_expiry: true
+
+timeout: "30s"
+tags:
+  - failsafe
+  - autonomous
+  - duration
+
+---
+# TC-FAIL-006: Failsafe with No Configured Limit
+id: TC-FAIL-006
+name: Timer Persistence Across Power Cycle
+description: |
+  Verifies that if MASH.S.CTRL.B_FAILSAFE_PERSISTENT=1, the failsafe
+  timer resumes from saved state after a device restart.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_FAILSAFE_PERSISTENT=1
+
+preconditions:
+  - session_established: true
+  - failsafe_persistent: true
+  - failsafe_duration: 3600
+
+steps:
+  - name: Disconnect to trigger failsafe
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait 5 seconds
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Simulate device power cycle
+    action: device_local_action
+    params:
+      action: power_cycle
+    expect:
+      action_triggered: true
+
+  - name: Wait for device restart
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Connect and read control state
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify still in FAILSAFE (timer resumed, not expired)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value_in: [0x04]             # Still FAILSAFE (timer resumed)
+
+postconditions:
+  - timer_persisted: true
+
+timeout: "30s"
+tags:
+  - failsafe
+  - persistence
+  - power-cycle
+
+---
+# TC-FAIL-007: Failsafe Timer Accuracy
+id: TC-FAIL-007
+name: Failsafe Timer Accuracy Within Tolerance
+description: |
+  Verifies that failsafe timer accuracy is within +/- 1% or +/- 60s,
+  whichever is greater. Uses a short test duration.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A48
+
+preconditions:
+  - session_established: true
+  - failsafe_duration_short: 60    # 60 second test value
+
+steps:
+  - name: Record FAILSAFE entry time
+    action: record_time
+    params:
+      name: failsafe_start
+
+  - name: Disconnect to trigger failsafe
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait for AUTONOMOUS transition
+    action: wait
+    params:
+      duration: "70s"
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify AUTONOMOUS and check timing
+    action: verify_timing
+    params:
+      reference: failsafe_start
+      expected_duration: "60s"
+      tolerance: "60s"            # +/- 60s (whichever is greater)
+    expect:
+      within_limit: true
+
+postconditions:
+  - timer_accuracy_ok: true
+
+timeout: "90s"
+tags:
+  - failsafe
+  - accuracy
+  - timing
+
+---
+# TC-FAIL-008: Multi-Zone Failsafe Independence
+id: TC-FAIL-008
+name: Per-Zone Connection Loss Does Not Trigger FAILSAFE
+description: |
+  Verifies that losing one zone's connection while another is still
+  connected does NOT trigger FAILSAFE. Device remains CONTROLLED.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.ZONE
+
+preconditions:
+  - session_established: true
+  - two_zones_connected: true
+
+steps:
+  - name: Disconnect Zone 2 (LOCAL) only
+    action: disconnect_zone
+    params:
+      zone: LOCAL
+
+  - name: Wait briefly
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Verify control state still CONTROLLED
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: controlState
+    expect:
+      read_success: true
+      value: 0x01                  # CONTROLLED (Zone 1 still connected)
+
+  - name: Verify effective limit uses Zone 1 only
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_is_not_null: true      # Zone 1's limit still active
+
+postconditions:
+  - partial_loss_not_failsafe: true
+
+timeout: "15s"
+tags:
+  - failsafe
+  - multi-zone
+  - partial-loss
+
+---
+# TC-FAIL-009: Failsafe During Process Execution
+id: TC-FAIL-009
+name: Process Continues During FAILSAFE
+description: |
+  Verifies that an active process (processState = RUNNING) continues
+  during FAILSAFE state. ControlState and ProcessState are orthogonal.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.A01
+  - MASH.S.CTRL.A02
+
+preconditions:
+  - session_established: true
+  - process_state: RUNNING
+  - control_state: CONTROLLED
+
+steps:
+  - name: Verify process is running
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03                  # RUNNING
+
+  - name: Disconnect all zones
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait for failsafe
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Reconnect
+    action: connect
+    params:
+      insecure: true
+
+  - name: Verify process still running despite FAILSAFE
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      value: 0x03                  # RUNNING (unchanged)
+
+postconditions:
+  - process_survives_failsafe: true
+
+timeout: "30s"
+tags:
+  - failsafe
+  - process
+  - orthogonal
+
+---
+# TC-FAIL-010: Clean Disconnect Immediate Detection
+id: TC-FAIL-010
+name: Clean Disconnect Detected Immediately
+description: |
+  Verifies that a clean disconnect (TCP RST) is detected within 1 second,
+  without waiting for the full keep-alive timeout.
+
+pics_requirements:
+  - MASH.S.CTRL
+
+preconditions:
+  - session_established: true
+  - control_state: CONTROLLED
+
+steps:
+  - name: Record time
+    action: record_time
+    params:
+      name: disconnect_time
+
+  - name: Send TCP RST to device
+    action: disconnect
+    params:
+      graceful: false
+      method: tcp_rst
+
+  - name: Wait briefly for detection
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify FAILSAFE entered quickly
+    action: verify_timing
+    params:
+      reference: disconnect_time
+      max_duration: "2s"          # Should be within 1-2 seconds
+    expect:
+      within_limit: true
+
+postconditions:
+  - immediate_detection: true
+
+timeout: "15s"
+tags:
+  - failsafe
+  - detection
+  - tcp-rst
+  - immediate

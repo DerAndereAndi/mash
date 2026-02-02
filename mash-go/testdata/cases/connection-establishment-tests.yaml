@@ -1,0 +1,1441 @@
+# Test Suite: Connection Establishment Tests
+# Verifies the complete connection flow from discovery to operational
+#
+# Spec: docs/testing/behavior/connection-establishment.md
+#
+# Key concepts:
+# - Self-signed TLS cert during commissioning (CN=MASH-<D>)
+# - PASE-to-operational transition via close and reconnect
+# - Mutual TLS for operational connections
+# - IPv6 address handling (link-local, ULA, global)
+# - Multi-interface support with address failover
+# - Device-not-found error classification
+
+---
+# TC-TLS-COMM-001: Self-Signed Certificate Accepted During Commissioning
+id: TC-TLS-COMM-001
+name: Self-Signed Certificate Accepted for Commissioning TLS
+description: |
+  Verifies that during commissioning, the device presents a self-signed
+  certificate with CN=MASH-<discriminator> and the controller accepts
+  it for the TLS handshake.
+
+pics_requirements:
+  - MASH.S.TLS.SELF_SIGNED_COMM=1
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Connect to device during commissioning
+    action: connect
+    params:
+      alpn: "mash/1"
+      accept_self_signed: true
+    expect:
+      connected: true
+      server_cert_self_signed: true
+      server_cert_cn_prefix: "MASH-"
+
+postconditions:
+  - commissioning_tls_accepted: true
+
+timeout: "10s"
+tags:
+  - connection
+  - tls
+  - commissioning
+  - self-signed
+
+---
+# TC-TLS-COMM-002: Wrong CN Logged as Warning
+id: TC-TLS-COMM-002
+name: Mismatched CN Generates Warning but Proceeds
+description: |
+  Verifies that when the self-signed cert CN does not match the
+  expected discriminator, the controller logs a warning but still
+  proceeds (SPAKE2+ provides actual authentication).
+
+pics_requirements:
+  - MASH.S.TLS.SELF_SIGNED_COMM=1
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Connect to device with mismatched CN
+    action: connect
+    params:
+      alpn: "mash/1"
+      accept_self_signed: true
+      expected_discriminator: 9999
+    expect:
+      connected: true
+      cn_mismatch_warning: true
+
+postconditions:
+  - cn_mismatch_warned: true
+
+timeout: "10s"
+tags:
+  - connection
+  - tls
+  - commissioning
+  - warning
+
+---
+# TC-TLS-COMM-003: No Client Certificate During Commissioning
+id: TC-TLS-COMM-003
+name: Commissioning TLS Accepts Connection Without Client Certificate
+description: |
+  Verifies that during commissioning, the device does not require
+  a client certificate (controller has none yet).
+
+pics_requirements:
+  - MASH.S.TLS.SELF_SIGNED_COMM=1
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Connect without client cert
+    action: connect
+    params:
+      alpn: "mash/1"
+      client_cert: none
+      accept_self_signed: true
+    expect:
+      connected: true
+
+postconditions:
+  - no_client_cert_accepted: true
+
+timeout: "10s"
+tags:
+  - connection
+  - tls
+  - commissioning
+
+---
+# TC-TLS-COMM-004: ALPN mash/1 Negotiated During Commissioning
+id: TC-TLS-COMM-004
+name: ALPN Protocol Negotiated During Commissioning TLS
+description: |
+  Verifies that the ALPN protocol "mash/1" is successfully
+  negotiated during the commissioning TLS handshake.
+
+pics_requirements:
+  - MASH.S.TLS.ALPN=mash/1
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Connect with ALPN during commissioning
+    action: connect
+    params:
+      alpn: "mash/1"
+      accept_self_signed: true
+    expect:
+      connected: true
+      negotiated_alpn: "mash/1"
+
+postconditions:
+  - alpn_negotiated: true
+
+timeout: "10s"
+tags:
+  - connection
+  - tls
+  - commissioning
+  - alpn
+
+---
+# TC-TRANS-001: Normal PASE to Operational Transition
+id: TC-TRANS-001
+name: PASE to Operational Transition via Close and Reconnect
+description: |
+  Verifies the complete transition: after PASE and cert install,
+  the commissioning connection is closed and a new operational
+  TLS connection with mutual authentication is established.
+
+pics_requirements:
+  - MASH.S.TRANS.RECONNECT_AFTER_COMM=1
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - zone_created: true
+
+steps:
+  - name: Commission device (PASE + cert exchange)
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      commission_success: true
+
+  - name: Verify commissioning connection closed
+    action: verify_connection_state
+    expect:
+      commissioning_connection_closed: true
+
+  - name: Verify operational connection established
+    action: verify_connection_state
+    expect:
+      operational_connection_active: true
+      mutual_tls: true
+
+postconditions:
+  - transition_complete: true
+
+timeout: "30s"
+tags:
+  - connection
+  - transition
+  - pase
+  - operational
+
+---
+# TC-TRANS-002: mDNS Updated During Transition
+id: TC-TRANS-002
+name: mDNS Records Updated During PASE-to-Operational Transition
+description: |
+  Verifies that during the transition, _mashc._udp is removed and
+  _mash._tcp is registered.
+
+pics_requirements:
+  - MASH.S.TRANS.RECONNECT_AFTER_COMM=1
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - zone_created: true
+
+steps:
+  - name: Verify commissionable service present
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: true
+
+  - name: Commission device
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      commission_success: true
+
+  - name: Wait for mDNS update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify commissionable removed
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: false
+
+  - name: Verify operational added
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: true
+
+postconditions:
+  - mdns_updated: true
+
+timeout: "30s"
+tags:
+  - connection
+  - transition
+  - mdns
+
+---
+# TC-TRANS-003: Service Type Switch with Correct Instance Name
+id: TC-TRANS-003
+name: Operational Instance Name Uses zone-id and device-id
+description: |
+  Verifies that the new _mash._tcp instance name follows the format
+  <zone-id>-<device-id> after the transition.
+
+pics_requirements:
+  - MASH.S.TRANS.RECONNECT_AFTER_COMM=1
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - zone_created: true
+
+steps:
+  - name: Commission device
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      commission_success: true
+
+  - name: Wait for mDNS update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Inspect operational instance name
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: true
+      instance_name_format: "<zone-id>-<device-id>"
+
+postconditions:
+  - correct_instance_name: true
+
+timeout: "30s"
+tags:
+  - connection
+  - transition
+  - instance-name
+
+---
+# TC-TRANS-004: Reconnect Timeout
+id: TC-TRANS-004
+name: Operational Reconnection Completes Within Timeout
+description: |
+  Verifies that the operational TLS reconnection after commissioning
+  completes within the 10-second timeout.
+
+pics_requirements:
+  - MASH.S.TRANS.RECONNECT_AFTER_COMM=1
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - zone_created: true
+
+steps:
+  - name: Commission device
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      commission_success: true
+
+  - name: Verify reconnection completed in time
+    action: verify_timing
+    params:
+      event: operational_connection_established
+      max_duration: "10s"
+    expect:
+      within_deadline: true
+
+postconditions:
+  - reconnect_within_timeout: true
+
+timeout: "30s"
+tags:
+  - connection
+  - transition
+  - timeout
+
+---
+# TC-E2E-001: First-Time Commissioning End-to-End
+id: TC-E2E-001
+name: Full First-Time Commissioning Flow
+description: |
+  Verifies the complete end-to-end flow: QR scan, mDNS discovery,
+  TLS commissioning, PASE, cert exchange, transition, operational read.
+
+pics_requirements:
+  - D.COMM.PASE
+  - D.CERT.EXCHANGE
+  - MASH.S.TRANS.RECONNECT_AFTER_COMM=1
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - zone_created: true
+
+steps:
+  - name: Parse QR code
+    action: parse_qr
+    params:
+      content: "MASH:1:1234:12345678"
+    expect:
+      parse_success: true
+
+  - name: Discover device via mDNS
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+      discriminator: 1234
+    expect:
+      device_found: true
+
+  - name: Commission device
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      commission_success: true
+
+  - name: Read DeviceInfo on operational connection
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorName
+    expect:
+      read_success: true
+
+postconditions:
+  - e2e_commissioning_complete: true
+
+timeout: "45s"
+tags:
+  - connection
+  - e2e
+  - commissioning
+
+---
+# TC-E2E-002: Reconnection After Disconnect
+id: TC-E2E-002
+name: Reconnection Uses Mutual TLS Without PASE
+description: |
+  Verifies that after a disconnect, the controller reconnects using
+  mutual TLS (no PASE needed since device is already commissioned).
+
+pics_requirements:
+  - MASH.S.TLS.MUTUAL_AUTH=1
+
+preconditions:
+  - device_commissioned: true
+  - connection_established: true
+
+steps:
+  - name: Force disconnect
+    action: disconnect
+
+  - name: Wait for reconnection
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Verify operational connection re-established
+    action: verify_connection_state
+    expect:
+      operational_connection_active: true
+      mutual_tls: true
+      pase_performed: false
+
+postconditions:
+  - reconnected_without_pase: true
+
+timeout: "15s"
+tags:
+  - connection
+  - e2e
+  - reconnection
+
+---
+# TC-E2E-003: Second Zone Commissioning
+id: TC-E2E-003
+name: Additional Zone Commissioning on Already-Operational Device
+description: |
+  Verifies that an already-operational device can be commissioned
+  to a second zone while maintaining the first.
+
+pics_requirements:
+  - D.COMM.PASE
+  - D.ZONE.MULTI
+
+preconditions:
+  - device_in_zone: true
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Commission to second zone
+    action: commission
+    params:
+      setup_code: "12345678"
+      zone_type: GRID
+    expect:
+      commission_success: true
+
+  - name: Verify both zones operational
+    action: device_local_action
+    params:
+      action: zone_count
+    expect:
+      result: 2
+
+postconditions:
+  - second_zone_commissioned: true
+
+timeout: "30s"
+tags:
+  - connection
+  - e2e
+  - multi-zone
+
+---
+# TC-E2E-004: Device Reboot Reconnection
+id: TC-E2E-004
+name: Reconnection After Device Reboot
+description: |
+  Verifies that after a device reboot, the controller can reconnect
+  to the device using the stored operational certificates.
+
+pics_requirements:
+  - MASH.S.TLS.MUTUAL_AUTH=1
+
+preconditions:
+  - device_commissioned: true
+  - connection_established: true
+
+steps:
+  - name: Reboot device
+    action: device_local_action
+    params:
+      action: reboot
+    expect:
+      action_triggered: true
+
+  - name: Wait for device to come back
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Verify reconnection succeeds
+    action: verify_connection_state
+    expect:
+      operational_connection_active: true
+      mutual_tls: true
+
+  - name: Verify read works after reboot
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorName
+    expect:
+      read_success: true
+
+postconditions:
+  - reconnected_after_reboot: true
+
+timeout: "30s"
+tags:
+  - connection
+  - e2e
+  - reboot
+
+---
+# TC-IPV6-001: Link-Local Connection
+id: TC-IPV6-001
+name: Connection Succeeds via Link-Local Address
+description: |
+  Verifies that the controller can connect to a device using
+  its link-local IPv6 address with the correct interface.
+
+pics_requirements:
+  - MASH.S.MDNS.LINK_LOCAL=1
+  - MASH.S.IPV6.LINK_LOCAL_INTERFACE=1
+
+preconditions:
+  - device_commissioned: true
+  - device_has_link_local: true
+
+steps:
+  - name: Connect via link-local address
+    action: connect
+    params:
+      address_type: link_local
+      alpn: "mash/1"
+    expect:
+      connected: true
+
+postconditions:
+  - link_local_connected: true
+
+timeout: "10s"
+tags:
+  - connection
+  - ipv6
+  - link-local
+
+---
+# TC-IPV6-002: Global Address Preferred Over Link-Local
+id: TC-IPV6-002
+name: Global/ULA Address Preferred Over Link-Local
+description: |
+  Verifies that when a device has both global/ULA and link-local
+  addresses, the controller prefers the global/ULA address.
+
+pics_requirements:
+  - MASH.S.MDNS.GLOBAL_ADDR=1
+
+preconditions:
+  - device_commissioned: true
+  - device_has_global_and_link_local: true
+
+steps:
+  - name: Connect to device
+    action: connect
+    params:
+      alpn: "mash/1"
+    expect:
+      connected: true
+      connected_address_type: global_or_ula
+
+postconditions:
+  - global_preferred: true
+
+timeout: "10s"
+tags:
+  - connection
+  - ipv6
+  - address-selection
+
+---
+# TC-IPV6-003: Address Change Triggers Reconnection
+id: TC-IPV6-003
+name: Connection Re-established After Address Change
+description: |
+  Verifies that when a device's address changes, the controller
+  detects the connection loss, re-resolves via mDNS, and reconnects
+  to the new address.
+
+pics_requirements:
+  - MASH.S.IPV6.ADDRESS_CHANGE=1
+
+preconditions:
+  - device_commissioned: true
+  - connection_established: true
+
+steps:
+  - name: Change device address
+    action: device_local_action
+    params:
+      action: change_address
+    expect:
+      action_triggered: true
+
+  - name: Wait for reconnection
+    action: wait
+    params:
+      duration: "10s"
+
+  - name: Verify connection re-established
+    action: verify_connection_state
+    expect:
+      operational_connection_active: true
+
+postconditions:
+  - address_change_handled: true
+
+timeout: "30s"
+tags:
+  - connection
+  - ipv6
+  - address-change
+
+---
+# TC-IPV6-004: Link-Local Interface Binding
+id: TC-IPV6-004
+name: Correct Interface Used for Link-Local Connection
+description: |
+  Verifies that for link-local addresses, the controller uses the
+  correct network interface (from the mDNS response) when connecting.
+
+pics_requirements:
+  - MASH.S.IPV6.LINK_LOCAL_INTERFACE=1
+
+preconditions:
+  - device_commissioned: true
+  - device_has_link_local: true
+
+steps:
+  - name: Discover device via mDNS
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: true
+      save_as: mdns_result
+
+  - name: Connect using discovered interface
+    action: connect
+    params:
+      address_type: link_local
+      interface_from: mdns_result
+      alpn: "mash/1"
+    expect:
+      connected: true
+      interface_correct: true
+
+postconditions:
+  - interface_binding_correct: true
+
+timeout: "10s"
+tags:
+  - connection
+  - ipv6
+  - interface
+
+---
+# TC-MDNS-REC-001: SRV Record Present
+id: TC-MDNS-REC-001
+name: SRV Record Published with Correct Port
+description: |
+  Verifies that the device publishes an SRV record with port 8443
+  and a valid hostname.
+
+pics_requirements:
+  - MASH.S.MDNS.SRV_RECORD=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Query SRV record
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+      record_type: SRV
+    expect:
+      device_found: true
+      srv_port: 8443
+      srv_hostname_valid: true
+
+postconditions:
+  - srv_record_correct: true
+
+timeout: "10s"
+tags:
+  - connection
+  - mdns
+  - srv
+
+---
+# TC-MDNS-REC-002: AAAA Record Present
+id: TC-MDNS-REC-002
+name: AAAA Record Published with Valid IPv6 Address
+description: |
+  Verifies that the device publishes at least one AAAA record with
+  a valid IPv6 address.
+
+pics_requirements:
+  - MASH.S.MDNS.AAAA_RECORD=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Query AAAA record
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+      record_type: AAAA
+    expect:
+      device_found: true
+      aaaa_count_min: 1
+      ipv6_valid: true
+
+postconditions:
+  - aaaa_record_present: true
+
+timeout: "10s"
+tags:
+  - connection
+  - mdns
+  - aaaa
+
+---
+# TC-MDNS-REC-003: Multiple AAAA Records
+id: TC-MDNS-REC-003
+name: Multiple AAAA Records Published for Multi-Address Device
+description: |
+  Verifies that a device with both ULA and link-local addresses
+  publishes AAAA records for both.
+
+pics_requirements:
+  - MASH.S.MDNS.AAAA_RECORD=1
+  - MASH.S.MDNS.GLOBAL_ADDR=1
+
+preconditions:
+  - device_commissioned: true
+  - device_has_global_and_link_local: true
+
+steps:
+  - name: Query AAAA records
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+      record_type: AAAA
+    expect:
+      aaaa_count_min: 2
+      has_link_local: true
+      has_global_or_ula: true
+
+postconditions:
+  - multiple_aaaa: true
+
+timeout: "10s"
+tags:
+  - connection
+  - mdns
+  - aaaa
+  - multi-address
+
+---
+# TC-MDNS-REC-004: Address Change Updates AAAA
+id: TC-MDNS-REC-004
+name: AAAA Record Updated on Address Change
+description: |
+  Verifies that when the device's address changes, it sends an
+  mDNS goodbye for the old AAAA and announces the new one.
+
+pics_requirements:
+  - MASH.S.MDNS.AAAA_RECORD=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Record current AAAA
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+      record_type: AAAA
+    expect:
+      save_as: original_aaaa
+
+  - name: Change device address
+    action: device_local_action
+    params:
+      action: change_address
+    expect:
+      action_triggered: true
+
+  - name: Wait for mDNS update
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Verify new AAAA record
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+      record_type: AAAA
+    expect:
+      address_changed: true
+
+postconditions:
+  - aaaa_updated: true
+
+timeout: "15s"
+tags:
+  - connection
+  - mdns
+  - address-change
+
+---
+# TC-MULTIIF-001: Publish All Interfaces
+id: TC-MULTIIF-001
+name: Device Publishes AAAA Records for All Active Interfaces
+description: |
+  Verifies that a device with multiple network interfaces (e.g.,
+  eth0 + wlan0) publishes AAAA records for addresses on all
+  active interfaces.
+
+pics_requirements:
+  - MASH.S.MULTIIF.SUPPORTED=1
+  - MASH.S.MULTIIF.PUBLISH_ALL=1
+
+preconditions:
+  - device_commissioned: true
+  - device_has_multiple_interfaces: true
+
+steps:
+  - name: Query AAAA records
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+      record_type: AAAA
+    expect:
+      aaaa_count_min: 2
+      addresses_from_multiple_interfaces: true
+
+postconditions:
+  - all_interfaces_published: true
+
+timeout: "10s"
+tags:
+  - connection
+  - multi-interface
+  - mdns
+
+---
+# TC-MULTIIF-002: Interface Down Triggers Goodbye and Failover
+id: TC-MULTIIF-002
+name: Interface Down Sends Goodbye and Controller Reconnects via Other
+description: |
+  Verifies that when a network interface goes down, the device sends
+  mDNS goodbye for that interface's addresses, and the controller
+  reconnects via the remaining interface.
+
+pics_requirements:
+  - MASH.S.MULTIIF.SUPPORTED=1
+  - MASH.C.MULTIIF.TRY_ALL=1
+
+preconditions:
+  - device_commissioned: true
+  - device_has_multiple_interfaces: true
+  - connected_via_eth0: true
+
+steps:
+  - name: Disconnect eth0
+    action: device_local_action
+    params:
+      action: interface_down
+      interface: eth0
+    expect:
+      action_triggered: true
+
+  - name: Wait for failover
+    action: wait
+    params:
+      duration: "10s"
+
+  - name: Verify reconnected via wlan0
+    action: verify_connection_state
+    expect:
+      operational_connection_active: true
+
+postconditions:
+  - interface_failover: true
+
+timeout: "30s"
+tags:
+  - connection
+  - multi-interface
+  - failover
+
+---
+# TC-MULTIIF-003: Interface Up Announces After Debounce
+id: TC-MULTIIF-003
+name: New Interface Announced After 2-Second Debounce
+description: |
+  Verifies that when a new network interface comes up, the device
+  waits 2 seconds (debounce) before announcing new AAAA records.
+
+pics_requirements:
+  - MASH.S.MULTIIF.SUPPORTED=1
+  - MASH.S.MULTIIF.DEBOUNCE_MS=2000
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Enable new interface
+    action: device_local_action
+    params:
+      action: interface_up
+      interface: wlan0
+    expect:
+      action_triggered: true
+
+  - name: Check no announcement within 1s
+    action: wait
+    params:
+      duration: "1s"
+
+  - name: Wait for debounce to complete
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify new AAAA announced
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+      record_type: AAAA
+    expect:
+      new_address_announced: true
+
+postconditions:
+  - debounce_observed: true
+
+timeout: "10s"
+tags:
+  - connection
+  - multi-interface
+  - debounce
+
+---
+# TC-MULTIIF-004: Controller Tries All Addresses
+id: TC-MULTIIF-004
+name: Controller Tries All Addresses Until Success
+description: |
+  Verifies that when the first address is unreachable, the controller
+  tries the next address and connects successfully.
+
+pics_requirements:
+  - MASH.C.MULTIIF.TRY_ALL=1
+  - MASH.C.MULTIIF.TIMEOUT_PER_ADDR=5000
+
+preconditions:
+  - device_commissioned: true
+  - first_address_unreachable: true
+
+steps:
+  - name: Connect to device
+    action: connect
+    params:
+      alpn: "mash/1"
+    expect:
+      connected: true
+      addresses_tried_min: 2
+
+postconditions:
+  - failover_succeeded: true
+
+timeout: "15s"
+tags:
+  - connection
+  - multi-interface
+  - failover
+
+---
+# TC-MULTIIF-005: All Addresses Fail
+id: TC-MULTIIF-005
+name: All Addresses Fail Returns Device Unreachable Error
+description: |
+  Verifies that when all addresses fail, the controller reports
+  a "device unreachable" error.
+
+pics_requirements:
+  - MASH.C.MULTIIF.TRY_ALL=1
+
+preconditions:
+  - device_commissioned: true
+  - all_addresses_unreachable: true
+
+steps:
+  - name: Attempt connection
+    action: connect
+    params:
+      alpn: "mash/1"
+    expect:
+      connected: false
+      error: device_unreachable
+
+postconditions:
+  - unreachable_reported: true
+
+timeout: "30s"
+tags:
+  - connection
+  - multi-interface
+  - negative
+
+---
+# TC-MULTIIF-006: Interface Flapping Debounce
+id: TC-MULTIIF-006
+name: Interface Flap Within 2s Suppresses mDNS Updates
+description: |
+  Verifies that if an interface goes down and comes back up within
+  2 seconds, no mDNS goodbye or announcement is sent (debounce).
+
+pics_requirements:
+  - MASH.S.MULTIIF.DEBOUNCE_MS=2000
+
+preconditions:
+  - device_commissioned: true
+  - device_has_multiple_interfaces: true
+
+steps:
+  - name: Record current AAAA records
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+      record_type: AAAA
+    expect:
+      save_as: original_records
+
+  - name: Briefly disconnect interface
+    action: device_local_action
+    params:
+      action: interface_flap
+      interface: eth0
+      down_duration: "500ms"
+    expect:
+      action_triggered: true
+
+  - name: Wait for debounce period
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Verify records unchanged
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+      record_type: AAAA
+    expect:
+      records_unchanged: true
+
+postconditions:
+  - flap_debounced: true
+
+timeout: "10s"
+tags:
+  - connection
+  - multi-interface
+  - debounce
+
+---
+# TC-MULTIIF-007: ULA Preferred Over Link-Local
+id: TC-MULTIIF-007
+name: ULA Address Tried Before Link-Local
+description: |
+  Verifies that when a device has both ULA and link-local addresses,
+  the controller tries the ULA address first.
+
+pics_requirements:
+  - MASH.C.MULTIIF.TRY_ALL=1
+
+preconditions:
+  - device_commissioned: true
+  - device_has_ula_and_link_local: true
+
+steps:
+  - name: Connect to device
+    action: connect
+    params:
+      alpn: "mash/1"
+    expect:
+      connected: true
+      first_address_tried: ula
+
+postconditions:
+  - ula_preferred: true
+
+timeout: "10s"
+tags:
+  - connection
+  - multi-interface
+  - address-selection
+
+---
+# TC-MULTIIF-008: Cached Address Tried First
+id: TC-MULTIIF-008
+name: Last-Known-Good Address Tried First on Reconnect
+description: |
+  Verifies that after a brief disconnect, the controller tries the
+  cached (last-known-good) address before performing mDNS resolution.
+
+pics_requirements:
+  - MASH.C.MULTIIF.CACHE_LAST_GOOD=1
+
+preconditions:
+  - device_commissioned: true
+  - connection_established: true
+
+steps:
+  - name: Disconnect briefly
+    action: disconnect
+
+  - name: Wait for reconnection
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Verify cached address used
+    action: verify_connection_state
+    expect:
+      operational_connection_active: true
+      cached_address_tried_first: true
+
+postconditions:
+  - cache_used: true
+
+timeout: "15s"
+tags:
+  - connection
+  - multi-interface
+  - cache
+
+---
+# TC-MULTIIF-009: Cache Miss Falls Back to mDNS
+id: TC-MULTIIF-009
+name: Cache Miss Falls Back to mDNS Resolution
+description: |
+  Verifies that when the cached address is no longer valid, the
+  controller falls back to mDNS resolution and connects via the
+  new address.
+
+pics_requirements:
+  - MASH.C.MULTIIF.CACHE_LAST_GOOD=1
+
+preconditions:
+  - device_commissioned: true
+  - cached_address_invalid: true
+
+steps:
+  - name: Attempt connection (cache miss)
+    action: connect
+    params:
+      alpn: "mash/1"
+    expect:
+      connected: true
+      mdns_resolution_performed: true
+
+postconditions:
+  - cache_fallback_worked: true
+
+timeout: "15s"
+tags:
+  - connection
+  - multi-interface
+  - cache
+  - fallback
+
+---
+# TC-MULTIIF-010: TLS Failure on One Address Tries Next
+id: TC-MULTIIF-010
+name: TLS Failure on First Address Falls Through to Next
+description: |
+  Verifies that if the first address succeeds at TCP but fails
+  TLS (e.g., different device at that IP), the controller tries
+  the next address.
+
+pics_requirements:
+  - MASH.C.MULTIIF.TRY_ALL=1
+
+preconditions:
+  - device_commissioned: true
+  - first_address_tls_mismatch: true
+
+steps:
+  - name: Connect to device
+    action: connect
+    params:
+      alpn: "mash/1"
+    expect:
+      connected: true
+      addresses_tried_min: 2
+      tls_failure_on_first: true
+
+postconditions:
+  - tls_fallthrough: true
+
+timeout: "15s"
+tags:
+  - connection
+  - multi-interface
+  - tls
+  - fallover
+
+---
+# TC-NOTFOUND-001: No Devices Found
+id: TC-NOTFOUND-001
+name: No Devices in Commissioning Mode Returns Error
+description: |
+  Verifies that when no devices are in commissioning mode, the
+  browse returns a NO_DEVICES_FOUND error with actionable suggestions.
+
+pics_requirements:
+  - MASH.S.DISC.BROWSE_TIMEOUT=10
+
+preconditions:
+  - no_devices_advertising: true
+
+steps:
+  - name: Attempt to browse
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+      timeout: "10s"
+    expect:
+      device_found: false
+      error_code: NO_DEVICES_FOUND
+
+postconditions:
+  - no_devices_error: true
+
+timeout: "15s"
+tags:
+  - connection
+  - not-found
+  - negative
+
+---
+# TC-NOTFOUND-002: Wrong Discriminator
+id: TC-NOTFOUND-002
+name: Discriminator Mismatch Returns Specific Error
+description: |
+  Verifies that when devices are found but none match the QR code
+  discriminator, a DISCRIMINATOR_MISMATCH error is returned.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Browse with wrong discriminator
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+      discriminator: 9999
+    expect:
+      device_found: false
+      error_code: DISCRIMINATOR_MISMATCH
+
+postconditions:
+  - disc_mismatch_error: true
+
+timeout: "15s"
+tags:
+  - connection
+  - not-found
+  - discriminator
+  - negative
+
+---
+# TC-NOTFOUND-003: Address Unavailable
+id: TC-NOTFOUND-003
+name: SRV Present But No AAAA Returns Address Error
+description: |
+  Verifies that when a device is found via SRV but has no AAAA
+  record, an ADDRESS_RESOLUTION_FAILED error is returned.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+
+preconditions:
+  - device_srv_present: true
+  - device_aaaa_missing: true
+
+steps:
+  - name: Browse for device
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: true
+      error_code: ADDRESS_RESOLUTION_FAILED
+
+postconditions:
+  - address_error: true
+
+timeout: "15s"
+tags:
+  - connection
+  - not-found
+  - address
+  - negative
+
+---
+# TC-NOTFOUND-004: Connection Refused
+id: TC-NOTFOUND-004
+name: Valid Address But Connection Refused Returns Error
+description: |
+  Verifies that when the device address is valid but the connection
+  is refused (port not listening), a CONNECTION_FAILED error is returned.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+
+preconditions:
+  - device_address_valid: true
+  - device_port_closed: true
+
+steps:
+  - name: Attempt connection
+    action: connect
+    params:
+      alpn: "mash/1"
+    expect:
+      connected: false
+      error_code: CONNECTION_FAILED
+
+postconditions:
+  - connection_refused_error: true
+
+timeout: "15s"
+tags:
+  - connection
+  - not-found
+  - refused
+  - negative
+
+---
+# TC-NOTFOUND-005: Retry Success After Initial Failure
+id: TC-NOTFOUND-005
+name: Browse Retry Succeeds After Device Appears
+description: |
+  Verifies that the controller retries browsing and succeeds when
+  a device appears after the initial browse found nothing.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+
+preconditions:
+  - device_will_appear_after_delay: true
+
+steps:
+  - name: Browse with retry (device appears during retry)
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+      retry: true
+    expect:
+      device_found: true
+      retries_performed_min: 1
+
+postconditions:
+  - retry_succeeded: true
+
+timeout: "30s"
+tags:
+  - connection
+  - not-found
+  - retry
+
+---
+# TC-NOTFOUND-006: Window Expiry Warning
+id: TC-NOTFOUND-006
+name: Warning When Browse Runs During Last 30s of Window
+description: |
+  Verifies that if the browse is still running in the last 30 seconds
+  of the 120-second commissioning window, a warning is generated about
+  potential window expiry.
+
+pics_requirements:
+  - MASH.S.DISC.COMMISSION_WINDOW=120
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - commissioning_window_at_95s: true
+
+steps:
+  - name: Browse for device during end of window
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: true
+      window_expiry_warning: true
+
+postconditions:
+  - window_warning_shown: true
+
+timeout: "30s"
+tags:
+  - connection
+  - not-found
+  - window
+  - warning

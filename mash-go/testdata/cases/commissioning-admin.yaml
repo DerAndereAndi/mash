@@ -1,0 +1,149 @@
+# Test Suite: Commissioning Admin Token Tests
+# Verifies delegated commissioning via admin tokens
+#
+# Spec: docs/testing/behavior/commissioning-pase.md (admin section)
+# Spec: docs/testing/behavior/zone-lifecycle.md (delegated commissioning)
+#
+# Key concepts:
+# - Admin tokens allow delegated commissioning (e.g., phone app)
+# - Token contains permissions, expiry, and Zone CA signature
+# - Token validation: signature, expiry, permissions
+
+---
+# TC-ADMIN-001: Valid Admin Token Accepted
+id: TC-ADMIN-001
+name: Valid Admin Token Accepted
+description: |
+  Verifies that a valid admin token (correct signature, not expired,
+  correct permissions) is accepted during delegated commissioning.
+
+pics_requirements:
+  - D.COMM.ADMIN
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - admin_token_valid: true
+
+steps:
+  - name: Perform PASE with admin token
+    action: commission_with_admin
+    params:
+      setup_code: "12345678"
+      admin_token: valid
+    expect:
+      commission_success: true
+
+postconditions:
+  - admin_commissioning_ok: true
+
+timeout: "20s"
+tags:
+  - commissioning
+  - admin
+  - token
+  - success
+
+---
+# TC-ADMIN-002: Expired Admin Token Rejected
+id: TC-ADMIN-002
+name: Expired Admin Token Rejected
+description: |
+  Verifies that an expired admin token is rejected with
+  INVALID_CERT error.
+
+pics_requirements:
+  - D.COMM.ADMIN
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - admin_token_expired: true
+
+steps:
+  - name: Attempt commissioning with expired token
+    action: commission_with_admin
+    params:
+      setup_code: "12345678"
+      admin_token: expired
+    expect:
+      commission_success: false
+      error: INVALID_CERT
+
+postconditions:
+  - expired_token_rejected: true
+
+timeout: "15s"
+tags:
+  - commissioning
+  - admin
+  - token
+  - negative
+
+---
+# TC-ADMIN-003: Invalid Signature Token Rejected
+id: TC-ADMIN-003
+name: Tampered Admin Token Rejected
+description: |
+  Verifies that an admin token with an invalid signature (tampered
+  or signed by wrong key) is rejected.
+
+pics_requirements:
+  - D.COMM.ADMIN
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Attempt commissioning with tampered token
+    action: commission_with_admin
+    params:
+      setup_code: "12345678"
+      admin_token: invalid_signature
+    expect:
+      commission_success: false
+      error: INVALID_CERT
+
+postconditions:
+  - tampered_token_rejected: true
+
+timeout: "15s"
+tags:
+  - commissioning
+  - admin
+  - token
+  - negative
+  - security
+
+---
+# TC-ADMIN-004: Wrong Permissions Token Rejected
+id: TC-ADMIN-004
+name: Admin Token Without Commission Permission Rejected
+description: |
+  Verifies that an admin token without the commission permission
+  bit is rejected during commissioning.
+
+pics_requirements:
+  - D.COMM.ADMIN
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Attempt commissioning with read-only token
+    action: commission_with_admin
+    params:
+      setup_code: "12345678"
+      admin_token: wrong_permissions
+    expect:
+      commission_success: false
+      error: INVALID_CERT
+
+postconditions:
+  - wrong_permissions_rejected: true
+
+timeout: "15s"
+tags:
+  - commissioning
+  - admin
+  - token
+  - negative
+  - permissions

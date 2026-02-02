@@ -1,0 +1,431 @@
+# Test Suite: Zone Management Tests
+# Verifies zone operations, connection tracking, and priority resolution
+#
+# Spec: docs/testing/behavior/zone-management.md
+#
+# Key concepts:
+# - Max 2 zones: 1 GRID (priority 1) + 1 LOCAL (priority 2) per DEC-043
+# - Zone operations: AddZone, RemoveZone, SetConnected, SetDisconnected
+# - Query operations: GetZone, HasZone, ListZones, HighestPriorityZone
+# - Zone ID from Zone CA certificate fingerprint
+
+---
+# TC-ZONE-MGT-001: AddZone with Valid Parameters
+id: TC-ZONE-MGT-001
+name: AddZone with Valid Parameters
+description: |
+  Verifies that AddZone creates a new zone with the specified ID and type.
+  The zone starts with Connected=false and CommissionedAt set to current time.
+
+pics_requirements:
+  - MASH.S.ZONE
+  - MASH.S.ZONE.ADD
+
+preconditions:
+  - session_established: true
+  - no_zones_configured: true
+
+steps:
+  - name: Add a LOCAL zone
+    action: device_local_action
+    params:
+      action: add_zone
+      zone_id: "zone-local-001"
+      zone_type: LOCAL
+    expect:
+      action_triggered: true
+      no_error: true
+
+  - name: Verify zone exists
+    action: device_local_action
+    params:
+      action: has_zone
+      zone_id: "zone-local-001"
+    expect:
+      result: true
+
+  - name: Verify zone properties
+    action: device_local_action
+    params:
+      action: get_zone
+      zone_id: "zone-local-001"
+    expect:
+      zone_type: LOCAL
+      connected: false
+      commissioned_at_recent: true
+
+postconditions:
+  - zone_added: true
+
+timeout: "10s"
+tags:
+  - zone
+  - add
+  - basic
+
+---
+# TC-ZONE-MGT-002: AddZone Duplicate Zone Type Rejected
+id: TC-ZONE-MGT-002
+name: AddZone Duplicate Zone Type Rejected
+description: |
+  Verifies that adding a second zone of the same type fails with
+  ErrZoneTypeExists. Per DEC-043, only one zone per type is allowed.
+
+pics_requirements:
+  - MASH.S.ZONE
+  - MASH.S.ZONE.ADD
+
+preconditions:
+  - session_established: true
+  - local_zone_configured: true
+
+steps:
+  - name: Attempt to add second LOCAL zone
+    action: device_local_action
+    params:
+      action: add_zone
+      zone_id: "zone-local-002"
+      zone_type: LOCAL
+    expect:
+      error: ErrZoneTypeExists
+
+  - name: Verify zone count unchanged
+    action: device_local_action
+    params:
+      action: zone_count
+    expect:
+      result: 1
+
+postconditions:
+  - duplicate_type_rejected: true
+
+timeout: "10s"
+tags:
+  - zone
+  - add
+  - negative
+  - DEC-043
+
+---
+# TC-ZONE-MGT-003: RemoveZone Success
+id: TC-ZONE-MGT-003
+name: RemoveZone Success
+description: |
+  Verifies that RemoveZone removes an existing zone from the device.
+
+pics_requirements:
+  - MASH.S.ZONE
+  - MASH.S.ZONE.REMOVE
+
+preconditions:
+  - session_established: true
+  - local_zone_configured: true
+
+steps:
+  - name: Verify zone exists before removal
+    action: device_local_action
+    params:
+      action: has_zone
+      zone_id: "zone-local-001"
+    expect:
+      result: true
+
+  - name: Remove the zone
+    action: device_local_action
+    params:
+      action: remove_zone
+      zone_id: "zone-local-001"
+    expect:
+      no_error: true
+
+  - name: Verify zone no longer exists
+    action: device_local_action
+    params:
+      action: has_zone
+      zone_id: "zone-local-001"
+    expect:
+      result: false
+
+  - name: Verify zone count is zero
+    action: device_local_action
+    params:
+      action: zone_count
+    expect:
+      result: 0
+
+postconditions:
+  - zone_removed: true
+
+timeout: "10s"
+tags:
+  - zone
+  - remove
+  - basic
+
+---
+# TC-ZONE-MGT-004: RemoveZone Non-Existent Zone
+id: TC-ZONE-MGT-004
+name: RemoveZone Non-Existent Zone
+description: |
+  Verifies that RemoveZone on a non-existent zone ID returns
+  ErrZoneNotFound.
+
+pics_requirements:
+  - MASH.S.ZONE
+  - MASH.S.ZONE.REMOVE
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Attempt to remove non-existent zone
+    action: device_local_action
+    params:
+      action: remove_zone
+      zone_id: "nonexistent-zone"
+    expect:
+      error: ErrZoneNotFound
+
+postconditions:
+  - not_found_error: true
+
+timeout: "5s"
+tags:
+  - zone
+  - remove
+  - negative
+
+---
+# TC-ZONE-MGT-005: Zone Priority Query
+id: TC-ZONE-MGT-005
+name: Zone Priority Query (HighestPriorityZone)
+description: |
+  Verifies that HighestPriorityZone returns the zone with the lowest
+  priority number (GRID=1 wins over LOCAL=2).
+
+pics_requirements:
+  - MASH.S.ZONE
+  - MASH.S.ZONE.GRID
+  - MASH.S.ZONE.LOCAL
+  - MASH.S.ZONE.B_PRIORITY
+
+preconditions:
+  - session_established: true
+  - two_zones_configured: true
+
+steps:
+  - name: Query highest priority zone
+    action: device_local_action
+    params:
+      action: highest_priority_zone
+    expect:
+      zone_type: GRID
+      zone_id: "zone-grid-001"
+
+postconditions:
+  - grid_highest_priority: true
+
+timeout: "5s"
+tags:
+  - zone
+  - priority
+  - query
+
+---
+# TC-ZONE-MGT-006: ListZones Returns All Active
+id: TC-ZONE-MGT-006
+name: ListZones Returns All Active Zones
+description: |
+  Verifies that ListZones returns all zone IDs that have been added
+  to the device.
+
+pics_requirements:
+  - MASH.S.ZONE
+
+preconditions:
+  - session_established: true
+  - two_zones_configured: true
+
+steps:
+  - name: List all zones
+    action: device_local_action
+    params:
+      action: list_zones
+    expect:
+      zone_count: 2
+      zone_ids_include:
+        - "zone-grid-001"
+        - "zone-local-001"
+
+postconditions:
+  - all_zones_listed: true
+
+timeout: "5s"
+tags:
+  - zone
+  - list
+  - query
+
+---
+# TC-ZONE-MGT-007: Zone Connection State Tracking
+id: TC-ZONE-MGT-007
+name: Zone Connection State Tracking
+description: |
+  Verifies that SetConnected and SetDisconnected correctly track
+  zone connection state. SetConnected updates LastSeen; SetDisconnected
+  does NOT update LastSeen.
+
+pics_requirements:
+  - MASH.S.ZONE
+  - MASH.S.ZONE.CONNECT
+  - MASH.S.ZONE.LAST_SEEN
+
+preconditions:
+  - session_established: true
+  - local_zone_configured: true
+
+steps:
+  - name: Mark zone as connected
+    action: device_local_action
+    params:
+      action: set_connected
+      zone_id: "zone-local-001"
+    expect:
+      no_error: true
+
+  - name: Verify zone is connected
+    action: device_local_action
+    params:
+      action: get_zone
+      zone_id: "zone-local-001"
+    expect:
+      connected: true
+      last_seen_recent: true
+
+  - name: Mark zone as disconnected
+    action: device_local_action
+    params:
+      action: set_disconnected
+      zone_id: "zone-local-001"
+    expect:
+      no_error: true
+
+  - name: Verify zone is disconnected but LastSeen preserved
+    action: device_local_action
+    params:
+      action: get_zone
+      zone_id: "zone-local-001"
+    expect:
+      connected: false
+      last_seen_not_updated: true
+
+postconditions:
+  - connection_tracking_correct: true
+
+timeout: "10s"
+tags:
+  - zone
+  - connection
+  - tracking
+
+---
+# TC-ZONE-MGT-008: Max Zones Enforced
+id: TC-ZONE-MGT-008
+name: Max Zones Enforced (2 Zones Maximum)
+description: |
+  Verifies that the device enforces the MaxZones=2 limit.
+  With DEC-043, this is one GRID + one LOCAL.
+
+pics_requirements:
+  - MASH.S.ZONE
+  - MASH.S.ZONE.MAX=2
+
+preconditions:
+  - session_established: true
+  - two_zones_configured: true
+
+steps:
+  - name: Verify zone count is at maximum
+    action: device_local_action
+    params:
+      action: zone_count
+    expect:
+      result: 2
+
+  - name: Attempt to add third zone (different ID, but type must repeat)
+    action: device_local_action
+    params:
+      action: add_zone
+      zone_id: "zone-extra-001"
+      zone_type: LOCAL
+    expect:
+      error: ErrZoneTypeExists
+
+postconditions:
+  - max_zones_enforced: true
+
+timeout: "5s"
+tags:
+  - zone
+  - capacity
+  - negative
+
+---
+# TC-ZONE-MGT-009: HighestPriorityConnectedZone
+id: TC-ZONE-MGT-009
+name: HighestPriorityConnectedZone with Mixed State
+description: |
+  Verifies that HighestPriorityConnectedZone returns the connected
+  zone with the highest priority, ignoring disconnected zones.
+
+pics_requirements:
+  - MASH.S.ZONE
+  - MASH.S.ZONE.B_PRIORITY
+  - MASH.S.ZONE.CONNECT
+
+preconditions:
+  - session_established: true
+  - two_zones_configured: true
+
+steps:
+  - name: Connect LOCAL zone only (GRID disconnected)
+    action: device_local_action
+    params:
+      action: set_connected
+      zone_id: "zone-local-001"
+    expect:
+      no_error: true
+
+  - name: Query highest priority connected zone
+    action: device_local_action
+    params:
+      action: highest_priority_connected_zone
+    expect:
+      zone_type: LOCAL             # GRID is disconnected, LOCAL wins
+      zone_id: "zone-local-001"
+
+  - name: Now connect GRID zone too
+    action: device_local_action
+    params:
+      action: set_connected
+      zone_id: "zone-grid-001"
+    expect:
+      no_error: true
+
+  - name: Query again - GRID should now win
+    action: device_local_action
+    params:
+      action: highest_priority_connected_zone
+    expect:
+      zone_type: GRID
+      zone_id: "zone-grid-001"
+
+postconditions:
+  - priority_connected_correct: true
+
+timeout: "10s"
+tags:
+  - zone
+  - priority
+  - connected
+  - query

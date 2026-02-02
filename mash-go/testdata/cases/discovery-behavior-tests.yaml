@@ -1,0 +1,1499 @@
+# Test Suite: Discovery Behavior Tests
+# Verifies mDNS/DNS-SD discovery and QR code parsing
+#
+# Spec: docs/testing/behavior/discovery.md
+#
+# Key concepts:
+# - Three service types: _mashc._udp (commissionable), _mash._tcp (operational), _mashd._udp (commissioner)
+# - Instance names: MASH-<D> for commissionable, <zone-id>-<device-id> for operational
+# - QR format: MASH:<version>:<discriminator>:<setupcode>
+# - 12-bit discriminator (0-4095), 8-digit setup code
+# - 120s commissioning window
+# - Discovery state machine: UNREGISTERED -> UNCOMMISSIONED -> COMMISSIONING_OPEN -> OPERATIONAL
+
+---
+# TC-MASHC-001: Register on Button Press
+id: TC-MASHC-001
+name: Commissionable Service Registered on Button Press
+description: |
+  Verifies that pressing the commissioning button causes the device
+  to register a _mashc._udp service instance with the correct
+  instance name MASH-<discriminator>.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - D.COMM.QR
+
+preconditions:
+  - device_booted: true
+  - device_uncommissioned: true
+
+steps:
+  - name: Press commissioning button
+    action: device_local_action
+    params:
+      action: enter_commissioning_mode
+    expect:
+      action_triggered: true
+
+  - name: Browse for commissionable devices
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: true
+      instance_name_prefix: "MASH-"
+
+postconditions:
+  - mashc_registered: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - commissionable
+  - mdns
+
+---
+# TC-MASHC-002: Deregister on Timeout
+id: TC-MASHC-002
+name: Commissionable Service Removed After 120s Timeout
+description: |
+  Verifies that the _mashc._udp service instance is deregistered
+  after the 120-second commissioning window expires.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.COMMISSION_WINDOW=120
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Verify device is advertising
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: true
+
+  - name: Wait for commissioning window to expire
+    action: wait
+    params:
+      duration: "125s"
+
+  - name: Verify device no longer advertising
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: false
+
+postconditions:
+  - mashc_deregistered_on_timeout: true
+
+timeout: "135s"
+tags:
+  - discovery
+  - commissionable
+  - timeout
+
+---
+# TC-MASHC-003: Deregister on Commissioning Success
+id: TC-MASHC-003
+name: Commissionable Service Removed After Successful Commissioning
+description: |
+  Verifies that the _mashc._udp service instance is deregistered
+  after commissioning completes successfully.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - zone_created: true
+
+steps:
+  - name: Commission device
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      commission_success: true
+
+  - name: Wait for mDNS update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify commissionable service removed
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: false
+
+postconditions:
+  - mashc_deregistered_on_success: true
+
+timeout: "30s"
+tags:
+  - discovery
+  - commissionable
+  - commissioning
+
+---
+# TC-MASHC-004: TXT Record Format
+id: TC-MASHC-004
+name: Commissionable TXT Record Contains Required Fields
+description: |
+  Verifies that the _mashc._udp TXT record contains all required
+  fields: D (discriminator), cat (device category), serial, brand,
+  and model.
+
+pics_requirements:
+  - MASH.S.DISC.COMM_TXT_D=1
+  - MASH.S.DISC.COMM_TXT_CAT=1
+  - MASH.S.DISC.COMM_TXT_SERIAL=1
+  - MASH.S.DISC.COMM_TXT_BRAND=1
+  - MASH.S.DISC.COMM_TXT_MODEL=1
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Browse and inspect TXT record
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: true
+      txt_field_D: present
+      txt_field_cat: present
+      txt_field_serial: present
+      txt_field_brand: present
+      txt_field_model: present
+      txt_D_range: "0-4095"
+
+postconditions:
+  - mashc_txt_valid: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - commissionable
+  - txt-record
+
+---
+# TC-MASHC-005: Instance Name Conflict Resolution
+id: TC-MASHC-005
+name: Duplicate Instance Name Resolved with Suffix
+description: |
+  Verifies that when two devices have the same discriminator and
+  thus the same instance name, a suffix is appended to resolve
+  the conflict (e.g., MASH-1234-2).
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+
+preconditions:
+  - two_devices_same_discriminator: true
+
+steps:
+  - name: Both devices enter commissioning mode
+    action: device_local_action
+    params:
+      device: both
+      action: enter_commissioning_mode
+    expect:
+      action_triggered: true
+
+  - name: Browse for commissionable devices
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+      discriminator: 1234
+    expect:
+      devices_found: 2
+      instance_conflict_resolved: true
+
+postconditions:
+  - name_conflict_resolved: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - commissionable
+  - conflict
+
+---
+# TC-MASHC-006: Already Operational Device Adds Commissionable
+id: TC-MASHC-006
+name: Operational Device Also Advertises Commissionable Service
+description: |
+  Verifies that a device already in a zone can also advertise
+  _mashc._udp when entering commissioning mode for a second zone,
+  while keeping the existing _mash._tcp advertisement.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+
+preconditions:
+  - device_in_zone: true
+
+steps:
+  - name: Verify operational service present
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: true
+
+  - name: Enter commissioning mode for second zone
+    action: device_local_action
+    params:
+      action: enter_commissioning_mode
+    expect:
+      action_triggered: true
+
+  - name: Verify both services present
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: true
+
+  - name: Verify operational service still present
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: true
+
+postconditions:
+  - both_services_active: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - commissionable
+  - operational
+  - multi-zone
+
+---
+# TC-MASHO-001: Register on Commissioning Complete
+id: TC-MASHO-001
+name: Operational Service Registered After Commissioning
+description: |
+  Verifies that after commissioning completes, a _mash._tcp service
+  instance appears with the correct zone-id and device-id.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - zone_created: true
+
+steps:
+  - name: Commission device
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      commission_success: true
+
+  - name: Wait for mDNS update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify operational service registered
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: true
+
+postconditions:
+  - masho_registered: true
+
+timeout: "30s"
+tags:
+  - discovery
+  - operational
+  - commissioning
+
+---
+# TC-MASHO-002: Instance Name Format
+id: TC-MASHO-002
+name: Operational Instance Name Has Correct Format
+description: |
+  Verifies that the operational _mash._tcp instance name follows
+  the format <zone-id>-<device-id> where both are 16 hex characters.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Browse and inspect instance name
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: true
+      instance_name_format: "<zone-id>-<device-id>"
+      zone_id_length: 16
+      device_id_length: 16
+      zone_id_hex_valid: true
+      device_id_hex_valid: true
+
+postconditions:
+  - instance_name_valid: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - operational
+  - instance-name
+
+---
+# TC-MASHO-003: Operational TXT Record Format
+id: TC-MASHO-003
+name: Operational TXT Record Contains Required Fields
+description: |
+  Verifies that the _mash._tcp TXT record contains the required
+  ZI (zone ID) and DI (device ID) fields.
+
+pics_requirements:
+  - MASH.S.DISC.OPER_TXT_ZI=1
+  - MASH.S.DISC.OPER_TXT_DI=1
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Browse and inspect TXT record
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: true
+      txt_field_ZI: present
+      txt_field_DI: present
+      txt_ZI_length: 16
+      txt_DI_length: 16
+
+postconditions:
+  - masho_txt_valid: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - operational
+  - txt-record
+
+---
+# TC-MASHO-004: Multi-Zone Instances
+id: TC-MASHO-004
+name: Device in Two Zones Has Two Operational Instances
+description: |
+  Verifies that a device commissioned to two zones publishes two
+  separate _mash._tcp service instances, one per zone.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+  - D.ZONE.MULTI
+
+preconditions:
+  - device_in_two_zones: true
+
+steps:
+  - name: Browse operational services
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      instances_for_device: 2
+
+postconditions:
+  - multi_zone_instances: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - operational
+  - multi-zone
+
+---
+# TC-MASHO-005: Zone Removed Deregisters Instance
+id: TC-MASHO-005
+name: Removing One Zone Removes Only That Instance
+description: |
+  Verifies that when a device is removed from one zone, only that
+  zone's _mash._tcp instance is deregistered. The other zone's
+  instance remains.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+  - D.ZONE.MULTI
+
+preconditions:
+  - device_in_two_zones: true
+
+steps:
+  - name: Remove device from first zone
+    action: controller_action
+    params:
+      action: remove_device
+      zone: zone_1
+    expect:
+      action_triggered: true
+
+  - name: Wait for mDNS update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify one instance remaining
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      instances_for_device: 1
+
+postconditions:
+  - partial_zone_removal: true
+
+timeout: "15s"
+tags:
+  - discovery
+  - operational
+  - zone-removal
+
+---
+# TC-MASHO-006: All Zones Removed Clears All Instances
+id: TC-MASHO-006
+name: Removing All Zones Removes All Operational Instances
+description: |
+  Verifies that when a device is removed from all zones, no
+  _mash._tcp instances remain for that device.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+
+preconditions:
+  - device_in_zone: true
+
+steps:
+  - name: Remove device from all zones
+    action: controller_action
+    params:
+      action: remove_device
+      zone: all
+    expect:
+      action_triggered: true
+
+  - name: Wait for mDNS update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify no operational instances
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: false
+
+postconditions:
+  - all_zones_removed: true
+
+timeout: "15s"
+tags:
+  - discovery
+  - operational
+  - zone-removal
+
+---
+# TC-MASHD-001: Commissioner Service Registered on Zone Create
+id: TC-MASHD-001
+name: Commissioner Service Registered When Zone Created
+description: |
+  Verifies that creating a zone causes the controller to register
+  a _mashd._udp service instance with the zone name.
+
+pics_requirements:
+  - MASH.C.DISC.COMMR_TXT_ZN=1
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Create a zone
+    action: controller_action
+    params:
+      action: create_zone
+      zone_name: "Home Energy"
+      zone_type: LOCAL
+    expect:
+      zone_created: true
+
+  - name: Browse for commissioners
+    action: browse_mdns
+    params:
+      service_type: "_mashd._udp"
+    expect:
+      controller_found: true
+      instance_name: "Home Energy"
+
+postconditions:
+  - mashd_registered: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - commissioner
+  - zone-create
+
+---
+# TC-MASHD-002: Commissioner TXT Record Format
+id: TC-MASHD-002
+name: Commissioner TXT Record Contains Required Fields
+description: |
+  Verifies that the _mashd._udp TXT record contains the required
+  ZN (zone name) and ZI (zone ID) fields.
+
+pics_requirements:
+  - MASH.C.DISC.COMMR_TXT_ZN=1
+  - MASH.C.DISC.COMMR_TXT_ZI=1
+
+preconditions:
+  - zone_created: true
+
+steps:
+  - name: Browse and inspect commissioner TXT
+    action: browse_mdns
+    params:
+      service_type: "_mashd._udp"
+    expect:
+      controller_found: true
+      txt_field_ZN: present
+      txt_field_ZI: present
+      txt_ZI_length: 16
+
+postconditions:
+  - mashd_txt_valid: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - commissioner
+  - txt-record
+
+---
+# TC-MASHD-003: Multiple Zone Instances
+id: TC-MASHD-003
+name: Controller with Two Zones Has Two Commissioner Instances
+description: |
+  Verifies that a controller with two zones registers two separate
+  _mashd._udp instances, one per zone.
+
+pics_requirements:
+  - MASH.C.DISC.COMMR_TXT_ZN=1
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Create first zone
+    action: controller_action
+    params:
+      action: create_zone
+      zone_name: "Home Energy"
+      zone_type: LOCAL
+    expect:
+      zone_created: true
+
+  - name: Create second zone
+    action: controller_action
+    params:
+      action: create_zone
+      zone_name: "Grid Service"
+      zone_type: GRID
+    expect:
+      zone_created: true
+
+  - name: Browse for commissioners
+    action: browse_mdns
+    params:
+      service_type: "_mashd._udp"
+    expect:
+      instances_found: 2
+
+postconditions:
+  - multi_zone_mashd: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - commissioner
+  - multi-zone
+
+---
+# TC-MASHD-004: Device Count Updated
+id: TC-MASHD-004
+name: Commissioner DC Field Updated When Device Joins
+description: |
+  Verifies that the DC (device count) field in the _mashd._udp
+  TXT record is updated when a device joins the zone.
+
+pics_requirements:
+  - MASH.C.DISC.COMMR_TXT_DC=1
+
+preconditions:
+  - zone_created: true
+
+steps:
+  - name: Check initial device count
+    action: browse_mdns
+    params:
+      service_type: "_mashd._udp"
+    expect:
+      txt_field_DC: "0"
+
+  - name: Commission a device
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      commission_success: true
+
+  - name: Wait for TXT update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify device count incremented
+    action: browse_mdns
+    params:
+      service_type: "_mashd._udp"
+    expect:
+      txt_field_DC: "1"
+
+postconditions:
+  - dc_updated: true
+
+timeout: "30s"
+tags:
+  - discovery
+  - commissioner
+  - device-count
+
+---
+# TC-MASHD-005: Commissioner Deregistered on Zone Delete
+id: TC-MASHD-005
+name: Commissioner Service Removed When Zone Deleted
+description: |
+  Verifies that deleting a zone causes the controller to deregister
+  that zone's _mashd._udp instance.
+
+pics_requirements:
+  - MASH.C.DISC.COMMR_TXT_ZN=1
+
+preconditions:
+  - zone_created: true
+
+steps:
+  - name: Verify commissioner present
+    action: browse_mdns
+    params:
+      service_type: "_mashd._udp"
+    expect:
+      controller_found: true
+
+  - name: Delete zone
+    action: controller_action
+    params:
+      action: delete_zone
+    expect:
+      zone_deleted: true
+
+  - name: Wait for mDNS update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify commissioner gone
+    action: browse_mdns
+    params:
+      service_type: "_mashd._udp"
+    expect:
+      controller_found: false
+
+postconditions:
+  - mashd_deregistered: true
+
+timeout: "15s"
+tags:
+  - discovery
+  - commissioner
+  - zone-delete
+
+---
+# TC-MASHD-006: Device Browses for Commissioners
+id: TC-MASHD-006
+name: Device Discovers Available Commissioners
+description: |
+  Verifies that a device can browse _mashd._udp to discover
+  available zone controllers on the network.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSIONER=_mashd._udp
+
+preconditions:
+  - zone_created: true
+  - device_has_display: true
+
+steps:
+  - name: Device enters find-controller mode
+    action: device_local_action
+    params:
+      action: browse_commissioners
+    expect:
+      commissioners_found: true
+      commissioner_count_min: 1
+
+postconditions:
+  - device_found_commissioner: true
+
+timeout: "15s"
+tags:
+  - discovery
+  - commissioner
+  - device-initiated
+
+---
+# TC-QR-001: Valid QR Code Parsed
+id: TC-QR-001
+name: Valid QR Code Parses Successfully
+description: |
+  Verifies that a valid QR code string "MASH:1:1234:12345678"
+  is parsed correctly into version, discriminator, and setup code.
+
+pics_requirements:
+  - MASH.S.DISC.QR_VERSION=1
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Parse valid QR code
+    action: parse_qr
+    params:
+      content: "MASH:1:1234:12345678"
+    expect:
+      parse_success: true
+      version: 1
+      discriminator: 1234
+      setup_code: "12345678"
+
+postconditions:
+  - qr_parsed: true
+
+timeout: "5s"
+tags:
+  - discovery
+  - qr
+  - parsing
+
+---
+# TC-QR-002: QR Code with Leading Zeros Setup Code
+id: TC-QR-002
+name: Setup Code Leading Zeros Preserved
+description: |
+  Verifies that a QR code with a setup code that has leading zeros
+  parses correctly, preserving the zeros.
+
+pics_requirements:
+  - MASH.S.DISC.QR_VERSION=1
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Parse QR with leading zeros
+    action: parse_qr
+    params:
+      content: "MASH:1:0:00000001"
+    expect:
+      parse_success: true
+      version: 1
+      discriminator: 0
+      setup_code: "00000001"
+
+postconditions:
+  - leading_zeros_preserved: true
+
+timeout: "5s"
+tags:
+  - discovery
+  - qr
+  - parsing
+
+---
+# TC-QR-003: Invalid QR Prefix Rejected
+id: TC-QR-003
+name: Invalid QR Prefix Causes Parse Error
+description: |
+  Verifies that a QR code with an invalid prefix (e.g., "EEBUS:")
+  is rejected with an appropriate error.
+
+pics_requirements:
+  - MASH.S.DISC.QR_VERSION=1
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Parse QR with wrong prefix
+    action: parse_qr
+    params:
+      content: "EEBUS:1:1234:12345678"
+    expect:
+      parse_success: false
+      error: invalid_prefix
+
+postconditions:
+  - invalid_prefix_rejected: true
+
+timeout: "5s"
+tags:
+  - discovery
+  - qr
+  - negative
+
+---
+# TC-QR-004: Short Setup Code Rejected
+id: TC-QR-004
+name: Short Setup Code Causes Parse Error
+description: |
+  Verifies that a setup code with fewer than 8 digits is rejected.
+
+pics_requirements:
+  - MASH.S.DISC.QR_VERSION=1
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Parse QR with short setup code
+    action: parse_qr
+    params:
+      content: "MASH:1:1234:1234"
+    expect:
+      parse_success: false
+      error: invalid_setup_code
+
+postconditions:
+  - short_code_rejected: true
+
+timeout: "5s"
+tags:
+  - discovery
+  - qr
+  - negative
+
+---
+# TC-QR-005: Wrong Field Count Rejected
+id: TC-QR-005
+name: Wrong Number of QR Fields Causes Parse Error
+description: |
+  Verifies that a QR code with too few fields (missing setup code)
+  is rejected.
+
+pics_requirements:
+  - MASH.S.DISC.QR_VERSION=1
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Parse QR with missing field
+    action: parse_qr
+    params:
+      content: "MASH:1:1234"
+    expect:
+      parse_success: false
+      error: invalid_field_count
+
+postconditions:
+  - wrong_fields_rejected: true
+
+timeout: "5s"
+tags:
+  - discovery
+  - qr
+  - negative
+
+---
+# TC-QR-006: Discriminator Overflow Rejected
+id: TC-QR-006
+name: Discriminator Out of Range Causes Parse Error
+description: |
+  Verifies that a discriminator value exceeding the 12-bit range
+  (> 4095) is rejected.
+
+pics_requirements:
+  - MASH.S.DISC.QR_VERSION=1
+  - MASH.S.DISC.DISCRIMINATOR_BITS=12
+
+preconditions:
+  - controller_running: true
+
+steps:
+  - name: Parse QR with overflow discriminator
+    action: parse_qr
+    params:
+      content: "MASH:1:9999:12345678"
+    expect:
+      parse_success: false
+      error: discriminator_out_of_range
+
+postconditions:
+  - discriminator_overflow_rejected: true
+
+timeout: "5s"
+tags:
+  - discovery
+  - qr
+  - negative
+
+---
+# TC-DISC-003: Multiple Discriminator Match
+id: TC-DISC-003
+name: Multiple Devices with Same Discriminator Found
+description: |
+  Verifies that when multiple devices have the same discriminator,
+  the controller discovers all of them via mDNS.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+
+preconditions:
+  - two_devices_same_discriminator: true
+
+steps:
+  - name: Browse for discriminator
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+      discriminator: 1234
+    expect:
+      devices_found: 2
+
+postconditions:
+  - multiple_disc_found: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - discriminator
+  - collision
+
+---
+# TC-DISC-004: Discriminator Collision Resolved via PASE
+id: TC-DISC-004
+name: PASE Resolves Discriminator Collision
+description: |
+  Verifies that when two devices share a discriminator, the controller
+  resolves the collision by attempting PASE with each until the
+  setup code matches the correct device.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - D.COMM.PASE
+
+preconditions:
+  - two_devices_same_discriminator: true
+  - zone_created: true
+
+steps:
+  - name: Commission with correct setup code
+    action: commission
+    params:
+      discriminator: 1234
+      setup_code: "12345678"
+    expect:
+      commission_success: true
+      correct_device_commissioned: true
+
+postconditions:
+  - collision_resolved_by_pase: true
+
+timeout: "30s"
+tags:
+  - discovery
+  - discriminator
+  - collision
+  - pase
+
+---
+# TC-DSTATE-001: Enter Commissioning Mode
+id: TC-DSTATE-001
+name: Uncommissioned Device Transitions to Commissioning Open
+description: |
+  Verifies that pressing the commissioning button on an uncommissioned
+  device causes it to register _mashc._udp (transition from
+  UNCOMMISSIONED to COMMISSIONING_OPEN).
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+
+preconditions:
+  - device_uncommissioned: true
+
+steps:
+  - name: Press commissioning button
+    action: device_local_action
+    params:
+      action: enter_commissioning_mode
+    expect:
+      action_triggered: true
+
+  - name: Verify _mashc._udp registered
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: true
+
+postconditions:
+  - state_commissioning_open: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - state
+  - transition
+
+---
+# TC-DSTATE-002: Commissioning Timeout Returns to Uncommissioned
+id: TC-DSTATE-002
+name: Commissioning Timeout Returns to Uncommissioned State
+description: |
+  Verifies that after the 120s commissioning window expires, the
+  device deregisters _mashc._udp and returns to UNCOMMISSIONED.
+
+pics_requirements:
+  - MASH.S.DISC.COMMISSION_WINDOW=120
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - device_uncommissioned: true
+
+steps:
+  - name: Wait for window to expire
+    action: wait
+    params:
+      duration: "125s"
+
+  - name: Verify _mashc._udp deregistered
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: false
+
+postconditions:
+  - returned_to_uncommissioned: true
+
+timeout: "135s"
+tags:
+  - discovery
+  - state
+  - timeout
+
+---
+# TC-DSTATE-003: Commissioning Success Transitions to Operational
+id: TC-DSTATE-003
+name: Successful Commissioning Transitions to Operational State
+description: |
+  Verifies that successful commissioning transitions the device:
+  _mashc._udp removed, _mash._tcp added.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - zone_created: true
+
+steps:
+  - name: Commission device
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      commission_success: true
+
+  - name: Wait for mDNS update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify commissionable gone
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: false
+
+  - name: Verify operational present
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: true
+
+postconditions:
+  - transitioned_to_operational: true
+
+timeout: "30s"
+tags:
+  - discovery
+  - state
+  - transition
+
+---
+# TC-DSTATE-004: Operational Device Enters Add-Zone Commissioning
+id: TC-DSTATE-004
+name: Operational Device Can Enter Commissioning for Second Zone
+description: |
+  Verifies that an operational device can enter commissioning mode
+  to add a second zone: _mashc._udp added while _mash._tcp kept.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+  - D.ZONE.MULTI
+
+preconditions:
+  - device_in_zone: true
+
+steps:
+  - name: Enter commissioning mode
+    action: device_local_action
+    params:
+      action: enter_commissioning_mode
+    expect:
+      action_triggered: true
+
+  - name: Verify both services present
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: true
+
+  - name: Verify operational still present
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: true
+
+postconditions:
+  - operational_plus_commissioning: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - state
+  - multi-zone
+
+---
+# TC-DSTATE-005: Second Zone Adds New Operational Instance
+id: TC-DSTATE-005
+name: Second Zone Commissioning Adds New Operational Instance
+description: |
+  Verifies that successfully commissioning to a second zone adds a
+  new _mash._tcp instance while keeping the existing one.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+  - D.ZONE.MULTI
+
+preconditions:
+  - device_in_zone: true
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Commission to second zone
+    action: commission
+    params:
+      setup_code: "12345678"
+      zone_type: GRID
+    expect:
+      commission_success: true
+
+  - name: Wait for mDNS update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify two operational instances
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      instances_for_device: 2
+
+postconditions:
+  - second_zone_instance_added: true
+
+timeout: "30s"
+tags:
+  - discovery
+  - state
+  - multi-zone
+
+---
+# TC-DSTATE-006: Remove All Zones Returns to Uncommissioned
+id: TC-DSTATE-006
+name: Removing All Zones Returns Device to Uncommissioned State
+description: |
+  Verifies that removing the last zone transitions the device to
+  UNCOMMISSIONED with all _mash._tcp instances removed.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+
+preconditions:
+  - device_in_zone: true
+
+steps:
+  - name: Remove device from zone
+    action: controller_action
+    params:
+      action: remove_device
+      zone: all
+    expect:
+      action_triggered: true
+
+  - name: Wait for mDNS update
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Verify no operational services
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      device_found: false
+
+postconditions:
+  - returned_to_uncommissioned: true
+
+timeout: "15s"
+tags:
+  - discovery
+  - state
+  - zone-removal
+
+---
+# TC-BROWSE-001: Browse Commissionable Devices
+id: TC-BROWSE-001
+name: Browse Discovers All Commissionable Devices
+description: |
+  Verifies that browsing _mashc._udp discovers all devices currently
+  in commissioning mode.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+
+preconditions:
+  - multiple_devices_commissioning: true
+
+steps:
+  - name: Browse commissionable
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      devices_found_min: 2
+
+postconditions:
+  - browse_commissionable_works: true
+
+timeout: "15s"
+tags:
+  - discovery
+  - browse
+  - commissionable
+
+---
+# TC-BROWSE-002: Browse Operational Devices
+id: TC-BROWSE-002
+name: Browse Discovers All Operational Devices
+description: |
+  Verifies that browsing _mash._tcp discovers all commissioned
+  devices in the zone.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+
+preconditions:
+  - multiple_devices_commissioned: true
+
+steps:
+  - name: Browse operational
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+    expect:
+      devices_found_min: 2
+
+postconditions:
+  - browse_operational_works: true
+
+timeout: "15s"
+tags:
+  - discovery
+  - browse
+  - operational
+
+---
+# TC-BROWSE-003: Browse Commissioner Devices
+id: TC-BROWSE-003
+name: Browse Discovers All Controllers
+description: |
+  Verifies that browsing _mashd._udp discovers all zone controllers
+  on the network.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSIONER=_mashd._udp
+
+preconditions:
+  - multiple_controllers_running: true
+
+steps:
+  - name: Browse commissioners
+    action: browse_mdns
+    params:
+      service_type: "_mashd._udp"
+    expect:
+      controllers_found_min: 2
+
+postconditions:
+  - browse_commissioner_works: true
+
+timeout: "15s"
+tags:
+  - discovery
+  - browse
+  - commissioner
+
+---
+# TC-BROWSE-004: Filter by Discriminator
+id: TC-BROWSE-004
+name: Browse Filtered by Discriminator Finds Matching Device
+description: |
+  Verifies that browsing _mashc._udp filtered by discriminator
+  from QR code finds only the matching device.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Browse for specific discriminator
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+      discriminator: 1234
+    expect:
+      device_found: true
+      txt_field_D: "1234"
+
+postconditions:
+  - disc_filter_works: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - browse
+  - discriminator
+
+---
+# TC-BROWSE-005: Filter by Zone ID
+id: TC-BROWSE-005
+name: Browse Filtered by Zone ID Finds Zone Devices
+description: |
+  Verifies that browsing _mash._tcp filtered by zone ID discovers
+  only devices in that specific zone.
+
+pics_requirements:
+  - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
+
+preconditions:
+  - multiple_devices_commissioned: true
+
+steps:
+  - name: Browse for specific zone
+    action: browse_mdns
+    params:
+      service_type: "_mash._tcp"
+      zone_id_filter: "A1B2C3D4E5F6A7B8"
+    expect:
+      all_results_in_zone: true
+
+postconditions:
+  - zone_filter_works: true
+
+timeout: "10s"
+tags:
+  - discovery
+  - browse
+  - zone-filter
+
+---
+# TC-BROWSE-006: Browse Timeout
+id: TC-BROWSE-006
+name: Browse Returns Error After Timeout
+description: |
+  Verifies that if no services are found within the browse timeout
+  (10 seconds), an appropriate error is returned.
+
+pics_requirements:
+  - MASH.S.DISC.BROWSE_TIMEOUT=10
+
+preconditions:
+  - no_devices_advertising: true
+
+steps:
+  - name: Browse with no devices present
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+      timeout: "10s"
+    expect:
+      device_found: false
+      error: browse_timeout
+
+postconditions:
+  - browse_timeout_works: true
+
+timeout: "15s"
+tags:
+  - discovery
+  - browse
+  - timeout
+  - negative

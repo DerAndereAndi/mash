@@ -1,0 +1,226 @@
+# Test Suite: Zone Add (Device Commission) Tests
+# Verifies adding devices to zones via commissioning
+#
+# Spec: docs/testing/behavior/zone-lifecycle.md (adding devices section)
+#
+# Key concepts:
+# - Direct commissioning: controller scans QR, runs PASE, issues cert
+# - Admin commissioning: phone app delegates CSR signing to EMS
+# - Multi-zone: device can join up to 2 zones (GRID + LOCAL)
+
+---
+# TC-ZONE-ADD-001: Direct Commissioning Adds Device to Zone
+id: TC-ZONE-ADD-001
+name: Direct Commissioning Success
+description: |
+  Verifies that direct commissioning (controller scans QR, runs PASE,
+  issues cert) successfully adds a device to the zone.
+
+pics_requirements:
+  - D.COMM.PASE
+  - D.CERT.EXCHANGE
+  - MASH.C.ZONE.CREATE
+
+preconditions:
+  - zone_created: true
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Commission device directly
+    action: commission
+    params:
+      setup_code: "12345678"
+      zone_type: LOCAL
+    expect:
+      commission_success: true
+      device_in_zone: true
+
+  - name: Verify device has operational certificate
+    action: verify_device_cert
+    expect:
+      has_operational_cert: true
+      cert_signed_by_zone_ca: true
+
+postconditions:
+  - device_added_to_zone: true
+
+timeout: "30s"
+tags:
+  - zone
+  - add
+  - direct
+  - commissioning
+
+---
+# TC-ZONE-ADD-002: Admin Commissioning Success
+id: TC-ZONE-ADD-002
+name: Delegated Admin Commissioning Success
+description: |
+  Verifies that delegated commissioning via an admin token
+  successfully adds a device to the zone.
+
+pics_requirements:
+  - D.COMM.PASE
+  - D.COMM.ADMIN
+
+preconditions:
+  - zone_created: true
+  - device_in_commissioning_mode: true
+  - admin_token_valid: true
+
+steps:
+  - name: Commission device via admin token
+    action: commission_with_admin
+    params:
+      setup_code: "12345678"
+      admin_token: valid
+    expect:
+      commission_success: true
+      device_in_zone: true
+
+postconditions:
+  - admin_commissioning_ok: true
+
+timeout: "30s"
+tags:
+  - zone
+  - add
+  - admin
+  - delegated
+
+---
+# TC-ZONE-ADD-003: Wrong Setup Code Fails PASE
+id: TC-ZONE-ADD-003
+name: Wrong Setup Code Prevents Device Addition
+description: |
+  Verifies that providing the wrong setup code during commissioning
+  prevents the device from being added to the zone.
+
+pics_requirements:
+  - D.COMM.PASE
+
+preconditions:
+  - zone_created: true
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Attempt commissioning with wrong code
+    action: commission
+    params:
+      setup_code: "00000000"
+    expect:
+      commission_success: false
+      error: VERIFICATION_FAILED
+      device_in_zone: false
+
+postconditions:
+  - wrong_code_rejected: true
+
+timeout: "15s"
+tags:
+  - zone
+  - add
+  - negative
+  - wrong-code
+
+---
+# TC-ZONE-ADD-004: Discriminator Collision Resolved
+id: TC-ZONE-ADD-004
+name: Discriminator Collision Finds Correct Device
+description: |
+  Verifies that when multiple devices have the same discriminator
+  (12-bit value, collision possible), the controller correctly
+  identifies the target device via setup code verification.
+
+pics_requirements:
+  - D.COMM.PASE
+  - D.DISC.COMM
+
+preconditions:
+  - zone_created: true
+  - two_devices_same_discriminator: true
+
+steps:
+  - name: Browse and find both devices
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+      discriminator: 1234
+    expect:
+      devices_found: 2
+
+  - name: Commission correct device (PASE succeeds only with right code)
+    action: commission
+    params:
+      setup_code: "12345678"       # Code for device 1, not device 2
+      discriminator: 1234
+    expect:
+      commission_success: true
+      correct_device_commissioned: true
+
+postconditions:
+  - collision_resolved: true
+
+timeout: "30s"
+tags:
+  - zone
+  - add
+  - discriminator
+  - collision
+
+---
+# TC-ZONE-ADD-005: Second Zone Both Active
+id: TC-ZONE-ADD-005
+name: Device Commissioned to Two Zones Both Active
+description: |
+  Verifies that a device can be commissioned to a second zone (GRID)
+  while maintaining the first zone (LOCAL), with both zones active.
+
+pics_requirements:
+  - D.COMM.PASE
+  - D.ZONE.MULTI
+  - MASH.S.ZONE.MAX=2
+
+preconditions:
+  - device_in_local_zone: true
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Verify device already in LOCAL zone
+    action: device_local_action
+    params:
+      action: zone_count
+    expect:
+      result: 1
+
+  - name: Commission device to GRID zone
+    action: commission
+    params:
+      setup_code: "12345678"
+      zone_type: GRID
+    expect:
+      commission_success: true
+
+  - name: Verify device now in two zones
+    action: device_local_action
+    params:
+      action: zone_count
+    expect:
+      result: 2
+
+  - name: Verify both zones can connect
+    action: connect_as_zone
+    params:
+      zone: GRID
+    expect:
+      connection_established: true
+
+postconditions:
+  - two_zones_active: true
+
+timeout: "30s"
+tags:
+  - zone
+  - add
+  - multi-zone
+  - second

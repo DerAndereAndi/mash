@@ -1,0 +1,1261 @@
+# Test Suite: Connection State Machine Tests
+# Verifies close, in-flight commands, keepalive, multi-connection,
+# reconnection backoff, and subscription restoration
+#
+# Spec: docs/testing/behavior/connection-state-machine.md
+#
+# Key concepts:
+# - Graceful close: close -> close_ack -> TCP closed (5s ack timeout)
+# - In-flight: Idempotent = safe to retry, Non-idempotent = UNKNOWN
+# - Keep-alive: 30s ping, 5s pong timeout, 3 missed = close
+# - Multi-connection: up to 5 zones, 1 commissioning
+# - Backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s max
+# - Subscription restoration: re-subscribe after reconnect with priming
+
+---
+# TC-CLOSE-001: Clean Close with close_ack
+id: TC-CLOSE-001
+name: Clean Graceful Close Sequence
+description: |
+  Verifies that sending a close message results in a close_ack
+  response followed by TCP connection closure.
+
+pics_requirements:
+  - MASH.S.TRANS.CLOSE_ACK_TIMEOUT=5
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Verify connection is operational
+    action: ping
+    expect:
+      pong_received: true
+
+  - name: Send close message
+    action: send_close
+    params:
+      code: 0                     # NORMAL
+      reason: "Test close"
+    expect:
+      close_ack_received: true
+
+  - name: Verify TCP connection closed
+    action: verify_connection_state
+    expect:
+      state: CLOSED
+
+postconditions:
+  - clean_close: true
+
+timeout: "10s"
+tags:
+  - close
+  - graceful
+  - basic
+
+---
+# TC-CLOSE-002: Pending Requests Completed Before Close
+id: TC-CLOSE-002
+name: Pending Requests Completed Then Close
+description: |
+  Verifies that when close is initiated with pending requests,
+  responses are delivered before the close completes.
+
+pics_requirements:
+  - MASH.S.TRANS.CLOSE_PENDING_TIMEOUT=10
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send a slow request
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+      async: true
+    expect:
+      request_sent: true
+
+  - name: Immediately initiate close
+    action: send_close
+    params:
+      code: 0
+      reason: "Close with pending"
+    expect:
+      pending_response_received: true
+      close_ack_received: true
+
+postconditions:
+  - pending_completed_before_close: true
+
+timeout: "15s"
+tags:
+  - close
+  - pending
+  - graceful
+
+---
+# TC-CLOSE-003: Close Timeout Forces TCP Close
+id: TC-CLOSE-003
+name: Close Ack Timeout Forces TCP Close
+description: |
+  Verifies that if close_ack is not received within 5 seconds,
+  the TCP connection is force-closed.
+
+pics_requirements:
+  - MASH.S.TRANS.CLOSE_ACK_TIMEOUT=5
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send close message (simulate no ack response)
+    action: send_close
+    params:
+      code: 0
+      reason: "Test timeout"
+      suppress_ack: true
+    expect:
+      close_sent: true
+
+  - name: Wait for timeout
+    action: wait
+    params:
+      duration: "6s"
+
+  - name: Verify connection was force-closed
+    action: verify_connection_state
+    expect:
+      state: CLOSED
+
+postconditions:
+  - timeout_force_close: true
+
+timeout: "15s"
+tags:
+  - close
+  - timeout
+  - force
+
+---
+# TC-CLOSE-004: Simultaneous Close Both Acknowledge
+id: TC-CLOSE-004
+name: Simultaneous Close from Both Sides
+description: |
+  Verifies that when both sides send close simultaneously, each
+  receives the other's close as an implicit ack, and both close cleanly.
+
+pics_requirements:
+  - MASH.S.TRANS.CLOSE_ACK_TIMEOUT=5
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send close while device also sends close
+    action: simultaneous_close
+    params:
+      code: 0
+      reason: "Simultaneous"
+    expect:
+      both_close_received: true
+      connection_closed: true
+
+postconditions:
+  - simultaneous_close_ok: true
+
+timeout: "10s"
+tags:
+  - close
+  - simultaneous
+  - edge-case
+
+---
+# TC-INFLIGHT-001: Queued Command Sent After Reconnect
+id: TC-INFLIGHT-001
+name: Queued Command Replayed After Reconnect
+description: |
+  Verifies that commands queued during RECONNECTING state are sent
+  after the connection is re-established.
+
+pics_requirements:
+  - MASH.S.TRANS.B_QUEUE_ON_RECONNECT=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Disconnect to trigger reconnecting
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Queue a read command while disconnected
+    action: queue_command
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorId
+    expect:
+      queued: true
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify queued command was executed
+    action: wait_for_queued_result
+    params:
+      timeout: "5s"
+    expect:
+      result_received: true
+      read_success: true
+
+postconditions:
+  - queued_replayed: true
+
+timeout: "30s"
+tags:
+  - inflight
+  - queue
+  - reconnect
+
+---
+# TC-INFLIGHT-002: Idempotent Retry After Reconnect
+id: TC-INFLIGHT-002
+name: Idempotent Command Safely Retried
+description: |
+  Verifies that idempotent commands (SetLimit) that were in-flight
+  during disconnection are safely retried after reconnection.
+
+pics_requirements:
+  - MASH.S.TRANS.B_QUEUE_ON_RECONNECT=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send SetLimit and simulate disconnect before response
+    action: invoke_with_disconnect
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+      disconnect_before_response: true
+    expect:
+      disconnect_occurred: true
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Retry the same SetLimit (idempotent - safe)
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+    expect:
+      invoke_success: true
+
+  - name: Verify limit is applied
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 5000000
+
+postconditions:
+  - idempotent_retry_safe: true
+
+timeout: "30s"
+tags:
+  - inflight
+  - idempotent
+  - retry
+
+---
+# TC-INFLIGHT-003: Non-Idempotent Marked UNKNOWN
+id: TC-INFLIGHT-003
+name: Non-Idempotent Command Marked UNKNOWN Outcome
+description: |
+  Verifies that non-idempotent commands (Start) that were in-flight
+  during disconnection are marked as UNKNOWN outcome.
+
+pics_requirements:
+  - MASH.S.TRANS.B_QUEUE_ON_RECONNECT=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send Start command and disconnect before response
+    action: invoke_with_disconnect
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Start
+      args:
+        processId: "test-process-001"
+      disconnect_before_response: true
+    expect:
+      result_status: UNKNOWN
+
+postconditions:
+  - non_idempotent_unknown: true
+
+timeout: "15s"
+tags:
+  - inflight
+  - non-idempotent
+  - unknown
+
+---
+# TC-INFLIGHT-004: Read Before Retry Pattern
+id: TC-INFLIGHT-004
+name: Read State Before Retrying Non-Idempotent Command
+description: |
+  Verifies that for non-idempotent commands with UNKNOWN outcome,
+  the controller reads current state before deciding to retry.
+
+pics_requirements:
+  - MASH.S.TRANS.B_QUEUE_ON_RECONNECT=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send Start and disconnect
+    action: invoke_with_disconnect
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: Start
+      disconnect_before_response: true
+    expect:
+      result_status: UNKNOWN
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Read current process state before retry
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: processState
+    expect:
+      read_success: true
+      save_as: current_state
+
+  - name: Decide based on state
+    action: evaluate
+    params:
+      expression: "current_state can inform retry decision"
+    expect:
+      result: true
+
+postconditions:
+  - read_before_retry: true
+
+timeout: "30s"
+tags:
+  - inflight
+  - read-before-retry
+  - pattern
+
+---
+# TC-INFLIGHT-005: Multiple In-Flight Handled Per Type
+id: TC-INFLIGHT-005
+name: Multiple In-Flight Commands Handled by Type
+description: |
+  Verifies that when multiple commands are in-flight during disconnection,
+  each is handled according to its idempotency classification.
+
+pics_requirements:
+  - MASH.S.TRANS.B_QUEUE_ON_RECONNECT=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send multiple commands then disconnect
+    action: send_multiple_then_disconnect
+    params:
+      commands:
+        - type: read
+          endpoint: 0
+          feature: DeviceInfo
+          attribute: vendorId
+        - type: invoke
+          endpoint: 1
+          feature: EnergyControl
+          command: SetLimit
+          args:
+            consumptionLimit: 5000000
+        - type: invoke
+          endpoint: 1
+          feature: EnergyControl
+          command: Start
+    expect:
+      read_status: retried         # Idempotent
+      setlimit_status: retried     # Idempotent
+      start_status: UNKNOWN        # Non-idempotent
+
+postconditions:
+  - each_handled_per_type: true
+
+timeout: "30s"
+tags:
+  - inflight
+  - multiple
+  - mixed-types
+
+---
+# TC-KEEPALIVE-001: Ping Sent and Pong Received
+id: TC-KEEPALIVE-001
+name: Ping Sent and Pong Received
+description: |
+  Verifies that after 30 seconds of idle time, a ping is sent
+  and a pong is received with matching sequence number.
+
+pics_requirements:
+  - MASH.S.TRANS.PING_INTERVAL=30
+  - MASH.S.PROTO.AUTO_PONG
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Wait for ping interval (idle)
+    action: wait
+    params:
+      duration: "31s"
+
+  - name: Verify ping was sent automatically
+    action: verify_keepalive
+    expect:
+      ping_sent: true
+      pong_received: true
+      sequence_match: true
+
+postconditions:
+  - keepalive_ping_pong: true
+
+timeout: "40s"
+tags:
+  - keepalive
+  - ping
+  - pong
+
+---
+# TC-KEEPALIVE-002: Pong Timeout Closes After 5s
+id: TC-KEEPALIVE-002
+name: Pong Timeout Triggers Close After 5 Seconds
+description: |
+  Verifies that when a pong is not received within 5 seconds,
+  the missed pong counter increments.
+
+pics_requirements:
+  - MASH.S.TRANS.PONG_TIMEOUT=5
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send ping and block pong response
+    action: ping
+    params:
+      block_pong: true
+    expect:
+      pong_received: false
+
+  - name: Verify pong timeout after 5s
+    action: verify_timing
+    params:
+      max_duration: "6s"
+    expect:
+      timeout_detected: true
+
+postconditions:
+  - pong_timeout_5s: true
+
+timeout: "15s"
+tags:
+  - keepalive
+  - timeout
+  - pong
+
+---
+# TC-KEEPALIVE-003: 3 Missed Pongs Triggers Close
+id: TC-KEEPALIVE-003
+name: Three Missed Pongs Closes Connection
+description: |
+  Verifies that after 3 consecutive missed pongs, the connection
+  is closed. Maximum detection delay is 95 seconds.
+
+pics_requirements:
+  - MASH.S.TRANS.MISSED_PONGS_CLOSE=3
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Block all pong responses
+    action: network_filter
+    params:
+      block_pongs: true
+    expect:
+      filter_active: true
+
+  - name: Wait for 3 missed pong cycles
+    action: wait
+    params:
+      duration: "100s"
+
+  - name: Verify connection was closed
+    action: verify_connection_state
+    expect:
+      state: CLOSED
+      close_reason: KEEPALIVE_TIMEOUT
+
+postconditions:
+  - three_misses_close: true
+
+timeout: "120s"
+tags:
+  - keepalive
+  - missed
+  - close
+
+---
+# TC-KEEPALIVE-004: Activity Resets Keep-Alive Timer
+id: TC-KEEPALIVE-004
+name: Message Activity Resets Ping Timer
+description: |
+  Verifies that sending a message resets the keep-alive timer,
+  so no ping is sent if messages are exchanged within the 30s interval.
+
+pics_requirements:
+  - MASH.S.TRANS.PING_INTERVAL=30
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send read at 15 seconds
+    action: wait
+    params:
+      duration: "15s"
+
+  - name: Send a read request (resets timer)
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorId
+    expect:
+      read_success: true
+
+  - name: Wait another 20 seconds (total 35s, but timer reset at 15s)
+    action: wait
+    params:
+      duration: "20s"
+
+  - name: Verify no ping was sent (activity kept timer alive)
+    action: verify_keepalive
+    expect:
+      ping_sent: false
+
+postconditions:
+  - activity_resets_timer: true
+
+timeout: "45s"
+tags:
+  - keepalive
+  - reset
+  - activity
+
+---
+# TC-MULTI-001: Two Zones Both OPERATIONAL
+id: TC-MULTI-001
+name: Two Zone Connections Both Reach OPERATIONAL
+description: |
+  Verifies that a device can accept connections from two different
+  zones (GRID and LOCAL) simultaneously, each reaching OPERATIONAL state.
+
+pics_requirements:
+  - MASH.S.TRANS.B_MULTI_ZONE_CONN=1
+  - MASH.S.TRANS.MAX_CONNECTIONS=5
+
+preconditions:
+  - device_listening: true
+  - two_zones_commissioned: true
+
+steps:
+  - name: Connect Zone 1 (GRID)
+    action: connect_as_zone
+    params:
+      zone: GRID
+    expect:
+      connection_established: true
+      state: OPERATIONAL
+
+  - name: Connect Zone 2 (LOCAL)
+    action: connect_as_zone
+    params:
+      zone: LOCAL
+    expect:
+      connection_established: true
+      state: OPERATIONAL
+
+  - name: Verify both connections active
+    action: ping
+    params:
+      zone: GRID
+    expect:
+      pong_received: true
+
+  - name: Verify second connection active
+    action: ping
+    params:
+      zone: LOCAL
+    expect:
+      pong_received: true
+
+postconditions:
+  - both_operational: true
+
+timeout: "20s"
+tags:
+  - multi-connection
+  - two-zones
+  - operational
+
+---
+# TC-MULTI-002: 6th Zone Rejected (Max 5)
+id: TC-MULTI-002
+name: Connection Beyond Max Zones Rejected
+description: |
+  Verifies that attempting to connect a 6th zone is rejected
+  when 5 zones are already connected (max concurrent connections).
+
+pics_requirements:
+  - MASH.S.TRANS.MAX_CONNECTIONS=5
+
+preconditions:
+  - device_listening: true
+  - five_zones_connected: true
+
+steps:
+  - name: Attempt 6th zone connection
+    action: connect_as_zone
+    params:
+      zone: EXTRA
+    expect:
+      connection_established: false
+      error: MAX_CONNECTIONS_EXCEEDED
+
+postconditions:
+  - sixth_rejected: true
+
+timeout: "10s"
+tags:
+  - multi-connection
+  - capacity
+  - negative
+
+---
+# TC-MULTI-003: Zone Subscription Isolation
+id: TC-MULTI-003
+name: Zone Subscriptions Are Isolated
+description: |
+  Verifies that subscriptions from Zone A do not deliver notifications
+  to Zone B. Each zone's subscriptions are independent.
+
+pics_requirements:
+  - MASH.S.TRANS.B_MULTI_ZONE_CONN=1
+  - MASH.S.PROTO.SUBSCRIPTION
+
+preconditions:
+  - two_zones_connected: true
+
+steps:
+  - name: Zone A subscribes to operatingState
+    action: subscribe_as_zone
+    params:
+      zone: GRID
+      endpoint: 1
+      feature: Status
+      attributes:
+        - operatingState
+    expect:
+      subscribe_success: true
+
+  - name: Trigger state change
+    action: device_local_action
+    params:
+      action: change_state
+      target_state: RUNNING
+    expect:
+      action_triggered: true
+
+  - name: Verify Zone A receives notification
+    action: wait_for_notification_as_zone
+    params:
+      zone: GRID
+      timeout: "5s"
+    expect:
+      notification_received: true
+
+  - name: Verify Zone B receives NO notification (not subscribed)
+    action: wait_for_notification_as_zone
+    params:
+      zone: LOCAL
+      timeout: "3s"
+    expect:
+      notification_received: false
+
+postconditions:
+  - subscription_isolation: true
+
+timeout: "15s"
+tags:
+  - multi-connection
+  - subscription
+  - isolation
+
+---
+# TC-MULTI-004: Partial Zone Loss Doesn't Affect Others
+id: TC-MULTI-004
+name: One Zone Disconnect Does Not Affect Other Zone
+description: |
+  Verifies that disconnecting one zone does not affect the other
+  zone's connection or subscriptions.
+
+pics_requirements:
+  - MASH.S.TRANS.B_MULTI_ZONE_CONN=1
+
+preconditions:
+  - two_zones_connected: true
+
+steps:
+  - name: Verify both zones operational
+    action: ping
+    params:
+      zone: GRID
+    expect:
+      pong_received: true
+
+  - name: Disconnect Zone A (GRID)
+    action: disconnect_zone
+    params:
+      zone: GRID
+
+  - name: Verify Zone B (LOCAL) still operational
+    action: ping
+    params:
+      zone: LOCAL
+    expect:
+      pong_received: true
+
+  - name: Verify Zone B can still read
+    action: read_as_zone
+    params:
+      zone: LOCAL
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorId
+    expect:
+      read_success: true
+
+postconditions:
+  - partial_loss_isolated: true
+
+timeout: "15s"
+tags:
+  - multi-connection
+  - partial-loss
+  - isolation
+
+---
+# TC-RECONN-001: Reconnect with Exponential Backoff
+id: TC-RECONN-001
+name: Reconnection Uses Exponential Backoff
+description: |
+  Verifies that after connection loss, reconnection attempts use
+  exponential backoff starting at 1 second.
+
+pics_requirements:
+  - MASH.C.TRANS.BACKOFF_INITIAL=1
+  - MASH.C.TRANS.BACKOFF_MAX=60
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Force disconnect
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Monitor reconnection attempts
+    action: monitor_reconnect
+    params:
+      max_attempts: 3
+    expect:
+      attempt_1_delay_min: "0.9s"
+      attempt_1_delay_max: "1.1s"
+      backoff_increasing: true
+
+postconditions:
+  - backoff_applied: true
+
+timeout: "30s"
+tags:
+  - reconnection
+  - backoff
+  - exponential
+
+---
+# TC-RECONN-002: Backoff Timing 1s, 2s, 4s, 8s
+id: TC-RECONN-002
+name: Backoff Timing Pattern Verified
+description: |
+  Verifies the exponential backoff timing pattern: 1s, 2s, 4s, 8s
+  (with +/- 10% jitter).
+
+pics_requirements:
+  - MASH.C.TRANS.BACKOFF_INITIAL=1
+  - MASH.C.TRANS.BACKOFF_JITTER=10
+
+preconditions:
+  - session_established: true
+  - device_rejecting_connections: true
+
+steps:
+  - name: Force disconnect and observe backoff delays
+    action: disconnect_and_monitor_backoff
+    params:
+      attempts_to_observe: 4
+    expect:
+      delay_1: { min: "0.9s", max: "1.1s" }
+      delay_2: { min: "1.8s", max: "2.2s" }
+      delay_3: { min: "3.6s", max: "4.4s" }
+      delay_4: { min: "7.2s", max: "8.8s" }
+
+postconditions:
+  - backoff_timing_correct: true
+
+timeout: "30s"
+tags:
+  - reconnection
+  - backoff
+  - timing
+
+---
+# TC-RECONN-003: Backoff Resets on Success
+id: TC-RECONN-003
+name: Backoff Resets to 1s After Successful Connection
+description: |
+  Verifies that the backoff timer resets to 1s after a successful
+  connection (reaching OPERATIONAL state).
+
+pics_requirements:
+  - MASH.C.TRANS.BACKOFF_INITIAL=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Disconnect and reconnect multiple times
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Allow multiple backoff attempts
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Reconnect successfully
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Disconnect again
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Verify backoff starts at 1s again
+    action: monitor_reconnect
+    params:
+      max_attempts: 1
+    expect:
+      attempt_1_delay_min: "0.9s"
+      attempt_1_delay_max: "1.1s"
+
+postconditions:
+  - backoff_reset: true
+
+timeout: "30s"
+tags:
+  - reconnection
+  - backoff
+  - reset
+
+---
+# TC-RECONN-004: Cancel Reconnect Transitions to DISCONNECTED
+id: TC-RECONN-004
+name: Cancel Reconnection Goes to DISCONNECTED
+description: |
+  Verifies that calling Disconnect() during RECONNECTING state
+  cancels the backoff and transitions to DISCONNECTED.
+
+pics_requirements:
+  - MASH.C.TRANS.BACKOFF_INITIAL=1
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Force disconnect (enters RECONNECTING)
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait briefly for RECONNECTING state
+    action: wait
+    params:
+      duration: "1s"
+
+  - name: Cancel reconnection
+    action: cancel_reconnect
+    expect:
+      state: DISCONNECTED
+
+  - name: Verify no further reconnect attempts
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Verify still DISCONNECTED
+    action: verify_connection_state
+    expect:
+      state: DISCONNECTED
+
+postconditions:
+  - reconnect_cancelled: true
+
+timeout: "15s"
+tags:
+  - reconnection
+  - cancel
+  - disconnected
+
+---
+# TC-SUB-RESTORE-001: Subscriptions Re-Established on Reconnect
+id: TC-SUB-RESTORE-001
+name: Subscriptions Restored After Reconnection
+description: |
+  Verifies that after reconnection, the controller can re-subscribe
+  and receive priming reports with current values.
+
+pics_requirements:
+  - MASH.S.TRANS.B_SUBSCRIPTION_LOST=1
+  - MASH.S.PROTO.SUBSCRIPTION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to controlState
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attributes:
+        - controlState
+      minInterval: 1
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+
+  - name: Force disconnect
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Re-subscribe after reconnect
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attributes:
+        - controlState
+      minInterval: 1
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      priming_received: true
+
+postconditions:
+  - subscriptions_restored: true
+
+timeout: "30s"
+tags:
+  - subscription
+  - restore
+  - reconnect
+
+---
+# TC-SUB-RESTORE-002: Changed Values in Priming Report
+id: TC-SUB-RESTORE-002
+name: Priming Report Shows Values Changed During Disconnect
+description: |
+  Verifies that the priming report after reconnection contains
+  the current attribute values, which may have changed during
+  the disconnection period.
+
+pics_requirements:
+  - MASH.S.PROTO.SUBSCRIPTION
+  - MASH.S.PROTO.PRIMING
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe and note initial value
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attributes:
+        - effectiveConsumptionLimit
+      minInterval: 1
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      save_priming_value: initial_limit
+
+  - name: Disconnect
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Change value on device while disconnected
+    action: device_local_action
+    params:
+      action: set_failsafe_limit
+    expect:
+      action_triggered: true
+
+  - name: Reconnect and re-subscribe
+    action: connect
+    params:
+      auto_reconnect: true
+
+  - name: Re-subscribe and check priming
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attributes:
+        - effectiveConsumptionLimit
+      minInterval: 1
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      priming_received: true
+      priming_value_different_from: initial_limit
+
+postconditions:
+  - changed_values_in_priming: true
+
+timeout: "30s"
+tags:
+  - subscription
+  - restore
+  - priming
+
+---
+# TC-SUB-RESTORE-003: Partial Subscription Failure
+id: TC-SUB-RESTORE-003
+name: Partial Subscription Restore Failure Handled
+description: |
+  Verifies that if one subscription restoration fails, the others
+  are still successfully restored.
+
+pics_requirements:
+  - MASH.S.PROTO.SUBSCRIPTION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to multiple features
+    action: subscribe_multiple
+    params:
+      subscriptions:
+        - endpoint: 1
+          feature: EnergyControl
+          attributes: [controlState]
+        - endpoint: 1
+          feature: Status
+          attributes: [operatingState]
+        - endpoint: 99             # Non-existent endpoint
+          feature: EnergyControl
+          attributes: [controlState]
+    expect:
+      success_count: 2
+      failure_count: 1
+
+postconditions:
+  - partial_restore_handled: true
+
+timeout: "15s"
+tags:
+  - subscription
+  - restore
+  - partial-failure
+
+---
+# TC-SUB-RESTORE-004: Critical Subscriptions First
+id: TC-SUB-RESTORE-004
+name: Critical Subscriptions Restored First
+description: |
+  Verifies that subscription restoration prioritizes critical
+  attributes (controlState, effectiveLimits) before less critical ones.
+
+pics_requirements:
+  - MASH.S.PROTO.SUBSCRIPTION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Establish multiple subscriptions in priority order
+    action: subscribe_ordered
+    params:
+      order:
+        - endpoint: 1
+          feature: EnergyControl
+          attributes: [controlState]
+          priority: critical
+        - endpoint: 1
+          feature: EnergyControl
+          attributes: [effectiveConsumptionLimit]
+          priority: critical
+        - endpoint: 1
+          feature: Status
+          attributes: [operatingState]
+          priority: normal
+    expect:
+      all_subscribed: true
+      order_preserved: true
+
+postconditions:
+  - critical_first: true
+
+timeout: "15s"
+tags:
+  - subscription
+  - restore
+  - priority
+
+---
+# TC-SUB-RESTORE-005: Queued Commands Replayed After Restore
+id: TC-SUB-RESTORE-005
+name: Queued Commands Replayed After Subscription Restore
+description: |
+  Verifies that commands queued during disconnection are replayed
+  after subscriptions are restored.
+
+pics_requirements:
+  - MASH.S.TRANS.B_QUEUE_ON_RECONNECT=1
+  - MASH.S.PROTO.SUBSCRIPTION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe and disconnect
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attributes:
+        - controlState
+      minInterval: 1
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+
+  - name: Disconnect
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Queue command while disconnected
+    action: queue_command
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+    expect:
+      queued: true
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify subscriptions restored then command replayed
+    action: verify_restore_sequence
+    expect:
+      subscriptions_first: true
+      command_replayed: true
+
+postconditions:
+  - replay_after_restore: true
+
+timeout: "30s"
+tags:
+  - subscription
+  - restore
+  - queue
+  - sequence

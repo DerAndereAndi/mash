@@ -43,3 +43,48 @@ tags:
   - PASE
   - security
   - SPAKE2+
+
+---
+# TC-COMM-005: Storage Full Returns STORAGE_ERROR
+id: TC-COMM-005
+name: Certificate Storage Full Returns STORAGE_ERROR
+description: |
+  Verifies that when a device cannot store the operational certificate
+  (storage full -- e.g., max certs stored), the commissioning fails
+  with STORAGE_ERROR. The device transitions from CERT_INSTALL back
+  to ADVERTISING state.
+
+pics_requirements:
+  - D.COMM.PASE
+  - D.CERT.EXCHANGE
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - device_storage_full: true
+
+steps:
+  - name: Attempt commissioning when storage is full
+    action: commission
+    params:
+      setup_code: "12345678"
+    expect:
+      commission_success: false
+      error: STORAGE_ERROR
+
+  - name: Verify device returned to advertising
+    action: browse_mdns
+    params:
+      service_type: "_mashc._udp"
+    expect:
+      device_found: true
+      commissioning_mode: true
+
+postconditions:
+  - storage_full_rejected: true
+
+timeout: "15s"
+tags:
+  - commissioning
+  - PASE
+  - storage
+  - negative

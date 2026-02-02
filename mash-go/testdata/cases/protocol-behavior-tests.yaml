@@ -1,0 +1,555 @@
+# Test Suite: Protocol Behavior Tests
+# Verifies request/response correlation, subscriptions, keep-alive, reconnection
+#
+# Spec: docs/testing/behavior/protocol-behaviors.md
+#
+# Key concepts:
+# - 32-bit MessageID for request/response correlation
+# - Subscription priming, coalescing, heartbeats
+# - Keep-alive: 30s ping interval, 5s pong timeout, 3 max missed
+# - Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s max
+
+---
+# TC-PROTO-001: Request/Response Correlation by txnId
+id: TC-PROTO-001
+name: Request/Response Correlation by MessageID
+description: |
+  Verifies that each response uses the same MessageID as its
+  corresponding request, enabling correct correlation.
+
+pics_requirements:
+  - MASH.S.PROTO.CORRELATION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send read request and capture MessageID
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorId
+      capture_message_id: true
+    expect:
+      read_success: true
+      message_ids_match: true
+
+postconditions:
+  - correlation_correct: true
+
+timeout: "5s"
+tags:
+  - protocol
+  - correlation
+  - messageId
+
+---
+# TC-PROTO-002: Unknown txnId Response Ignored
+id: TC-PROTO-002
+name: Unknown MessageID Response Ignored
+description: |
+  Verifies that a response with an unknown MessageID (no matching
+  pending request) is safely ignored without error.
+
+pics_requirements:
+  - MASH.S.PROTO.CORRELATION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send fabricated response with unknown MessageID
+    action: send_raw
+    params:
+      message_type: response
+      message_id: 99999999
+      status: 0
+    expect:
+      no_error: true
+
+  - name: Verify connection still operational
+    action: ping
+    expect:
+      pong_received: true
+
+postconditions:
+  - connection_stable: true
+
+timeout: "10s"
+tags:
+  - protocol
+  - correlation
+  - negative
+
+---
+# TC-PROTO-003: Concurrent Requests on Same Connection
+id: TC-PROTO-003
+name: Concurrent Requests on Same Connection
+description: |
+  Verifies that multiple concurrent requests each receive their
+  correct response, even when responses arrive out of order.
+
+pics_requirements:
+  - MASH.S.PROTO.CORRELATION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send concurrent read requests
+    action: read_concurrent
+    params:
+      requests:
+        - endpoint: 0
+          feature: DeviceInfo
+          attribute: vendorId
+        - endpoint: 0
+          feature: DeviceInfo
+          attribute: productId
+        - endpoint: 0
+          feature: DeviceInfo
+          attribute: serialNumber
+    expect:
+      all_responses_received: true
+      each_message_id_matches: true
+      response_count: 3
+
+postconditions:
+  - concurrent_correct: true
+
+timeout: "10s"
+tags:
+  - protocol
+  - correlation
+  - concurrent
+
+---
+# TC-PROTO-004: Response Timeout Handling
+id: TC-PROTO-004
+name: Response Timeout Handling
+description: |
+  Verifies that when no response is received within the 30s timeout,
+  the request fails with a timeout error and the pending entry is cleaned up.
+
+pics_requirements:
+  - MASH.S.PROTO.REQUEST_TIMEOUT
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send request to endpoint that won't respond
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+      simulate_no_response: true
+      timeout: "35s"
+    expect:
+      read_success: false
+      error: TIMEOUT
+
+  - name: Verify connection still operational after timeout
+    action: ping
+    expect:
+      pong_received: true
+
+postconditions:
+  - timeout_handled_cleanly: true
+
+timeout: "40s"
+tags:
+  - protocol
+  - timeout
+  - error
+
+---
+# TC-PROTO-005: Subscribe Creates Subscription with Priming
+id: TC-PROTO-005
+name: Subscribe Creates Subscription with Priming
+description: |
+  Verifies that a Subscribe request creates a subscription and
+  immediately delivers a priming notification with current values.
+
+pics_requirements:
+  - MASH.S.PROTO.SUBSCRIPTION
+  - MASH.S.PROTO.PRIMING
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to EnergyControl attributes
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attributes:
+        - effectiveConsumptionLimit
+        - controlState
+      minInterval: 1
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      subscription_id_present: true
+      priming_received: true
+      priming_is_priming_flag: true
+
+postconditions:
+  - subscription_created: true
+
+timeout: "10s"
+tags:
+  - protocol
+  - subscribe
+  - priming
+
+---
+# TC-PROTO-006: Notification Delivery on Change
+id: TC-PROTO-006
+name: Notification Delivery on Change
+description: |
+  Verifies that after subscribing, attribute changes are delivered
+  as notifications to the subscriber.
+
+pics_requirements:
+  - MASH.S.PROTO.SUBSCRIPTION
+
+preconditions:
+  - session_established: true
+  - subscription_active: true
+
+steps:
+  - name: Subscribe to operatingState
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Status
+      attributes:
+        - operatingState
+      minInterval: 1
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+
+  - name: Trigger state change on device
+    action: device_local_action
+    params:
+      action: change_state
+      target_state: RUNNING
+    expect:
+      action_triggered: true
+
+  - name: Wait for notification
+    action: wait_for_notification
+    params:
+      timeout: "5s"
+    expect:
+      notification_received: true
+      changed_attribute: operatingState
+
+postconditions:
+  - notification_delivered: true
+
+timeout: "15s"
+tags:
+  - protocol
+  - subscribe
+  - notification
+
+---
+# TC-PROTO-007: Unsubscribe Stops Notifications
+id: TC-PROTO-007
+name: Unsubscribe Stops Notifications
+description: |
+  Verifies that after unsubscribing, no further notifications
+  are sent for the cancelled subscription.
+
+pics_requirements:
+  - MASH.S.PROTO.SUBSCRIPTION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to operatingState
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: Status
+      attributes:
+        - operatingState
+      minInterval: 1
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      save_subscription_id: sub_id
+
+  - name: Unsubscribe
+    action: unsubscribe
+    params:
+      subscription_id_ref: sub_id
+    expect:
+      unsubscribe_success: true
+
+  - name: Trigger state change on device
+    action: device_local_action
+    params:
+      action: change_state
+      target_state: RUNNING
+    expect:
+      action_triggered: true
+
+  - name: Verify no notification received
+    action: wait_for_notification
+    params:
+      timeout: "3s"
+    expect:
+      notification_received: false
+
+postconditions:
+  - unsubscribe_stops_notifications: true
+
+timeout: "15s"
+tags:
+  - protocol
+  - unsubscribe
+  - negative
+
+---
+# TC-PROTO-008: Keep-Alive Ping/Pong Exchange
+id: TC-PROTO-008
+name: Keep-Alive Ping/Pong Exchange
+description: |
+  Verifies that the device responds to ping messages with pong
+  messages containing the same sequence number.
+
+pics_requirements:
+  - MASH.S.PROTO.KEEPALIVE
+  - MASH.S.PROTO.AUTO_PONG
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send ping with sequence number
+    action: ping
+    params:
+      seq: 42
+    expect:
+      pong_received: true
+      pong_seq: 42
+      latency_under: "5000ms"
+
+postconditions:
+  - keepalive_working: true
+
+timeout: "10s"
+tags:
+  - protocol
+  - keepalive
+  - ping
+  - pong
+
+---
+# TC-PROTO-009: Reconnection Re-Establishes State
+id: TC-PROTO-009
+name: Reconnection Re-Establishes State
+description: |
+  Verifies that after disconnection and reconnection, the client
+  can re-establish communication and re-subscribe.
+
+pics_requirements:
+  - MASH.C.PROTO.RECONNECT
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Force disconnect
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait briefly
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify communication works after reconnect
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorId
+    expect:
+      read_success: true
+
+postconditions:
+  - state_re_established: true
+
+timeout: "30s"
+tags:
+  - protocol
+  - reconnection
+  - state
+
+---
+# TC-PROTO-010: Idempotent Retry After Reconnect
+id: TC-PROTO-010
+name: Idempotent Retry After Reconnect
+description: |
+  Verifies that idempotent requests (Read, Subscribe) can be safely
+  retried after reconnection without side effects.
+
+pics_requirements:
+  - MASH.C.PROTO.RECONNECT
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send read request
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorId
+    expect:
+      read_success: true
+      save_as: original_value
+
+  - name: Force disconnect and reconnect
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Retry same read request
+    action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorId
+    expect:
+      read_success: true
+      value_equals: original_value
+
+postconditions:
+  - idempotent_retry_safe: true
+
+timeout: "30s"
+tags:
+  - protocol
+  - reconnection
+  - idempotent
+
+---
+# TC-PROTO-011: Non-Idempotent Marked UNKNOWN
+id: TC-PROTO-011
+name: Non-Idempotent In-Flight Marked UNKNOWN
+description: |
+  Verifies that non-idempotent requests (Invoke/Write) that were in-flight
+  during disconnection are marked as UNKNOWN outcome, since the client
+  cannot determine if they were processed.
+
+pics_requirements:
+  - MASH.C.PROTO.RECONNECT
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Send invoke command and simulate disconnect during response
+    action: invoke_with_disconnect
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+      disconnect_before_response: true
+    expect:
+      result_status: UNKNOWN
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Read current state to determine actual outcome
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+
+postconditions:
+  - non_idempotent_unknown: true
+
+timeout: "30s"
+tags:
+  - protocol
+  - reconnection
+  - non-idempotent
+
+---
+# TC-PROTO-012: Graceful Close Sequence
+id: TC-PROTO-012
+name: Graceful Close Sequence
+description: |
+  Verifies that a graceful close sends a close message, receives
+  close_ack, and then terminates the TCP connection.
+
+pics_requirements:
+  - MASH.S.PROTO.CORRELATION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Verify connection is active
+    action: ping
+    expect:
+      pong_received: true
+
+  - name: Send graceful close
+    action: disconnect
+    params:
+      graceful: true
+    expect:
+      close_acknowledged: true
+
+  - name: Verify connection is closed
+    action: ping
+    expect:
+      pong_received: false
+      error: CONNECTION_CLOSED
+
+postconditions:
+  - graceful_close_complete: true
+
+timeout: "10s"
+tags:
+  - protocol
+  - close
+  - graceful

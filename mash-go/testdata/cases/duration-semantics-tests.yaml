@@ -1,0 +1,677 @@
+# Test Suite: Duration Semantics Tests
+# Verifies timer lifecycle for command duration parameters
+#
+# Spec: docs/testing/behavior/duration-semantics.md
+#
+# Key concepts:
+# - Timer starts on command receipt, not response send
+# - Auto-clear on expiry (as if ClearLimit called)
+# - No persistence across connection loss
+# - Per-zone independent timers
+# - Accuracy: +/- 1% or +/- 1 second
+
+---
+# TC-DUR-001: Timer Starts on SetLimit Acceptance
+id: TC-DUR-001
+name: Timer Starts on SetLimit Acceptance
+description: |
+  Verifies that the duration timer starts when the device receives
+  the SetLimit command. The limit should still be active just before
+  the duration expires.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DURATION
+  - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - session_established: true
+  - control_state: CONTROLLED
+
+steps:
+  - name: Record current time
+    action: record_time
+    params:
+      name: t0
+
+  - name: Send SetLimit with 5s duration
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+        duration: 5
+    expect:
+      invoke_success: true
+
+  - name: Wait 4 seconds (limit should still be active)
+    action: wait
+    params:
+      duration: "4s"
+
+  - name: Verify limit still active
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 5000000
+
+postconditions:
+  - timer_started_on_receipt: true
+
+timeout: "15s"
+tags:
+  - duration
+  - timer
+  - start
+
+---
+# TC-DUR-002: Timer Expiry Returns to Unlimited
+id: TC-DUR-002
+name: Timer Expiry Returns to Unlimited
+description: |
+  Verifies that when a duration timer expires, the zone's limit is
+  cleared (as if ClearLimit called) and effective limit reflects
+  the removal.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DURATION
+  - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - session_established: true
+  - no_other_zones: true
+
+steps:
+  - name: Set limit with 3 second duration
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+        duration: 3
+    expect:
+      invoke_success: true
+
+  - name: Wait for timer expiry
+    action: wait
+    params:
+      duration: "4s"
+
+  - name: Verify limit expired (unlimited)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_is_null: true          # Expired = unlimited
+
+postconditions:
+  - timer_expired_to_unlimited: true
+
+timeout: "15s"
+tags:
+  - duration
+  - timer
+  - expiry
+
+---
+# TC-DUR-003: New SetLimit Replaces Timer
+id: TC-DUR-003
+name: New SetLimit Replaces Existing Timer
+description: |
+  Verifies that a new SetLimit with duration replaces any existing timer
+  for the same (ZoneId, CommandType). The original timer is cancelled.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DURATION
+  - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Set limit with 60s duration
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+        duration: 60
+    expect:
+      invoke_success: true
+
+  - name: Wait 2 seconds
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Replace with new limit and 5s duration
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 3000000
+        duration: 5
+    expect:
+      invoke_success: true
+
+  - name: Verify new limit is active
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 3000000
+
+  - name: Wait for replacement timer expiry
+    action: wait
+    params:
+      duration: "6s"
+
+  - name: Verify limit expired (replacement timer, not original)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value_is_null: true          # Replacement expired
+
+postconditions:
+  - timer_replaced: true
+
+timeout: "20s"
+tags:
+  - duration
+  - timer
+  - replacement
+
+---
+# TC-DUR-004: Duration Zero Means Indefinite
+id: TC-DUR-004
+name: Duration Zero Means Indefinite
+description: |
+  Verifies that duration=0 (or omitted) creates an indefinite limit
+  that persists until explicitly cleared.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DURATION
+  - MASH.S.CTRL.C01.Rsp
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Set limit with duration 0 (indefinite)
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+        duration: 0
+    expect:
+      invoke_success: true
+
+  - name: Wait well past any reasonable timeout
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Verify limit still active
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 5000000
+
+postconditions:
+  - indefinite_limit_persists: true
+
+timeout: "15s"
+tags:
+  - duration
+  - indefinite
+  - zero
+
+---
+# TC-DUR-005: Connection Loss Cancels Timers
+id: TC-DUR-005
+name: Connection Loss Cancels Duration Timers
+description: |
+  Verifies that when a zone's connection is lost, all pending duration
+  timers for that zone are cancelled. On reconnect, the controller
+  must re-establish any timed constraints.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DURATION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Set limit with 300s duration
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+        duration: 300
+    expect:
+      invoke_success: true
+
+  - name: Disconnect zone
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait for failsafe
+    action: wait
+    params:
+      duration: "5s"
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify limit is cleared (timer cancelled on disconnect)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: myConsumptionLimit
+    expect:
+      read_success: true
+      value_is_null: true
+
+postconditions:
+  - timers_cancelled_on_disconnect: true
+
+timeout: "30s"
+tags:
+  - duration
+  - connection-loss
+  - timer
+
+---
+# TC-DUR-006: Timer Survives Reconnection (NOT)
+id: TC-DUR-006
+name: Timer Does NOT Survive Reconnection
+description: |
+  Verifies that duration timers are NOT persisted across connection
+  loss. This is distinct from TC-DUR-005 in that it explicitly tests
+  that the timer doesn't resume after reconnect.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DURATION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Set limit with 60s duration
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+        duration: 60
+    expect:
+      invoke_success: true
+
+  - name: Wait 2 seconds then disconnect
+    action: wait
+    params:
+      duration: "2s"
+
+  - name: Disconnect
+    action: disconnect
+    params:
+      graceful: false
+
+  - name: Wait 3 seconds
+    action: wait
+    params:
+      duration: "3s"
+
+  - name: Reconnect
+    action: connect
+    params:
+      auto_reconnect: true
+    expect:
+      connection_established: true
+
+  - name: Verify no residual timer (limit should be cleared)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: myConsumptionLimit
+    expect:
+      read_success: true
+      value_is_null: true          # Timer does NOT resume
+
+postconditions:
+  - timer_not_persisted: true
+
+timeout: "30s"
+tags:
+  - duration
+  - persistence
+  - negative
+
+---
+# TC-DUR-007: Multi-Zone Independent Timers
+id: TC-DUR-007
+name: Multi-Zone Independent Timers
+description: |
+  Verifies that each zone's duration timers are completely independent.
+  Zone 2's timer expiry does not affect Zone 1's limit.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DURATION
+  - MASH.S.ZONE
+
+preconditions:
+  - session_established: true
+  - two_zones_connected: true
+
+steps:
+  - name: Zone 1 sets limit with 60s duration
+    action: invoke_as_zone
+    params:
+      zone: GRID
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+        duration: 60
+    expect:
+      invoke_success: true
+
+  - name: Zone 2 sets limit with 3s duration
+    action: invoke_as_zone
+    params:
+      zone: LOCAL
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 3000000
+        duration: 3
+    expect:
+      invoke_success: true
+
+  - name: Wait for Zone 2 timer expiry
+    action: wait
+    params:
+      duration: "4s"
+
+  - name: Verify effective limit is Zone 1's (Zone 2 expired)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 5000000               # Only Zone 1 limit remains
+
+postconditions:
+  - timers_independent: true
+
+timeout: "15s"
+tags:
+  - duration
+  - multi-zone
+  - independent
+
+---
+# TC-DUR-008: Timer Accuracy Within Tolerance
+id: TC-DUR-008
+name: Timer Accuracy Within Tolerance
+description: |
+  Verifies that duration timers are accurate to +/- 1% or +/- 1 second,
+  whichever is greater.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DURATION
+  - MASH.S.CTRL.B_DURATION_ACCURACY
+
+preconditions:
+  - session_established: true
+  - subscription_active: true
+
+steps:
+  - name: Subscribe to effectiveConsumptionLimit
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attributes:
+        - effectiveConsumptionLimit
+      minInterval: 1
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+
+  - name: Record start time
+    action: record_time
+    params:
+      name: timer_start
+
+  - name: Set limit with 10s duration
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+        duration: 10
+    expect:
+      invoke_success: true
+
+  - name: Wait for expiry notification
+    action: wait_for_notification
+    params:
+      timeout: "12s"
+    expect:
+      notification_received: true
+
+  - name: Verify timing accuracy
+    action: verify_timing
+    params:
+      reference: timer_start
+      expected_duration: "10s"
+      tolerance: "1s"             # +/- 1 second (greater than 1%)
+    expect:
+      within_limit: true
+
+postconditions:
+  - timer_accuracy_ok: true
+
+timeout: "20s"
+tags:
+  - duration
+  - accuracy
+  - timing
+
+---
+# TC-DUR-009: Expired Limit Removed from Resolution
+id: TC-DUR-009
+name: Expired Limit Removed from Multi-Zone Resolution
+description: |
+  Verifies that when a zone's limit timer expires, its contribution
+  is removed from effective value calculation.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DURATION
+  - MASH.S.ZONE
+
+preconditions:
+  - session_established: true
+  - two_zones_connected: true
+
+steps:
+  - name: Zone 1 sets indefinite limit 5 kW
+    action: invoke_as_zone
+    params:
+      zone: GRID
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+    expect:
+      invoke_success: true
+
+  - name: Zone 2 sets 3 kW limit with 3s duration
+    action: invoke_as_zone
+    params:
+      zone: LOCAL
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 3000000
+        duration: 3
+    expect:
+      invoke_success: true
+
+  - name: Verify effective is most restrictive (3 kW)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 3000000
+
+  - name: Wait for Zone 2 expiry
+    action: wait
+    params:
+      duration: "4s"
+
+  - name: Verify effective is now Zone 1 only (5 kW)
+    action: read
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attribute: effectiveConsumptionLimit
+    expect:
+      read_success: true
+      value: 5000000
+
+postconditions:
+  - expired_removed_from_resolution: true
+
+timeout: "15s"
+tags:
+  - duration
+  - multi-zone
+  - resolution
+
+---
+# TC-DUR-010: Notification on Timer Expiry
+id: TC-DUR-010
+name: Notification Sent on Timer Expiry
+description: |
+  Verifies that a subscription notification is sent when a duration
+  timer expires and effective values change.
+
+pics_requirements:
+  - MASH.S.CTRL
+  - MASH.S.CTRL.B_DURATION
+  - MASH.S.PROTO.SUBSCRIPTION
+
+preconditions:
+  - session_established: true
+
+steps:
+  - name: Subscribe to effective limit
+    action: subscribe
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      attributes:
+        - effectiveConsumptionLimit
+      minInterval: 1
+      maxInterval: 60
+    expect:
+      subscribe_success: true
+      priming_received: true
+
+  - name: Set limit with 3s duration
+    action: invoke
+    params:
+      endpoint: 1
+      feature: EnergyControl
+      command: SetLimit
+      args:
+        consumptionLimit: 5000000
+        duration: 3
+    expect:
+      invoke_success: true
+
+  - name: Wait for first notification (limit set)
+    action: wait_for_notification
+    params:
+      timeout: "3s"
+    expect:
+      notification_received: true
+
+  - name: Wait for expiry notification
+    action: wait_for_notification
+    params:
+      timeout: "5s"
+    expect:
+      notification_received: true
+      changed_attribute: effectiveConsumptionLimit
+
+postconditions:
+  - expiry_notification_sent: true
+
+timeout: "15s"
+tags:
+  - duration
+  - notification
+  - expiry

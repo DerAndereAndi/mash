@@ -1,0 +1,413 @@
+# Test Suite: Certificate Validation Tests
+# Verifies device and controller certificate validation behaviors
+#
+# Spec: docs/testing/behavior/connection-establishment.md (cert validation section)
+#
+# Key concepts:
+# - Certificate chain: Zone CA -> Device/Controller cert (max depth 2)
+# - Clock skew tolerance: 300 seconds
+# - No revocation checking (short-lived certs instead)
+
+---
+# TC-CERT-VAL-001: Valid Certificate Chain Succeeds
+id: TC-CERT-VAL-001
+name: Valid Certificate Chain Verification Succeeds
+description: |
+  Verifies that a valid certificate chain (Zone CA -> Device cert)
+  passes verification during TLS handshake.
+
+pics_requirements:
+  - D.COMM.SC
+  - D.CERT.CHAIN
+
+preconditions:
+  - device_commissioned: true
+  - certificates_valid: true
+
+steps:
+  - name: Connect with valid operational certificate
+    action: connect
+    params:
+      use_operational_cert: true
+    expect:
+      connection_established: true
+      tls_handshake_success: true
+
+postconditions:
+  - valid_chain_accepted: true
+
+timeout: "10s"
+tags:
+  - certificate
+  - validation
+  - chain
+  - success
+
+---
+# TC-CERT-VAL-002: Expired Certificate Fails Verification
+id: TC-CERT-VAL-002
+name: Expired Certificate Rejected
+description: |
+  Verifies that an expired device certificate is rejected during
+  TLS handshake with certificate_expired alert.
+
+pics_requirements:
+  - D.COMM.SC
+  - D.CERT.CHAIN
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with expired certificate
+    action: connect
+    params:
+      use_expired_cert: true
+    expect:
+      connection_established: false
+      tls_error: certificate_expired
+
+postconditions:
+  - expired_cert_rejected: true
+
+timeout: "10s"
+tags:
+  - certificate
+  - validation
+  - expired
+  - negative
+
+---
+# TC-CERT-VAL-003: Wrong Zone CA Fails Verification
+id: TC-CERT-VAL-003
+name: Certificate Signed by Wrong Zone CA Rejected
+description: |
+  Verifies that a certificate signed by a different Zone CA
+  (not the one the device was commissioned with) is rejected.
+
+pics_requirements:
+  - D.COMM.SC
+  - D.CERT.CHAIN
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with cert from different zone
+    action: connect
+    params:
+      use_wrong_zone_cert: true
+    expect:
+      connection_established: false
+      tls_error: unknown_ca
+
+postconditions:
+  - wrong_zone_rejected: true
+
+timeout: "10s"
+tags:
+  - certificate
+  - validation
+  - wrong-zone
+  - negative
+
+---
+# TC-CERT-VAL-004: Clock Skew 200s Succeeds
+id: TC-CERT-VAL-004
+name: Certificate Accepted with 200s Clock Skew
+description: |
+  Verifies that certificate validation succeeds when the clock skew
+  between device and controller is within the 300s tolerance.
+
+pics_requirements:
+  - D.COMM.SC
+  - D.CERT.CHAIN
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Set device clock 200 seconds ahead
+    action: device_local_action
+    params:
+      action: adjust_clock
+      offset_seconds: 200
+    expect:
+      action_triggered: true
+
+  - name: Connect with valid certificate
+    action: connect
+    params:
+      use_operational_cert: true
+    expect:
+      connection_established: true
+
+postconditions:
+  - clock_skew_200s_ok: true
+
+timeout: "10s"
+tags:
+  - certificate
+  - validation
+  - clock-skew
+  - tolerance
+
+---
+# TC-CERT-VAL-005: Clock Skew 400s Fails
+id: TC-CERT-VAL-005
+name: Certificate Rejected with 400s Clock Skew
+description: |
+  Verifies that certificate validation fails when the clock skew
+  exceeds the 300s tolerance.
+
+pics_requirements:
+  - D.COMM.SC
+  - D.CERT.CHAIN
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Set device clock 400 seconds ahead
+    action: device_local_action
+    params:
+      action: adjust_clock
+      offset_seconds: 400
+    expect:
+      action_triggered: true
+
+  - name: Connect with valid certificate (should fail due to skew)
+    action: connect
+    params:
+      use_operational_cert: true
+    expect:
+      connection_established: false
+      tls_error: certificate_expired
+
+postconditions:
+  - clock_skew_400s_rejected: true
+
+timeout: "10s"
+tags:
+  - certificate
+  - validation
+  - clock-skew
+  - negative
+
+---
+# TC-CERT-VAL-CTRL-001: Valid Controller Certificate Accepted
+id: TC-CERT-VAL-CTRL-001
+name: Valid Controller Certificate Accepted by Device
+description: |
+  Verifies that the device accepts a valid controller certificate
+  during mutual TLS authentication.
+
+pics_requirements:
+  - D.COMM.SC
+  - D.CERT.MUTUAL
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with valid controller cert
+    action: connect_as_controller
+    params:
+      cert_type: valid
+    expect:
+      connection_established: true
+      mutual_auth: true
+
+postconditions:
+  - controller_cert_accepted: true
+
+timeout: "10s"
+tags:
+  - certificate
+  - validation
+  - controller
+  - success
+
+---
+# TC-CERT-VAL-CTRL-002: Expired Controller Certificate Rejected
+id: TC-CERT-VAL-CTRL-002
+name: Expired Controller Certificate Rejected by Device
+description: |
+  Verifies that the device rejects an expired controller certificate
+  during mutual TLS authentication.
+
+pics_requirements:
+  - D.COMM.SC
+  - D.CERT.MUTUAL
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with expired controller cert
+    action: connect_as_controller
+    params:
+      cert_type: expired
+    expect:
+      connection_established: false
+      tls_error: certificate_expired
+
+postconditions:
+  - expired_controller_rejected: true
+
+timeout: "10s"
+tags:
+  - certificate
+  - validation
+  - controller
+  - expired
+  - negative
+
+---
+# TC-CERT-VAL-CTRL-003: Controller Cert from Wrong Zone CA Rejected
+id: TC-CERT-VAL-CTRL-003
+name: Controller Certificate from Wrong Zone CA Rejected
+description: |
+  Verifies that the device rejects a controller certificate signed
+  by a Zone CA different from the zone it belongs to.
+
+pics_requirements:
+  - D.COMM.SC
+  - D.CERT.MUTUAL
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with controller cert from different zone
+    action: connect_as_controller
+    params:
+      cert_type: wrong_zone_ca
+    expect:
+      connection_established: false
+      tls_error: unknown_ca
+
+postconditions:
+  - wrong_ca_controller_rejected: true
+
+timeout: "10s"
+tags:
+  - certificate
+  - validation
+  - controller
+  - wrong-zone
+  - negative
+
+---
+# TC-CERT-VAL-CTRL-004: Self-Signed Controller Certificate Rejected
+id: TC-CERT-VAL-CTRL-004
+name: Self-Signed Controller Certificate Rejected
+description: |
+  Verifies that the device rejects a self-signed controller certificate
+  (not issued by a Zone CA).
+
+pics_requirements:
+  - D.COMM.SC
+  - D.CERT.MUTUAL
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect with self-signed controller cert
+    action: connect_as_controller
+    params:
+      cert_type: self_signed
+    expect:
+      connection_established: false
+      tls_error: unknown_ca
+
+postconditions:
+  - self_signed_rejected: true
+
+timeout: "10s"
+tags:
+  - certificate
+  - validation
+  - controller
+  - self-signed
+  - negative
+
+---
+# TC-CERT-VAL-CTRL-005: Controller Cert Clock Skew 200s Accepted
+id: TC-CERT-VAL-CTRL-005
+name: Controller Certificate with 200s Clock Skew Accepted
+description: |
+  Verifies that controller certificate validation tolerates clock
+  skew within the 300s tolerance.
+
+pics_requirements:
+  - D.COMM.SC
+  - D.CERT.MUTUAL
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Adjust device clock 200s
+    action: device_local_action
+    params:
+      action: adjust_clock
+      offset_seconds: 200
+
+  - name: Connect with valid controller cert
+    action: connect_as_controller
+    params:
+      cert_type: valid
+    expect:
+      connection_established: true
+
+postconditions:
+  - controller_skew_200s_ok: true
+
+timeout: "10s"
+tags:
+  - certificate
+  - validation
+  - controller
+  - clock-skew
+
+---
+# TC-CERT-VAL-CTRL-006: Controller Cert Clock Skew 400s Rejected
+id: TC-CERT-VAL-CTRL-006
+name: Controller Certificate with 400s Clock Skew Rejected
+description: |
+  Verifies that controller certificate validation rejects when
+  clock skew exceeds the 300s tolerance.
+
+pics_requirements:
+  - D.COMM.SC
+  - D.CERT.MUTUAL
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Adjust device clock 400s
+    action: device_local_action
+    params:
+      action: adjust_clock
+      offset_seconds: 400
+
+  - name: Connect with valid controller cert (should fail due to skew)
+    action: connect_as_controller
+    params:
+      cert_type: valid
+    expect:
+      connection_established: false
+
+postconditions:
+  - controller_skew_400s_rejected: true
+
+timeout: "10s"
+tags:
+  - certificate
+  - validation
+  - controller
+  - clock-skew
+  - negative
