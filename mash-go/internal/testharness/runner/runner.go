@@ -114,6 +114,11 @@ func New(config *Config) *Runner {
 	// This works because NewWithConfig stores the *EngineConfig pointer.
 	engineConfig.SetupPreconditions = r.setupPreconditions
 
+	// Stream each test result as it completes.
+	engineConfig.OnTestComplete = func(result *engine.TestResult) {
+		r.reporter.ReportTest(result)
+	}
+
 	// Register enhanced checkers
 	engine.RegisterEnhancedCheckers(r.engine)
 
@@ -162,8 +167,8 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 	result := r.engine.RunSuite(ctx, cases)
 	result.SuiteName = fmt.Sprintf("MASH Conformance Tests (%s)", r.config.Target)
 
-	// Report results
-	r.reporter.ReportSuite(result)
+	// Report summary only -- individual tests were already streamed via OnTestComplete.
+	r.reporter.ReportSummary(result)
 
 	return result, nil
 }

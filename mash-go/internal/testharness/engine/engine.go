@@ -262,9 +262,14 @@ func (e *Engine) RunSuite(ctx context.Context, cases []*loader.TestCase) *SuiteR
 			result.PassCount++
 		} else {
 			result.FailCount++
-			if e.config.StopOnFirstFailure {
-				break
-			}
+		}
+
+		if e.config.OnTestComplete != nil {
+			e.config.OnTestComplete(testResult)
+		}
+
+		if !testResult.Passed && !testResult.Skipped && e.config.StopOnFirstFailure {
+			break
 		}
 	}
 

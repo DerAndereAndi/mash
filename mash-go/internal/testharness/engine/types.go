@@ -189,6 +189,11 @@ type EngineConfig struct {
 	// test's preconditions require (connections, sessions, etc.).
 	// If nil, preconditions are not evaluated.
 	SetupPreconditions func(ctx context.Context, tc *loader.TestCase, state *ExecutionState) error
+
+	// OnTestComplete is called after each test finishes in RunSuite.
+	// Use this to stream results in real-time (e.g., to a reporter).
+	// If nil, no per-test callback is made.
+	OnTestComplete func(result *TestResult)
 }
 
 // DefaultConfig returns the default engine configuration.

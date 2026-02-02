@@ -18,6 +18,12 @@ type Reporter interface {
 
 	// ReportTest reports results for a single test.
 	ReportTest(result *engine.TestResult)
+
+	// ReportSummary reports only the suite summary (header + stats),
+	// assuming individual tests were already streamed via ReportTest.
+	// For structured formats (JSON, JUnit) this delegates to ReportSuite
+	// since the output must be a single complete document.
+	ReportSummary(result *engine.SuiteResult)
 }
 
 // TextReporter outputs human-readable text reports.
@@ -52,6 +58,27 @@ func (r *TextReporter) ReportSuite(result *engine.SuiteResult) {
 	fmt.Fprintf(r.writer, "Skipped: %d\n", result.SkipCount)
 
 	// Pass rate
+	total := result.PassCount + result.FailCount
+	if total > 0 {
+		rate := float64(result.PassCount) / float64(total) * 100
+		fmt.Fprintf(r.writer, "Pass Rate: %.1f%%\n", rate)
+	}
+}
+
+// ReportSummary reports only the suite header and statistics.
+// Individual test results are assumed to have been streamed already.
+func (r *TextReporter) ReportSummary(result *engine.SuiteResult) {
+	fmt.Fprintf(r.writer, "\n=== Suite: %s ===\n", result.SuiteName)
+	fmt.Fprintf(r.writer, "Duration: %s\n", result.Duration.Round(time.Millisecond))
+	fmt.Fprintf(r.writer, "\n")
+
+	// Summary only -- no per-test results
+	fmt.Fprintf(r.writer, "--- Summary ---\n")
+	fmt.Fprintf(r.writer, "Total:   %d\n", len(result.Results))
+	fmt.Fprintf(r.writer, "Passed:  %d\n", result.PassCount)
+	fmt.Fprintf(r.writer, "Failed:  %d\n", result.FailCount)
+	fmt.Fprintf(r.writer, "Skipped: %d\n", result.SkipCount)
+
 	total := result.PassCount + result.FailCount
 	if total > 0 {
 		rate := float64(result.PassCount) / float64(total) * 100
@@ -191,6 +218,12 @@ func (r *JSONReporter) ReportSuite(result *engine.SuiteResult) {
 	}
 
 	r.writeJSON(jr)
+}
+
+// ReportSummary delegates to ReportSuite for JSON since the output must be
+// a single complete JSON object.
+func (r *JSONReporter) ReportSummary(result *engine.SuiteResult) {
+	r.ReportSuite(result)
 }
 
 // ReportTest reports a single test result in JSON format.
@@ -338,6 +371,12 @@ func (r *JUnitReporter) ReportSuite(result *engine.SuiteResult) {
 	b.WriteString("</testsuite>\n")
 
 	fmt.Fprint(r.writer, b.String())
+}
+
+// ReportSummary delegates to ReportSuite for JUnit since the output must be
+// a single complete XML document.
+func (r *JUnitReporter) ReportSummary(result *engine.SuiteResult) {
+	r.ReportSuite(result)
 }
 
 // ReportTest reports a single test in JUnit format (wraps in minimal testsuite).
