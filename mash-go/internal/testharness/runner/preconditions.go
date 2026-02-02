@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
@@ -24,14 +25,16 @@ const (
 // preconditionKeyLevels maps known precondition keys to their required level.
 var preconditionKeyLevels = map[string]int{
 	"device_in_commissioning_mode": precondLevelCommissioning,
+	"device_uncommissioned":        precondLevelCommissioning,
+	"commissioning_window_open":    precondLevelCommissioning,
 	"tls_connection_established":   precondLevelConnected,
 	"connection_established":       precondLevelConnected,
 	"device_commissioned":          precondLevelCommissioned,
 	"session_established":          precondLevelCommissioned,
 }
 
-// preconditionLevel determines the highest setup level needed for the given conditions.
-func (r *Runner) preconditionLevel(conditions []loader.Condition) int {
+// preconditionLevelFor determines the highest setup level needed for the given conditions.
+func preconditionLevelFor(conditions []loader.Condition) int {
 	level := precondLevelNone
 	for _, cond := range conditions {
 		for key, val := range cond {
@@ -47,15 +50,56 @@ func (r *Runner) preconditionLevel(conditions []loader.Condition) int {
 	return level
 }
 
+// preconditionLevel determines the highest setup level needed for the given conditions.
+func (r *Runner) preconditionLevel(conditions []loader.Condition) int {
+	return preconditionLevelFor(conditions)
+}
+
+// SortByPreconditionLevel sorts test cases by their required precondition level
+// (lowest first). The sort is stable, preserving file order within the same level.
+func SortByPreconditionLevel(cases []*loader.TestCase) {
+	sort.SliceStable(cases, func(i, j int) bool {
+		return preconditionLevelFor(cases[i].Preconditions) <
+			preconditionLevelFor(cases[j].Preconditions)
+	})
+}
+
+// currentLevel returns the runner's current precondition level based on connection
+// and commissioning state.
+func (r *Runner) currentLevel() int {
+	if r.paseState != nil && r.paseState.completed {
+		return precondLevelCommissioned
+	}
+	if r.conn != nil && r.conn.connected {
+		return precondLevelConnected
+	}
+	return precondLevelNone
+}
+
 // setupPreconditions is the callback registered with the engine.
 // It inspects tc.Preconditions and ensures the runner is in the right state.
+// When transitioning backwards (e.g., from commissioned to commissioning),
+// it disconnects to give the device a clean state.
 func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState) error {
-	level := r.preconditionLevel(tc.Preconditions)
+	needed := r.preconditionLevel(tc.Preconditions)
+	current := r.currentLevel()
 
-	switch level {
+	// Backwards transition: disconnect to give the device a clean state.
+	// This handles cases like a commissioned runner needing to drop back
+	// for a commissioning-level test.
+	if needed < current && needed <= precondLevelCommissioning {
+		r.ensureDisconnected()
+	}
+
+	switch needed {
 	case precondLevelCommissioned:
 		return r.ensureCommissioned(ctx, state)
 	case precondLevelConnected:
+		// If currently commissioned but only a connection is needed,
+		// disconnect and reconnect for a clean TLS session.
+		if current > precondLevelConnected {
+			r.ensureDisconnected()
+		}
 		return r.ensureConnected(ctx, state)
 	case precondLevelCommissioning:
 		r.ensureDisconnected()

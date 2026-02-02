@@ -155,6 +155,9 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 		return nil, fmt.Errorf("no test cases found matching pattern %q", r.config.Pattern)
 	}
 
+	// Sort tests by precondition level to minimize state transitions.
+	SortByPreconditionLevel(cases)
+
 	// Run the test suite
 	result := r.engine.RunSuite(ctx, cases)
 	result.SuiteName = fmt.Sprintf("MASH Conformance Tests (%s)", r.config.Target)
