@@ -100,6 +100,38 @@ func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step,
 		return r.handleConfigureDevice(ctx, subStep, state)
 	case "set_value":
 		return r.handleDeviceSetValue(ctx, subStep, state)
+
+	// Zone management sub-actions.
+	case "add_zone":
+		return r.handleAddZone(ctx, subStep, state)
+	case "remove_zone":
+		return r.handleRemoveZone(ctx, subStep, state)
+	case "has_zone":
+		return r.handleHasZone(ctx, subStep, state)
+	case "list_zones":
+		return r.handleListZones(ctx, subStep, state)
+	case "zone_count":
+		return r.handleZoneCount(ctx, subStep, state)
+	case "highest_priority_zone":
+		return r.handleHighestPriorityZone(ctx, subStep, state)
+
+	// Network simulation sub-actions.
+	case "interface_down":
+		return r.handleInterfaceDown(ctx, subStep, state)
+	case "interface_up":
+		return r.handleInterfaceUp(ctx, subStep, state)
+	case "change_address":
+		return r.handleChangeAddress(ctx, subStep, state)
+	case "adjust_clock":
+		return r.handleAdjustClock(ctx, subStep, state)
+
+	// Discovery sub-actions.
+	case "browse_commissioners":
+		return r.handleBrowseCommissioners(ctx, subStep, state)
+	case "get_qr_payload":
+		return r.handleGetQRPayload(ctx, subStep, state)
+	case "enter_commissioning_mode":
+		return r.handleEnterCommissioningMode(ctx, subStep, state)
 	default:
 		return nil, fmt.Errorf("unknown device_local_action sub_action: %s", subAction)
 	}
@@ -543,3 +575,4 @@ func (r *Runner) handleReboot(ctx context.Context, step *loader.Step, state *eng
 func (r *Runner) handleRestart(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	return r.handlePowerCycle(ctx, step, state)
 }
+

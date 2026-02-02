@@ -53,6 +53,18 @@ func (r *Runner) handleControllerAction(ctx context.Context, step *loader.Step, 
 		return r.handleRenewCert(ctx, subStep, state)
 	case "check_renewal":
 		return r.handleCheckRenewal(ctx, subStep, state)
+
+	// Zone management sub-actions.
+	case "create_zone":
+		return r.handleCreateZone(ctx, subStep, state)
+	case "get_zone_ca_fingerprint":
+		return r.handleGetZoneCAFingerprint(ctx, subStep, state)
+
+	// Cert sub-actions.
+	case "get_cert_fingerprint":
+		return r.handleGetCertFingerprint(ctx, subStep, state)
+	case "set_cert_expiry_days":
+		return r.handleSetCertExpiryDays(ctx, subStep, state)
 	default:
 		return nil, fmt.Errorf("unknown controller_action sub_action: %s", subAction)
 	}

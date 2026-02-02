@@ -1,7 +1,9 @@
 package loader
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,8 +38,25 @@ func ParseTestCase(data []byte) (*TestCase, error) {
 	return &tc, nil
 }
 
-// LoadTestCase loads a test case from a file.
+// LoadTestCase loads a single test case from a file (first valid document).
+// For multi-document YAML files, use LoadTestCases instead.
 func LoadTestCase(path string) (*TestCase, error) {
+	cases, err := LoadTestCases(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(cases) == 0 {
+		return nil, &LoadError{
+			File:    path,
+			Message: "no valid test cases found in file",
+		}
+	}
+	return cases[0], nil
+}
+
+// LoadTestCases loads all test cases from a file, supporting multi-document YAML.
+// Empty or comment-only documents (those without an id field) are skipped.
+func LoadTestCases(path string) ([]*TestCase, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, &LoadError{
@@ -47,7 +66,7 @@ func LoadTestCase(path string) (*TestCase, error) {
 		}
 	}
 
-	tc, err := ParseTestCase(data)
+	cases, err := ParseTestCases(data)
 	if err != nil {
 		if le, ok := err.(*LoadError); ok {
 			le.File = path
@@ -59,7 +78,43 @@ func LoadTestCase(path string) (*TestCase, error) {
 		}
 	}
 
-	return tc, nil
+	return cases, nil
+}
+
+// ParseTestCases parses multiple test cases from multi-document YAML bytes.
+// Empty or comment-only documents are skipped.
+func ParseTestCases(data []byte) ([]*TestCase, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var cases []*TestCase
+
+	for {
+		var tc TestCase
+		err := decoder.Decode(&tc)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, &LoadError{
+				Message: "failed to parse YAML",
+				Cause:   err,
+			}
+		}
+
+		// Skip empty/comment-only documents.
+		if tc.ID == "" {
+			continue
+		}
+
+		if len(tc.Steps) == 0 {
+			return nil, &LoadError{
+				Message: fmt.Sprintf("test case %s must have at least one step", tc.ID),
+			}
+		}
+
+		cases = append(cases, &tc)
+	}
+
+	return cases, nil
 }
 
 // LoadDirectory loads all test cases from a directory.
@@ -88,12 +143,12 @@ func LoadDirectory(dir string) ([]*TestCase, error) {
 		}
 
 		path := filepath.Join(dir, name)
-		tc, err := LoadTestCase(path)
+		fileCases, err := LoadTestCases(path)
 		if err != nil {
 			return nil, err
 		}
 
-		cases = append(cases, tc)
+		cases = append(cases, fileCases...)
 	}
 
 	return cases, nil
@@ -117,12 +172,12 @@ func LoadDirectoryRecursive(dir string) ([]*TestCase, error) {
 			return nil
 		}
 
-		tc, err := LoadTestCase(path)
+		fileCases, err := LoadTestCases(path)
 		if err != nil {
 			return err
 		}
 
-		cases = append(cases, tc)
+		cases = append(cases, fileCases...)
 		return nil
 	})
 

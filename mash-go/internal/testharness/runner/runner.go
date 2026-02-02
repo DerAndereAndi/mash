@@ -256,7 +256,16 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect: %w", err)
+		// Return connection failure as outputs so tests can assert on TLS errors.
+		return map[string]any{
+			"connection_established": false,
+			"connected":              false,
+			"tls_handshake_success":  false,
+			"target":                 target,
+			"error":                  err.Error(),
+			"tls_error":              err.Error(),
+			"tls_alert":              extractTLSAlert(err),
+		}, nil
 	}
 
 	r.conn.tlsConn = conn
@@ -272,11 +281,38 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	// Store connection info in state
 	state.Set("connection", r.conn)
 
+	// Extract TLS connection details.
+	cs := conn.ConnectionState()
+	hasPeerCerts := len(cs.PeerCertificates) > 0
+	mutualAuth := hasPeerCerts && len(cs.VerifiedChains) > 0
+	chainValidated := len(cs.VerifiedChains) > 0
+
+	// Server cert details.
+	serverCertCNPrefix := ""
+	serverCertSelfSigned := false
+	if hasPeerCerts {
+		cert := cs.PeerCertificates[0]
+		serverCertCNPrefix = cert.Subject.CommonName
+		serverCertSelfSigned = cert.IsCA || cert.Issuer.CommonName == cert.Subject.CommonName
+	}
+
 	return map[string]any{
 		"connection_established": true,
+		"connected":              true,
+		"tls_handshake_success":  true,
 		"target":                 target,
-		"tls_version":            conn.ConnectionState().Version,
-		"negotiated_protocol":    conn.ConnectionState().NegotiatedProtocol,
+		"tls_version":            cs.Version,
+		"negotiated_version":     tlsVersionName(cs.Version),
+		"negotiated_cipher":      tls.CipherSuiteName(cs.CipherSuite),
+		"negotiated_group":       curveIDName(cs.CurveID),
+		"negotiated_protocol":    cs.NegotiatedProtocol,
+		"negotiated_alpn":        cs.NegotiatedProtocol,
+		"mutual_auth":            mutualAuth,
+		"chain_validated":        chainValidated,
+		"self_signed_accepted":   serverCertSelfSigned && hasPeerCerts,
+		"server_cert_cn_prefix":  serverCertCNPrefix,
+		"server_cert_self_signed": serverCertSelfSigned,
+		"has_peer_certs":         hasPeerCerts,
 	}, nil
 }
 
@@ -645,4 +681,59 @@ func generateConnectionID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// tlsVersionName returns a human-readable TLS version string.
+func tlsVersionName(version uint16) string {
+	switch version {
+	case tls.VersionTLS13:
+		return "TLS 1.3"
+	case tls.VersionTLS12:
+		return "TLS 1.2"
+	case tls.VersionTLS11:
+		return "TLS 1.1"
+	case tls.VersionTLS10:
+		return "TLS 1.0"
+	default:
+		return fmt.Sprintf("unknown (0x%04x)", version)
+	}
+}
+
+// curveIDName returns a human-readable name for a TLS curve ID.
+func curveIDName(id tls.CurveID) string {
+	switch id {
+	case tls.CurveP256:
+		return "P-256"
+	case tls.CurveP384:
+		return "P-384"
+	case tls.CurveP521:
+		return "P-521"
+	case tls.X25519:
+		return "X25519"
+	default:
+		return fmt.Sprintf("unknown (%d)", id)
+	}
+}
+
+// extractTLSAlert extracts a TLS alert description from an error.
+func extractTLSAlert(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	// Go TLS errors contain alert descriptions like "bad certificate",
+	// "certificate expired", "unknown authority", etc.
+	alertKeywords := []string{
+		"bad certificate", "certificate expired", "unknown authority",
+		"handshake failure", "protocol version", "no application protocol",
+		"certificate unknown", "decrypt error", "illegal parameter",
+		"close notify",
+	}
+	for _, kw := range alertKeywords {
+		if contains(msg, kw) {
+			return kw
+		}
+	}
+	// Return the full error as fallback.
+	return msg
 }

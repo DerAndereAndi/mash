@@ -143,7 +143,10 @@ func main() {
 		SetupCode:          *setupCode,
 		ClientIdentity:     *clientIdentity,
 		ServerIdentity:     *serverIdentity,
-		ProtocolLogger:     protocolLogger,
+	}
+	// Only set logger when non-nil to avoid typed-nil interface issue.
+	if protocolLogger != nil {
+		config.ProtocolLogger = protocolLogger
 	}
 
 	// Create and run test runner

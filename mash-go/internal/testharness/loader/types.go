@@ -1,6 +1,8 @@
 // Package loader provides YAML test case loading for the MASH test harness.
 package loader
 
+import "fmt"
+
 // TestCase represents a single test case loaded from YAML.
 type TestCase struct {
 	// ID is the unique test case identifier (e.g., "TC-COMM-001").
@@ -13,7 +15,8 @@ type TestCase struct {
 	Description string `yaml:"description"`
 
 	// PICSRequirements lists PICS items that must be supported to run this test.
-	PICSRequirements []string `yaml:"pics_requirements"`
+	// Entries can be strings ("MASH.S.COMM") or maps ("MASH.S.COMM.X: 900").
+	PICSRequirements PICSRequirementList `yaml:"pics_requirements"`
 
 	// Preconditions are conditions that must be true before the test runs.
 	Preconditions []Condition `yaml:"preconditions"`
@@ -29,6 +32,34 @@ type TestCase struct {
 
 	// Tags for categorizing tests.
 	Tags []string `yaml:"tags,omitempty"`
+}
+
+// PICSRequirementList is a list of PICS requirement strings that supports
+// mixed YAML entries: both plain strings ("MASH.S.COMM") and key-value maps
+// ("MASH.S.COMM.WINDOW_DEFAULT: 900") are normalized to strings.
+type PICSRequirementList []string
+
+// UnmarshalYAML implements custom unmarshaling to handle mixed list entries.
+func (p *PICSRequirementList) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw []any
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	result := make([]string, 0, len(raw))
+	for _, item := range raw {
+		switch v := item.(type) {
+		case string:
+			result = append(result, v)
+		case map[string]any:
+			for k, val := range v {
+				result = append(result, fmt.Sprintf("%s: %v", k, val))
+			}
+		default:
+			result = append(result, fmt.Sprintf("%v", v))
+		}
+	}
+	*p = result
+	return nil
 }
 
 // Condition represents a precondition or postcondition.
