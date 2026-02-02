@@ -193,12 +193,6 @@ func (r *Runner) registerHandlers() {
 	r.engine.RegisterHandler("subscribe", r.handleSubscribe)
 	r.engine.RegisterHandler("invoke", r.handleInvoke)
 
-	// Discovery handlers
-	r.engine.RegisterHandler("start_discovery", r.handleStartDiscovery)
-	r.engine.RegisterHandler("wait_for_device", r.handleWaitForDevice)
-	r.engine.RegisterHandler("stop_discovery", r.handleStopDiscovery)
-	r.engine.RegisterHandler("verify_txt_records", r.handleVerifyTXTRecords)
-
 	// PASE commissioning handlers
 	r.registerPASEHandlers()
 
@@ -215,6 +209,16 @@ func (r *Runner) registerHandlers() {
 
 	// Security testing handlers (DEC-047)
 	r.registerSecurityHandlers()
+
+	// Extended handler groups
+	r.registerUtilityHandlers()
+	r.registerDiscoveryHandlers()
+	r.registerZoneHandlers()
+	r.registerDeviceHandlers()
+	r.registerControllerHandlers()
+	r.registerConnectionHandlers()
+	r.registerCertHandlers()
+	r.registerNetworkHandlers()
 }
 
 // handleConnect establishes a connection to the target.
@@ -522,27 +526,6 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 	}, nil
 }
 
-// Discovery handlers (stubs for now - would use actual mDNS)
-func (r *Runner) handleStartDiscovery(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	// TODO: Integrate with actual mDNS discovery
-	return map[string]any{"discovery_started": true}, nil
-}
-
-func (r *Runner) handleWaitForDevice(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	// TODO: Integrate with actual mDNS discovery
-	return map[string]any{
-		"device_found":           true,
-		"device_has_txt_records": true,
-	}, nil
-}
-
-func (r *Runner) handleStopDiscovery(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	return map[string]any{"discovery_stopped": true}, nil
-}
-
-func (r *Runner) handleVerifyTXTRecords(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	return map[string]any{"txt_valid": true}, nil
-}
 
 // Utility handlers
 func (r *Runner) handleWait(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {

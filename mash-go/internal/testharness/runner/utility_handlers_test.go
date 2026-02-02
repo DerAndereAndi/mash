@@ -1,0 +1,411 @@
+package runner
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/mash-protocol/mash-go/internal/testharness/engine"
+	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+)
+
+func newTestRunner() *Runner {
+	return &Runner{
+		config: &Config{},
+		conn:   &Connection{},
+	}
+}
+
+func TestHandleCompare(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	tests := []struct {
+		name     string
+		left     any
+		right    any
+		op       string
+		wantComp bool
+	}{
+		{"equal ints", float64(42), float64(42), "equal", true},
+		{"not equal ints", float64(42), float64(43), "equal", false},
+		{"gt true", float64(10), float64(5), "gt", true},
+		{"gt false", float64(5), float64(10), "gt", false},
+		{"lt true", float64(5), float64(10), "lt", true},
+		{"lt false", float64(10), float64(5), "lt", false},
+		{"gte equal", float64(5), float64(5), "gte", true},
+		{"lte equal", float64(5), float64(5), "lte", true},
+		{"ne true", float64(1), float64(2), "ne", true},
+		{"equal strings", "hello", "hello", "equal", true},
+		{"default op is equal", float64(7), float64(7), "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			step := &loader.Step{
+				Params: map[string]any{
+					"left":     tt.left,
+					"right":    tt.right,
+					"operator": tt.op,
+				},
+			}
+			out, err := r.handleCompare(context.Background(), step, state)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if out["comparison_result"] != tt.wantComp {
+				t.Errorf("comparison_result = %v, want %v", out["comparison_result"], tt.wantComp)
+			}
+		})
+	}
+}
+
+func TestHandleCompareValues(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	tests := []struct {
+		name          string
+		values        []any
+		wantEqual     bool
+		wantDifferent bool
+	}{
+		{"all equal", []any{"a", "a", "a"}, true, false},
+		{"all different", []any{"a", "b", "c"}, false, true},
+		{"mixed", []any{"a", "b", "a"}, false, false},
+		{"single", []any{"a"}, true, true},
+		{"empty", []any{}, true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			step := &loader.Step{
+				Params: map[string]any{"values": tt.values},
+			}
+			out, err := r.handleCompareValues(context.Background(), step, state)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if out["all_equal"] != tt.wantEqual {
+				t.Errorf("all_equal = %v, want %v", out["all_equal"], tt.wantEqual)
+			}
+			if out["all_different"] != tt.wantDifferent {
+				t.Errorf("all_different = %v, want %v", out["all_different"], tt.wantDifferent)
+			}
+		})
+	}
+}
+
+func TestHandleEvaluate(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Evaluate from state key.
+	state.Set("flag", true)
+	step := &loader.Step{
+		Params: map[string]any{"expression": "flag"},
+	}
+	out, err := r.handleEvaluate(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["result"] != true {
+		t.Error("expected result=true for true state key")
+	}
+
+	// Evaluate direct value.
+	step = &loader.Step{
+		Params: map[string]any{"value": false},
+	}
+	out, err = r.handleEvaluate(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["result"] != false {
+		t.Error("expected result=false for false value")
+	}
+
+	// Missing expression returns false.
+	step = &loader.Step{
+		Params: map[string]any{"expression": "nonexistent"},
+	}
+	out, err = r.handleEvaluate(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["result"] != false {
+		t.Error("expected result=false for missing key")
+	}
+}
+
+func TestHandleRecordTimeAndVerifyTiming(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Record start time.
+	step := &loader.Step{
+		Params: map[string]any{"key": "t_start"},
+	}
+	out, err := r.handleRecordTime(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["time_recorded"] != true {
+		t.Error("expected time_recorded=true")
+	}
+	if out["timestamp_ms"].(int64) <= 0 {
+		t.Error("expected positive timestamp")
+	}
+
+	// Small delay.
+	time.Sleep(10 * time.Millisecond)
+
+	// Record end time.
+	step = &loader.Step{
+		Params: map[string]any{"key": "t_end"},
+	}
+	_, err = r.handleRecordTime(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify timing within tolerance.
+	step = &loader.Step{
+		Params: map[string]any{
+			"start_key": "t_start",
+			"end_key":   "t_end",
+			"min_ms":    float64(5),
+			"max_ms":    float64(5000),
+		},
+	}
+	out, err = r.handleVerifyTiming(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["within_tolerance"] != true {
+		t.Errorf("expected within_tolerance=true, elapsed=%v", out["elapsed_ms"])
+	}
+	elapsed := out["elapsed_ms"].(int64)
+	if elapsed < 5 {
+		t.Errorf("expected elapsed >= 5ms, got %d", elapsed)
+	}
+}
+
+func TestHandleCheckResponse(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	state.Set("status", "SUCCESS")
+	state.Set("device_id", "dev-123")
+
+	step := &loader.Step{
+		Params: map[string]any{
+			"expected_status": "SUCCESS",
+			"expected_fields": map[string]any{
+				"device_id": "dev-123",
+			},
+		},
+	}
+
+	out, err := r.handleCheckResponse(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["status_matches"] != true {
+		t.Error("expected status_matches=true")
+	}
+	if out["payload_matches"] != true {
+		t.Error("expected payload_matches=true")
+	}
+
+	// Mismatching status.
+	step.Params["expected_status"] = "FAILURE"
+	out, err = r.handleCheckResponse(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["status_matches"] != false {
+		t.Error("expected status_matches=false for mismatched status")
+	}
+}
+
+func TestHandleVerifyCorrelation(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	state.Set("request_message_id", uint32(42))
+	state.Set("response_message_id", uint32(42))
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleVerifyCorrelation(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["correlation_valid"] != true {
+		t.Error("expected correlation_valid=true")
+	}
+
+	// Mismatch.
+	state.Set("response_message_id", uint32(99))
+	out, err = r.handleVerifyCorrelation(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["correlation_valid"] != false {
+		t.Error("expected correlation_valid=false")
+	}
+}
+
+func TestHandleWaitForState(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// State already set -> immediate return.
+	state.Set("ready", true)
+	step := &loader.Step{
+		Params: map[string]any{
+			"key":        "ready",
+			"value":      true,
+			"timeout_ms": float64(100),
+			"poll_ms":    float64(10),
+		},
+	}
+	out, err := r.handleWaitForState(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["state_reached"] != true {
+		t.Error("expected state_reached=true")
+	}
+
+	// State never set -> timeout.
+	step = &loader.Step{
+		Params: map[string]any{
+			"key":        "never_set",
+			"value":      "done",
+			"timeout_ms": float64(50),
+			"poll_ms":    float64(10),
+		},
+	}
+	out, err = r.handleWaitForState(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["state_reached"] != false {
+		t.Error("expected state_reached=false on timeout")
+	}
+}
+
+func TestHandleParseQR(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Valid QR payload.
+	step := &loader.Step{
+		Params: map[string]any{
+			"payload": "MASH:1:1234:12345678:0x1234:0x5678",
+		},
+	}
+	out, err := r.handleParseQR(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["valid"] != true {
+		t.Errorf("expected valid=true, got error=%v", out["error"])
+	}
+	if out["version"] != 1 {
+		t.Errorf("expected version=1, got %v", out["version"])
+	}
+	if out["discriminator"] != 1234 {
+		t.Errorf("expected discriminator=1234, got %v", out["discriminator"])
+	}
+	if out["setup_code"] != "12345678" {
+		t.Errorf("expected setup_code=12345678, got %v", out["setup_code"])
+	}
+
+	// Invalid QR payload.
+	step = &loader.Step{
+		Params: map[string]any{"payload": "invalid"},
+	}
+	out, err = r.handleParseQR(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["valid"] != false {
+		t.Error("expected valid=false for invalid payload")
+	}
+
+	// Empty payload.
+	step = &loader.Step{
+		Params: map[string]any{},
+	}
+	out, err = r.handleParseQR(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["valid"] != false {
+		t.Error("expected valid=false for empty payload")
+	}
+}
+
+func TestToBool(t *testing.T) {
+	tests := []struct {
+		input any
+		want  bool
+	}{
+		{true, true},
+		{false, false},
+		{1, true},
+		{0, false},
+		{1.0, true},
+		{0.0, false},
+		{"hello", true},
+		{"", false},
+		{"false", false},
+		{"0", false},
+		{nil, false},
+	}
+	for _, tt := range tests {
+		got := toBool(tt.input)
+		if got != tt.want {
+			t.Errorf("toBool(%v) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestToFloat(t *testing.T) {
+	tests := []struct {
+		input any
+		want  float64
+	}{
+		{42, 42.0},
+		{int64(100), 100.0},
+		{3.14, 3.14},
+		{float32(2.5), 2.5},
+		{"nope", 0},
+		{nil, 0},
+	}
+	for _, tt := range tests {
+		got := toFloat(tt.input)
+		if got != tt.want {
+			t.Errorf("toFloat(%v) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestHandleCompareUnknownOperator(t *testing.T) {
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+
+	step := &loader.Step{
+		Params: map[string]any{
+			"left":     float64(1),
+			"right":    float64(2),
+			"operator": "unknown_op",
+		},
+	}
+	_, err := r.handleCompare(context.Background(), step, state)
+	if err == nil {
+		t.Error("expected error for unknown operator")
+	}
+}
