@@ -337,6 +337,29 @@ func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state 
 	return map[string]any{"disconnected": true}, nil
 }
 
+// sendRequest sends an encoded request and reads the decoded response.
+// On IO errors (send/receive), the connection is marked as dead so that
+// subsequent tests will reconnect instead of reusing a broken connection.
+func (r *Runner) sendRequest(data []byte, op string) (*wire.Response, error) {
+	if err := r.conn.framer.WriteFrame(data); err != nil {
+		r.conn.connected = false
+		return nil, fmt.Errorf("failed to send %s request: %w", op, err)
+	}
+
+	respData, err := r.conn.framer.ReadFrame()
+	if err != nil {
+		r.conn.connected = false
+		return nil, fmt.Errorf("failed to read %s response: %w", op, err)
+	}
+
+	resp, err := wire.DecodeResponse(respData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode %s response: %w", op, err)
+	}
+
+	return resp, nil
+}
+
 // handleRead sends a read request and returns the response.
 func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if !r.conn.connected {
@@ -367,25 +390,14 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		FeatureID:  featureID,
 	}
 
-	// Encode and send
 	data, err := wire.EncodeRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode read request: %w", err)
 	}
 
-	if err := r.conn.framer.WriteFrame(data); err != nil {
-		return nil, fmt.Errorf("failed to send read request: %w", err)
-	}
-
-	// Read response
-	respData, err := r.conn.framer.ReadFrame()
+	resp, err := r.sendRequest(data, "read")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	resp, err := wire.DecodeResponse(respData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		return nil, err
 	}
 
 	outputs := map[string]any{
@@ -438,19 +450,9 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 		return nil, fmt.Errorf("failed to encode write request: %w", err)
 	}
 
-	if err := r.conn.framer.WriteFrame(data); err != nil {
-		return nil, fmt.Errorf("failed to send write request: %w", err)
-	}
-
-	// Read response
-	respData, err := r.conn.framer.ReadFrame()
+	resp, err := r.sendRequest(data, "write")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	resp, err := wire.DecodeResponse(respData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		return nil, err
 	}
 
 	return map[string]any{
@@ -492,18 +494,9 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 		return nil, fmt.Errorf("failed to encode subscribe request: %w", err)
 	}
 
-	if err := r.conn.framer.WriteFrame(data); err != nil {
-		return nil, fmt.Errorf("failed to send subscribe request: %w", err)
-	}
-
-	respData, err := r.conn.framer.ReadFrame()
+	resp, err := r.sendRequest(data, "subscribe")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	resp, err := wire.DecodeResponse(respData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		return nil, err
 	}
 
 	return map[string]any{
@@ -548,18 +541,9 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 		return nil, fmt.Errorf("failed to encode invoke request: %w", err)
 	}
 
-	if err := r.conn.framer.WriteFrame(data); err != nil {
-		return nil, fmt.Errorf("failed to send invoke request: %w", err)
-	}
-
-	respData, err := r.conn.framer.ReadFrame()
+	resp, err := r.sendRequest(data, "invoke")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	resp, err := wire.DecodeResponse(respData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		return nil, err
 	}
 
 	return map[string]any{

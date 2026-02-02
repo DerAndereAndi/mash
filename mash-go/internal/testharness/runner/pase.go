@@ -104,6 +104,10 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			session:   session,
 			completed: false,
 		}
+		// The handshake writes/reads on the connection. If it fails,
+		// the connection is in an unusable state (the device closes
+		// it on PASE failure per the MASH spec).
+		r.conn.connected = false
 		// Return error directly so test framework shows it clearly
 		return nil, fmt.Errorf("PASE handshake failed: %w", err)
 	}
@@ -208,6 +212,7 @@ func (r *Runner) handlePASEReceiveVerify(ctx context.Context, step *loader.Step,
 	// Perform the actual handshake now
 	sessionKey, err := r.paseState.session.Handshake(ctx, r.conn.tlsConn)
 	if err != nil {
+		r.conn.connected = false
 		return nil, fmt.Errorf("PASE handshake failed: %w", err)
 	}
 
