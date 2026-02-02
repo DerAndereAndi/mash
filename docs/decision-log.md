@@ -3465,6 +3465,32 @@ The hybrid trigger with MinMessages floor ensures:
 
 ---
 
+### DEC-059: Auto Re-enter Commissioning on Last Zone Removal
+
+**Date:** 2026-02-02
+**Status:** Proposed
+
+**Context:** When a device's last zone is removed, the device must become commissionable again. Without this, a device that loses all controllers is permanently stuck in operational mode with no way to recommission. This also impacts test infrastructure: the test harness needs to run hundreds of spec tests that cycle between commissioned and uncommissioned states.
+
+**Decision:** When `RemoveZone` reduces zone count to 0, the device automatically calls `EnterCommissioningMode()`. This is mandatory behavior for all MASH devices. The test harness sends `RemoveZone` before disconnecting on backward precondition transitions (commissioned -> uncommissioned) to trigger this behavior.
+
+**Rationale:**
+
+- A device with no zones is useless -- it cannot be controlled
+- Manual intervention to re-enter commissioning mode defeats automation
+- Consistent with Matter's behavior after fabric removal
+- Simplifies test infrastructure (no device restart needed between tests)
+- The zone ID for RemoveZone can be derived from the PASE shared secret using the same `SHA-256(secret)[:8]` derivation both sides already use
+
+**Declined Alternatives:**
+
+- **Timer-based auto-recommission:** Device waits N seconds after last zone disconnect before entering commissioning. Adds unnecessary delay and complexity. Immediate re-entry is simpler and correct.
+- **Require explicit API call:** Forces test infrastructure or management apps to restart devices between test runs. Unnecessarily complex for the common case.
+
+**Related:** DEC-047 (commissioning security), DEC-043 (zone type constraints)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -3595,3 +3621,4 @@ Key learnings:
 | 2026-01-31 | Added DEC-055: Use cases on the wire. Adds `useCases` attribute to DeviceInfo with name + major.minor version + endpointId. REST API versioning model: minor = forward-compatible, major = new contract. Bundled with specVersion releases. Enables business logic testing and explicit device contracts. |
 | 2026-02-01 | Added DEC-057: Integer use case IDs and scenario bitmaps. Replaces string names with uint16 IDs on the wire. Adds uint32 scenario bitmap to UseCaseDecl. Matter-inspired atomic scenario contracts. All 11 use case YAMLs restructured with scenarios. |
 | 2026-02-02 | Added DEC-058: Capability snapshots in protocol logs. Logging-layer mechanism to periodically emit device model snapshots with hybrid time/count trigger and MinMessages floor. Addresses discovery data loss on long-lived connections. |
+| 2026-02-02 | Added DEC-059: Auto re-enter commissioning on last zone removal. Device calls EnterCommissioningMode() when RemoveZone reduces zone count to 0. Test harness sends RemoveZone on backward precondition transitions. |

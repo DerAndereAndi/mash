@@ -59,11 +59,12 @@ name: Last Zone Removal Returns Device to Uncommissioned
 description: |
   When the last zone is removed from a device, the device
   should return to uncommissioned state, ready for new
-  commissioning.
+  commissioning (DEC-059).
 
 pics_requirements:
   - MASH.S.INFO
   - MASH.S.INFO.C10.Rsp
+  - MASH.S.ZONE.B_RECOMM
 
 preconditions:
   - session_established: true

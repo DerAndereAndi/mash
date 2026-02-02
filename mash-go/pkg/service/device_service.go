@@ -1733,6 +1733,15 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 	// Update pairing request listening state based on zone count
 	s.updatePairingRequestListening()
 
+	// DEC-059: Auto re-enter commissioning mode when last zone is removed.
+	// A device with no zones must become commissionable again.
+	s.mu.RLock()
+	noZonesLeft := len(s.connectedZones) == 0
+	s.mu.RUnlock()
+	if noZonesLeft {
+		s.EnterCommissioningMode()
+	}
+
 	return nil
 }
 

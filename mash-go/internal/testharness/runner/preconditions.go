@@ -2,11 +2,15 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
+	"sync/atomic"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // Precondition levels form a hierarchy:
@@ -83,6 +87,12 @@ func (r *Runner) currentLevel() int {
 func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState) error {
 	needed := r.preconditionLevel(tc.Preconditions)
 	current := r.currentLevel()
+
+	// DEC-059: On backward transition from commissioned, send RemoveZone
+	// so the device re-enters commissioning mode before we disconnect.
+	if current >= precondLevelCommissioned && needed <= precondLevelCommissioning {
+		r.sendRemoveZone()
+	}
 
 	// Backwards transition: disconnect to give the device a clean state.
 	// This handles cases like a commissioned runner needing to drop back
@@ -180,4 +190,46 @@ func (r *Runner) ensureDisconnected() {
 		_ = r.conn.Close()
 	}
 	r.paseState = nil
+}
+
+// sendRemoveZone sends a RemoveZone invoke to the device so it re-enters
+// commissioning mode (DEC-059). Errors are ignored because the device may
+// have already closed the connection.
+func (r *Runner) sendRemoveZone() {
+	if r.conn == nil || !r.conn.connected || r.conn.framer == nil {
+		return
+	}
+	if r.paseState == nil || !r.paseState.completed || r.paseState.sessionKey == nil {
+		return
+	}
+
+	// Derive zone ID from shared secret (same derivation as device).
+	zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+
+	// Build RemoveZone invoke: endpoint 0, DeviceInfo feature (1), command 0x10.
+	req := &wire.Request{
+		MessageID:  atomic.AddUint32(&r.messageID, 1),
+		Operation:  wire.OpInvoke,
+		EndpointID: 0,
+		FeatureID:  1, // DeviceInfo
+		Payload: &wire.InvokePayload{
+			CommandID:  16, // DeviceInfoCmdRemoveZone
+			Parameters: map[string]any{"zoneId": zoneID},
+		},
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return
+	}
+
+	// Best-effort: send and read response, ignoring errors.
+	_, _ = r.sendRequest(data, "remove-zone")
+}
+
+// deriveZoneIDFromSecret derives a zone ID from a PASE shared secret
+// using the same SHA-256 derivation as the device side.
+func deriveZoneIDFromSecret(secret []byte) string {
+	hash := sha256.Sum256(secret)
+	return hex.EncodeToString(hash[:8])
 }

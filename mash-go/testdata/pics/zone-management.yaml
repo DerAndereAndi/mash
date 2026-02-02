@@ -65,6 +65,9 @@ items:
   # Bidirectional communication
   MASH.S.ZONE.B_BIDIR_COMM: true  # Device can send to controller
 
+  # Auto re-enter commissioning on last zone removal (DEC-059)
+  MASH.S.ZONE.B_RECOMM: true      # Auto re-enter commissioning when last zone removed
+
   # ==========================================================================
   # Failsafe Behavior
   # ==========================================================================
@@ -180,3 +183,12 @@ items:
 #   - MASH.S.ZONE.MAX: 2
 #   - MASH.S.ZONE.GRID: true
 #   - MASH.S.ZONE.REMOVE: true
+#
+# =============================================================================
+# Zone Removal Tests
+# =============================================================================
+#
+# TC-ZONE-REMOVE-002 (Last Zone Removal Returns Device to Uncommissioned):
+#   - MASH.S.INFO: true
+#   - MASH.S.INFO.C10.Rsp: true
+#   - MASH.S.ZONE.B_RECOMM: true

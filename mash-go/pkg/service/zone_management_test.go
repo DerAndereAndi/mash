@@ -7,8 +7,10 @@ import (
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
+	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
 	"github.com/mash-protocol/mash-go/pkg/examples"
 	"github.com/mash-protocol/mash-go/pkg/failsafe"
+	"github.com/stretchr/testify/mock"
 )
 
 // createTestDeviceService creates a DeviceService for testing.
@@ -295,6 +297,90 @@ func TestDeviceServiceRemoveZoneWhileFailsafeActive(t *testing.T) {
 	zone = svc.GetZone(zoneID)
 	if zone != nil {
 		t.Error("Zone should not exist after RemoveZone")
+	}
+}
+
+func TestDeviceServiceRemoveLastZoneReentersCommissioning(t *testing.T) {
+	svc := createTestDeviceService(t)
+
+	// Set up mock advertiser so we can inspect commissioning state
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopOperational(mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer svc.Stop()
+
+	// Enter commissioning, then exit (simulates commissioning flow)
+	if err := svc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	// Add a zone
+	zoneID := "test-zone-recomm"
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
+
+	// Exit commissioning mode (as happens after commissioning completes)
+	if err := svc.ExitCommissioningMode(); err != nil {
+		t.Fatalf("ExitCommissioningMode failed: %v", err)
+	}
+
+	// Verify not in commissioning mode
+	if svc.discoveryManager.IsCommissioningMode() {
+		t.Fatal("expected NOT to be in commissioning mode after ExitCommissioningMode")
+	}
+
+	// Remove the last zone
+	if err := svc.RemoveZone(zoneID); err != nil {
+		t.Fatalf("RemoveZone failed: %v", err)
+	}
+
+	// Verify device re-entered commissioning mode (DEC-059)
+	if !svc.discoveryManager.IsCommissioningMode() {
+		t.Error("expected commissioning mode after removing last zone (DEC-059)")
+	}
+}
+
+func TestDeviceServiceRemoveZoneWithRemainingZonesStaysOperational(t *testing.T) {
+	svc := createTestDeviceService(t)
+
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopOperational(mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer svc.Stop()
+
+	// Add two zones
+	svc.HandleZoneConnect("zone-1", cert.ZoneTypeGrid)
+	svc.HandleZoneConnect("zone-2", cert.ZoneTypeLocal)
+
+	// Exit commissioning mode
+	if err := svc.ExitCommissioningMode(); err != nil {
+		t.Fatalf("ExitCommissioningMode failed: %v", err)
+	}
+
+	// Remove one zone -- should NOT re-enter commissioning
+	if err := svc.RemoveZone("zone-1"); err != nil {
+		t.Fatalf("RemoveZone failed: %v", err)
+	}
+
+	if svc.discoveryManager.IsCommissioningMode() {
+		t.Error("should NOT enter commissioning mode when zones remain")
 	}
 }
 

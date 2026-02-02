@@ -279,7 +279,7 @@ For detailed timing requirements, see [Failsafe Timing](testing/behavior/failsaf
 1. Controller sends RemoveZone command
 2. Device deletes operational certificate for that zone
 3. Connection is closed
-4. Zone slot is freed (device may re-advertise as commissionable)
+4. Zone slot is freed; if no zones remain, device automatically re-enters commissioning mode (DEC-059)
 5. Device re-evaluates effective limits/setpoints from remaining zones
 
 ### 8.3 Zone Slot Exhaustion

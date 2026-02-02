@@ -331,3 +331,79 @@ func TestSetupPreconditions_BackwardsTransition(t *testing.T) {
 		t.Error("expected paseState to be nil after backwards transition")
 	}
 }
+
+func TestDeriveZoneIDFromSecret(t *testing.T) {
+	// Verify deterministic derivation matches device-side logic:
+	// hex(SHA-256(secret)[:8])
+	secret := []byte("test-shared-secret")
+	zoneID := deriveZoneIDFromSecret(secret)
+
+	// Should be 16 hex chars (8 bytes)
+	if len(zoneID) != 16 {
+		t.Errorf("expected 16 hex chars, got %d: %q", len(zoneID), zoneID)
+	}
+
+	// Must be deterministic
+	if zoneID != deriveZoneIDFromSecret(secret) {
+		t.Error("deriveZoneIDFromSecret is not deterministic")
+	}
+
+	// Different secret -> different zone ID
+	other := deriveZoneIDFromSecret([]byte("different-secret"))
+	if zoneID == other {
+		t.Error("different secrets should produce different zone IDs")
+	}
+}
+
+func TestSendRemoveZone_NilPaseState(t *testing.T) {
+	// sendRemoveZone should be a no-op when not commissioned.
+	r := newTestRunner()
+	r.conn.connected = true
+	r.paseState = nil
+
+	// Should not panic.
+	r.sendRemoveZone()
+}
+
+func TestSendRemoveZone_NoSessionKey(t *testing.T) {
+	r := newTestRunner()
+	r.conn.connected = true
+	r.paseState = &PASEState{completed: true, sessionKey: nil}
+
+	// Should not panic.
+	r.sendRemoveZone()
+}
+
+func TestSetupPreconditions_BackwardsFromCommissioned_SendsRemoveZone(t *testing.T) {
+	// When transitioning from commissioned (level 3) to commissioning (level 1),
+	// sendRemoveZone is called before disconnect. Since there's no real server,
+	// the send will silently fail but the transition should still complete.
+	r := newTestRunner()
+	r.conn.connected = true
+	r.paseState = &PASEState{
+		completed:  true,
+		sessionKey: []byte{0xDE, 0xAD, 0xBE, 0xEF},
+	}
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-BACK-REMOVE-001",
+		Preconditions: []loader.Condition{
+			{"device_in_commissioning_mode": true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Connection should be closed after backward transition
+	if r.conn.connected {
+		t.Error("expected connection to be closed")
+	}
+	// PASE state should be cleared
+	if r.paseState != nil {
+		t.Error("expected paseState to be nil")
+	}
+}
