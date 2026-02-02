@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -17,6 +18,7 @@ var (
 	ErrNotStarted             = errors.New("service not started")
 	ErrAlreadyStarted         = errors.New("service already started")
 	ErrCommissionFailed       = errors.New("commissioning failed")
+	ErrPASEFailed             = fmt.Errorf("%w: PASE authentication failed", ErrCommissionFailed)
 	ErrNotConnected           = errors.New("not connected")
 	ErrDeviceNotFound         = errors.New("device not found")
 	ErrZoneFull               = errors.New("maximum zones reached")

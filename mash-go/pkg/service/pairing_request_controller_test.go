@@ -37,7 +37,8 @@ func TestCommissionDevice_DeviceAlreadyAdvertising(t *testing.T) {
 	}
 
 	browser := mocks.NewMockBrowser(t)
-	browser.EXPECT().FindByDiscriminator(mock.Anything, uint16(1234)).Return(device, nil).Once()
+	browser.EXPECT().FindAllByDiscriminator(mock.Anything, uint16(1234)).
+		Return([]*discovery.CommissionableService{device}, nil).Once()
 	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
@@ -77,10 +78,10 @@ func TestCommissionDevice_DeviceNotAdvertising_PairingRequestAnnounced(t *testin
 
 	ctx := context.Background()
 
-	// Mock browser - device not found initially
+	// Mock browser - no devices found
 	browser := mocks.NewMockBrowser(t)
-	browser.EXPECT().FindByDiscriminator(mock.Anything, uint16(1234)).
-		Return(nil, discovery.ErrNotFound).Maybe()
+	browser.EXPECT().FindAllByDiscriminator(mock.Anything, uint16(1234)).
+		Return(nil, nil).Maybe()
 	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
@@ -144,13 +145,13 @@ func TestCommissionDevice_PairingRequest_DeviceAppears(t *testing.T) {
 
 	callCount := 0
 	browser := mocks.NewMockBrowser(t)
-	browser.EXPECT().FindByDiscriminator(mock.Anything, uint16(1234)).
-		RunAndReturn(func(_ context.Context, _ uint16) (*discovery.CommissionableService, error) {
+	browser.EXPECT().FindAllByDiscriminator(mock.Anything, uint16(1234)).
+		RunAndReturn(func(_ context.Context, _ uint16) ([]*discovery.CommissionableService, error) {
 			callCount++
 			if callCount == 1 {
-				return nil, discovery.ErrNotFound
+				return nil, nil // No devices initially
 			}
-			return device, nil
+			return []*discovery.CommissionableService{device}, nil
 		}).Times(2)
 	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
@@ -208,8 +209,8 @@ func TestCommissionDevice_PairingRequest_Timeout(t *testing.T) {
 
 	// Mock browser - device never found
 	browser := mocks.NewMockBrowser(t)
-	browser.EXPECT().FindByDiscriminator(mock.Anything, uint16(1234)).
-		Return(nil, discovery.ErrNotFound).Maybe()
+	browser.EXPECT().FindAllByDiscriminator(mock.Anything, uint16(1234)).
+		Return(nil, nil).Maybe()
 	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
@@ -251,8 +252,8 @@ func TestCancelCommissioning_StopsPairingRequest(t *testing.T) {
 
 	// Mock browser - device never found
 	browser := mocks.NewMockBrowser(t)
-	browser.EXPECT().FindByDiscriminator(mock.Anything, uint16(1234)).
-		Return(nil, discovery.ErrNotFound).Maybe()
+	browser.EXPECT().FindAllByDiscriminator(mock.Anything, uint16(1234)).
+		Return(nil, nil).Maybe()
 	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
@@ -331,6 +332,7 @@ func TestCommissionDevice_PairingRequest_CleanupOnSuccess(t *testing.T) {
 	config.DiscoveryTimeout = 50 * time.Millisecond       // Short for test
 	config.ConnectionTimeout = 100 * time.Millisecond     // Short for test
 	config.PairingRequestTimeout = 500 * time.Millisecond // Short for test
+	config.PairingRequestPollInterval = 10 * time.Millisecond
 	svc, err := NewControllerService(config)
 	require.NoError(t, err)
 
@@ -351,13 +353,13 @@ func TestCommissionDevice_PairingRequest_CleanupOnSuccess(t *testing.T) {
 
 	callCount := 0
 	browser := mocks.NewMockBrowser(t)
-	browser.EXPECT().FindByDiscriminator(mock.Anything, uint16(1234)).
-		RunAndReturn(func(_ context.Context, _ uint16) (*discovery.CommissionableService, error) {
+	browser.EXPECT().FindAllByDiscriminator(mock.Anything, uint16(1234)).
+		RunAndReturn(func(_ context.Context, _ uint16) ([]*discovery.CommissionableService, error) {
 			callCount++
 			if callCount == 1 {
-				return nil, discovery.ErrNotFound
+				return nil, nil // No devices initially
 			}
-			return device, nil
+			return []*discovery.CommissionableService{device}, nil
 		}).Maybe()
 	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
@@ -410,8 +412,8 @@ func TestCommissionDevice_ContextCancellation(t *testing.T) {
 
 	// Mock browser - device never found
 	browser := mocks.NewMockBrowser(t)
-	browser.EXPECT().FindByDiscriminator(mock.Anything, uint16(1234)).
-		Return(nil, discovery.ErrNotFound).Maybe()
+	browser.EXPECT().FindAllByDiscriminator(mock.Anything, uint16(1234)).
+		Return(nil, nil).Maybe()
 	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 
@@ -480,10 +482,10 @@ func TestCommissionDevice_RequiresZoneID(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Mock browser - device not found (to trigger pairing request path)
+	// Mock browser - no devices found (to trigger pairing request path)
 	browser := mocks.NewMockBrowser(t)
-	browser.EXPECT().FindByDiscriminator(mock.Anything, uint16(1234)).
-		Return(nil, discovery.ErrNotFound).Maybe()
+	browser.EXPECT().FindAllByDiscriminator(mock.Anything, uint16(1234)).
+		Return(nil, nil).Maybe()
 	browser.EXPECT().Stop().Return().Maybe()
 	svc.SetBrowser(browser)
 

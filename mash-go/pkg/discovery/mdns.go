@@ -719,6 +719,30 @@ func (b *MDNSBrowser) FindByDiscriminator(ctx context.Context, discriminator uin
 	}
 }
 
+// FindAllByDiscriminator searches for all commissionable devices with the given discriminator.
+// Collects results until the context expires, then returns all matches found.
+func (b *MDNSBrowser) FindAllByDiscriminator(ctx context.Context, discriminator uint16) ([]*CommissionableService, error) {
+	added, _, err := b.BrowseCommissionable(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var results []*CommissionableService
+	for {
+		select {
+		case svc, ok := <-added:
+			if !ok {
+				return results, nil
+			}
+			if svc.Discriminator == discriminator {
+				results = append(results, svc)
+			}
+		case <-ctx.Done():
+			return results, nil // Return what we have, not an error
+		}
+	}
+}
+
 // Stop stops all active browsing operations.
 func (b *MDNSBrowser) Stop() {
 	b.mu.Lock()

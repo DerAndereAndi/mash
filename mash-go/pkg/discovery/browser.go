@@ -30,6 +30,11 @@ type Browser interface {
 	// Returns when found or when context is cancelled/timeout.
 	FindByDiscriminator(ctx context.Context, discriminator uint16) (*CommissionableService, error)
 
+	// FindAllByDiscriminator searches for all commissionable devices with the given discriminator.
+	// Collects results until the context expires, then returns all matches found.
+	// An empty result is not an error -- it means no matching devices were found.
+	FindAllByDiscriminator(ctx context.Context, discriminator uint16) ([]*CommissionableService, error)
+
 	// Stop stops all active browsing operations.
 	Stop()
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -390,7 +391,7 @@ func (s *ControllerService) Commission(ctx context.Context, service *discovery.C
 	sharedSecret, err := session.Handshake(ctx, conn)
 	if err != nil {
 		conn.Close()
-		return nil, ErrCommissionFailed
+		return nil, ErrPASEFailed
 	}
 
 	// Zone ID is derived from shared secret (both sides compute the same value)
@@ -526,17 +527,25 @@ func (s *ControllerService) CommissionDevice(ctx context.Context, discriminator 
 		timeout = DefaultPairingRequestTimeout
 	}
 
-	// First, try to find the device directly
+	// First, try to find devices directly (may find multiple with same discriminator)
 	discoverCtx, discoverCancel := context.WithTimeout(ctx, s.config.DiscoveryTimeout)
-	service, err := browser.FindByDiscriminator(discoverCtx, discriminator)
+	candidates, err := browser.FindAllByDiscriminator(discoverCtx, discriminator)
 	discoverCancel()
 
-	if err == nil && service != nil {
-		// Device found immediately - proceed with commissioning
-		return s.Commission(ctx, service, setupCode)
+	if len(candidates) > 0 {
+		result, err := commissionCandidates(ctx, candidates, setupCode, s.Commission)
+		if err == nil {
+			return result, nil
+		}
+		if !isPASEFailure(err) {
+			return nil, err
+		}
+		// All candidates failed PASE -- fall through to pairing request
+		// (the correct device may not be advertising yet)
 	}
+	_ = err // Browse errors are non-fatal here; we fall through to pairing request
 
-	// Device not found - need to announce pairing request
+	// No candidates found or all failed PASE - need to announce pairing request
 	// First check that we have a zone ID (required for pairing request)
 	if zoneID == "" {
 		return nil, ErrZoneIDRequired
@@ -608,6 +617,10 @@ func (s *ControllerService) CommissionDevice(ctx context.Context, discriminator 
 	timeoutTimer := time.NewTimer(timeout)
 	defer timeoutTimer.Stop()
 
+	// Track candidates that already failed PASE (deterministic -- wrong device
+	// will never succeed with the same setup code). Keyed by "host:port".
+	tried := make(map[string]struct{})
+
 	for {
 		select {
 		case <-pairingCtx.Done():
@@ -621,16 +634,42 @@ func (s *ControllerService) CommissionDevice(ctx context.Context, discriminator 
 			return nil, ErrPairingRequestTimeout
 
 		case <-ticker.C:
-			// Try to find the device again
+			// Discover all matching candidates
 			discoverCtx, discoverCancel := context.WithTimeout(pairingCtx, s.config.DiscoveryTimeout)
-			service, err := browser.FindByDiscriminator(discoverCtx, discriminator)
+			found, _ := browser.FindAllByDiscriminator(discoverCtx, discriminator)
 			discoverCancel()
 
-			if err == nil && service != nil {
-				// Device found! Proceed with commissioning
-				return s.Commission(ctx, service, setupCode)
+			if len(found) == 0 {
+				continue
 			}
-			// Device not found yet, continue polling
+
+			// Filter out already-tried candidates
+			var untried []*discovery.CommissionableService
+			for _, c := range found {
+				key := fmt.Sprintf("%s:%d", c.Host, c.Port)
+				if _, ok := tried[key]; !ok {
+					untried = append(untried, c)
+				}
+			}
+			if len(untried) == 0 {
+				continue
+			}
+
+			result, err := commissionCandidates(ctx, untried, setupCode, s.Commission)
+			if err == nil {
+				return result, nil
+			}
+
+			// Mark failed PASE candidates as tried
+			for _, c := range untried {
+				key := fmt.Sprintf("%s:%d", c.Host, c.Port)
+				tried[key] = struct{}{}
+			}
+
+			if !isPASEFailure(err) {
+				return nil, err
+			}
+			// All untried candidates failed PASE -- continue polling for new ones
 		}
 	}
 }
@@ -1131,6 +1170,39 @@ func (s *ControllerService) attemptReconnection(ctx context.Context, svc *discov
 	// Start message loop - blocks until connection closes
 	// Note: runDeviceMessageLoop calls handleDeviceSessionClose on exit
 	s.runDeviceMessageLoop(svc.DeviceID, framedConn, session)
+}
+
+// isPASEFailure reports whether the error is a PASE authentication failure,
+// which is retryable during discriminator collision handling.
+func isPASEFailure(err error) bool {
+	return errors.Is(err, ErrPASEFailed)
+}
+
+// commissionFunc is the signature for a function that commissions a single device.
+type commissionFunc func(context.Context, *discovery.CommissionableService, string) (*ConnectedDevice, error)
+
+// commissionCandidates tries to commission each candidate in order.
+// Returns on first success or first non-PASE error.
+// Returns the last error if all candidates fail with PASE errors.
+func commissionCandidates(
+	ctx context.Context,
+	candidates []*discovery.CommissionableService,
+	setupCode string,
+	commission commissionFunc,
+) (*ConnectedDevice, error) {
+	var lastErr error
+	for _, candidate := range candidates {
+		result, err := commission(ctx, candidate, setupCode)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		if !isPASEFailure(err) {
+			return nil, err // Non-retryable
+		}
+		// PASE failed -- try next candidate
+	}
+	return nil, lastErr
 }
 
 // buildOperationalTLSConfig creates a TLS config for operational (post-commissioning)

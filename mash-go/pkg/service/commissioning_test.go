@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -397,8 +398,8 @@ func TestControllerServiceCommissionWrongCode(t *testing.T) {
 		t.Error("Expected Commission to fail with wrong setup code")
 	}
 
-	if err != ErrCommissionFailed {
-		t.Errorf("Expected ErrCommissionFailed, got: %v", err)
+	if !errors.Is(err, ErrPASEFailed) {
+		t.Errorf("Expected ErrPASEFailed, got: %v", err)
 	}
 
 	// Verify no device is stored

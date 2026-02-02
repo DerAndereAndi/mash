@@ -253,6 +253,65 @@ func (_c *MockBrowser_BrowsePairingRequests_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// FindAllByDiscriminator provides a mock function with given fields: ctx, discriminator
+func (_m *MockBrowser) FindAllByDiscriminator(ctx context.Context, discriminator uint16) ([]*discovery.CommissionableService, error) {
+	ret := _m.Called(ctx, discriminator)
+
+	if len(ret) == 0 {
+		panic("no return value specified for FindAllByDiscriminator")
+	}
+
+	var r0 []*discovery.CommissionableService
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, uint16) ([]*discovery.CommissionableService, error)); ok {
+		return rf(ctx, discriminator)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, uint16) []*discovery.CommissionableService); ok {
+		r0 = rf(ctx, discriminator)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*discovery.CommissionableService)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, uint16) error); ok {
+		r1 = rf(ctx, discriminator)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBrowser_FindAllByDiscriminator_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindAllByDiscriminator'
+type MockBrowser_FindAllByDiscriminator_Call struct {
+	*mock.Call
+}
+
+// FindAllByDiscriminator is a helper method to define mock.On call
+//   - ctx context.Context
+//   - discriminator uint16
+func (_e *MockBrowser_Expecter) FindAllByDiscriminator(ctx interface{}, discriminator interface{}) *MockBrowser_FindAllByDiscriminator_Call {
+	return &MockBrowser_FindAllByDiscriminator_Call{Call: _e.mock.On("FindAllByDiscriminator", ctx, discriminator)}
+}
+
+func (_c *MockBrowser_FindAllByDiscriminator_Call) Run(run func(ctx context.Context, discriminator uint16)) *MockBrowser_FindAllByDiscriminator_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(uint16))
+	})
+	return _c
+}
+
+func (_c *MockBrowser_FindAllByDiscriminator_Call) Return(_a0 []*discovery.CommissionableService, _a1 error) *MockBrowser_FindAllByDiscriminator_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBrowser_FindAllByDiscriminator_Call) RunAndReturn(run func(context.Context, uint16) ([]*discovery.CommissionableService, error)) *MockBrowser_FindAllByDiscriminator_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FindByDiscriminator provides a mock function with given fields: ctx, discriminator
 func (_m *MockBrowser) FindByDiscriminator(ctx context.Context, discriminator uint16) (*discovery.CommissionableService, error) {
 	ret := _m.Called(ctx, discriminator)
