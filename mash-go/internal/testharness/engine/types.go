@@ -182,6 +182,13 @@ type EngineConfig struct {
 
 	// PICS is the PICS configuration to filter tests.
 	PICS *loader.PICSFile
+
+	// SetupPreconditions is called before step execution to fulfill
+	// test preconditions. The callback receives the test case and a
+	// fresh ExecutionState. It should establish whatever state the
+	// test's preconditions require (connections, sessions, etc.).
+	// If nil, preconditions are not evaluated.
+	SetupPreconditions func(ctx context.Context, tc *loader.TestCase, state *ExecutionState) error
 }
 
 // DefaultConfig returns the default engine configuration.

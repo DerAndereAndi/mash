@@ -110,6 +110,10 @@ func New(config *Config) *Runner {
 		pics:     pics,
 	}
 
+	// Set precondition callback (must be after r is created since it's a method on r).
+	// This works because NewWithConfig stores the *EngineConfig pointer.
+	engineConfig.SetupPreconditions = r.setupPreconditions
+
 	// Register enhanced checkers
 	engine.RegisterEnhancedCheckers(r.engine)
 

@@ -87,6 +87,17 @@ func (e *Engine) Run(ctx context.Context, tc *loader.TestCase) *TestResult {
 	// Create execution state
 	state := NewExecutionState(testCtx)
 
+	// Fulfill preconditions
+	if e.config.SetupPreconditions != nil {
+		if err := e.config.SetupPreconditions(testCtx, tc, state); err != nil {
+			result.Passed = false
+			result.Error = fmt.Errorf("precondition setup failed: %w", err)
+			result.EndTime = time.Now()
+			result.Duration = result.EndTime.Sub(result.StartTime)
+			return result
+		}
+	}
+
 	// Execute steps
 	for i := range tc.Steps {
 		step := &tc.Steps[i]
