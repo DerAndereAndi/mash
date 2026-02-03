@@ -115,7 +115,8 @@ type Config struct {
 	ProtocolLogFile string
 
 	// Test harness support
-	TestMode bool
+	TestMode  bool
+	EnableKey string // Hex-encoded 128-bit key for TestControl triggers
 }
 
 // DeviceType implements interactive.DeviceConfig.
@@ -158,6 +159,7 @@ func init() {
 	flag.StringVar(&config.ProtocolLogFile, "protocol-log", "", "File path for protocol event logging (CBOR format)")
 
 	flag.BoolVar(&config.TestMode, "test-mode", false, "Disable security hardening for test harness usage")
+	flag.StringVar(&config.EnableKey, "enable-key", "00112233445566778899aabbccddeeff", "128-bit hex key for TestControl triggers (32 hex chars)")
 }
 
 func main() {
@@ -198,6 +200,15 @@ func main() {
 	svcConfig.Categories = []discovery.DeviceCategory{deviceCategory}
 	svcConfig.ListenAddress = fmt.Sprintf(":%d", config.Port)
 	svcConfig.TestMode = config.TestMode
+	svcConfig.TestEnableKey = config.EnableKey
+
+	// In test mode, add TestControl feature to root endpoint.
+	var testControl *features.TestControl
+	if config.TestMode {
+		testControl = features.NewTestControl()
+		_ = testControl.SetTestEventTriggersEnabled(true)
+		device.RootEndpoint().AddFeature(testControl.Feature)
+	}
 
 	// Set up protocol logging if requested
 	var protocolLogger *mashlog.FileLogger
@@ -214,6 +225,13 @@ func main() {
 	svc, err := service.NewDeviceService(device, svcConfig)
 	if err != nil {
 		log.Fatalf("Failed to create device service: %v", err)
+	}
+
+	// Register test event trigger handler (must happen after service creation
+	// but before the wrapper is discarded).
+	if config.TestMode && testControl != nil {
+		svc.RegisterTestEventHandler(testControl)
+		log.Printf("TestControl feature enabled (enable-key: %s...)", config.EnableKey[:8])
 	}
 
 	// Wire per-zone "my" attribute notifications.
@@ -294,6 +312,12 @@ func main() {
 		}
 	}
 
+	// Disable simulation in test mode -- synthetic data would make test
+	// assertions non-deterministic.
+	if config.TestMode {
+		config.Simulate = false
+	}
+
 	// Set up simulation behavior
 	if config.Interactive {
 		log.Println("Interactive mode enabled - use 'start' to begin simulation")
@@ -368,6 +392,19 @@ func validateConfig() error {
 	default:
 		return fmt.Errorf("unknown device type: %s", config.Type)
 	}
+
+	// Validate enable key format if test mode is active.
+	if config.TestMode && config.EnableKey != "" {
+		if len(config.EnableKey) != 32 {
+			return fmt.Errorf("enable-key must be 32 hex characters (128-bit), got %d", len(config.EnableKey))
+		}
+		for _, c := range config.EnableKey {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return fmt.Errorf("enable-key contains non-hex character: %c", c)
+			}
+		}
+	}
+
 	return nil
 }
 
