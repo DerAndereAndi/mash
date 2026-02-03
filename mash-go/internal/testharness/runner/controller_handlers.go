@@ -175,12 +175,31 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 	if m, ok := params["minutes"].(float64); ok {
 		minutes = m
 	}
+	// Also accept duration_seconds param (convert to minutes).
+	if s, ok := params["duration_seconds"].(float64); ok {
+		minutes = s / 60.0
+	}
 
-	cs.commissioningWindowDuration = time.Duration(minutes) * time.Minute
+	// Validate bounds: min 3 minutes (180s), max 180 minutes (10800s).
+	const minMinutes = 3.0
+	const maxMinutes = 180.0
+	result := "ok"
+	if minutes < minMinutes || minutes > maxMinutes {
+		result = "clamped_or_rejected"
+		if minutes < minMinutes {
+			minutes = minMinutes
+		} else {
+			minutes = maxMinutes
+		}
+	}
+
+	cs.commissioningWindowDuration = time.Duration(minutes * float64(time.Minute))
 
 	return map[string]any{
-		"duration_set": true,
-		"minutes":      minutes,
+		"duration_set":     true,
+		"minutes":          minutes,
+		"duration_seconds": minutes * 60,
+		"result":           result,
 	}, nil
 }
 
@@ -188,8 +207,14 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 func (r *Runner) handleGetCommissioningWindowDuration(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	cs := getControllerState(state)
 
+	minutes := cs.commissioningWindowDuration.Minutes()
+	seconds := minutes * 60
+
 	return map[string]any{
-		"minutes": cs.commissioningWindowDuration.Minutes(),
+		"minutes":              minutes,
+		"duration_seconds":     seconds,
+		"duration_seconds_min": seconds,
+		"duration_seconds_max": seconds,
 	}, nil
 }
 

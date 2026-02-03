@@ -405,9 +405,19 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		// Use operational TLS config with Zone CA validation (no hostname check).
 		tlsConfig = r.operationalTLSConfig()
 	} else {
+		// When no Zone CA exists, accept self-signed certs since there's
+		// no trusted root to verify against yet.
+		skipVerify := true
+		if !insecure {
+			// Only enforce verification if explicitly set to false AND
+			// accept_self_signed is also explicitly false.
+			if a, ok := step.Params["accept_self_signed"].(bool); ok && !a {
+				skipVerify = false
+			}
+		}
 		tlsConfig = &tls.Config{
 			MinVersion:         tls.VersionTLS13,
-			InsecureSkipVerify: insecure,
+			InsecureSkipVerify: skipVerify,
 			NextProtos:         []string{transport.ALPNProtocol},
 		}
 	}
@@ -423,6 +433,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			"tls_handshake_success":  false,
 			"target":                 target,
 			"error":                  err.Error(),
+			"error_code":             classifyConnectError(err),
 			"tls_error":              err.Error(),
 			"tls_alert":              extractTLSAlert(err),
 		}, nil
@@ -461,7 +472,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		"connected":              true,
 		"tls_handshake_success":  true,
 		"target":                 target,
-		"tls_version":            cs.Version,
+		"tls_version":            tlsVersionName(cs.Version),
 		"negotiated_version":     tlsVersionName(cs.Version),
 		"negotiated_cipher":      tls.CipherSuiteName(cs.CipherSuite),
 		"negotiated_group":       curveIDName(cs.CurveID),
@@ -880,4 +891,22 @@ func extractTLSAlert(err error) string {
 	}
 	// Return the full error as fallback.
 	return msg
+}
+
+// classifyConnectError returns a short error code for connection failures.
+func classifyConnectError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline"):
+		return "TIMEOUT"
+	case strings.Contains(msg, "connection refused"):
+		return "CONNECTION_FAILED"
+	case strings.Contains(msg, "tls") || strings.Contains(msg, "certificate"):
+		return "TLS_ERROR"
+	default:
+		return "CONNECTION_ERROR"
+	}
 }

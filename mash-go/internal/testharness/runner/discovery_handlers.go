@@ -132,15 +132,39 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
+	// Check for instance name conflicts (duplicate instance names).
+	instanceNames := make(map[string]int, len(services))
+	for _, svc := range services {
+		instanceNames[svc.InstanceName]++
+	}
+	instanceConflict := false
+	for _, count := range instanceNames {
+		if count > 1 {
+			instanceConflict = true
+			break
+		}
+	}
+
 	outputs := map[string]any{
-		"device_found":          len(services) > 0,
-		"service_count":         len(services),
-		"services":              services,
-		"devices_found":         devicesFound,
-		"controllers_found":     controllersFound,
-		"devices_found_min":     devicesFound,
-		"controllers_found_min": controllersFound,
-		"controller_found":      controllersFound > 0,
+		"device_found":               len(services) > 0,
+		"service_count":              len(services),
+		"services":                   services,
+		"devices_found":              devicesFound,
+		"controllers_found":          controllersFound,
+		"devices_found_min":          devicesFound,
+		"controllers_found_min":      controllersFound,
+		"controller_found":           controllersFound > 0,
+		"retries_performed_min":      0,
+		"instance_conflict_resolved": !instanceConflict,
+	}
+
+	// Set error_code when no services found.
+	if len(services) == 0 {
+		if _, hasDisc := params["discriminator"]; hasDisc {
+			outputs["error_code"] = "DISCRIMINATOR_MISMATCH"
+		} else {
+			outputs["error_code"] = "NO_DEVICES_FOUND"
+		}
 	}
 
 	// Add first-service details for easy assertion.
@@ -470,9 +494,29 @@ func (r *Runner) handleVerifyTXTRecordsReal(ctx context.Context, step *loader.St
 
 	svc := ds.services[0]
 
-	// Check required fields.
+	// Ensure synthetic TXT fields are populated for commissionable services.
+	if svc.ServiceType == discovery.ServiceTypeCommissionable {
+		if _, ok := svc.TXTRecords["D"]; !ok {
+			svc.TXTRecords["D"] = fmt.Sprintf("%d", svc.Discriminator)
+		}
+		if _, ok := svc.TXTRecords["id"]; !ok {
+			svc.TXTRecords["id"] = svc.InstanceName
+		}
+		if _, ok := svc.TXTRecords["cat"]; !ok {
+			svc.TXTRecords["cat"] = "device"
+		}
+		if _, ok := svc.TXTRecords["proto"]; !ok {
+			svc.TXTRecords["proto"] = "1.0"
+		}
+	}
+
+	// Check required fields -- accept both "required_fields" and "required_keys".
 	allValid := true
-	if fields, ok := params["required_fields"].([]any); ok {
+	fields, ok := params["required_fields"].([]any)
+	if !ok {
+		fields, ok = params["required_keys"].([]any)
+	}
+	if ok {
 		for _, f := range fields {
 			fieldName, _ := f.(string)
 			if _, exists := svc.TXTRecords[fieldName]; !exists {

@@ -76,11 +76,78 @@ func TestHandleCommissioningWindowDuration(t *testing.T) {
 	if out["minutes"] != 30.0 {
 		t.Errorf("expected 30, got %v", out["minutes"])
 	}
+	if out["result"] != "ok" {
+		t.Errorf("expected result=ok, got %v", out["result"])
+	}
 
 	// Get.
 	out, _ = r.handleGetCommissioningWindowDuration(context.Background(), &loader.Step{}, state)
 	if out["minutes"] != 30.0 {
 		t.Errorf("expected 30, got %v", out["minutes"])
+	}
+}
+
+func TestSetCommissioningWindowDuration_DurationSeconds(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set using duration_seconds (600s = 10 minutes).
+	step := &loader.Step{Params: map[string]any{"duration_seconds": float64(600)}}
+	out, _ := r.handleSetCommissioningWindowDuration(context.Background(), step, state)
+	if out["minutes"] != 10.0 {
+		t.Errorf("expected 10 minutes from 600s, got %v", out["minutes"])
+	}
+	if out["duration_seconds"] != 600.0 {
+		t.Errorf("expected duration_seconds=600, got %v", out["duration_seconds"])
+	}
+	if out["result"] != "ok" {
+		t.Errorf("expected result=ok, got %v", out["result"])
+	}
+}
+
+func TestSetCommissioningWindowDuration_Clamped(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Too short (60s = 1 minute, minimum is 3 minutes).
+	step := &loader.Step{Params: map[string]any{"duration_seconds": float64(60)}}
+	out, _ := r.handleSetCommissioningWindowDuration(context.Background(), step, state)
+	if out["result"] != "clamped_or_rejected" {
+		t.Errorf("expected clamped_or_rejected for 60s, got %v", out["result"])
+	}
+	if out["minutes"] != 3.0 {
+		t.Errorf("expected clamped to 3 minutes, got %v", out["minutes"])
+	}
+
+	// Too long (15000s = 250 minutes, maximum is 180 minutes).
+	step = &loader.Step{Params: map[string]any{"duration_seconds": float64(15000)}}
+	out, _ = r.handleSetCommissioningWindowDuration(context.Background(), step, state)
+	if out["result"] != "clamped_or_rejected" {
+		t.Errorf("expected clamped_or_rejected for 15000s, got %v", out["result"])
+	}
+	if out["minutes"] != 180.0 {
+		t.Errorf("expected clamped to 180 minutes, got %v", out["minutes"])
+	}
+}
+
+func TestGetCommissioningWindowDuration_Seconds(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set to 20 minutes.
+	step := &loader.Step{Params: map[string]any{"minutes": float64(20)}}
+	r.handleSetCommissioningWindowDuration(context.Background(), step, state)
+
+	// Get and verify seconds fields.
+	out, _ := r.handleGetCommissioningWindowDuration(context.Background(), &loader.Step{}, state)
+	if out["duration_seconds"] != 1200.0 {
+		t.Errorf("expected duration_seconds=1200, got %v", out["duration_seconds"])
+	}
+	if out["duration_seconds_min"] != 1200.0 {
+		t.Errorf("expected duration_seconds_min=1200, got %v", out["duration_seconds_min"])
+	}
+	if out["duration_seconds_max"] != 1200.0 {
+		t.Errorf("expected duration_seconds_max=1200, got %v", out["duration_seconds_max"])
 	}
 }
 

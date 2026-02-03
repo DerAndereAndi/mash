@@ -86,13 +86,15 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 		target = t
 	}
 
+	// When no Zone CA exists, default to InsecureSkipVerify since there's
+	// no trusted root to verify against.
 	var tlsConfig *tls.Config
 	if r.zoneCAPool != nil {
 		tlsConfig = r.operationalTLSConfig()
 	} else {
 		tlsConfig = &tls.Config{
 			MinVersion:         tls.VersionTLS13,
-			InsecureSkipVerify: r.config.InsecureSkipVerify,
+			InsecureSkipVerify: true,
 			NextProtos:         []string{transport.ALPNProtocol},
 		}
 	}
@@ -100,7 +102,12 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
-		return nil, fmt.Errorf("connect as zone failed: %w", err)
+		return map[string]any{
+			"connection_established": false,
+			"zone_id":                zoneID,
+			"error":                  err.Error(),
+			"error_code":             classifyConnectError(err),
+		}, nil
 	}
 
 	newConn := &Connection{

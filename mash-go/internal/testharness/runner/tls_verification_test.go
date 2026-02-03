@@ -1,16 +1,19 @@
 package runner
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
 
+	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 )
 
@@ -188,5 +191,69 @@ func TestOperationalTLSConfig_NoZoneCA_FallsBack(t *testing.T) {
 	// Should NOT have custom verifier.
 	if tlsConfig.VerifyPeerCertificate != nil {
 		t.Error("expected no VerifyPeerCertificate when no zone CA")
+	}
+}
+
+func TestClassifyConnectError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"nil", nil, ""},
+		{"timeout", fmt.Errorf("dial tcp: i/o timeout"), "TIMEOUT"},
+		{"deadline", fmt.Errorf("context deadline exceeded"), "TIMEOUT"},
+		{"refused", fmt.Errorf("dial tcp 127.0.0.1:8443: connection refused"), "CONNECTION_FAILED"},
+		{"tls", fmt.Errorf("tls: bad certificate"), "TLS_ERROR"},
+		{"certificate", fmt.Errorf("x509: certificate signed by unknown authority"), "TLS_ERROR"},
+		{"generic", fmt.Errorf("some other error"), "CONNECTION_ERROR"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyConnectError(tt.err)
+			if got != tt.want {
+				t.Errorf("classifyConnectError(%v) = %q, want %q", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTLSVersionName(t *testing.T) {
+	if v := tlsVersionName(tls.VersionTLS13); v != "1.3" {
+		t.Errorf("expected '1.3', got %q", v)
+	}
+	if v := tlsVersionName(tls.VersionTLS12); v != "1.2" {
+		t.Errorf("expected '1.2', got %q", v)
+	}
+	if v := tlsVersionName(0); v == "1.3" {
+		t.Error("expected non-1.3 for unknown version")
+	}
+}
+
+func TestHandleConnectOperational_ErrorOutputs(t *testing.T) {
+	r := &Runner{
+		config: &Config{Target: "127.0.0.1:1"},
+		conn:   &Connection{},
+	}
+	state := newTestState()
+
+	step := &loader.Step{Params: map[string]any{
+		"target":  "127.0.0.1:1",
+		"zone_id": "zone-test",
+	}}
+	out, err := r.handleConnectOperational(context.Background(), step, state)
+	// Should return output map, not an error.
+	if err != nil {
+		t.Fatalf("expected nil error (output map), got: %v", err)
+	}
+	if out["connection_established"] != false {
+		t.Error("expected connection_established=false")
+	}
+	if _, ok := out["error_code"]; !ok {
+		t.Error("expected error_code key in output")
+	}
+	if _, ok := out["error"]; !ok {
+		t.Error("expected error key in output")
 	}
 }

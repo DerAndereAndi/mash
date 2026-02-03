@@ -122,6 +122,15 @@ func TestHandleDeviceVerifyPeerNotConnected(t *testing.T) {
 	if out["peer_valid"] != false {
 		t.Error("expected peer_valid=false when not connected")
 	}
+	if out["verification_success"] != false {
+		t.Error("expected verification_success=false when not connected")
+	}
+	if out["same_zone_ca"] != false {
+		t.Error("expected same_zone_ca=false when not connected")
+	}
+	if out["error"] != "no active connection" {
+		t.Errorf("expected 'no active connection' error, got %v", out["error"])
+	}
 }
 
 func TestHandleVerifyDeviceCert_NotConnected(t *testing.T) {

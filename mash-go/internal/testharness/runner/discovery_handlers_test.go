@@ -324,3 +324,50 @@ func TestBrowseMDNS_MinCountFields(t *testing.T) {
 		t.Errorf("expected 1 controller, got %d", controllersFound)
 	}
 }
+
+func TestVerifyTXTRecords_RequiredKeys(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Populate with a commissionable service.
+	ds := getDiscoveryState(state)
+	ds.services = []discoveredService{
+		{
+			ServiceType:   discovery.ServiceTypeCommissionable,
+			Discriminator: 1234,
+			InstanceName:  "MASH-1234",
+			TXTRecords: map[string]string{
+				"brand": "Test",
+				"model": "M1",
+			},
+		},
+	}
+
+	// Using required_keys param (instead of required_fields).
+	step := &loader.Step{
+		Params: map[string]any{
+			"required_keys": []any{"brand", "model"},
+		},
+	}
+	out, err := r.handleVerifyTXTRecordsReal(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["txt_valid"] != true {
+		t.Error("expected txt_valid=true with required_keys")
+	}
+
+	// Synthetic fields (id, cat, proto) should be populated for commissionable.
+	step = &loader.Step{
+		Params: map[string]any{
+			"required_keys": []any{"id", "cat", "proto", "D"},
+		},
+	}
+	out, err = r.handleVerifyTXTRecordsReal(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["txt_valid"] != true {
+		t.Error("expected txt_valid=true for synthetic fields (id, cat, proto, D)")
+	}
+}

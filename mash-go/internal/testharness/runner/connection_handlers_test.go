@@ -326,6 +326,31 @@ func TestHandleSendRaw_HexDecode(t *testing.T) {
 // Phase 7: subscribe_multiple param format tests
 // ============================================================================
 
+func TestHandleConnectAsZone_ErrorOutputs(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "127.0.0.1:1" // unreachable port
+	state := newTestState()
+
+	step := &loader.Step{Params: map[string]any{
+		"zone_id": "zone-test",
+		"target":  "127.0.0.1:1",
+	}}
+	out, err := r.handleConnectAsZone(context.Background(), step, state)
+	// Should return output map, not an error.
+	if err != nil {
+		t.Fatalf("expected nil error (output map), got: %v", err)
+	}
+	if out["connection_established"] != false {
+		t.Error("expected connection_established=false")
+	}
+	if out["zone_id"] != "zone-test" {
+		t.Errorf("expected zone_id=zone-test, got %v", out["zone_id"])
+	}
+	if _, ok := out["error_code"]; !ok {
+		t.Error("expected error_code key in output")
+	}
+}
+
 func TestSubscribeMultiple_NeitherParam(t *testing.T) {
 	r := newTestRunner()
 	r.conn.connected = true

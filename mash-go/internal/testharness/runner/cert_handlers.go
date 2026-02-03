@@ -250,14 +250,46 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 // handleDeviceVerifyPeer verifies peer cert in D2D scenario.
 func (r *Runner) handleDeviceVerifyPeer(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
-		return map[string]any{"peer_valid": false}, nil
+		return map[string]any{
+			"peer_valid":           false,
+			"verification_success": false,
+			"same_zone_ca":         false,
+			"error":                "no active connection",
+		}, nil
 	}
 
 	tlsState := r.conn.tlsConn.ConnectionState()
 	hasPeerCert := len(tlsState.PeerCertificates) > 0
 
+	verificationSuccess := false
+	sameZoneCA := false
+	verifyError := ""
+
+	if hasPeerCert {
+		verificationSuccess = true // peer cert exists
+
+		// If Zone CA is available, verify peer cert against it.
+		if r.zoneCAPool != nil {
+			opts := x509.VerifyOptions{
+				Roots:     r.zoneCAPool,
+				KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+			}
+			if _, err := tlsState.PeerCertificates[0].Verify(opts); err != nil {
+				sameZoneCA = false
+				verifyError = err.Error()
+			} else {
+				sameZoneCA = true
+			}
+		}
+	} else {
+		verifyError = "no peer certificate"
+	}
+
 	return map[string]any{
-		"peer_valid": hasPeerCert,
+		"peer_valid":           hasPeerCert,
+		"verification_success": verificationSuccess,
+		"same_zone_ca":         sameZoneCA,
+		"error":                verifyError,
 	}, nil
 }
 
