@@ -188,8 +188,14 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 	// Derive zone ID from PASE shared secret (same derivation as device).
 	zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
 
+	// Use the configured zone type, defaulting to LOCAL.
+	zt := r.commissionZoneType
+	if zt == 0 {
+		zt = cert.ZoneTypeLocal
+	}
+
 	// Generate Zone CA for this zone.
-	zoneCA, err := cert.GenerateZoneCA(zoneID, cert.ZoneTypeLocal)
+	zoneCA, err := cert.GenerateZoneCA(zoneID, zt)
 	if err != nil {
 		return "", fmt.Errorf("generate zone CA: %w", err)
 	}

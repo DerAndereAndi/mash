@@ -77,7 +77,7 @@ func TestZoneDeleteRemove(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeUserApp, KeyZoneID: "u1"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeHomeManager, KeyZoneID: "u1"}}
 	_, _ = r.handleCreateZone(context.Background(), step, state)
 
 	// Delete it.
@@ -109,7 +109,7 @@ func TestHighestPriorityZone(t *testing.T) {
 	state := newTestState()
 
 	// Create zones with different priorities.
-	step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeUserApp, KeyZoneID: "user"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeHomeManager, KeyZoneID: "user"}}
 	_, _ = r.handleCreateZone(context.Background(), step, state)
 
 	step = &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeGridOperator, KeyZoneID: "grid"}}

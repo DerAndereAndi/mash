@@ -81,6 +81,64 @@ func TestMultiZoneValueLimits(t *testing.T) {
 	})
 }
 
+func TestZoneTypeTestExcludedFromLimits(t *testing.T) {
+	t.Run("TestZoneIgnored", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-grid", cert.ZoneTypeGrid, 3000, 0)
+		mzv.Set("zone-test", cert.ZoneTypeTest, 1000, 0) // Would be most restrictive, but should be ignored
+
+		val, zoneID := mzv.ResolveLimits()
+		if val == nil || *val != 3000 {
+			t.Errorf("ResolveLimits() = %v, want 3000 (TEST zone should be ignored)", val)
+		}
+		if zoneID != "zone-grid" {
+			t.Errorf("zoneID = %q, want %q", zoneID, "zone-grid")
+		}
+	})
+
+	t.Run("OnlyTestZoneReturnsNil", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-test", cert.ZoneTypeTest, 5000, 0)
+
+		val, zoneID := mzv.ResolveLimits()
+		if val != nil {
+			t.Errorf("ResolveLimits() = %v, want nil (only TEST zone values)", *val)
+		}
+		if zoneID != "" {
+			t.Errorf("zoneID = %q, want empty", zoneID)
+		}
+	})
+}
+
+func TestZoneTypeTestExcludedFromSetpoints(t *testing.T) {
+	t.Run("TestZoneIgnored", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-local", cert.ZoneTypeLocal, 8000, 0)
+		mzv.Set("zone-test", cert.ZoneTypeTest, 2000, 0) // Higher priority number but should be ignored
+
+		val, zoneID := mzv.ResolveSetpoints()
+		if val == nil || *val != 8000 {
+			t.Errorf("ResolveSetpoints() = %v, want 8000 (TEST zone should be ignored)", val)
+		}
+		if zoneID != "zone-local" {
+			t.Errorf("zoneID = %q, want %q", zoneID, "zone-local")
+		}
+	})
+
+	t.Run("OnlyTestZoneReturnsNil", func(t *testing.T) {
+		mzv := NewMultiZoneValue()
+		mzv.Set("zone-test", cert.ZoneTypeTest, 5000, 0)
+
+		val, zoneID := mzv.ResolveSetpoints()
+		if val != nil {
+			t.Errorf("ResolveSetpoints() = %v, want nil (only TEST zone values)", *val)
+		}
+		if zoneID != "" {
+			t.Errorf("zoneID = %q, want empty", zoneID)
+		}
+	})
+}
+
 func TestMultiZoneValueSetpoints(t *testing.T) {
 	t.Run("HighestPriorityWins", func(t *testing.T) {
 		mzv := NewMultiZoneValue()
@@ -197,7 +255,7 @@ func TestManager(t *testing.T) {
 	t.Run("MaxZonesExceeded", func(t *testing.T) {
 		m := NewManager()
 
-		// Add both allowed zone types (GRID + LOCAL = 2 zones = MaxZones)
+		// Add all allowed zone types (GRID + LOCAL + TEST = 3 = MaxZones)
 		err := m.AddZone("grid-zone", cert.ZoneTypeGrid)
 		if err != nil {
 			t.Fatalf("AddZone(grid-zone) error = %v", err)
@@ -205,6 +263,10 @@ func TestManager(t *testing.T) {
 		err = m.AddZone("local-zone", cert.ZoneTypeLocal)
 		if err != nil {
 			t.Fatalf("AddZone(local-zone) error = %v", err)
+		}
+		err = m.AddZone("test-zone", cert.ZoneTypeTest)
+		if err != nil {
+			t.Fatalf("AddZone(test-zone) error = %v", err)
 		}
 
 		// Verify we're at capacity
@@ -409,7 +471,7 @@ func TestZoneTypeEnforcement(t *testing.T) {
 	t.Run("TypeCheckBeforeCapacityCheck", func(t *testing.T) {
 		m := NewManager()
 
-		// Add both zone types to reach capacity (MaxZones = 2)
+		// Fill all zone types to reach capacity (MaxZones = 3)
 		err := m.AddZone("grid-1", cert.ZoneTypeGrid)
 		if err != nil {
 			t.Fatalf("AddZone(grid-1) error = %v", err)
@@ -417,6 +479,10 @@ func TestZoneTypeEnforcement(t *testing.T) {
 		err = m.AddZone("local-1", cert.ZoneTypeLocal)
 		if err != nil {
 			t.Fatalf("AddZone(local-1) error = %v", err)
+		}
+		err = m.AddZone("test-1", cert.ZoneTypeTest)
+		if err != nil {
+			t.Fatalf("AddZone(test-1) error = %v", err)
 		}
 
 		// Now at capacity. Try to add another GRID zone.
@@ -428,10 +494,10 @@ func TestZoneTypeEnforcement(t *testing.T) {
 		}
 	})
 
-	t.Run("MaxZonesIsTwo", func(t *testing.T) {
-		// Verify MaxZones constant is 2 (one GRID + one LOCAL per DEC-043)
-		if MaxZones != 2 {
-			t.Errorf("MaxZones = %d, want 2", MaxZones)
+	t.Run("MaxZonesIsThree", func(t *testing.T) {
+		// Verify MaxZones constant is 3 (GRID + LOCAL + TEST per DEC-060)
+		if MaxZones != 3 {
+			t.Errorf("MaxZones = %d, want 3", MaxZones)
 		}
 	})
 }

@@ -88,6 +88,8 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 	zt := cert.ZoneTypeLocal
 	if zoneType == "GRID" || zoneType == ZoneTypeGridOperator {
 		zt = cert.ZoneTypeGrid
+	} else if zoneType == "TEST" || zoneType == ZoneTypeTest {
+		zt = cert.ZoneTypeTest
 	}
 	if zoneCA, err := cert.GenerateZoneCA(zoneID, zt); err == nil {
 		r.zoneCA = zoneCA

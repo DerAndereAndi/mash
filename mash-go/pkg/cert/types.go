@@ -24,8 +24,9 @@ const (
 )
 
 // MaxZones is the maximum number of zones a device can belong to.
-// Per DEC-043: one GRID zone + one LOCAL zone = 2 zones maximum.
-const MaxZones = 2
+// Per DEC-043/DEC-060: GRID + LOCAL + TEST = 3 zones maximum.
+// TEST zones are only accepted when DeviceConfig.TestMode is true.
+const MaxZones = 3
 
 // KeyPair holds an ECDSA P-256 key pair for MASH cryptographic operations.
 type KeyPair struct {
@@ -57,6 +58,7 @@ type ZoneType uint8
 const (
 	ZoneTypeGrid  ZoneType = 1 // External/regulatory authority (DSO, SMGW, aggregators)
 	ZoneTypeLocal ZoneType = 2 // Local energy management (EMS, residential or commercial)
+	ZoneTypeTest  ZoneType = 3 // Test-only observer zone (DEC-060), excluded from limit/setpoint resolution
 )
 
 // String returns a human-readable zone type name.
@@ -66,6 +68,8 @@ func (zt ZoneType) String() string {
 		return "GRID"
 	case ZoneTypeLocal:
 		return "LOCAL"
+	case ZoneTypeTest:
+		return "TEST"
 	default:
 		return "UNKNOWN"
 	}

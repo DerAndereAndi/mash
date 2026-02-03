@@ -3491,6 +3491,39 @@ The hybrid trigger with MinMessages floor ensures:
 
 ---
 
+### DEC-060: TEST Zone Type for Conformance Testing
+
+**Date:** 2026-02-03
+**Status:** Accepted
+
+**Context:** The conformance test harness needs to connect to a device alongside real controllers (GRID, LOCAL) to read feature data and send test commands. Without a dedicated zone type, the test harness would consume one of the device's two production zone slots. Additionally, the device was hardcoding `ZoneTypeLocal` for all incoming zones instead of extracting the zone type from the Zone CA certificate's OrganizationalUnit field.
+
+**Decision:**
+
+1. Add `ZoneTypeTest` (value 3, priority 3/lowest) as a new zone type.
+2. TEST zones are pure observers: excluded from limit resolution (most-restrictive-wins) and setpoint resolution (highest-priority-wins).
+3. TEST zones are only accepted when `DeviceConfig.TestMode == true`.
+4. `MaxZones` bumped from 2 to 3 (GRID + LOCAL + TEST). In production, `DefaultDeviceConfig()` keeps `MaxZones: 2`; when `TestMode` is enabled, the constructor bumps it to 3.
+5. Extract zone type from the Zone CA certificate's `OrganizationalUnit[0]` field via new `ExtractZoneTypeFromCert()` function. This fixes the existing bug where all zones were treated as LOCAL regardless of the certificate content.
+
+**Rationale:**
+
+- A dedicated zone type prevents test infrastructure from consuming production zone slots
+- Observer-only semantics ensure test zones cannot interfere with limit/setpoint resolution
+- Gating behind `TestMode` prevents TEST zones in production deployments
+- Extracting zone type from the certificate is necessary regardless (pre-existing bug)
+- Priority 3 (lowest) means TEST zones never win in any resolution algorithm
+
+**Declined Alternatives:**
+
+- **Use LOCAL zone for testing:** Would consume the device's only LOCAL slot, preventing multi-zone conformance testing.
+- **Add a separate test connection type outside the zone model:** More complex, would require a parallel connection management path.
+- **Always allow TEST zones:** Security concern -- production devices should not accept observer connections without explicit opt-in.
+
+**Related:** DEC-043 (one zone per type), DEC-047 (commissioning security), DEC-059 (auto recommission)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -3622,3 +3655,4 @@ Key learnings:
 | 2026-02-01 | Added DEC-057: Integer use case IDs and scenario bitmaps. Replaces string names with uint16 IDs on the wire. Adds uint32 scenario bitmap to UseCaseDecl. Matter-inspired atomic scenario contracts. All 11 use case YAMLs restructured with scenarios. |
 | 2026-02-02 | Added DEC-058: Capability snapshots in protocol logs. Logging-layer mechanism to periodically emit device model snapshots with hybrid time/count trigger and MinMessages floor. Addresses discovery data loss on long-lived connections. |
 | 2026-02-02 | Added DEC-059: Auto re-enter commissioning on last zone removal. Device calls EnterCommissioningMode() when RemoveZone reduces zone count to 0. Test harness sends RemoveZone on backward precondition transitions. |
+| 2026-02-03 | Added DEC-060: TEST zone type for conformance testing. ZoneTypeTest=3, observer-only (excluded from limit/setpoint resolution), gated behind TestMode, MaxZones bumped to 3. Fixed zone type extraction from Zone CA certificate. |

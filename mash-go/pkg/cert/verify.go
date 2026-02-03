@@ -148,6 +148,30 @@ func GetCertificateInfo(cert *x509.Certificate) *CertificateInfo {
 	}
 }
 
+// ErrUnknownZoneType is returned when the zone type cannot be determined from a certificate.
+var ErrUnknownZoneType = errors.New("unknown zone type in certificate")
+
+// ExtractZoneTypeFromCert extracts the zone type from a Zone CA certificate's
+// OrganizationalUnit[0] field. The zone type is embedded during GenerateZoneCA.
+func ExtractZoneTypeFromCert(c *x509.Certificate) (ZoneType, error) {
+	if c == nil {
+		return 0, ErrInvalidCert
+	}
+	if len(c.Subject.OrganizationalUnit) == 0 {
+		return 0, fmt.Errorf("%w: no OrganizationalUnit in certificate", ErrUnknownZoneType)
+	}
+	switch c.Subject.OrganizationalUnit[0] {
+	case "GRID":
+		return ZoneTypeGrid, nil
+	case "LOCAL":
+		return ZoneTypeLocal, nil
+	case "TEST":
+		return ZoneTypeTest, nil
+	default:
+		return 0, fmt.Errorf("%w: %q", ErrUnknownZoneType, c.Subject.OrganizationalUnit[0])
+	}
+}
+
 // bytesEqual compares two byte slices for equality.
 func bytesEqual(a, b []byte) bool {
 	if len(a) != len(b) {

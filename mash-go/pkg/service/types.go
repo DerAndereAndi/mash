@@ -369,7 +369,7 @@ func (c *ControllerConfig) Validate() error {
 	if c.ZoneName == "" {
 		return ErrInvalidConfig
 	}
-	if c.ZoneType < cert.ZoneTypeGrid || c.ZoneType > cert.ZoneTypeLocal {
+	if c.ZoneType < cert.ZoneTypeGrid || c.ZoneType > cert.ZoneTypeTest {
 		return ErrInvalidConfig
 	}
 	return nil

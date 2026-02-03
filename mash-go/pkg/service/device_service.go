@@ -152,6 +152,11 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 		svc.config.CommissioningWindowDuration = 24 * time.Hour
 	}
 
+	// In test mode, bump MaxZones to 3 (GRID + LOCAL + TEST) if still at default 2 (DEC-060).
+	if config.TestMode && svc.config.MaxZones == 2 {
+		svc.config.MaxZones = 3
+	}
+
 	// Register service-level commands on DeviceInfo feature
 	svc.registerDeviceCommands()
 
@@ -592,9 +597,22 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// Store Zone CA for future verification of controller connections
 	_ = zoneCA // Zone CA already stored in performCertExchange
 
+	// Extract zone type from the Zone CA certificate's OU field.
+	// Falls back to LOCAL if extraction fails (backward compatibility).
+	zoneType := cert.ZoneTypeLocal
+	if zt, err := cert.ExtractZoneTypeFromCert(zoneCA); err == nil {
+		zoneType = zt
+	}
+
+	// Reject TEST zones unless the device is in test mode (DEC-060).
+	if zoneType == cert.ZoneTypeTest && !s.config.TestMode {
+		s.debugLog("handleCommissioningConnection: TEST zone rejected (TestMode disabled)", "zoneID", zoneID)
+		conn.Close()
+		return
+	}
+
 	// Register the zone connection
-	// Zone type derived from certificate (defaults to Local for now)
-	s.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
+	s.HandleZoneConnect(zoneID, zoneType)
 
 	// Persist state immediately after commissioning
 	_ = s.SaveState()
@@ -619,7 +637,7 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// Create zone session for this connection
 	zoneSession := NewZoneSession(zoneID, framedConn, s.device)
 	zoneSession.SetLogger(s.logger)
-	zoneSession.SetZoneType(cert.ZoneTypeLocal)
+	zoneSession.SetZoneType(zoneType)
 
 	// Set snapshot policy and protocol logger if configured
 	zoneSession.SetSnapshotPolicy(s.config.SnapshotPolicy)
@@ -1122,6 +1140,12 @@ func (s *DeviceService) GetAllZones() []*ConnectedZone {
 
 // HandleZoneConnect handles a new zone connection.
 func (s *DeviceService) HandleZoneConnect(zoneID string, zoneType cert.ZoneType) {
+	// Reject TEST zones unless in test mode (DEC-060).
+	if zoneType == cert.ZoneTypeTest && !s.config.TestMode {
+		s.debugLog("HandleZoneConnect: TEST zone rejected", "zoneID", zoneID)
+		return
+	}
+
 	s.mu.Lock()
 
 	// Create connected zone record

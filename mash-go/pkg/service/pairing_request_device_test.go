@@ -12,7 +12,6 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
 	"github.com/mash-protocol/mash-go/pkg/model"
-	"github.com/mash-protocol/mash-go/pkg/zone"
 )
 
 // TestDevice_PairingRequestListening_UncommissionedOpensWindow verifies that
@@ -190,7 +189,7 @@ func TestDevice_PairingRequestListening_MaxZonesIgnores(t *testing.T) {
 	device := model.NewDevice("test-device", 0x1234, 0x5678)
 	config := validDeviceConfig()
 	config.ListenForPairingRequests = true
-	config.MaxZones = zone.MaxZones // Ensure we use the actual max
+	config.MaxZones = 2 // Production default: 1 GRID + 1 LOCAL // Ensure we use the actual max
 
 	svc, err := NewDeviceService(device, config)
 	if err != nil {
@@ -412,7 +411,7 @@ func TestDevice_PairingRequestListening_StopOnMaxZones(t *testing.T) {
 	device := model.NewDevice("test-device", 0x1234, 0x5678)
 	config := validDeviceConfig()
 	config.ListenForPairingRequests = true
-	config.MaxZones = zone.MaxZones
+	config.MaxZones = 2 // Production default: 1 GRID + 1 LOCAL
 
 	svc, err := NewDeviceService(device, config)
 	if err != nil {
@@ -530,7 +529,7 @@ func TestDevice_PairingRequestListening_ResumeAfterZoneRemoved(t *testing.T) {
 	device := model.NewDevice("test-device", 0x1234, 0x5678)
 	config := validDeviceConfig()
 	config.ListenForPairingRequests = true
-	config.MaxZones = zone.MaxZones
+	config.MaxZones = 2 // Production default: 1 GRID + 1 LOCAL
 
 	svc, err := NewDeviceService(device, config)
 	if err != nil {

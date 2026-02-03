@@ -92,8 +92,8 @@ func TestMemoryStore(t *testing.T) {
 func TestMemoryStoreMaxZones(t *testing.T) {
 	store := NewMemoryStore()
 
-	// Create MaxZones zones (one GRID + one LOCAL per DEC-043)
-	zoneTypes := []ZoneType{ZoneTypeGrid, ZoneTypeLocal}
+	// Create MaxZones zones (GRID + LOCAL + TEST per DEC-060)
+	zoneTypes := []ZoneType{ZoneTypeGrid, ZoneTypeLocal, ZoneTypeTest}
 	for i := 0; i < MaxZones; i++ {
 		zoneID := "zone-" + string(rune('A'+i))
 		zoneType := zoneTypes[i]

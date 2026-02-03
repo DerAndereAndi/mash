@@ -117,13 +117,14 @@ func TestFileStore(t *testing.T) {
 		dir := t.TempDir()
 		store := NewFileStore(dir)
 
-		// Add MaxZones zones (one GRID + one LOCAL per DEC-043)
+		// Add MaxZones zones (GRID + LOCAL + TEST per DEC-060)
 		zoneConfigs := []struct {
 			id       string
 			zoneType ZoneType
 		}{
 			{"zone-grid", ZoneTypeGrid},
 			{"zone-local", ZoneTypeLocal},
+			{"zone-test", ZoneTypeTest},
 		}
 		for _, cfg := range zoneConfigs {
 			ca, _ := GenerateZoneCA(cfg.id, cfg.zoneType)

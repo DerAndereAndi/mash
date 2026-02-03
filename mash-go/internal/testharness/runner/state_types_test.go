@@ -135,13 +135,10 @@ func TestGetControllerState(t *testing.T) {
 }
 
 func TestZonePriority(t *testing.T) {
-	if zonePriority[ZoneTypeGridOperator] <= zonePriority[ZoneTypeBuildingManager] {
-		t.Error("GRID_OPERATOR should have higher priority than BUILDING_MANAGER")
+	if zonePriority[ZoneTypeGridOperator] <= zonePriority[ZoneTypeHomeManager] {
+		t.Error("GRID_OPERATOR should have higher priority than HOME_MANAGER")
 	}
-	if zonePriority[ZoneTypeBuildingManager] <= zonePriority[ZoneTypeHomeManager] {
-		t.Error("BUILDING_MANAGER should have higher priority than HOME_MANAGER")
-	}
-	if zonePriority[ZoneTypeHomeManager] <= zonePriority[ZoneTypeUserApp] {
-		t.Error("HOME_MANAGER should have higher priority than USER_APP")
+	if zonePriority[ZoneTypeHomeManager] <= zonePriority[ZoneTypeTest] {
+		t.Error("HOME_MANAGER should have higher priority than TEST")
 	}
 }

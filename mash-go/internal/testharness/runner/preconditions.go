@@ -15,6 +15,7 @@ import (
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -225,54 +226,66 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 				}
 			case PrecondTwoZonesConnected:
 				ct := getConnectionTracker(state)
-				zones := []string{"GRID", "LOCAL"}
-				if r.config.Target != "" {
-					// Commission each zone separately. Each PASE session
-					// creates a new zone on the device, and the PASE
-					// connection becomes that zone's live framer for
-					// subscribe/read/write operations.
-					for i, name := range zones {
-						if _, exists := ct.zoneConnections[name]; exists {
-							continue
-						}
-						// Reset connection and PASE state for fresh commission.
-						// Save and restore the accumulated zone CA pool so
-						// that earlier zones' CAs survive across commissions.
-						savedPool := r.zoneCAPool
-						r.ensureDisconnected()
-						r.zoneCAPool = savedPool
-
-						if err := r.ensureCommissioned(ctx, state); err != nil {
-							return fmt.Errorf("precondition two_zones_connected commission zone %s: %w", name, err)
-						}
-
-						// Move the PASE connection to the zone tracker.
-						zoneConn := r.conn
-						ct.zoneConnections[name] = zoneConn
-						r.activeZoneConns[name] = zoneConn
-						state.Set(ZoneConnectionStateKey(name), zoneConn)
-
-						// Detach from runner so the next iteration
-						// creates a fresh connection.
-						r.conn = &Connection{}
-
-						// If not last zone, wait for device to re-enter
-						// commissioning mode in test-mode.
-						if i < len(zones)-1 {
-							time.Sleep(600 * time.Millisecond)
-						}
+				zones := []struct {
+				name string
+				zt   cert.ZoneType
+			}{
+				{"GRID", cert.ZoneTypeGrid},
+				{"LOCAL", cert.ZoneTypeLocal},
+			}
+			if r.config.Target != "" {
+				// Commission each zone separately. Each PASE session
+				// creates a new zone on the device, and the PASE
+				// connection becomes that zone's live framer for
+				// subscribe/read/write operations.
+				for i, z := range zones {
+					if _, exists := ct.zoneConnections[z.name]; exists {
+						continue
 					}
-				} else {
-					// No target available (unit tests): use dummy connections.
-					for _, name := range zones {
-						if _, exists := ct.zoneConnections[name]; exists {
-							continue
-						}
-						dummyConn := &Connection{connected: true}
-						ct.zoneConnections[name] = dummyConn
-						r.activeZoneConns[name] = dummyConn
+					// Reset connection and PASE state for fresh commission.
+					// Save and restore the accumulated zone CA pool so
+					// that earlier zones' CAs survive across commissions.
+					savedPool := r.zoneCAPool
+					r.ensureDisconnected()
+					r.zoneCAPool = savedPool
+
+					// Set zone type so performCertExchange generates the
+					// correct Zone CA (GRID vs LOCAL).
+					r.commissionZoneType = z.zt
+
+					if err := r.ensureCommissioned(ctx, state); err != nil {
+						return fmt.Errorf("precondition two_zones_connected commission zone %s: %w", z.name, err)
+					}
+
+					// Move the PASE connection to the zone tracker.
+					zoneConn := r.conn
+					ct.zoneConnections[z.name] = zoneConn
+					r.activeZoneConns[z.name] = zoneConn
+					state.Set(ZoneConnectionStateKey(z.name), zoneConn)
+
+					// Detach from runner so the next iteration
+					// creates a fresh connection.
+					r.conn = &Connection{}
+
+					// If not last zone, wait for device to re-enter
+					// commissioning mode in test-mode.
+					if i < len(zones)-1 {
+						time.Sleep(600 * time.Millisecond)
 					}
 				}
+				// Reset commission zone type to default.
+				r.commissionZoneType = 0
+			} else {
+				// No target available (unit tests): use dummy connections.
+				for _, z := range zones {
+					if _, exists := ct.zoneConnections[z.name]; exists {
+						continue
+					}
+					dummyConn := &Connection{connected: true}
+					ct.zoneConnections[z.name] = dummyConn
+					r.activeZoneConns[z.name] = dummyConn
+				}
+			}
 			}
 		}
 	}

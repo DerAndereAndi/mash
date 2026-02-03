@@ -144,6 +144,10 @@ const (
 	// ZoneTypeLocal has priority 2.
 	// Local energy management - EMS (residential or commercial).
 	ZoneTypeLocal ZoneType = 2
+
+	// ZoneTypeTest has priority 3 (lowest).
+	// Test-only observer zone (DEC-060), excluded from limit/setpoint resolution.
+	ZoneTypeTest ZoneType = 3
 )
 
 // String returns the zone type name.
@@ -153,6 +157,8 @@ func (z ZoneType) String() string {
 		return "GRID"
 	case ZoneTypeLocal:
 		return "LOCAL"
+	case ZoneTypeTest:
+		return "TEST"
 	default:
 		return "UNKNOWN"
 	}

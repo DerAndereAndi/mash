@@ -51,6 +51,10 @@ type Runner struct {
 	// test leak and prevent the device from accepting new ones (all zones
 	// appear "connected" on the device side).
 	activeZoneConns map[string]*Connection
+
+	// commissionZoneType overrides the zone type used when generating the
+	// Zone CA during performCertExchange. Defaults to ZoneTypeLocal if zero.
+	commissionZoneType cert.ZoneType
 }
 
 // Config configures the test runner.

@@ -412,3 +412,90 @@ func TestDeviceServiceListZoneIDs(t *testing.T) {
 		t.Errorf("Expected zone-a and zone-b in IDs, got %v", ids)
 	}
 }
+
+func TestHandleZoneConnect_TestZone_RequiresTestMode(t *testing.T) {
+	t.Run("RejectedWhenTestModeDisabled", func(t *testing.T) {
+		svc := createTestDeviceService(t)
+
+		ctx := context.Background()
+		if err := svc.Start(ctx); err != nil {
+			t.Fatalf("Start failed: %v", err)
+		}
+		defer svc.Stop()
+
+		// TestMode is false by default -- TEST zone should be rejected
+		svc.HandleZoneConnect("test-zone", cert.ZoneTypeTest)
+
+		zone := svc.GetZone("test-zone")
+		if zone != nil {
+			t.Error("TEST zone should be rejected when TestMode is disabled")
+		}
+	})
+
+	t.Run("AcceptedWhenTestModeEnabled", func(t *testing.T) {
+		svc := createTestDeviceServiceWithTestMode(t)
+
+		ctx := context.Background()
+		if err := svc.Start(ctx); err != nil {
+			t.Fatalf("Start failed: %v", err)
+		}
+		defer svc.Stop()
+
+		svc.HandleZoneConnect("test-zone", cert.ZoneTypeTest)
+
+		zone := svc.GetZone("test-zone")
+		if zone == nil {
+			t.Fatal("TEST zone should be accepted when TestMode is enabled")
+		}
+		if zone.Type != cert.ZoneTypeTest {
+			t.Errorf("zone.Type = %v, want ZoneTypeTest", zone.Type)
+		}
+	})
+}
+
+func TestNewDeviceService_TestMode_BumpsMaxZones(t *testing.T) {
+	svc := createTestDeviceServiceWithTestMode(t)
+	// The constructor should have bumped MaxZones from 2 to 3.
+	if svc.config.MaxZones != 3 {
+		t.Errorf("config.MaxZones = %d, want 3 in test mode", svc.config.MaxZones)
+	}
+}
+
+// createTestDeviceServiceWithTestMode creates a DeviceService with TestMode enabled.
+func createTestDeviceServiceWithTestMode(t *testing.T) *DeviceService {
+	t.Helper()
+
+	evse := examples.NewEVSE(examples.EVSEConfig{
+		DeviceID:           "test-evse-tm",
+		VendorName:         "Test Vendor",
+		ProductName:        "Test EVSE",
+		SerialNumber:       "SN-TM-001",
+		VendorID:           0x1234,
+		ProductID:          0x0001,
+		PhaseCount:         3,
+		NominalVoltage:     230,
+		MaxCurrentPerPhase: 32000,
+		MinCurrentPerPhase: 6000,
+		NominalMaxPower:    22000000,
+		NominalMinPower:    1380000,
+	})
+
+	cfg := DefaultDeviceConfig()
+	cfg.ListenAddress = ":0"
+	cfg.Discriminator = 1234
+	cfg.SetupCode = "12345678"
+	cfg.SerialNumber = "SN-TM-001"
+	cfg.Brand = "Test Vendor"
+	cfg.Model = "Test EVSE"
+	cfg.Categories = []discovery.DeviceCategory{discovery.CategoryEMobility}
+	cfg.FailsafeTimeout = 100 * time.Millisecond
+	cfg.TestMode = true
+	cfg.TestEnableKey = "00112233445566778899aabbccddeeff"
+
+	svc, err := NewDeviceService(evse.Device(), cfg)
+	if err != nil {
+		t.Fatalf("Failed to create DeviceService: %v", err)
+	}
+
+	return svc
+}

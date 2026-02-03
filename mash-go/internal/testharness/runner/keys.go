@@ -546,10 +546,9 @@ const (
 
 // Zone type string values -- protocol-defined zone types for multi-zone architecture.
 const (
-	ZoneTypeGridOperator    = "GRID_OPERATOR"
-	ZoneTypeBuildingManager = "BUILDING_MANAGER"
-	ZoneTypeHomeManager     = "HOME_MANAGER"
-	ZoneTypeUserApp         = "USER_APP"
+	ZoneTypeGridOperator = "GRID_OPERATOR"
+	ZoneTypeHomeManager  = "HOME_MANAGER"
+	ZoneTypeTest         = "TEST"
 )
 
 // OperatingStateEnum values.

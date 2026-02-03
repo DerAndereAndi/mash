@@ -17,8 +17,9 @@ var (
 )
 
 // MaxZones is the maximum number of zones a device can belong to.
-// Per DEC-043: one GRID zone + one LOCAL zone = 2 zones maximum.
-const MaxZones = 2
+// Per DEC-043/DEC-060: GRID + LOCAL + TEST = 3 zones maximum.
+// TEST zones are only accepted when DeviceConfig.TestMode is true.
+const MaxZones = 3
 
 // Zone represents a zone membership for a device.
 type Zone struct {
@@ -148,6 +149,10 @@ func (m *MultiZoneValue) ResolveLimits() (*int64, string) {
 	var winningZoneID string
 
 	for zoneID, v := range m.Values {
+		// TEST zones are pure observers -- exclude from limit resolution (DEC-060).
+		if v.ZoneType == cert.ZoneTypeTest {
+			continue
+		}
 		if effectiveValue == nil {
 			val := v.Value
 			effectiveValue = &val
@@ -209,6 +214,10 @@ func (m *MultiZoneValue) ResolveSetpoints() (*int64, string) {
 	var winningPriority uint8 = 255
 
 	for zoneID, v := range m.Values {
+		// TEST zones are pure observers -- exclude from setpoint resolution (DEC-060).
+		if v.ZoneType == cert.ZoneTypeTest {
+			continue
+		}
 		if v.Priority() < winningPriority {
 			val := v.Value
 			effectiveValue = &val
