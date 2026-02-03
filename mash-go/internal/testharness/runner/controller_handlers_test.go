@@ -198,9 +198,9 @@ func TestHandleRemoveDevice_ClearsPreconditionState(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	// Simulate device in two zones.
+	// Simulate device in two zones -- only set the two-zones precondition,
+	// matching the real YAML precondition (device_in_two_zones: true).
 	state.Set(PrecondDeviceInTwoZones, true)
-	state.Set(PrecondDeviceInZone, true)
 
 	cs := getControllerState(state)
 	cs.devices["dev-001"] = "zone-abc"

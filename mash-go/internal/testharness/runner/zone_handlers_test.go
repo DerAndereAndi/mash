@@ -263,6 +263,60 @@ func TestHandleVerifyZoneCA_WithRunnerZoneCA(t *testing.T) {
 	}
 }
 
+func TestDisconnectZone_ConnectionOnly(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set up connections without zone state entries (mimics two_zones_connected).
+	ct := getConnectionTracker(state)
+	ct.zoneConnections["GRID"] = &Connection{connected: true}
+	ct.zoneConnections["LOCAL"] = &Connection{connected: true}
+
+	// Disconnect GRID -- should succeed even without zone state.
+	step := &loader.Step{Params: map[string]any{"zone": "GRID"}}
+	out, err := r.handleDisconnectZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyZoneDisconnected] != true {
+		t.Errorf("expected zone_disconnected=true, got %v", out[KeyZoneDisconnected])
+	}
+
+	// GRID should be removed from connections.
+	if _, ok := ct.zoneConnections["GRID"]; ok {
+		t.Error("expected GRID connection to be removed")
+	}
+
+	// LOCAL should still exist.
+	if _, ok := ct.zoneConnections["LOCAL"]; !ok {
+		t.Error("expected LOCAL connection to still exist")
+	}
+}
+
+func TestCreateZone_StoresZoneName(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	step := &loader.Step{Params: map[string]any{
+		KeyZoneType: "LOCAL",
+		KeyZoneID:   "z1",
+		KeyZoneName: "Home Energy",
+	}}
+	_, err := r.handleCreateZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	zs := getZoneState(state)
+	zone := zs.zones["z1"]
+	if zone == nil {
+		t.Fatal("expected zone z1 to exist")
+	}
+	if zone.ZoneName != "Home Energy" {
+		t.Errorf("expected ZoneName='Home Energy', got %q", zone.ZoneName)
+	}
+}
+
 func TestIsHex(t *testing.T) {
 	tests := []struct {
 		input string

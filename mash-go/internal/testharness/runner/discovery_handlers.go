@@ -159,6 +159,14 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
+	// Device was removed from all zones -- no operational instances.
+	if removed, _ := state.Get(StateDeviceWasRemoved); removed == true {
+		if inZone, _ := state.Get(PrecondDeviceInZone); inZone != true {
+			ds.services = nil
+			return r.buildBrowseOutput(ds)
+		}
+	}
+
 	// Simulate a device already commissioned into a zone.
 	if inZone, _ := state.Get(PrecondDeviceInZone); inZone == true {
 		serviceType, _ := params[KeyServiceType].(string)
@@ -233,8 +241,12 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 			zoneID := "sim-zone-id"
 			if len(zs.zoneOrder) > 0 {
 				zoneID = zs.zoneOrder[0]
-				if z, ok := zs.zones[zoneID]; ok && z.ZoneType != "" {
-					zoneName = z.ZoneType
+				if z, ok := zs.zones[zoneID]; ok {
+					if z.ZoneName != "" {
+						zoneName = z.ZoneName
+					} else if z.ZoneType != "" {
+						zoneName = z.ZoneType
+					}
 				}
 			}
 			ds.services = []discoveredService{{

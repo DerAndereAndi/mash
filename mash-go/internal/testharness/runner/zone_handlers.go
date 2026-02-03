@@ -47,6 +47,8 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 		zoneType = ZoneTypeHomeManager
 	}
 
+	zoneName, _ := params[KeyZoneName].(string)
+
 	zoneID, _ := params[KeyZoneID].(string)
 	if zoneID == "" {
 		zoneID = generateZoneID()
@@ -68,6 +70,7 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 
 	zone := &zoneInfo{
 		ZoneID:        zoneID,
+		ZoneName:      zoneName,
 		ZoneType:      zoneType,
 		Priority:      priority,
 		Metadata:      make(map[string]any),
@@ -372,20 +375,24 @@ func (r *Runner) handleDisconnectZone(ctx context.Context, step *loader.Step, st
 
 	zoneID := resolveZoneParam(params)
 
-	zone, exists := zs.zones[zoneID]
-	if !exists {
-		return map[string]any{KeyZoneDisconnected: false}, nil
+	// Mark zone as disconnected in zone state (if present).
+	if zone, exists := zs.zones[zoneID]; exists {
+		zone.Connected = false
 	}
 
-	zone.Connected = false
-
-	// Also close any tracked connection.
+	// Close tracked connection regardless of zone state.
 	ct := getConnectionTracker(state)
 	if conn, ok := ct.zoneConnections[zoneID]; ok {
 		if conn.connected {
 			_ = conn.Close()
 		}
 		delete(ct.zoneConnections, zoneID)
+		return map[string]any{KeyZoneDisconnected: true}, nil
+	}
+
+	// No tracked connection -- check if zone state existed.
+	if _, exists := zs.zones[zoneID]; !exists {
+		return map[string]any{KeyZoneDisconnected: false}, nil
 	}
 
 	return map[string]any{KeyZoneDisconnected: true}, nil
@@ -404,9 +411,9 @@ func (r *Runner) handleVerifyOtherZone(ctx context.Context, step *loader.Step, s
 	}
 
 	return map[string]any{
-		KeyZoneExists:  true,
-		KeyZoneType:    zone.ZoneType,
-		KeyConnected:   zone.Connected,
+		KeyZoneExists: true,
+		KeyZoneType:   zone.ZoneType,
+		KeyConnected:  zone.Connected,
 	}, nil
 }
 

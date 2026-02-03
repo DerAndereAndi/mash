@@ -247,9 +247,11 @@ func (r *Runner) handleRemoveDevice(ctx context.Context, step *loader.Step, stat
 		if zone == "all" || len(cs.devices) == 0 {
 			state.Set(PrecondDeviceInZone, false)
 			state.Set(PrecondDeviceInTwoZones, false)
+			state.Set(StateDeviceWasRemoved, true)
 		} else {
 			// Removed from one zone but others remain.
 			state.Set(PrecondDeviceInTwoZones, false)
+			state.Set(PrecondDeviceInZone, true)
 		}
 	}
 

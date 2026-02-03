@@ -125,6 +125,7 @@ const (
 	// Discovery state.
 	StatePairingRequestDiscriminator = "pairing_request_discriminator"
 	StatePairingRequestZoneID        = "pairing_request_zone_id"
+	StateDeviceWasRemoved            = "device_was_removed"
 
 	// Cert handler state.
 	StateExtractedDeviceID = "extracted_device_id"

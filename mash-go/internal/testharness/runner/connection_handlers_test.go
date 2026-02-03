@@ -499,9 +499,9 @@ func TestSubscribeAsZone_DummyConnection(t *testing.T) {
 	ct.zoneConnections["GRID"] = &Connection{connected: true}
 
 	step := &loader.Step{Params: map[string]any{
-		KeyZoneID:    "GRID",
-		KeyEndpoint:  float64(1),
-		KeyFeature:   "measurement",
+		KeyZoneID:   "GRID",
+		KeyEndpoint: float64(1),
+		KeyFeature:  "measurement",
 	}}
 	out, err := r.handleSubscribeAsZone(context.Background(), step, state)
 	if err != nil {
@@ -524,9 +524,9 @@ func TestReadAsZone_DummyConnection(t *testing.T) {
 	ct.zoneConnections["LOCAL"] = &Connection{connected: true}
 
 	step := &loader.Step{Params: map[string]any{
-		KeyZoneID:    "LOCAL",
-		KeyEndpoint:  float64(1),
-		KeyFeature:   "measurement",
+		KeyZoneID:   "LOCAL",
+		KeyEndpoint: float64(1),
+		KeyFeature:  "measurement",
 	}}
 	out, err := r.handleReadAsZone(context.Background(), step, state)
 	if err != nil {
@@ -554,6 +554,37 @@ func TestWaitForNotificationAsZone_DummyConnection(t *testing.T) {
 	}
 	if out[KeyNotificationReceived] != true {
 		t.Error("expected notification_received=true for dummy connection")
+	}
+}
+
+func TestReadAsZone_AfterOtherZoneDisconnect(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set up dummy connections for GRID and LOCAL.
+	ct := getConnectionTracker(state)
+	ct.zoneConnections["GRID"] = &Connection{connected: true}
+	ct.zoneConnections["LOCAL"] = &Connection{connected: true}
+
+	// Disconnect GRID.
+	disconnectStep := &loader.Step{Params: map[string]any{"zone": "GRID"}}
+	_, err := r.handleDisconnectZone(context.Background(), disconnectStep, state)
+	if err != nil {
+		t.Fatalf("unexpected error disconnecting GRID: %v", err)
+	}
+
+	// Read as LOCAL -- should still succeed (dummy connection).
+	readStep := &loader.Step{Params: map[string]any{
+		KeyZoneID:   "LOCAL",
+		KeyEndpoint: float64(1),
+		KeyFeature:  "measurement",
+	}}
+	out, err := r.handleReadAsZone(context.Background(), readStep, state)
+	if err != nil {
+		t.Fatalf("unexpected error reading as LOCAL: %v", err)
+	}
+	if out[KeyReadSuccess] != true {
+		t.Error("expected read_success=true for LOCAL after GRID disconnect")
 	}
 }
 

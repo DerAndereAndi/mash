@@ -8,10 +8,10 @@ import (
 
 // discoveryState holds state for mDNS discovery handlers.
 type discoveryState struct {
-	services   []discoveredService
-	browser    any // *discovery.Browser when real impl used
-	active     bool
-	qrPayload  string
+	services  []discoveredService
+	browser   any // *discovery.Browser when real impl used
+	active    bool
+	qrPayload string
 }
 
 // discoveredService represents a discovered mDNS service.
@@ -46,13 +46,14 @@ type zoneState struct {
 
 // zoneInfo represents a single zone.
 type zoneInfo struct {
-	ZoneID      string
-	ZoneType    string
-	Priority    int
-	Metadata    map[string]any
+	ZoneID        string
+	ZoneName      string
+	ZoneType      string
+	Priority      int
+	Metadata      map[string]any
 	CAFingerprint string
-	Connected   bool
-	DeviceIDs   []string
+	Connected     bool
+	DeviceIDs     []string
 }
 
 // zonePriority maps zone types to their priority (higher number = higher priority).
@@ -150,9 +151,9 @@ func getConnectionTracker(state *engine.ExecutionState) *connectionTracker {
 
 // controllerState holds state for controller action handlers.
 type controllerState struct {
-	controllerID               string
+	controllerID                string
 	commissioningWindowDuration time.Duration
-	devices                    map[string]string // deviceID -> zoneID
+	devices                     map[string]string // deviceID -> zoneID
 }
 
 // getControllerState retrieves or creates controller state from execution state.
@@ -162,7 +163,7 @@ func getControllerState(state *engine.ExecutionState) *controllerState {
 	}
 	s := &controllerState{
 		commissioningWindowDuration: 15 * time.Minute,
-		devices:                    make(map[string]string),
+		devices:                     make(map[string]string),
 	}
 	state.Custom["controller_state"] = s
 	return s

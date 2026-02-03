@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
@@ -602,6 +603,134 @@ func TestBrowseMDNS_CommissionerSimulation(t *testing.T) {
 	}
 	if svc.TXTRecords["ZI"] != zoneID {
 		t.Errorf("expected ZI=%s, got %v", zoneID, svc.TXTRecords["ZI"])
+	}
+}
+
+func TestBrowseMDNS_CommissionerUsesZoneName(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set zone_created precondition and create zone state with ZoneName.
+	state.Set(PrecondZoneCreated, true)
+	zs := getZoneState(state)
+	zoneID := "test-zone-id"
+	zs.zones[zoneID] = &zoneInfo{
+		ZoneID:   zoneID,
+		ZoneName: "Home Energy",
+		ZoneType: "LOCAL",
+		Metadata: map[string]any{},
+	}
+	zs.zoneOrder = append(zs.zoneOrder, zoneID)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasCommissioner,
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Instance name should be the zone name, not the zone type.
+	if out[KeyInstanceName] != "Home Energy" {
+		t.Errorf("expected instance_name='Home Energy', got %v", out[KeyInstanceName])
+	}
+
+	ds := getDiscoveryState(state)
+	if len(ds.services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(ds.services))
+	}
+	if ds.services[0].TXTRecords["ZN"] != "Home Energy" {
+		t.Errorf("expected TXT ZN='Home Energy', got %v", ds.services[0].TXTRecords["ZN"])
+	}
+}
+
+func TestBrowseMDNS_AfterOneZoneRemoval(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Simulate the two-zones precondition (only this flag, not device_in_zone).
+	state.Set(PrecondDeviceInTwoZones, true)
+
+	// Seed controller state with two device entries.
+	cs := getControllerState(state)
+	cs.devices["dev-001"] = "zone-abc"
+	cs.devices["dev-001-2"] = "zone-def"
+
+	// Remove one device from a specific zone.
+	removeStep := &loader.Step{Params: map[string]any{
+		KeyDeviceID: "dev-001",
+		"zone":      "zone-abc",
+	}}
+	_, err := r.handleRemoveDevice(context.Background(), removeStep, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Now browse for operational services -- should find exactly 1 instance.
+	browseStep := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasOperational,
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), browseStep, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	instancesForDevice, _ := out[KeyInstancesForDevice].(int)
+	if instancesForDevice != 1 {
+		t.Errorf("expected instances_for_device=1 after removing one zone, got %v", out[KeyInstancesForDevice])
+	}
+}
+
+func TestBrowseMDNS_AfterAllZonesRemoved(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Device starts in one zone.
+	state.Set(PrecondDeviceInZone, true)
+
+	cs := getControllerState(state)
+	cs.devices["dev-001"] = "zone-abc"
+
+	// Remove from all zones.
+	removeStep := &loader.Step{Params: map[string]any{
+		KeyDeviceID: "dev-001",
+		"zone":      "all",
+	}}
+	_, err := r.handleRemoveDevice(context.Background(), removeStep, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Browse for operational services -- should find nothing.
+	// The simulation path should handle this deterministically without
+	// falling through to real mDNS (which would take 5s+ to timeout).
+	start := time.Now()
+	browseStep := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasOperational,
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), browseStep, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if out[KeyDeviceFound] != false {
+		t.Errorf("expected device_found=false after removing from all zones, got %v", out[KeyDeviceFound])
+	}
+	instancesForDevice, _ := out[KeyInstancesForDevice].(int)
+	if instancesForDevice != 0 {
+		t.Errorf("expected instances_for_device=0 after removing from all zones, got %v", out[KeyInstancesForDevice])
+	}
+
+	// Should complete near-instantly via simulation, not via real mDNS browse.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("browse took %v, expected <500ms (simulation path should be instant)", elapsed)
 	}
 }
 
