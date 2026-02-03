@@ -189,6 +189,22 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		time.Sleep(50 * time.Millisecond)
 	}
 
+	// DEC-059: On backward transition from commissioned, send RemoveZone
+	// so the device re-enters commissioning mode before we disconnect.
+	// This must happen before special precondition handlers (e.g.,
+	// PrecondTwoZonesConnected) that need the device in commissioning mode.
+	if current >= precondLevelCommissioned && needed <= precondLevelCommissioning {
+		r.sendRemoveZone()
+	}
+
+	// Backwards transition: disconnect to give the device a clean state.
+	if needed < current && needed <= precondLevelCommissioning {
+		r.ensureDisconnected()
+		if r.config.Target != "" {
+			r.lastDeviceConnClose = time.Now()
+		}
+	}
+
 	// Store simulation precondition keys in state so handlers can check them.
 	for _, cond := range tc.Preconditions {
 		for key, val := range cond {
@@ -313,19 +329,6 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 			}
 			}
 		}
-	}
-
-	// DEC-059: On backward transition from commissioned, send RemoveZone
-	// so the device re-enters commissioning mode before we disconnect.
-	if current >= precondLevelCommissioned && needed <= precondLevelCommissioning {
-		r.sendRemoveZone()
-	}
-
-	// Backwards transition: disconnect to give the device a clean state.
-	// This handles cases like a commissioned runner needing to drop back
-	// for a commissioning-level test.
-	if needed < current && needed <= precondLevelCommissioning {
-		r.ensureDisconnected()
 	}
 
 	switch needed {

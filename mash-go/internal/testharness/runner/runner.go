@@ -259,7 +259,10 @@ func (r *Runner) runAutoPICS(ctx context.Context) error {
 		stdlog.Printf("Auto-PICS: discovered %d items from device", len(pf.Items))
 	}
 
-	// Disconnect so tests start from a clean state.
+	// Send RemoveZone so the device re-enters commissioning mode, then
+	// disconnect. Without RemoveZone the device retains the auto-PICS zone
+	// and won't accept PASE connections from tests.
+	r.sendRemoveZone()
 	r.ensureDisconnected()
 	return nil
 }
