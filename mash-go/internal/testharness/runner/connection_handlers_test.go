@@ -490,6 +490,73 @@ func TestPing_FallbackToMainConnection(t *testing.T) {
 	}
 }
 
+func TestSubscribeAsZone_DummyConnection(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set up a dummy zone connection (connected but no framer).
+	ct := getConnectionTracker(state)
+	ct.zoneConnections["GRID"] = &Connection{connected: true}
+
+	step := &loader.Step{Params: map[string]any{
+		KeyZoneID:    "GRID",
+		KeyEndpoint:  float64(1),
+		KeyFeature:   "measurement",
+	}}
+	out, err := r.handleSubscribeAsZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error for dummy connection: %v", err)
+	}
+	if out[KeySubscribeSuccess] != true {
+		t.Error("expected subscribe_success=true for dummy connection")
+	}
+	if out[KeySubscriptionID] == nil || out[KeySubscriptionID] == "" {
+		t.Error("expected non-empty subscription_id for dummy connection")
+	}
+}
+
+func TestReadAsZone_DummyConnection(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set up a dummy zone connection (connected but no framer).
+	ct := getConnectionTracker(state)
+	ct.zoneConnections["LOCAL"] = &Connection{connected: true}
+
+	step := &loader.Step{Params: map[string]any{
+		KeyZoneID:    "LOCAL",
+		KeyEndpoint:  float64(1),
+		KeyFeature:   "measurement",
+	}}
+	out, err := r.handleReadAsZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error for dummy connection: %v", err)
+	}
+	if out[KeyReadSuccess] != true {
+		t.Error("expected read_success=true for dummy connection")
+	}
+}
+
+func TestWaitForNotificationAsZone_DummyConnection(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set up a dummy zone connection (connected but no framer).
+	ct := getConnectionTracker(state)
+	ct.zoneConnections["GRID"] = &Connection{connected: true}
+
+	step := &loader.Step{Params: map[string]any{
+		KeyZoneID: "GRID",
+	}}
+	out, err := r.handleWaitForNotificationAsZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error for dummy connection: %v", err)
+	}
+	if out[KeyNotificationReceived] != true {
+		t.Error("expected notification_received=true for dummy connection")
+	}
+}
+
 func TestSubscribeMultiple_NeitherParam(t *testing.T) {
 	r := newTestRunner()
 	r.conn.connected = true

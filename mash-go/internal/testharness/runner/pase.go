@@ -119,6 +119,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		return map[string]any{
 			KeySessionEstablished: false,
 			KeyCommissionSuccess:  false,
+			KeySuccess:            false,
 			KeyError:              err.Error(),
 		}, fmt.Errorf("PASE handshake failed: %w", err)
 	}
@@ -162,8 +163,9 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	outputs := map[string]any{
 		KeySessionEstablished: true,
 		KeyCommissionSuccess:  true,
+		KeySuccess:            true,
 		KeyKeyLength:          len(sessionKey),
-		KeyKeyNotZero:        !isZeroKey(sessionKey),
+		KeyKeyNotZero:         !isZeroKey(sessionKey),
 	}
 	if deviceID != "" {
 		outputs[KeyDeviceID] = deviceID

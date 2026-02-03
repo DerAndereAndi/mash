@@ -52,6 +52,8 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondFiveZonesConnected:         true,
 	PrecondTwoZonesConnected:          true,
 	PrecondDeviceListening:            true,
+	PrecondDeviceInZone:               true,
+	PrecondDeviceInTwoZones:           true,
 }
 
 var preconditionKeyLevels = map[string]int{
@@ -82,6 +84,8 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceWillAppearAfterDelay: precondLevelNone,
 	PrecondFiveZonesConnected:         precondLevelNone,
 	PrecondTwoZonesConnected:          precondLevelNone,
+	PrecondDeviceInZone:               precondLevelNone,
+	PrecondDeviceInTwoZones:           precondLevelNone,
 
 	PrecondDeviceInCommissioningMode: precondLevelCommissioning,
 	PrecondDeviceUncommissioned:      precondLevelCommissioning,
@@ -146,6 +150,20 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		state.Set(StateSetupCode, r.config.SetupCode)
 	}
 
+	// Compute the needed precondition level early so we can clear stale
+	// zone state before processing special preconditions or connections.
+	needed := r.preconditionLevel(tc.Preconditions)
+	current := r.currentLevel()
+
+	// Clear stale zone CA state for non-commissioned tests. This prevents
+	// a zone CA from a previous commissioned test from causing TLS
+	// verification failures on subsequent connection-level or lower tests.
+	if needed < precondLevelCommissioned {
+		r.zoneCA = nil
+		r.controllerCert = nil
+		r.zoneCAPool = nil
+	}
+
 	// Store simulation precondition keys in state so handlers can check them.
 	for _, cond := range tc.Preconditions {
 		for key, val := range cond {
@@ -208,9 +226,6 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 			}
 		}
 	}
-
-	needed := r.preconditionLevel(tc.Preconditions)
-	current := r.currentLevel()
 
 	// DEC-059: On backward transition from commissioned, send RemoveZone
 	// so the device re-enters commissioning mode before we disconnect.
@@ -351,6 +366,9 @@ func (r *Runner) ensureDisconnected() {
 		_ = r.conn.Close()
 	}
 	r.paseState = nil
+	r.zoneCA = nil
+	r.controllerCert = nil
+	r.zoneCAPool = nil
 }
 
 // sendRemoveZone sends a RemoveZone invoke to the device so it re-enters

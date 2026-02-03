@@ -162,9 +162,33 @@ func (r *Runner) getZoneConnection(state *engine.ExecutionState, params map[stri
 	return conn, zoneID, nil
 }
 
+// isDummyZoneConnection returns the zone connection and ID if the connection
+// exists and is connected but has no framer (dummy). Returns nil if the
+// connection is real or doesn't exist.
+func (r *Runner) isDummyZoneConnection(state *engine.ExecutionState, params map[string]any) (*Connection, string) {
+	zoneID := resolveZoneParam(params)
+	ct := getConnectionTracker(state)
+
+	conn, ok := ct.zoneConnections[zoneID]
+	if ok && conn.connected && conn.framer == nil {
+		return conn, zoneID
+	}
+	return nil, zoneID
+}
+
 // handleReadAsZone reads using a zone-scoped connection.
 func (r *Runner) handleReadAsZone(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
+
+	// Dummy connections return simulated success data.
+	if dummy, zoneID := r.isDummyZoneConnection(state, params); dummy != nil {
+		return map[string]any{
+			KeyReadSuccess: true,
+			KeyValue:       nil,
+			KeyStatus:      0,
+			KeyZoneID:      zoneID,
+		}, nil
+	}
 
 	conn, _, err := r.getZoneConnection(state, params)
 	if err != nil {
@@ -263,6 +287,15 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 func (r *Runner) handleSubscribeAsZone(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
+	// Dummy connections return simulated success data.
+	if dummy, zoneID := r.isDummyZoneConnection(state, params); dummy != nil {
+		return map[string]any{
+			KeySubscribeSuccess: true,
+			KeySubscriptionID:   fmt.Sprintf("sim-%s", zoneID),
+			KeyStatus:           0,
+		}, nil
+	}
+
 	conn, _, err := r.getZoneConnection(state, params)
 	if err != nil {
 		return nil, err
@@ -310,6 +343,14 @@ func (r *Runner) handleSubscribeAsZone(ctx context.Context, step *loader.Step, s
 // handleWaitForNotificationAsZone waits for a notification on a zone connection.
 func (r *Runner) handleWaitForNotificationAsZone(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
+
+	// Dummy connections return simulated notification data.
+	if dummy, _ := r.isDummyZoneConnection(state, params); dummy != nil {
+		return map[string]any{
+			KeyNotificationReceived: true,
+			KeyNotificationData:     []byte{},
+		}, nil
+	}
 
 	conn, _, err := r.getZoneConnection(state, params)
 	if err != nil {

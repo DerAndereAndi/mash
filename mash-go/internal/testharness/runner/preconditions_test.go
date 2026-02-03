@@ -2,10 +2,12 @@ package runner
 
 import (
 	"context"
+	"crypto/x509"
 	"testing"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/cert"
 )
 
 func TestPreconditionLevel(t *testing.T) {
@@ -472,6 +474,50 @@ func TestSetupPreconditions_TwoZonesConnected(t *testing.T) {
 	}
 }
 
+func TestSetupPreconditions_TwoZonesConnected_HandlersWork(t *testing.T) {
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+
+	tc := &loader.TestCase{
+		ID: "TC-MULTI-003",
+		Preconditions: []loader.Condition{
+			{PrecondTwoZonesConnected: true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Dummy connections created by precondition should support simulated I/O.
+	step := &loader.Step{Params: map[string]any{
+		KeyZoneID:   "GRID",
+		KeyEndpoint: float64(1),
+		KeyFeature:  "measurement",
+	}}
+	out, err := r.handleSubscribeAsZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("subscribe_as_zone on dummy GRID connection: %v", err)
+	}
+	if out[KeySubscribeSuccess] != true {
+		t.Error("expected subscribe_success=true on dummy GRID connection")
+	}
+
+	step = &loader.Step{Params: map[string]any{
+		KeyZoneID:   "LOCAL",
+		KeyEndpoint: float64(1),
+		KeyFeature:  "measurement",
+	}}
+	out, err = r.handleReadAsZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("read_as_zone on dummy LOCAL connection: %v", err)
+	}
+	if out[KeyReadSuccess] != true {
+		t.Error("expected read_success=true on dummy LOCAL connection")
+	}
+}
+
 func TestPreconditionLevel_TwoDevicesSameDiscriminator(t *testing.T) {
 	r := newTestRunner()
 	conditions := []loader.Condition{
@@ -533,5 +579,96 @@ func TestSetupPreconditions_BackwardsFromCommissioned_SendsRemoveZone(t *testing
 	// PASE state should be cleared
 	if r.paseState != nil {
 		t.Error("expected paseState to be nil")
+	}
+}
+
+func TestPreconditionLevel_DeviceInZoneKeys(t *testing.T) {
+	r := newTestRunner()
+
+	for _, key := range []string{PrecondDeviceInZone, PrecondDeviceInTwoZones} {
+		conditions := []loader.Condition{{key: true}}
+		got := r.preconditionLevel(conditions)
+		if got != precondLevelNone {
+			t.Errorf("preconditionLevel(%s) = %d, want %d (level 0)", key, got, precondLevelNone)
+		}
+	}
+
+	// Verify they're registered as simulation keys.
+	if !simulationPreconditionKeys[PrecondDeviceInZone] {
+		t.Error("expected device_in_zone to be a simulation precondition key")
+	}
+	if !simulationPreconditionKeys[PrecondDeviceInTwoZones] {
+		t.Error("expected device_in_two_zones to be a simulation precondition key")
+	}
+}
+
+func TestSetupPreconditions_ClearsZoneCAForNonCommissionedTests(t *testing.T) {
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+
+	// Simulate stale zone CA from a previous commissioned test.
+	r.zoneCAPool = x509.NewCertPool()
+
+	// A level-2 test (connection_established) should clear the stale pool.
+	tc := &loader.TestCase{
+		ID: "TC-CONN-001",
+		Preconditions: []loader.Condition{
+			{PrecondConnectionEstablished: true},
+		},
+	}
+
+	// Will fail to connect (no target), but that's OK -- we're checking
+	// that zoneCAPool was cleared before the connection attempt.
+	_ = r.setupPreconditions(context.Background(), tc, state)
+
+	if r.zoneCAPool != nil {
+		t.Error("expected zoneCAPool to be nil for non-commissioned (level 2) test")
+	}
+}
+
+func TestSetupPreconditions_TwoZonesConnected_WithZoneCA(t *testing.T) {
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+
+	// Simulate stale zone CA from a previous commissioned test.
+	r.zoneCAPool = x509.NewCertPool()
+
+	tc := &loader.TestCase{
+		ID: "TC-MULTI-003",
+		Preconditions: []loader.Condition{
+			{PrecondTwoZonesConnected: true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Level 0 test should have cleared stale zone CA.
+	if r.zoneCAPool != nil {
+		t.Error("expected zoneCAPool to be nil for level-0 test with two_zones_connected")
+	}
+}
+
+func TestEnsureDisconnected_ClearsZoneCA(t *testing.T) {
+	r := newTestRunner()
+	r.conn.connected = true
+
+	// Simulate state left over from a previous commissioned test.
+	r.zoneCA = &cert.ZoneCA{}
+	r.controllerCert = &cert.OperationalCert{}
+	r.zoneCAPool = x509.NewCertPool()
+
+	r.ensureDisconnected()
+
+	if r.zoneCA != nil {
+		t.Error("expected zoneCA to be nil after ensureDisconnected")
+	}
+	if r.controllerCert != nil {
+		t.Error("expected controllerCert to be nil after ensureDisconnected")
+	}
+	if r.zoneCAPool != nil {
+		t.Error("expected zoneCAPool to be nil after ensureDisconnected")
 	}
 }

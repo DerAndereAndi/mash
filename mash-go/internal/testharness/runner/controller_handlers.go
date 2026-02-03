@@ -237,9 +237,21 @@ func (r *Runner) handleRemoveDevice(ctx context.Context, step *loader.Step, stat
 	cs := getControllerState(state)
 
 	deviceID, _ := params[KeyDeviceID].(string)
+	zone, _ := params["zone"].(string)
 
 	_, existed := cs.devices[deviceID]
 	delete(cs.devices, deviceID)
+
+	// Update simulation precondition state to reflect the removal.
+	if existed {
+		if zone == "all" || len(cs.devices) == 0 {
+			state.Set(PrecondDeviceInZone, false)
+			state.Set(PrecondDeviceInTwoZones, false)
+		} else {
+			// Removed from one zone but others remain.
+			state.Set(PrecondDeviceInTwoZones, false)
+		}
+	}
 
 	return map[string]any{
 		KeyDeviceRemoved: existed,

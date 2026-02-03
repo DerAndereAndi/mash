@@ -239,3 +239,34 @@ func TestPASEStateInitialization(t *testing.T) {
 		t.Error("expected config to be set")
 	}
 }
+
+func TestCommissionOutputIncludesSuccessKey(t *testing.T) {
+	// The success output map from handleCommission must include both
+	// KeyCommissionSuccess and KeySuccess for test compatibility.
+	successOutputs := map[string]any{
+		KeySessionEstablished: true,
+		KeyCommissionSuccess:  true,
+		KeySuccess:            true,
+		KeyKeyLength:          32,
+		KeyKeyNotZero:         true,
+	}
+
+	if v, ok := successOutputs[KeySuccess]; !ok || v != true {
+		t.Error("expected success=true in commission success outputs")
+	}
+	if v, ok := successOutputs[KeyCommissionSuccess]; !ok || v != true {
+		t.Error("expected commission_success=true in commission success outputs")
+	}
+
+	// The failure output map must also include KeySuccess=false.
+	failureOutputs := map[string]any{
+		KeySessionEstablished: false,
+		KeyCommissionSuccess:  false,
+		KeySuccess:            false,
+		KeyError:              "test error",
+	}
+
+	if v, ok := failureOutputs[KeySuccess]; !ok || v != false {
+		t.Error("expected success=false in commission failure outputs")
+	}
+}

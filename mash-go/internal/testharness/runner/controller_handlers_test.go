@@ -194,6 +194,79 @@ func TestHandleRemoveDevice(t *testing.T) {
 	}
 }
 
+func TestHandleRemoveDevice_ClearsPreconditionState(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Simulate device in two zones.
+	state.Set(PrecondDeviceInTwoZones, true)
+	state.Set(PrecondDeviceInZone, true)
+
+	cs := getControllerState(state)
+	cs.devices["dev-001"] = "zone-abc"
+	cs.devices["dev-001-2"] = "zone-def"
+
+	// Remove from a specific zone (not "all").
+	step := &loader.Step{Params: map[string]any{
+		KeyDeviceID: "dev-001",
+		"zone":      "zone-abc",
+	}}
+	out, err := r.handleRemoveDevice(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyDeviceRemoved] != true {
+		t.Error("expected device_removed=true")
+	}
+
+	// PrecondDeviceInTwoZones should now be false (removed from one zone).
+	v, _ := state.Get(PrecondDeviceInTwoZones)
+	if v != false {
+		t.Error("expected device_in_two_zones=false after single zone removal")
+	}
+
+	// PrecondDeviceInZone should still be true (one device remains).
+	v, _ = state.Get(PrecondDeviceInZone)
+	if v != true {
+		t.Error("expected device_in_zone=true (one device still present)")
+	}
+}
+
+func TestHandleRemoveDevice_ClearsAllZonePreconditions(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Simulate device in zone.
+	state.Set(PrecondDeviceInZone, true)
+	state.Set(PrecondDeviceInTwoZones, true)
+
+	cs := getControllerState(state)
+	cs.devices["dev-001"] = "zone-abc"
+
+	// Remove with zone="all".
+	step := &loader.Step{Params: map[string]any{
+		KeyDeviceID: "dev-001",
+		"zone":      "all",
+	}}
+	out, err := r.handleRemoveDevice(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyDeviceRemoved] != true {
+		t.Error("expected device_removed=true")
+	}
+
+	// Both preconditions should be cleared.
+	v, _ := state.Get(PrecondDeviceInZone)
+	if v != false {
+		t.Error("expected device_in_zone=false after remove all")
+	}
+	v, _ = state.Get(PrecondDeviceInTwoZones)
+	if v != false {
+		t.Error("expected device_in_two_zones=false after remove all")
+	}
+}
+
 func TestHandleCheckRenewal(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()

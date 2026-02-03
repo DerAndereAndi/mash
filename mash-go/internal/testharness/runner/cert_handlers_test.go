@@ -2,9 +2,11 @@ package runner
 
 import (
 	"context"
+	"crypto/tls"
 	"testing"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/cert"
 )
 
 func TestHandleResetPASESession(t *testing.T) {
@@ -203,6 +205,92 @@ func TestDeviceVerifyPeer_D2DPreconditions_DiffZone(t *testing.T) {
 	}
 	if out[KeyError] != "unknown_ca" {
 		t.Errorf("expected error=unknown_ca, got %v", out[KeyError])
+	}
+}
+
+func TestHandleVerifyCertificate_WithZoneCA(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Generate a Zone CA and a device cert signed by it.
+	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeLocal)
+	if err != nil {
+		t.Fatalf("generate zone CA: %v", err)
+	}
+	r.zoneCAPool = zoneCA.TLSClientCAs()
+
+	// Generate a device key pair and CSR.
+	keyPair, err := cert.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("generate key pair: %v", err)
+	}
+	csrDER, err := cert.CreateCSR(keyPair, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "test-device"},
+		ZoneID:   "test-zone",
+	})
+	if err != nil {
+		t.Fatalf("create CSR: %v", err)
+	}
+	deviceCert, err := cert.SignCSR(zoneCA, csrDER)
+	if err != nil {
+		t.Fatalf("sign CSR: %v", err)
+	}
+
+	// Create a local TLS server with the device cert, connect to it.
+	serverTLSCert := tls.Certificate{
+		Certificate: [][]byte{deviceCert.Raw},
+		PrivateKey:  keyPair.PrivateKey,
+	}
+	serverConfig := &tls.Config{
+		Certificates: []tls.Certificate{serverTLSCert},
+		MinVersion:   tls.VersionTLS13,
+	}
+
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", serverConfig)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	// Accept in background.
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		// Keep alive until test finishes.
+		buf := make([]byte, 1)
+		conn.Read(buf)
+	}()
+
+	// Connect the runner to the local TLS server.
+	clientConfig := &tls.Config{
+		InsecureSkipVerify: true,
+		MinVersion:         tls.VersionTLS13,
+	}
+	tlsConn, err := tls.Dial("tcp", listener.Addr().String(), clientConfig)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer tlsConn.Close()
+
+	r.conn.tlsConn = tlsConn
+	r.conn.connected = true
+
+	out, err := r.handleVerifyCertificate(context.Background(), &loader.Step{}, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if out[KeyChainValid] != true {
+		t.Error("expected chain_valid=true when zoneCAPool is set and cert is signed by zone CA")
+	}
+	if out[KeyNotExpired] != true {
+		t.Error("expected not_expired=true for fresh cert")
+	}
+	if out[KeyCertValid] != true {
+		t.Error("expected cert_valid=true")
 	}
 }
 

@@ -20,7 +20,7 @@ pics_requirements:
   - D.COMM.SC
 
 preconditions:
-  - device_available: true
+  - device_commissioned: true
   - certificates_valid: true
 
 steps:

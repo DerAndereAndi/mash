@@ -224,6 +224,31 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		return r.buildBrowseOutput(ds)
 	}
 
+	// Simulate commissioner service when a zone has been created.
+	if zoneCreated, _ := state.Get(PrecondZoneCreated); zoneCreated == true {
+		serviceType, _ := params[KeyServiceType].(string)
+		if serviceType == discovery.ServiceTypeCommissioner || serviceType == ServiceAliasCommissioner {
+			zs := getZoneState(state)
+			zoneName := "MASH Zone"
+			zoneID := "sim-zone-id"
+			if len(zs.zoneOrder) > 0 {
+				zoneID = zs.zoneOrder[0]
+				if z, ok := zs.zones[zoneID]; ok && z.ZoneType != "" {
+					zoneName = z.ZoneType
+				}
+			}
+			ds.services = []discoveredService{{
+				InstanceName: zoneName,
+				ServiceType:  discovery.ServiceTypeCommissioner,
+				Host:         "controller.local",
+				Port:         8443,
+				Addresses:    []string{"192.168.1.1"},
+				TXTRecords:   map[string]string{"ZN": zoneName, "ZI": zoneID},
+			}}
+			return r.buildBrowseOutput(ds)
+		}
+	}
+
 	// Simulate two devices with the same discriminator.
 	retries := 0
 	if twoDevs, _ := state.Get(PrecondTwoDevicesSameDiscriminator); twoDevs == true {

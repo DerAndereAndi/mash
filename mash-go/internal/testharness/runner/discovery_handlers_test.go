@@ -560,6 +560,51 @@ func TestBrowseMDNS_DeviceInTwoZones_Operational(t *testing.T) {
 	}
 }
 
+func TestBrowseMDNS_CommissionerSimulation(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set zone_created precondition and create zone state.
+	state.Set(PrecondZoneCreated, true)
+	zs := getZoneState(state)
+	zoneID := "test-zone-id"
+	zs.zones[zoneID] = &zoneInfo{
+		ZoneID:   zoneID,
+		ZoneType: ZoneTypeHomeManager,
+		Metadata: map[string]any{},
+	}
+	zs.zoneOrder = append(zs.zoneOrder, zoneID)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasCommissioner,
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if out[KeyControllerFound] != true {
+		t.Error("expected controller_found=true for commissioner simulation")
+	}
+	if out[KeyControllersFound] != 1 {
+		t.Errorf("expected controllers_found=1, got %v", out[KeyControllersFound])
+	}
+
+	ds := getDiscoveryState(state)
+	if len(ds.services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(ds.services))
+	}
+	svc := ds.services[0]
+	if svc.ServiceType != discovery.ServiceTypeCommissioner {
+		t.Errorf("expected commissioner service type, got %v", svc.ServiceType)
+	}
+	if svc.TXTRecords["ZI"] != zoneID {
+		t.Errorf("expected ZI=%s, got %v", zoneID, svc.TXTRecords["ZI"])
+	}
+}
+
 func TestBrowseMDNS_InstancesForDevice_AlwaysSet(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
