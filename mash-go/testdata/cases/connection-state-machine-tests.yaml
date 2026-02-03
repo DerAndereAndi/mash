@@ -716,7 +716,7 @@ steps:
     action: device_local_action
     params:
       action: change_state
-      target_state: RUNNING
+      operating_state: RUNNING
     expect:
       action_triggered: true
 

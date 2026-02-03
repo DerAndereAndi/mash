@@ -580,10 +580,13 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	s.mu.Lock()
 	if s.deviceID == "" {
 		s.deviceID = deviceID
-		// Update TLS cert to use operational cert for future connections
-		s.tlsCert = operationalCert.TLSCertificate()
-		s.tlsConfig.Certificates = []tls.Certificate{s.tlsCert}
 	}
+	// Always update TLS cert to use the latest operational cert.
+	// On re-commission (e.g., second zone), the device gets a new cert
+	// from the new zone's CA -- we must present that cert on future TLS
+	// connections, otherwise the controller sees a stale certificate.
+	s.tlsCert = operationalCert.TLSCertificate()
+	s.tlsConfig.Certificates = []tls.Certificate{s.tlsCert}
 	s.mu.Unlock()
 
 	// Store Zone CA for future verification of controller connections
@@ -641,6 +644,12 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	s.mu.Lock()
 	s.zoneSessions[zoneID] = zoneSession
 	s.mu.Unlock()
+
+	// Release the commissioning connection guard before entering the
+	// message loop. The commissioning phase (PASE + cert exchange) is
+	// complete; holding the guard during the operational message loop
+	// would block all subsequent commissioning attempts for other zones.
+	s.releaseCommissioningConnection()
 
 	// Start message loop - blocks until connection closes
 	s.runZoneMessageLoop(zoneID, framedConn, zoneSession)

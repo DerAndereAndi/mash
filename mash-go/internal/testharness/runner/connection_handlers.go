@@ -360,6 +360,16 @@ func (r *Runner) handleWaitForNotificationAsZone(ctx context.Context, step *load
 		return nil, err
 	}
 
+	// Check for notifications buffered by sendTriggerViaZone.
+	if len(conn.pendingNotifications) > 0 {
+		data := conn.pendingNotifications[0]
+		conn.pendingNotifications = conn.pendingNotifications[1:]
+		return map[string]any{
+			KeyNotificationReceived: true,
+			KeyNotificationData:     data,
+		}, nil
+	}
+
 	timeoutMs := 5000
 	if t, ok := params[KeyTimeoutMs].(float64); ok {
 		timeoutMs = int(t)

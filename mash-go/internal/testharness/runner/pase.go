@@ -204,9 +204,14 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("cert exchange: %w", err)
 	}
 
-	// Store Zone CA and build the CA pool for operational TLS.
+	// Store Zone CA and accumulate the CA pool for operational TLS.
+	// We accumulate rather than replace so that multiple commissions
+	// (multi-zone) can coexist -- each zone's CA must be trusted.
 	r.zoneCA = zoneCA
-	r.zoneCAPool = zoneCA.TLSClientCAs()
+	if r.zoneCAPool == nil {
+		r.zoneCAPool = x509.NewCertPool()
+	}
+	r.zoneCAPool.AddCert(zoneCA.Certificate)
 
 	// Generate controller operational cert for mutual TLS.
 	controllerID := "test-controller"

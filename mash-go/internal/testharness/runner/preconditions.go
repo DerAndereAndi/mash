@@ -224,36 +224,53 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 					}
 				}
 			case PrecondTwoZonesConnected:
-				// Ensure commissioned first so zone connections can present
-				// controller certificates for operational TLS.
-				if r.config.Target != "" {
-					if err := r.ensureCommissioned(ctx, state); err != nil {
-						return fmt.Errorf("precondition two_zones_connected commission: %w", err)
-					}
-				}
 				ct := getConnectionTracker(state)
-				for _, name := range []string{"GRID", "LOCAL"} {
-					if _, exists := ct.zoneConnections[name]; !exists {
-						if r.config.Target != "" {
-							// Establish real zone connections so tests can perform I/O.
-							step := &loader.Step{
-								Action: "connect_as_zone",
-								Params: map[string]any{KeyZoneID: name},
-							}
-							outputs, err := r.handleConnectAsZone(ctx, step, state)
-							if err != nil {
-								return fmt.Errorf("precondition connect zone %s: %w", name, err)
-							}
-							if established, ok := outputs[KeyConnectionEstablished].(bool); ok && !established {
-								errMsg, _ := outputs[KeyError].(string)
-								return fmt.Errorf("precondition connect zone %s: %s", name, errMsg)
-							}
-						} else {
-							// No target available (unit tests): use dummy connections.
-							dummyConn := &Connection{connected: true}
-							ct.zoneConnections[name] = dummyConn
-							r.activeZoneConns[name] = dummyConn
+				zones := []string{"GRID", "LOCAL"}
+				if r.config.Target != "" {
+					// Commission each zone separately. Each PASE session
+					// creates a new zone on the device, and the PASE
+					// connection becomes that zone's live framer for
+					// subscribe/read/write operations.
+					for i, name := range zones {
+						if _, exists := ct.zoneConnections[name]; exists {
+							continue
 						}
+						// Reset connection and PASE state for fresh commission.
+						// Save and restore the accumulated zone CA pool so
+						// that earlier zones' CAs survive across commissions.
+						savedPool := r.zoneCAPool
+						r.ensureDisconnected()
+						r.zoneCAPool = savedPool
+
+						if err := r.ensureCommissioned(ctx, state); err != nil {
+							return fmt.Errorf("precondition two_zones_connected commission zone %s: %w", name, err)
+						}
+
+						// Move the PASE connection to the zone tracker.
+						zoneConn := r.conn
+						ct.zoneConnections[name] = zoneConn
+						r.activeZoneConns[name] = zoneConn
+						state.Set(ZoneConnectionStateKey(name), zoneConn)
+
+						// Detach from runner so the next iteration
+						// creates a fresh connection.
+						r.conn = &Connection{}
+
+						// If not last zone, wait for device to re-enter
+						// commissioning mode in test-mode.
+						if i < len(zones)-1 {
+							time.Sleep(600 * time.Millisecond)
+						}
+					}
+				} else {
+					// No target available (unit tests): use dummy connections.
+					for _, name := range zones {
+						if _, exists := ct.zoneConnections[name]; exists {
+							continue
+						}
+						dummyConn := &Connection{connected: true}
+						ct.zoneConnections[name] = dummyConn
+						r.activeZoneConns[name] = dummyConn
 					}
 				}
 			}

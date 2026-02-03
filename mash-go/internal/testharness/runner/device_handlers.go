@@ -7,6 +7,9 @@ import (
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/features"
+	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // registerDeviceHandlers registers all device state action handlers.
@@ -290,6 +293,16 @@ func (r *Runner) handleChangeState(ctx context.Context, step *loader.Step, state
 		ds.operatingState = s
 		state.Set(StateOperatingState, s)
 		changed = true
+
+		// When running against a real device, send a trigger to actually
+		// change the attribute on the device so notifications fire.
+		if r.config.Target != "" {
+			if trigger, ok := operatingStateTriggers[s]; ok {
+				if err := r.sendTriggerViaZone(ctx, trigger, state); err != nil {
+					return nil, fmt.Errorf("trigger state change on device: %w", err)
+				}
+			}
+		}
 	}
 	if s, ok := params["control_state"].(string); ok {
 		ds.controlState = s
@@ -308,6 +321,97 @@ func (r *Runner) handleChangeState(ctx context.Context, step *loader.Step, state
 		StateControlState:    ds.controlState,
 		StateProcessState:    ds.processState,
 	}, nil
+}
+
+// operatingStateTriggers maps operating state names to TestControl trigger opcodes.
+var operatingStateTriggers = map[string]uint64{
+	"RUNNING": features.TriggerSetRunning,
+	"STANDBY": features.TriggerSetStandby,
+	"FAULT":   features.TriggerFault,
+}
+
+// sendTriggerViaZone sends a triggerTestEvent invoke to the device using any
+// available zone connection. This is used when the main runner connection
+// (r.conn) is not available, e.g. in multi-zone tests where the runner
+// connection was detached after commissioning.
+func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *engine.ExecutionState) error {
+	// Try main connection first.
+	if r.conn != nil && r.conn.connected && r.conn.framer != nil {
+		_, err := r.sendTrigger(ctx, trigger, state)
+		return err
+	}
+
+	// Find any zone connection to use.
+	ct := getConnectionTracker(state)
+	var conn *Connection
+	for _, c := range ct.zoneConnections {
+		if c.connected && c.framer != nil {
+			conn = c
+			break
+		}
+	}
+	if conn == nil {
+		return fmt.Errorf("no zone connection available for trigger")
+	}
+
+	enableKey := r.config.EnableKey
+	if enableKey == "" {
+		return fmt.Errorf("no enable key configured")
+	}
+
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpInvoke,
+		EndpointID: 0,
+		FeatureID:  uint8(model.FeatureTestControl), //nolint:gosec // constant fits in uint8
+		Payload: &wire.InvokePayload{
+			CommandID: features.TestControlCmdTriggerTestEvent,
+			Parameters: map[string]any{
+				features.TriggerTestEventParamEnableKey:    enableKey,
+				features.TriggerTestEventParamEventTrigger: trigger,
+			},
+		},
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return fmt.Errorf("encode trigger request: %w", err)
+	}
+
+	if err := conn.framer.WriteFrame(data); err != nil {
+		return fmt.Errorf("send trigger request: %w", err)
+	}
+
+	// Read frames until we get the invoke response. The zone connection
+	// may have active subscriptions, so the device can send notifications
+	// (triggered by the state change inside the invoke) before the invoke
+	// response arrives on the wire. Any notifications are buffered on
+	// the Connection so wait_for_notification_as_zone can retrieve them.
+	for range 10 {
+		respData, err := conn.framer.ReadFrame()
+		if err != nil {
+			return fmt.Errorf("read trigger response: %w", err)
+		}
+
+		msgType, peekErr := wire.PeekMessageType(respData)
+		if peekErr == nil && msgType == wire.MessageTypeNotification {
+			conn.pendingNotifications = append(conn.pendingNotifications, respData)
+			continue
+		}
+
+		resp, err := wire.DecodeResponse(respData)
+		if err != nil {
+			return fmt.Errorf("decode trigger response: %w", err)
+		}
+
+		if !resp.IsSuccess() {
+			return fmt.Errorf("trigger failed with status %d", resp.Status)
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("trigger response not received after skipping notifications")
 }
 
 // handleSetStateDetail sets stateDetails vendor data.

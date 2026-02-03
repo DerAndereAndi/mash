@@ -114,6 +114,11 @@ type Connection struct {
 	tlsConn   *tls.Conn
 	framer    *transport.Framer
 	connected bool
+
+	// pendingNotifications buffers notifications that were read while
+	// waiting for an invoke response (e.g. during sendTriggerViaZone).
+	// handleWaitForNotificationAsZone drains this before reading the wire.
+	pendingNotifications [][]byte
 }
 
 // New creates a new test runner.
