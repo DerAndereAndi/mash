@@ -13,7 +13,7 @@ func TestHandleControllerAction(t *testing.T) {
 
 	step := &loader.Step{
 		Params: map[string]any{
-			"sub_action":  "get_controller_id",
+			"sub_action": "get_controller_id",
 		},
 	}
 	out, err := r.handleControllerAction(context.Background(), step, state)
@@ -84,6 +84,29 @@ func TestHandleCommissioningWindowDuration(t *testing.T) {
 	out, _ = r.handleGetCommissioningWindowDuration(context.Background(), &loader.Step{}, state)
 	if out["minutes"] != 30.0 {
 		t.Errorf("expected 30, got %v", out["minutes"])
+	}
+}
+
+func TestSetCommissioningWindowDuration_IntParam(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// YAML integers parse as Go int, not float64.
+	// duration_seconds as int (600 = 10 minutes).
+	step := &loader.Step{Params: map[string]any{"duration_seconds": 600}}
+	out, _ := r.handleSetCommissioningWindowDuration(context.Background(), step, state)
+	if out["minutes"] != 10.0 {
+		t.Errorf("expected 10 minutes from int 600, got %v", out["minutes"])
+	}
+	if out["result"] != "ok" {
+		t.Errorf("expected result=ok, got %v", out["result"])
+	}
+
+	// minutes as int.
+	step = &loader.Step{Params: map[string]any{"minutes": 30}}
+	out, _ = r.handleSetCommissioningWindowDuration(context.Background(), step, state)
+	if out["minutes"] != 30.0 {
+		t.Errorf("expected 30 minutes from int 30, got %v", out["minutes"])
 	}
 }
 

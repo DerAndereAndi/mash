@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -348,6 +349,144 @@ func TestHandleConnectAsZone_ErrorOutputs(t *testing.T) {
 	}
 	if _, ok := out["error_code"]; !ok {
 		t.Error("expected error_code key in output")
+	}
+}
+
+// C2: handleConnect constructs target from host+port params.
+func TestHandleConnect_HostPortParams(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "original:9999"
+	state := newTestState()
+
+	// host+port should override config target.
+	step := &loader.Step{Params: map[string]any{
+		"host": "192.0.2.1",
+		"port": 8443,
+	}}
+	out, _ := r.handleConnect(context.Background(), step, state)
+	// Connection will fail (unreachable), but the target in output should reflect host:port.
+	if out["target"] != "192.0.2.1:8443" {
+		t.Errorf("expected target=192.0.2.1:8443, got %v", out["target"])
+	}
+}
+
+// C2: handleConnect with host+port using int port (YAML integer).
+func TestHandleConnect_HostPortIntPort(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	step := &loader.Step{Params: map[string]any{
+		"host": "10.0.0.1",
+		"port": int(9443), // YAML int type
+	}}
+	out, _ := r.handleConnect(context.Background(), step, state)
+	if out["target"] != "10.0.0.1:9443" {
+		t.Errorf("expected target=10.0.0.1:9443, got %v", out["target"])
+	}
+}
+
+// C4: connect_as_zone success output contains state: OPERATIONAL.
+func TestConnectAsZone_StateOutput(t *testing.T) {
+	// We can't easily test a successful connection without a real server,
+	// but we can verify the zone limit logic.
+	r := newTestRunner()
+	state := newTestState()
+
+	// Fill up 5 zone connections.
+	ct := getConnectionTracker(state)
+	for i := 0; i < 5; i++ {
+		ct.zoneConnections[fmt.Sprintf("zone%d", i)] = &Connection{connected: true}
+	}
+
+	// 6th zone should be rejected (C5).
+	step := &loader.Step{Params: map[string]any{
+		"zone_id": "zone5",
+	}}
+	out, err := r.handleConnectAsZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["connection_established"] != false {
+		t.Error("expected connection_established=false for 6th zone")
+	}
+	if out["error_code"] != "MAX_CONNECTIONS_EXCEEDED" {
+		t.Errorf("expected error_code=MAX_CONNECTIONS_EXCEEDED, got %v", out["error_code"])
+	}
+}
+
+// C5: Zone limit enforcement allows exactly 5.
+func TestConnectAsZone_ZoneLimit(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	ct := getConnectionTracker(state)
+
+	// With fewer than 5 zones, the limit check should not trigger.
+	// (Connection will still fail due to no real server, but the error
+	// should NOT be MAX_CONNECTIONS_EXCEEDED.)
+	ct.zoneConnections["zone0"] = &Connection{connected: true}
+	step := &loader.Step{Params: map[string]any{
+		"zone_id": "zone1",
+		"target":  "127.0.0.1:1",
+	}}
+	out, _ := r.handleConnectAsZone(context.Background(), step, state)
+	if out["error_code"] == "MAX_CONNECTIONS_EXCEEDED" {
+		t.Error("should not hit zone limit with only 1 existing zone")
+	}
+}
+
+// C10: send_ping routes to zone-specific connection.
+func TestPing_ZoneRouting(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set up a zone connection in the tracker.
+	ct := getConnectionTracker(state)
+	zoneConn := &Connection{connected: true}
+	ct.zoneConnections["zone1"] = zoneConn
+
+	// Ping with connection=zone1 should find the zone connection.
+	step := &loader.Step{Params: map[string]any{"connection": "zone1"}}
+	out, _ := r.handleSendPing(context.Background(), step, state)
+	if out["pong_received"] != true {
+		t.Error("expected pong_received=true when zone connection exists")
+	}
+
+	// Ping with zone=zone1 should also work (alias).
+	step = &loader.Step{Params: map[string]any{"zone": "zone1"}}
+	out, _ = r.handleSendPing(context.Background(), step, state)
+	if out["pong_received"] != true {
+		t.Error("expected pong_received=true with zone param")
+	}
+
+	// Non-existent zone falls back to main connection.
+	r.conn.connected = true
+	step = &loader.Step{Params: map[string]any{"connection": "nonexistent"}}
+	out, _ = r.handleSendPing(context.Background(), step, state)
+	if out["pong_received"] != true {
+		t.Error("expected pong_received=true (fallback to main connection)")
+	}
+
+	// No connection at all.
+	r.conn.connected = false
+	step = &loader.Step{Params: map[string]any{"connection": "nonexistent"}}
+	out, _ = r.handleSendPing(context.Background(), step, state)
+	if out["pong_received"] != false {
+		t.Error("expected pong_received=false when no connection available")
+	}
+}
+
+// C10: send_ping without connection param uses main connection.
+func TestPing_FallbackToMainConnection(t *testing.T) {
+	r := newTestRunner()
+	r.conn.connected = true
+	state := newTestState()
+
+	// No connection/zone param -> falls back to r.conn.
+	step := &loader.Step{Params: map[string]any{}}
+	out, _ := r.handleSendPing(context.Background(), step, state)
+	if out["pong_received"] != true {
+		t.Error("expected pong_received=true with main connection fallback")
 	}
 }
 

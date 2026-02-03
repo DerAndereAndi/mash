@@ -205,7 +205,7 @@ func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, 
 		case <-floodCtx.Done():
 			wg.Wait()
 			return map[string]any{
-				"flood_completed":          true,
+				"flood_completed":           true,
 				"device_remains_responsive": true, // If we get here, device survived
 				"accepted_connections":      int(atomic.LoadInt32(&accepted)),
 				"rejected_connections":      int(atomic.LoadInt32(&rejected)),
@@ -243,7 +243,7 @@ func (r *Runner) handleCheckMDNSAdvertisement(ctx context.Context, step *loader.
 	commissionable := !zonesFull && !secState.commissioningActive
 
 	return map[string]any{
-		"commissionable":     commissionable,
+		"commissionable":      commissionable,
 		"advertisement_found": true,
 	}, nil
 }
@@ -357,13 +357,31 @@ func (r *Runner) handleSendPing(ctx context.Context, step *loader.Step, state *e
 	if c, ok := params["connection"].(string); ok {
 		connName = c
 	}
+	// Also accept "zone" param as an alias for "connection".
+	if connName == "" {
+		if z, ok := params["zone"].(string); ok {
+			connName = z
+		}
+	}
 
-	// Get the connection from state
+	// Look up the connection from the connection tracker's zone connections,
+	// then fall back to state lookup, then fall back to r.conn.
 	var conn *Connection
 	if connName != "" {
-		if c, ok := state.Get("zone_" + connName + "_connection"); ok {
-			conn = c.(*Connection)
+		ct := getConnectionTracker(state)
+		if c, ok := ct.zoneConnections[connName]; ok && c.connected {
+			conn = c
 		}
+		// Fall back to state-based lookup.
+		if conn == nil {
+			if c, ok := state.Get("zone_" + connName + "_connection"); ok {
+				conn = c.(*Connection)
+			}
+		}
+	}
+	// Fall back to the runner's main connection.
+	if conn == nil && r.conn != nil && r.conn.connected {
+		conn = r.conn
 	}
 
 	if conn == nil || !conn.connected {
@@ -373,8 +391,7 @@ func (r *Runner) handleSendPing(ctx context.Context, step *loader.Step, state *e
 		}, nil
 	}
 
-	// For now, simulate ping by checking connection is still alive
-	// In a real implementation, we'd send a protocol-level ping
+	// Simulate ping by checking connection is still alive.
 	return map[string]any{
 		"pong_received": true,
 	}, nil
@@ -516,9 +533,9 @@ func (r *Runner) handlePASEAttempts(ctx context.Context, step *loader.Step, stat
 	state.Set("last_pase_delays", delays)
 
 	return map[string]any{
-		"attempts_made":          count,
+		"attempts_made":           count,
 		"all_responses_immediate": allImmediate,
-		"max_delay_ms":           maxDelay.Milliseconds(),
+		"max_delay_ms":            maxDelay.Milliseconds(),
 	}, nil
 }
 
@@ -664,9 +681,9 @@ func (r *Runner) handleMeasureErrorTiming(ctx context.Context, step *loader.Step
 	secState.timingSamples[errorType] = sample
 
 	return map[string]any{
-		"mean_recorded":    true,
-		"mean_ms":          sample.Mean.Milliseconds(),
-		"stddev_ms":        sample.StdDev.Milliseconds(),
+		"mean_recorded":     true,
+		"mean_ms":           sample.Mean.Milliseconds(),
+		"stddev_ms":         sample.StdDev.Milliseconds(),
 		"samples_collected": len(sample.Samples),
 	}, nil
 }
@@ -696,10 +713,10 @@ func (r *Runner) handleCompareTimingDistributions(ctx context.Context, step *loa
 	state.Set("distributions_overlap", overlap)
 
 	return map[string]any{
-		"mean_difference_ms":   meanDiff.Milliseconds(),
+		"mean_difference_ms":    meanDiff.Milliseconds(),
 		"distributions_overlap": overlap,
-		"pubkey_mean_ms":       pubkeySample.Mean.Milliseconds(),
-		"password_mean_ms":     passwordSample.Mean.Milliseconds(),
+		"pubkey_mean_ms":        pubkeySample.Mean.Milliseconds(),
+		"password_mean_ms":      passwordSample.Mean.Milliseconds(),
 	}, nil
 }
 

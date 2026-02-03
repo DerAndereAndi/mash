@@ -95,9 +95,9 @@ func (r *Runner) handleCommissionWithAdmin(ctx context.Context, step *loader.Ste
 	cs.devices[deviceID] = zoneID
 
 	return map[string]any{
-		"commissioned":  true,
-		"device_id":     deviceID,
-		"zone_id":       zoneID,
+		"commissioned": true,
+		"device_id":    deviceID,
+		"zone_id":      zoneID,
 	}, nil
 }
 
@@ -132,19 +132,19 @@ func (r *Runner) handleVerifyControllerCert(ctx context.Context, step *loader.St
 		}
 
 		return map[string]any{
-			"cert_valid":       hasCerts,
-			"cert_count":       len(tlsState.PeerCertificates),
-			"cert_present":     hasCerts,
+			"cert_valid":        hasCerts,
+			"cert_count":        len(tlsState.PeerCertificates),
+			"cert_present":      hasCerts,
 			"signed_by_zone_ca": signedByZoneCA,
-			"not_expired":      notExpired,
+			"not_expired":       notExpired,
 		}, nil
 	}
 
 	return map[string]any{
-		"cert_valid":       false,
-		"cert_present":     false,
+		"cert_valid":        false,
+		"cert_present":      false,
 		"signed_by_zone_ca": false,
-		"not_expired":      false,
+		"not_expired":       false,
 	}, nil
 }
 
@@ -172,12 +172,12 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 	cs := getControllerState(state)
 
 	minutes := 15.0
-	if m, ok := params["minutes"].(float64); ok {
-		minutes = m
+	if v, ok := params["minutes"]; ok {
+		minutes = toFloat(v)
 	}
 	// Also accept duration_seconds param (convert to minutes).
-	if s, ok := params["duration_seconds"].(float64); ok {
-		minutes = s / 60.0
+	if v, ok := params["duration_seconds"]; ok {
+		minutes = toFloat(v) / 60.0
 	}
 
 	// Validate bounds: min 3 minutes (180s), max 180 minutes (10800s).

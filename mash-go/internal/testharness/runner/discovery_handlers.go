@@ -31,17 +31,8 @@ func (r *Runner) registerDiscoveryHandlers() {
 	r.engine.RegisterHandler("verify_txt_records", r.handleVerifyTXTRecordsReal)
 }
 
-// handleBrowseMDNS browses for mDNS services by type.
-func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	params := engine.InterpolateParams(step.Params, state)
-	ds := getDiscoveryState(state)
-
-	serviceType, _ := params["service_type"].(string)
-	timeoutMs := 5000
-	if t, ok := params["timeout_ms"].(float64); ok {
-		timeoutMs = int(t)
-	}
-
+// browseMDNSOnce performs a single mDNS browse pass and returns discovered services.
+func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params map[string]any, timeoutMs int) ([]discoveredService, error) {
 	browseCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
@@ -118,6 +109,41 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		return nil, fmt.Errorf("unknown service type: %s", serviceType)
 	}
 
+	return services, nil
+}
+
+// handleBrowseMDNS browses for mDNS services by type.
+func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	params := engine.InterpolateParams(step.Params, state)
+	ds := getDiscoveryState(state)
+
+	serviceType, _ := params["service_type"].(string)
+	timeoutMs := 5000
+	if t, ok := params["timeout_ms"].(float64); ok {
+		timeoutMs = int(t)
+	}
+
+	// Determine if retry is requested.
+	retryRequested := false
+	if r, ok := params["retry"].(bool); ok {
+		retryRequested = r
+	}
+
+	services, err := r.browseMDNSOnce(ctx, serviceType, params, timeoutMs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Retry once if requested and no services found.
+	retries := 0
+	if retryRequested && len(services) == 0 {
+		retries = 1
+		services, err = r.browseMDNSOnce(ctx, serviceType, params, timeoutMs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	ds.services = services
 
 	// Compute per-service-type counts and first-service metadata.
@@ -154,7 +180,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		"devices_found_min":          devicesFound,
 		"controllers_found_min":      controllersFound,
 		"controller_found":           controllersFound > 0,
-		"retries_performed_min":      0,
+		"retries_performed_min":      retries,
 		"instance_conflict_resolved": !instanceConflict,
 	}
 
@@ -164,6 +190,16 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 			outputs["error_code"] = "DISCRIMINATOR_MISMATCH"
 		} else {
 			outputs["error_code"] = "NO_DEVICES_FOUND"
+		}
+	}
+
+	// Check for address resolution issues: device found but no resolved addresses.
+	if len(services) > 0 {
+		for _, svc := range services {
+			if len(svc.Addresses) == 0 && svc.Host != "" {
+				outputs["error_code"] = "ADDRESS_RESOLUTION_FAILED"
+				break
+			}
 		}
 	}
 
@@ -469,6 +505,13 @@ func (r *Runner) handleWaitForDeviceReal(ctx context.Context, step *loader.Step,
 	}
 
 	// No discriminator -- fall back to simulated success for non-mDNS test modes.
+	// Populate ds.services so that subsequent verify_txt_records sees a non-empty list.
+	ds := getDiscoveryState(state)
+	ds.services = []discoveredService{{
+		InstanceName: "MASH-SIM-0000",
+		ServiceType:  discovery.ServiceTypeCommissionable,
+		TXTRecords:   map[string]string{},
+	}}
 	return map[string]any{
 		"device_found":           true,
 		"device_has_txt_records": true,

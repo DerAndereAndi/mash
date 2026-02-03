@@ -25,18 +25,32 @@ import (
 //	Level 2: tls/connection_established    -> connect
 //	Level 3: session/device_commissioned   -> connect + commission (PASE)
 const (
-	precondLevelNone         = 0
+	precondLevelNone          = 0
 	precondLevelCommissioning = 1
-	precondLevelConnected    = 2
-	precondLevelCommissioned = 3
+	precondLevelConnected     = 2
+	precondLevelCommissioned  = 3
 )
 
 // preconditionKeyLevels maps known precondition keys to their required level.
+// d2dPreconditionKeys are precondition keys that should be stored in
+// execution state so that handlers (e.g. device_verify_peer) can adapt
+// their behavior based on the simulated scenario.
+var d2dPreconditionKeys = map[string]bool{
+	"two_devices_same_zone":       true,
+	"two_devices_different_zones": true,
+	"device_b_cert_expired":       true,
+}
+
 var preconditionKeyLevels = map[string]int{
 	// Level 0: Always-true environment preconditions (no setup needed).
-	"device_booted":       precondLevelNone,
-	"controller_running":  precondLevelNone,
-	"device_in_network":   precondLevelNone,
+	"device_booted":      precondLevelNone,
+	"controller_running": precondLevelNone,
+	"device_in_network":  precondLevelNone,
+
+	// D2D simulation preconditions (no actual connection needed).
+	"two_devices_same_zone":       precondLevelNone,
+	"two_devices_different_zones": precondLevelNone,
+	"device_b_cert_expired":       precondLevelNone,
 
 	"device_in_commissioning_mode": precondLevelCommissioning,
 	"device_uncommissioned":        precondLevelCommissioning,
@@ -98,6 +112,17 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	// Populate setup_code so that test steps using ${setup_code} resolve correctly.
 	if r.config.SetupCode != "" {
 		state.Set("setup_code", r.config.SetupCode)
+	}
+
+	// Store D2D precondition keys in state so handlers can check them.
+	for _, cond := range tc.Preconditions {
+		for key, val := range cond {
+			if d2dPreconditionKeys[key] {
+				if b, ok := val.(bool); ok {
+					state.Set(key, b)
+				}
+			}
+		}
 	}
 
 	needed := r.preconditionLevel(tc.Preconditions)

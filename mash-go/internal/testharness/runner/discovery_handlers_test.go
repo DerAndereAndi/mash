@@ -371,3 +371,41 @@ func TestVerifyTXTRecords_RequiredKeys(t *testing.T) {
 		t.Error("expected txt_valid=true for synthetic fields (id, cat, proto, D)")
 	}
 }
+
+// C8: wait_for_device fallback populates ds.services.
+func TestWaitForDevice_PopulatesServices(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// No discriminator -> simulated fallback.
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleWaitForDeviceReal(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["device_found"] != true {
+		t.Error("expected device_found=true")
+	}
+
+	// Verify services were populated so verify_txt_records works.
+	ds := getDiscoveryState(state)
+	if len(ds.services) == 0 {
+		t.Error("expected ds.services to be populated in fallback path")
+	}
+	if ds.services[0].InstanceName != "MASH-SIM-0000" {
+		t.Errorf("expected synthetic instance name, got %v", ds.services[0].InstanceName)
+	}
+	if ds.services[0].ServiceType != discovery.ServiceTypeCommissionable {
+		t.Errorf("expected commissionable service type, got %v", ds.services[0].ServiceType)
+	}
+
+	// Verify verify_txt_records now succeeds on the synthetic service.
+	txtStep := &loader.Step{Params: map[string]any{}}
+	txtOut, err := r.handleVerifyTXTRecordsReal(context.Background(), txtStep, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if txtOut["txt_valid"] != true {
+		t.Error("expected txt_valid=true for synthetic service")
+	}
+}

@@ -384,6 +384,14 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	if t, ok := step.Params["target"].(string); ok && t != "" {
 		target = t
 	}
+	// Also construct from host + port when specified.
+	if h, ok := step.Params["host"].(string); ok && h != "" {
+		port := 8443
+		if p, ok := step.Params["port"]; ok {
+			port = int(toFloat(p))
+		}
+		target = fmt.Sprintf("%s:%d", h, port)
+	}
 
 	insecure := r.config.InsecureSkipVerify
 	if i, ok := step.Params["insecure"].(bool); ok {
@@ -468,22 +476,22 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}
 
 	return map[string]any{
-		"connection_established": true,
-		"connected":              true,
-		"tls_handshake_success":  true,
-		"target":                 target,
-		"tls_version":            tlsVersionName(cs.Version),
-		"negotiated_version":     tlsVersionName(cs.Version),
-		"negotiated_cipher":      tls.CipherSuiteName(cs.CipherSuite),
-		"negotiated_group":       curveIDName(cs.CurveID),
-		"negotiated_protocol":    cs.NegotiatedProtocol,
-		"negotiated_alpn":        cs.NegotiatedProtocol,
-		"mutual_auth":            mutualAuth,
-		"chain_validated":        chainValidated,
-		"self_signed_accepted":   serverCertSelfSigned && hasPeerCerts,
-		"server_cert_cn_prefix":  serverCertCNPrefix,
+		"connection_established":  true,
+		"connected":               true,
+		"tls_handshake_success":   true,
+		"target":                  target,
+		"tls_version":             tlsVersionName(cs.Version),
+		"negotiated_version":      tlsVersionName(cs.Version),
+		"negotiated_cipher":       tls.CipherSuiteName(cs.CipherSuite),
+		"negotiated_group":        curveIDName(cs.CurveID),
+		"negotiated_protocol":     cs.NegotiatedProtocol,
+		"negotiated_alpn":         cs.NegotiatedProtocol,
+		"mutual_auth":             mutualAuth,
+		"chain_validated":         chainValidated,
+		"self_signed_accepted":    serverCertSelfSigned && hasPeerCerts,
+		"server_cert_cn_prefix":   serverCertCNPrefix,
 		"server_cert_self_signed": serverCertSelfSigned,
-		"has_peer_certs":         hasPeerCerts,
+		"has_peer_certs":          hasPeerCerts,
 	}, nil
 }
 
@@ -716,7 +724,6 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 		"status":         resp.Status,
 	}, nil
 }
-
 
 // Utility handlers
 func (r *Runner) handleWait(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {

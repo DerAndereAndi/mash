@@ -81,6 +81,16 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 
 	zoneID, _ := params["zone_id"].(string)
 
+	// Enforce 5-zone connection limit.
+	if len(ct.zoneConnections) >= 5 {
+		return map[string]any{
+			"connection_established": false,
+			"zone_id":                zoneID,
+			"error":                  "MAX_CONNECTIONS_EXCEEDED",
+			"error_code":             "MAX_CONNECTIONS_EXCEEDED",
+		}, nil
+	}
+
 	target := r.config.Target
 	if t, ok := params["target"].(string); ok && t != "" {
 		target = t
@@ -122,6 +132,7 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	return map[string]any{
 		"connection_established": true,
 		"zone_id":                zoneID,
+		"state":                  "OPERATIONAL",
 	}, nil
 }
 
@@ -362,8 +373,8 @@ func (r *Runner) handleSimultaneousClose(ctx context.Context, step *loader.Step,
 
 	err := r.conn.Close()
 	return map[string]any{
-		"close_sent":      err == nil,
-		"simultaneous":    true,
+		"close_sent":   err == nil,
+		"simultaneous": true,
 	}, nil
 }
 
@@ -779,8 +790,8 @@ func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loa
 	_ = r.conn.Close()
 
 	return map[string]any{
-		"messages_sent":  sent,
-		"disconnected":   true,
+		"messages_sent": sent,
+		"disconnected":  true,
 	}, nil
 }
 

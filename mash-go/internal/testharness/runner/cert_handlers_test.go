@@ -133,6 +133,79 @@ func TestHandleDeviceVerifyPeerNotConnected(t *testing.T) {
 	}
 }
 
+// C3: verify_certificate should include not_expired key.
+func TestVerifyCertificate_NotExpiredKey(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Not connected: not_expired should be false.
+	out, _ := r.handleVerifyCertificate(context.Background(), &loader.Step{}, state)
+	if _, ok := out["not_expired"]; !ok {
+		t.Error("expected not_expired key in output")
+	}
+	if out["not_expired"] != false {
+		t.Error("expected not_expired=false when not connected")
+	}
+}
+
+// C9: D2D precondition-driven verify_peer with two_devices_same_zone.
+func TestDeviceVerifyPeer_D2DPreconditions_SameZone(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set precondition state.
+	state.Set("two_devices_same_zone", true)
+
+	out, _ := r.handleDeviceVerifyPeer(context.Background(), &loader.Step{}, state)
+	if out["peer_valid"] != true {
+		t.Error("expected peer_valid=true for same zone precondition")
+	}
+	if out["verification_success"] != true {
+		t.Error("expected verification_success=true for same zone")
+	}
+	if out["same_zone_ca"] != true {
+		t.Error("expected same_zone_ca=true for same zone")
+	}
+	if out["error"] != "" {
+		t.Errorf("expected empty error, got %v", out["error"])
+	}
+}
+
+// C9: D2D precondition-driven verify_peer with device_b_cert_expired.
+func TestDeviceVerifyPeer_D2DPreconditions_Expired(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	state.Set("device_b_cert_expired", true)
+
+	out, _ := r.handleDeviceVerifyPeer(context.Background(), &loader.Step{}, state)
+	if out["peer_valid"] != false {
+		t.Error("expected peer_valid=false for expired cert")
+	}
+	if out["error"] != "certificate_expired" {
+		t.Errorf("expected error=certificate_expired, got %v", out["error"])
+	}
+}
+
+// C9: D2D precondition-driven verify_peer with two_devices_different_zones.
+func TestDeviceVerifyPeer_D2DPreconditions_DiffZone(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	state.Set("two_devices_different_zones", true)
+
+	out, _ := r.handleDeviceVerifyPeer(context.Background(), &loader.Step{}, state)
+	if out["peer_valid"] != false {
+		t.Error("expected peer_valid=false for different zones")
+	}
+	if out["same_zone_ca"] != false {
+		t.Error("expected same_zone_ca=false for different zones")
+	}
+	if out["error"] != "unknown_ca" {
+		t.Errorf("expected error=unknown_ca, got %v", out["error"])
+	}
+}
+
 func TestHandleVerifyDeviceCert_NotConnected(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()

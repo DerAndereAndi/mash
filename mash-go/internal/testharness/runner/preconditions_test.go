@@ -205,12 +205,12 @@ func TestEnsureCommissioned_AlreadyDone(t *testing.T) {
 func TestSortByPreconditionLevel(t *testing.T) {
 	cases := []*loader.TestCase{
 		{ID: "TC-COMM-001", Preconditions: []loader.Condition{{"device_commissioned": true}}},          // level 3
-		{ID: "TC-DISC-001", Preconditions: nil},                                                         // level 0
-		{ID: "TC-CONN-001", Preconditions: []loader.Condition{{"connection_established": true}}},         // level 2
-		{ID: "TC-PASE-001", Preconditions: []loader.Condition{{"device_in_commissioning_mode": true}}},   // level 1
-		{ID: "TC-COMM-002", Preconditions: []loader.Condition{{"session_established": true}}},            // level 3
-		{ID: "TC-DISC-002", Preconditions: nil},                                                         // level 0
-		{ID: "TC-PASE-002", Preconditions: []loader.Condition{{"device_uncommissioned": true}}},          // level 1
+		{ID: "TC-DISC-001", Preconditions: nil},                                                        // level 0
+		{ID: "TC-CONN-001", Preconditions: []loader.Condition{{"connection_established": true}}},       // level 2
+		{ID: "TC-PASE-001", Preconditions: []loader.Condition{{"device_in_commissioning_mode": true}}}, // level 1
+		{ID: "TC-COMM-002", Preconditions: []loader.Condition{{"session_established": true}}},          // level 3
+		{ID: "TC-DISC-002", Preconditions: nil},                                                        // level 0
+		{ID: "TC-PASE-002", Preconditions: []loader.Condition{{"device_uncommissioned": true}}},        // level 1
 	}
 
 	SortByPreconditionLevel(cases)
@@ -352,6 +352,70 @@ func TestDeriveZoneIDFromSecret(t *testing.T) {
 	other := deriveZoneIDFromSecret([]byte("different-secret"))
 	if zoneID == other {
 		t.Error("different secrets should produce different zone IDs")
+	}
+}
+
+// C9: D2D precondition keys are stored in state.
+func TestSetupPreconditions_D2DStateKeys(t *testing.T) {
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+
+	tc := &loader.TestCase{
+		ID: "TC-D2D-001",
+		Preconditions: []loader.Condition{
+			{"two_devices_same_zone": true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	v, ok := state.Get("two_devices_same_zone")
+	if !ok {
+		t.Error("expected two_devices_same_zone to be stored in state")
+	}
+	if v != true {
+		t.Errorf("expected true, got %v", v)
+	}
+}
+
+func TestSetupPreconditions_D2DExpiredKey(t *testing.T) {
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+
+	tc := &loader.TestCase{
+		ID: "TC-D2D-003",
+		Preconditions: []loader.Condition{
+			{"device_b_cert_expired": true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	v, ok := state.Get("device_b_cert_expired")
+	if !ok {
+		t.Error("expected device_b_cert_expired to be stored in state")
+	}
+	if v != true {
+		t.Errorf("expected true, got %v", v)
+	}
+}
+
+// D2D precondition keys should be at level 0 (no setup needed).
+func TestPreconditionLevel_D2DKeys(t *testing.T) {
+	r := newTestRunner()
+
+	for _, key := range []string{"two_devices_same_zone", "two_devices_different_zones", "device_b_cert_expired"} {
+		conditions := []loader.Condition{{key: true}}
+		got := r.preconditionLevel(conditions)
+		if got != precondLevelNone {
+			t.Errorf("preconditionLevel(%s) = %d, want %d (level 0)", key, got, precondLevelNone)
+		}
 	}
 }
 
