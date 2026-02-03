@@ -639,7 +639,7 @@ steps:
     params:
       service_type: "_mashd._udp"
     expect:
-      instances_found: 2
+      instances_for_device: 2
 
 postconditions:
   - multi_zone_mashd: true

@@ -276,7 +276,7 @@ func (s *DeviceService) Start(ctx context.Context) error {
 		MinVersion:   tls.VersionTLS13,
 		MaxVersion:   tls.VersionTLS13,
 		Certificates: []tls.Certificate{s.tlsCert},
-		ClientAuth:   tls.NoClientCert, // During commissioning, no client cert
+		ClientAuth:   tls.RequestClientCert, // Request but don't require; used to distinguish operational reconnections
 		NextProtos:   []string{transport.ALPNProtocol},
 	}
 
@@ -389,10 +389,16 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 	inCommissioningMode := s.discoveryManager != nil && s.discoveryManager.IsCommissioningMode()
 	s.mu.RUnlock()
 
-	if inCommissioningMode {
+	// If the peer presented a client certificate, this is an operational
+	// reconnection from a known zone (not a new PASE commissioning).
+	peerHasCert := len(state.PeerCertificates) > 0
+
+	if inCommissioningMode && !peerHasCert {
 		s.handleCommissioningConnection(tlsConn)
 	} else {
-		// Operational mode - handle reconnection from known zones
+		// Operational mode - handle reconnection from known zones.
+		// Also used when in commissioning mode but the peer presented
+		// a certificate (indicating an operational reconnection).
 		s.handleOperationalConnection(tlsConn)
 	}
 }

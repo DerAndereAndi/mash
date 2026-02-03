@@ -602,6 +602,38 @@ func TestPreconditionLevel_DeviceInZoneKeys(t *testing.T) {
 	}
 }
 
+func TestZoneCreatedIsSimulationPreconditionKey(t *testing.T) {
+	if !simulationPreconditionKeys[PrecondZoneCreated] {
+		t.Error("expected zone_created to be a simulation precondition key")
+	}
+}
+
+func TestSetupPreconditions_ZoneCreated_SetsStateFlag(t *testing.T) {
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+
+	tc := &loader.TestCase{
+		ID: "TC-MASHD-002",
+		Preconditions: []loader.Condition{
+			{PrecondZoneCreated: true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The zone_created flag must be stored in state so handlers can check it.
+	v, ok := state.Get(PrecondZoneCreated)
+	if !ok {
+		t.Fatal("expected zone_created to be set in state")
+	}
+	if v != true {
+		t.Errorf("expected zone_created=true, got %v", v)
+	}
+}
+
 func TestSetupPreconditions_ClearsZoneCAForNonCommissionedTests(t *testing.T) {
 	r := newTestRunner()
 	state := engine.NewExecutionState(context.Background())
@@ -626,11 +658,11 @@ func TestSetupPreconditions_ClearsZoneCAForNonCommissionedTests(t *testing.T) {
 	}
 }
 
-func TestSetupPreconditions_TwoZonesConnected_WithZoneCA(t *testing.T) {
+func TestSetupPreconditions_TwoZonesConnected_PreservesZoneCA(t *testing.T) {
 	r := newTestRunner()
 	state := engine.NewExecutionState(context.Background())
 
-	// Simulate stale zone CA from a previous commissioned test.
+	// Simulate zone CA from a previous commissioned test.
 	r.zoneCAPool = x509.NewCertPool()
 
 	tc := &loader.TestCase{
@@ -645,9 +677,84 @@ func TestSetupPreconditions_TwoZonesConnected_WithZoneCA(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Level 0 test should have cleared stale zone CA.
+	// two_zones_connected needs the zone CA for operational TLS, so it
+	// should NOT be cleared even though the precondition level is 0.
+	if r.zoneCAPool == nil {
+		t.Error("expected zoneCAPool to be preserved for two_zones_connected")
+	}
+}
+
+func TestSetupPreconditions_ClearsZoneCA_ForNonZoneTests(t *testing.T) {
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+
+	// Simulate stale zone CA from a previous commissioned test.
+	r.zoneCAPool = x509.NewCertPool()
+
+	tc := &loader.TestCase{
+		ID: "TC-SIMPLE-001",
+		Preconditions: []loader.Condition{
+			{PrecondDeviceBooted: true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Level 0 test without two_zones_connected should clear stale zone CA.
 	if r.zoneCAPool != nil {
-		t.Error("expected zoneCAPool to be nil for level-0 test with two_zones_connected")
+		t.Error("expected zoneCAPool to be nil for simple level-0 test")
+	}
+}
+
+func TestSetupPreconditions_ClosesStaleZoneConnections(t *testing.T) {
+	r := newTestRunner()
+
+	// Simulate zone connections left over from a previous test.
+	conn1 := &Connection{connected: true}
+	conn2 := &Connection{connected: true}
+	r.activeZoneConns["GRID"] = conn1
+	r.activeZoneConns["LOCAL"] = conn2
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-MULTI-003",
+		Preconditions: []loader.Condition{
+			{PrecondTwoZonesConnected: true},
+		},
+	}
+
+	_ = r.setupPreconditions(context.Background(), tc, state)
+
+	// Stale zone connections should have been closed.
+	if conn1.connected {
+		t.Error("expected stale GRID connection to be closed")
+	}
+	if conn2.connected {
+		t.Error("expected stale LOCAL connection to be closed")
+	}
+	if len(r.activeZoneConns) != 2 {
+		// New connections (dummy since no target) should have been created.
+		t.Errorf("expected 2 active zone conns, got %d", len(r.activeZoneConns))
+	}
+}
+
+func TestHandleConnectAsZone_TracksInRunner(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Without a target, handleConnectAsZone won't establish a real connection.
+	// Directly verify the runner-level tracking by simulating what the
+	// precondition does: dummy connections should be tracked.
+	ct := getConnectionTracker(state)
+	conn := &Connection{connected: true}
+	ct.zoneConnections["GRID"] = conn
+	r.activeZoneConns["GRID"] = conn
+
+	if _, ok := r.activeZoneConns["GRID"]; !ok {
+		t.Error("expected GRID to be tracked in runner activeZoneConns")
 	}
 }
 

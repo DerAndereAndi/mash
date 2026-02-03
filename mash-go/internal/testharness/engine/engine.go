@@ -226,6 +226,17 @@ func defaultChecker(key string, expected interface{}, state *ExecutionState) *Ex
 		}
 	}
 
+	// "present" means the key exists with any non-nil value.
+	if expStr, ok := expected.(string); ok && expStr == "present" {
+		return &ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Actual:   actual,
+			Passed:   true,
+			Message:  fmt.Sprintf("%s = %v", key, actual),
+		}
+	}
+
 	// Simple equality check
 	passed := fmt.Sprintf("%v", expected) == fmt.Sprintf("%v", actual)
 	result := &ExpectResult{

@@ -646,6 +646,63 @@ func TestBrowseMDNS_CommissionerUsesZoneName(t *testing.T) {
 	}
 }
 
+func TestBrowseMDNS_CommissionerMultipleZones(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set zone_created precondition and create two zones.
+	state.Set(PrecondZoneCreated, true)
+	zs := getZoneState(state)
+
+	zone1ID := "zone-aaa"
+	zs.zones[zone1ID] = &zoneInfo{
+		ZoneID:   zone1ID,
+		ZoneName: "Home Energy",
+		ZoneType: "LOCAL",
+		Metadata: map[string]any{},
+	}
+	zs.zoneOrder = append(zs.zoneOrder, zone1ID)
+
+	zone2ID := "zone-bbb"
+	zs.zones[zone2ID] = &zoneInfo{
+		ZoneID:   zone2ID,
+		ZoneName: "Grid Service",
+		ZoneType: "GRID",
+		Metadata: map[string]any{},
+	}
+	zs.zoneOrder = append(zs.zoneOrder, zone2ID)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasCommissioner,
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should return one commissioner instance per zone.
+	instancesForDevice, _ := out[KeyInstancesForDevice].(int)
+	if instancesForDevice != 2 {
+		t.Errorf("expected instances_for_device=2, got %v", out[KeyInstancesForDevice])
+	}
+	if out[KeyControllersFound] != 2 {
+		t.Errorf("expected controllers_found=2, got %v", out[KeyControllersFound])
+	}
+
+	ds := getDiscoveryState(state)
+	if len(ds.services) != 2 {
+		t.Fatalf("expected 2 services, got %d", len(ds.services))
+	}
+	if ds.services[0].TXTRecords["ZI"] != zone1ID {
+		t.Errorf("expected first ZI=%s, got %v", zone1ID, ds.services[0].TXTRecords["ZI"])
+	}
+	if ds.services[1].TXTRecords["ZI"] != zone2ID {
+		t.Errorf("expected second ZI=%s, got %v", zone2ID, ds.services[1].TXTRecords["ZI"])
+	}
+}
+
 func TestBrowseMDNS_AfterOneZoneRemoval(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()

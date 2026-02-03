@@ -141,6 +141,70 @@ func TestEngineFilter(t *testing.T) {
 	}
 }
 
+// TestDefaultChecker_PresentValue tests that "present" means "key exists".
+func TestDefaultChecker_PresentValue(t *testing.T) {
+	e := engine.New()
+
+	e.RegisterHandler("emit_field", func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"txt_field_ZN": "Home Energy",
+			"txt_field_ZI": "abc123",
+		}, nil
+	})
+
+	tc := &loader.TestCase{
+		ID:   "TC-PRESENT",
+		Name: "Present Checker",
+		Steps: []loader.Step{
+			{
+				Action: "emit_field",
+				Expect: map[string]interface{}{
+					"txt_field_ZN": "present",
+					"txt_field_ZI": "present",
+				},
+			},
+		},
+	}
+
+	result := e.Run(context.Background(), tc)
+	if !result.Passed {
+		for _, sr := range result.StepResults {
+			for _, er := range sr.ExpectResults {
+				if !er.Passed {
+					t.Errorf("expectation %s failed: %s", er.Key, er.Message)
+				}
+			}
+		}
+	}
+}
+
+// TestDefaultChecker_PresentValue_MissingKey tests that "present" fails for missing keys.
+func TestDefaultChecker_PresentValue_MissingKey(t *testing.T) {
+	e := engine.New()
+
+	e.RegisterHandler("emit_nothing", func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]interface{}, error) {
+		return map[string]interface{}{}, nil
+	})
+
+	tc := &loader.TestCase{
+		ID:   "TC-PRESENT-MISSING",
+		Name: "Present Missing Key",
+		Steps: []loader.Step{
+			{
+				Action: "emit_nothing",
+				Expect: map[string]interface{}{
+					"txt_field_ZN": "present",
+				},
+			},
+		},
+	}
+
+	result := e.Run(context.Background(), tc)
+	if result.Passed {
+		t.Error("expected test to fail when key is missing")
+	}
+}
+
 // TestEngineTimeout tests timeout handling.
 func TestEngineTimeout(t *testing.T) {
 	config := engine.DefaultConfig()

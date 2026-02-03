@@ -129,6 +129,9 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	ct.zoneConnections[zoneID] = newConn
 	state.Set(ZoneConnectionStateKey(zoneID), newConn)
 
+	// Track at runner level so connections are cleaned up between tests.
+	r.activeZoneConns[zoneID] = newConn
+
 	return map[string]any{
 		KeyConnectionEstablished: true,
 		KeyZoneID:                zoneID,

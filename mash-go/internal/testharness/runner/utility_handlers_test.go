@@ -11,8 +11,9 @@ import (
 
 func newTestRunner() *Runner {
 	return &Runner{
-		config: &Config{},
-		conn:   &Connection{},
+		config:          &Config{},
+		conn:            &Connection{},
+		activeZoneConns: make(map[string]*Connection),
 	}
 }
 

@@ -45,6 +45,12 @@ type Runner struct {
 	// zoneCAPool holds the Zone CA certificate pool obtained during commissioning.
 	// Used for TLS verification on operational (non-commissioning) connections.
 	zoneCAPool *x509.CertPool
+
+	// activeZoneConns tracks zone connections across tests so they can be
+	// cleaned up between test cases. Without this, connections from a prior
+	// test leak and prevent the device from accepting new ones (all zones
+	// appear "connected" on the device side).
+	activeZoneConns map[string]*Connection
 }
 
 // Config configures the test runner.
@@ -127,11 +133,12 @@ func New(config *Config) *Runner {
 	}
 
 	r := &Runner{
-		config:       config,
-		engine:       engine.NewWithConfig(engineConfig),
-		engineConfig: engineConfig,
-		conn:         &Connection{},
-		resolver:     NewResolver(),
+		config:          config,
+		engine:          engine.NewWithConfig(engineConfig),
+		engineConfig:    engineConfig,
+		conn:            &Connection{},
+		resolver:        NewResolver(),
+		activeZoneConns: make(map[string]*Connection),
 		pics:         pics,
 	}
 

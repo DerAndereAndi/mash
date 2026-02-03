@@ -239,12 +239,23 @@ func (r *Runner) handleRemoveDevice(ctx context.Context, step *loader.Step, stat
 	deviceID, _ := params[KeyDeviceID].(string)
 	zone, _ := params["zone"].(string)
 
+	// Try device-map based removal first.
 	_, existed := cs.devices[deviceID]
-	delete(cs.devices, deviceID)
+	if existed {
+		delete(cs.devices, deviceID)
+	}
+
+	// When no device_id was provided (conformance test pattern), infer
+	// removal from precondition state flags directly.
+	if !existed {
+		inTwoZones, _ := state.Get(PrecondDeviceInTwoZones)
+		inZone, _ := state.Get(PrecondDeviceInZone)
+		existed = inTwoZones == true || inZone == true
+	}
 
 	// Update simulation precondition state to reflect the removal.
 	if existed {
-		if zone == "all" || len(cs.devices) == 0 {
+		if zone == "all" || (deviceID != "" && len(cs.devices) == 0) {
 			state.Set(PrecondDeviceInZone, false)
 			state.Set(PrecondDeviceInTwoZones, false)
 			state.Set(StateDeviceWasRemoved, true)

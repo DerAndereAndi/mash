@@ -267,6 +267,62 @@ func TestHandleRemoveDevice_ClearsAllZonePreconditions(t *testing.T) {
 	}
 }
 
+func TestHandleRemoveDevice_ZoneOnlyParam_SingleZone(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Matches TC-MASHO-006: device_in_zone precondition, no device_id in params.
+	state.Set(PrecondDeviceInZone, true)
+
+	step := &loader.Step{Params: map[string]any{
+		"zone": "all",
+	}}
+	out, err := r.handleRemoveDevice(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyDeviceRemoved] != true {
+		t.Error("expected device_removed=true")
+	}
+
+	v, _ := state.Get(PrecondDeviceInZone)
+	if v != false {
+		t.Error("expected device_in_zone=false after remove all (zone-only param)")
+	}
+	v, _ = state.Get(StateDeviceWasRemoved)
+	if v != true {
+		t.Error("expected device_was_removed=true after remove all")
+	}
+}
+
+func TestHandleRemoveDevice_ZoneOnlyParam_TwoZones(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Matches TC-MASHO-005: device_in_two_zones precondition, no device_id in params.
+	state.Set(PrecondDeviceInTwoZones, true)
+
+	step := &loader.Step{Params: map[string]any{
+		"zone": "zone_1",
+	}}
+	out, err := r.handleRemoveDevice(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyDeviceRemoved] != true {
+		t.Error("expected device_removed=true")
+	}
+
+	v, _ := state.Get(PrecondDeviceInTwoZones)
+	if v != false {
+		t.Error("expected device_in_two_zones=false after removing one zone")
+	}
+	v, _ = state.Get(PrecondDeviceInZone)
+	if v != true {
+		t.Error("expected device_in_zone=true (one zone remains)")
+	}
+}
+
 func TestHandleCheckRenewal(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()

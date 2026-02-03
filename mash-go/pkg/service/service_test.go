@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
 	"sync"
 	"testing"
 	"time"
@@ -1273,6 +1274,31 @@ func TestControllerOperationalDiscoveryIgnoresUnknownDevices(t *testing.T) {
 
 	if gotEvent {
 		t.Error("should NOT have received EventDeviceRediscovered for unknown device")
+	}
+}
+
+// Connection routing tests -- verify that the TLS config requests (but does not
+// require) client certificates, enabling the device to distinguish operational
+// reconnections from new PASE commissionings.
+
+func TestDeviceServiceTLSConfigRequestsClientCert(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// Verify the TLS config requests client certificates without requiring them.
+	if svc.tlsConfig.ClientAuth != tls.RequestClientCert {
+		t.Errorf("expected ClientAuth=RequestClientCert, got %v", svc.tlsConfig.ClientAuth)
 	}
 }
 

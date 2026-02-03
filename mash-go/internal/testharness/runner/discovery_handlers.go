@@ -237,10 +237,9 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		serviceType, _ := params[KeyServiceType].(string)
 		if serviceType == discovery.ServiceTypeCommissioner || serviceType == ServiceAliasCommissioner {
 			zs := getZoneState(state)
-			zoneName := "MASH Zone"
-			zoneID := "sim-zone-id"
-			if len(zs.zoneOrder) > 0 {
-				zoneID = zs.zoneOrder[0]
+			// Create one commissioner instance per zone.
+			for _, zoneID := range zs.zoneOrder {
+				zoneName := "MASH Zone"
 				if z, ok := zs.zones[zoneID]; ok {
 					if z.ZoneName != "" {
 						zoneName = z.ZoneName
@@ -248,15 +247,26 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 						zoneName = z.ZoneType
 					}
 				}
+				ds.services = append(ds.services, discoveredService{
+					InstanceName: zoneName,
+					ServiceType:  discovery.ServiceTypeCommissioner,
+					Host:         "controller.local",
+					Port:         8443,
+					Addresses:    []string{"192.168.1.1"},
+					TXTRecords:   map[string]string{"ZN": zoneName, "ZI": zoneID},
+				})
 			}
-			ds.services = []discoveredService{{
-				InstanceName: zoneName,
-				ServiceType:  discovery.ServiceTypeCommissioner,
-				Host:         "controller.local",
-				Port:         8443,
-				Addresses:    []string{"192.168.1.1"},
-				TXTRecords:   map[string]string{"ZN": zoneName, "ZI": zoneID},
-			}}
+			if len(ds.services) == 0 {
+				// Fallback when no zones exist in state.
+				ds.services = []discoveredService{{
+					InstanceName: "MASH Zone",
+					ServiceType:  discovery.ServiceTypeCommissioner,
+					Host:         "controller.local",
+					Port:         8443,
+					Addresses:    []string{"192.168.1.1"},
+					TXTRecords:   map[string]string{"ZN": "MASH Zone", "ZI": "sim-zone-id"},
+				}}
+			}
 			return r.buildBrowseOutput(ds)
 		}
 	}

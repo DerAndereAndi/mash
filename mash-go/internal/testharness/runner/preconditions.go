@@ -54,6 +54,7 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondDeviceListening:            true,
 	PrecondDeviceInZone:               true,
 	PrecondDeviceInTwoZones:           true,
+	PrecondZoneCreated:                true,
 }
 
 var preconditionKeyLevels = map[string]int{
@@ -119,6 +120,16 @@ func (r *Runner) preconditionLevel(conditions []loader.Condition) int {
 	return preconditionLevelFor(conditions)
 }
 
+// hasPrecondition checks if any condition in the list has the given key set to true.
+func hasPrecondition(conditions []loader.Condition, key string) bool {
+	for _, cond := range conditions {
+		if b, ok := cond[key].(bool); ok && b {
+			return true
+		}
+	}
+	return false
+}
+
 // SortByPreconditionLevel sorts test cases by their required precondition level
 // (lowest first). The sort is stable, preserving file order within the same level.
 func SortByPreconditionLevel(cases []*loader.TestCase) {
@@ -158,10 +169,23 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	// Clear stale zone CA state for non-commissioned tests. This prevents
 	// a zone CA from a previous commissioned test from causing TLS
 	// verification failures on subsequent connection-level or lower tests.
-	if needed < precondLevelCommissioned {
+	// Skip clearing when the test needs zone connections (two_zones_connected),
+	// since those require the zone CA and controller cert for operational TLS.
+	needsZoneConns := hasPrecondition(tc.Preconditions, PrecondTwoZonesConnected)
+	if needed < precondLevelCommissioned && !needsZoneConns {
 		r.zoneCA = nil
 		r.controllerCert = nil
 		r.zoneCAPool = nil
+	}
+
+	// Close stale zone connections from previous tests so the device marks
+	// those zones as disconnected and can accept new connections.
+	hadActive := len(r.activeZoneConns) > 0
+	r.closeActiveZoneConns()
+	// Brief pause to let the device process the disconnections before we
+	// attempt to establish new connections.
+	if hadActive && r.config.Target != "" {
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Store simulation precondition keys in state so handlers can check them.
@@ -200,6 +224,13 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 					}
 				}
 			case PrecondTwoZonesConnected:
+				// Ensure commissioned first so zone connections can present
+				// controller certificates for operational TLS.
+				if r.config.Target != "" {
+					if err := r.ensureCommissioned(ctx, state); err != nil {
+						return fmt.Errorf("precondition two_zones_connected commission: %w", err)
+					}
+				}
 				ct := getConnectionTracker(state)
 				for _, name := range []string{"GRID", "LOCAL"} {
 					if _, exists := ct.zoneConnections[name]; !exists {
@@ -219,7 +250,9 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 							}
 						} else {
 							// No target available (unit tests): use dummy connections.
-							ct.zoneConnections[name] = &Connection{connected: true}
+							dummyConn := &Connection{connected: true}
+							ct.zoneConnections[name] = dummyConn
+							r.activeZoneConns[name] = dummyConn
 						}
 					}
 				}
@@ -361,6 +394,18 @@ func isNetError(err error) bool {
 }
 
 // ensureDisconnected closes any existing connection for a clean start.
+// closeActiveZoneConns closes all runner-tracked zone connections from
+// previous tests. This ensures the device marks those zones as disconnected
+// and can accept new connections.
+func (r *Runner) closeActiveZoneConns() {
+	for id, conn := range r.activeZoneConns {
+		if conn.connected {
+			_ = conn.Close()
+		}
+		delete(r.activeZoneConns, id)
+	}
+}
+
 func (r *Runner) ensureDisconnected() {
 	if r.conn != nil && r.conn.connected {
 		_ = r.conn.Close()
