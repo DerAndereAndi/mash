@@ -22,8 +22,8 @@ func TestBuildDocModel_LoadsAllFeatures(t *testing.T) {
 		t.Fatalf("BuildDocModel failed: %v", err)
 	}
 
-	if len(m.Features) != 9 {
-		t.Errorf("len(Features) = %d, want 9", len(m.Features))
+	if len(m.Features) != 10 {
+		t.Errorf("len(Features) = %d, want 10", len(m.Features))
 	}
 
 	// Should be sorted by ID
@@ -118,8 +118,8 @@ func TestBuildDocModel_HasTypes(t *testing.T) {
 		t.Fatalf("BuildDocModel failed: %v", err)
 	}
 
-	if len(m.FeatureTypes) != 9 {
-		t.Errorf("len(FeatureTypes) = %d, want 9", len(m.FeatureTypes))
+	if len(m.FeatureTypes) != 10 {
+		t.Errorf("len(FeatureTypes) = %d, want 10", len(m.FeatureTypes))
 	}
 	if len(m.EndpointTypes) != 11 {
 		t.Errorf("len(EndpointTypes) = %d, want 11", len(m.EndpointTypes))

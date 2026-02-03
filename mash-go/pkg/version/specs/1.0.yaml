@@ -244,3 +244,14 @@ features:
       optional:
         - { id: 2, name: acceptPlan }
 
+  TestControl:
+    id: 0x0A
+    revision: 1
+    mandatory: false
+    attributes:
+      mandatory:
+        - { id: 1, name: testEventTriggersEnabled }
+    commands:
+      mandatory:
+        - { id: 1, name: triggerTestEvent }
+

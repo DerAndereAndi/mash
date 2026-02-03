@@ -33,6 +33,7 @@ var (
 		"signals":         uint8(model.FeatureSignals),
 		"tariff":          uint8(model.FeatureTariff),
 		"plan":            uint8(model.FeaturePlan),
+		"testcontrol":     uint8(model.FeatureTestControl),
 	}
 
 	// attributeNames maps attribute names to IDs, keyed by feature ID.
@@ -172,6 +173,15 @@ func initNameTables() {
 		deviceInfoAttrs[k] = v
 	}
 	attributeNames[uint8(model.FeatureDeviceInfo)] = deviceInfoAttrs
+
+	// TestControl attributes
+	testControlAttrs := map[string]uint16{
+		"testeventtriggersenabled": features.TestControlAttrTestEventTriggersEnabled,
+	}
+	for k, v := range globalAttrs {
+		testControlAttrs[k] = v
+	}
+	attributeNames[uint8(model.FeatureTestControl)] = testControlAttrs
 }
 
 func init() {

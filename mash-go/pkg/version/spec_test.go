@@ -65,7 +65,7 @@ func TestSpec10_AllSixFeaturesPresent(t *testing.T) {
 	want := []string{
 		"DeviceInfo", "Status", "Electrical",
 		"Measurement", "EnergyControl", "ChargingSession",
-		"Tariff", "Signals", "Plan",
+		"Tariff", "Signals", "Plan", "TestControl",
 	}
 	for _, name := range want {
 		if _, ok := spec.Features[name]; !ok {

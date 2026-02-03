@@ -11,6 +11,7 @@ versions:
       Tariff: "1.0"
       Signals: "1.0"
       Plan: "1.0"
+      TestControl: "1.0"
     shared: "1.0"
     usecases:
       GPL:   { id: 0x01, major: 1, minor: 0 }
@@ -33,6 +34,7 @@ versions:
       - { name: Tariff, id: 0x07, description: "Price structure and power tiers" }
       - { name: Signals, id: 0x08, description: "Time-slotted prices, limits, and forecasts" }
       - { name: Plan, id: 0x09, description: "Device intended behavior/schedule" }
+      - { name: TestControl, id: 0x0A, description: "Test control and event triggering" }
     endpoint_types:
       - { name: DEVICE_ROOT, id: 0x00, description: "Device-level metadata (always endpoint 0)" }
       - { name: GRID_CONNECTION, id: 0x01, description: "AC grid connection point" }

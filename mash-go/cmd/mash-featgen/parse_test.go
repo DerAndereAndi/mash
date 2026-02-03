@@ -459,8 +459,8 @@ func TestParseProtocolVersionsFile(t *testing.T) {
 	if !ok {
 		t.Fatal("version 1.0 not found")
 	}
-	if len(ver.Features) != 9 {
-		t.Errorf("len(features) = %d, want 9", len(ver.Features))
+	if len(ver.Features) != 10 {
+		t.Errorf("len(features) = %d, want 10", len(ver.Features))
 	}
 	if ver.Shared != "1.0" {
 		t.Errorf("shared = %q, want 1.0", ver.Shared)

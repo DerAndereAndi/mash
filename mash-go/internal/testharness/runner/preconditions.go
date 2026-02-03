@@ -95,6 +95,11 @@ func (r *Runner) currentLevel() int {
 // When transitioning backwards (e.g., from commissioned to commissioning),
 // it disconnects to give the device a clean state.
 func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState) error {
+	// Populate setup_code so that test steps using ${setup_code} resolve correctly.
+	if r.config.SetupCode != "" {
+		state.Set("setup_code", r.config.SetupCode)
+	}
+
 	needed := r.preconditionLevel(tc.Preconditions)
 	current := r.currentLevel()
 

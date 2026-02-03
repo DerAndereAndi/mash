@@ -174,6 +174,10 @@ type DeviceConfig struct {
 	// and the commissioning window auto-reopens after each successful commission.
 	TestMode bool
 
+	// TestEnableKey is the hex-encoded 128-bit key (32 hex chars) required by
+	// the triggerTestEvent command. Only used when TestMode is true.
+	TestEnableKey string
+
 	// SnapshotPolicy controls when capability snapshots are emitted to the protocol log.
 	SnapshotPolicy SnapshotPolicy
 

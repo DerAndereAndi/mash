@@ -76,10 +76,17 @@ steps:
     expect:
       device_found: true
 
-  - name: Wait for commissioning window to expire
+  - name: Close commissioning window via trigger
+    action: trigger_test_event
+    params:
+      event_trigger: "0x0001000000000002"
+    expect:
+      trigger_sent: true
+
+  - name: Wait for mDNS update
     action: wait
     params:
-      duration: "125s"
+      duration_ms: 2000
 
   - name: Verify device no longer advertising
     action: browse_mdns
@@ -91,7 +98,7 @@ steps:
 postconditions:
   - mashc_deregistered_on_timeout: true
 
-timeout: "135s"
+timeout: "30s"
 tags:
   - discovery
   - commissionable
@@ -1096,10 +1103,17 @@ preconditions:
   - device_uncommissioned: true
 
 steps:
-  - name: Wait for window to expire
+  - name: Close commissioning window via trigger
+    action: trigger_test_event
+    params:
+      event_trigger: "0x0001000000000002"
+    expect:
+      trigger_sent: true
+
+  - name: Wait for mDNS update
     action: wait
     params:
-      duration: "125s"
+      duration_ms: 2000
 
   - name: Verify _mashc._udp deregistered
     action: browse_mdns
@@ -1111,7 +1125,7 @@ steps:
 postconditions:
   - returned_to_uncommissioned: true
 
-timeout: "135s"
+timeout: "30s"
 tags:
   - discovery
   - state

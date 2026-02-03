@@ -14,6 +14,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
+	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 )
 
@@ -296,12 +297,20 @@ func (r *Runner) handleConnectOperational(ctx context.Context, step *loader.Step
 }
 
 // handleEnterCommissioningMode signals device to enter commissioning mode.
+// When connected, sends a TriggerEnterCommissioningMode via TestControl.
 func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	secState := getSecurityState(state)
 	secState.commissioningActive = true
 
-	// In a real implementation, this might send a command to the device
-	// or trigger mDNS advertisement update
+	// Send trigger if connected.
+	if r.conn != nil && r.conn.connected && r.config.EnableKey != "" {
+		triggerResult, err := r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
+		if err == nil {
+			triggerResult["commissioning_mode_entered"] = true
+			return triggerResult, nil
+		}
+		// Fall through to stub if trigger fails.
+	}
 
 	return map[string]any{
 		"commissioning_mode_entered": true,
@@ -309,9 +318,20 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 }
 
 // handleExitCommissioningMode signals device to exit commissioning mode.
+// When connected, sends a TriggerExitCommissioningMode via TestControl.
 func (r *Runner) handleExitCommissioningMode(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	secState := getSecurityState(state)
 	secState.commissioningActive = false
+
+	// Send trigger if connected.
+	if r.conn != nil && r.conn.connected && r.config.EnableKey != "" {
+		triggerResult, err := r.sendTrigger(ctx, features.TriggerExitCommissioningMode, state)
+		if err == nil {
+			triggerResult["commissioning_mode_exited"] = true
+			return triggerResult, nil
+		}
+		// Fall through to stub if trigger fails.
+	}
 
 	return map[string]any{
 		"commissioning_mode_exited": true,

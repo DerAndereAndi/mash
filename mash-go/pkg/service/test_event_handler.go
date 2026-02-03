@@ -1,0 +1,154 @@
+package service
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/mash-protocol/mash-go/pkg/features"
+	"github.com/mash-protocol/mash-go/pkg/model"
+)
+
+// RegisterTestEventHandler wires the triggerTestEvent command on the given
+// TestControl feature to the device service's trigger dispatch. This must be
+// called while the *TestControl wrapper is still available (before the inner
+// Feature is added to the endpoint) and only when TestMode is enabled.
+func (s *DeviceService) RegisterTestEventHandler(tc *features.TestControl) {
+	tc.OnTriggerTestEvent(func(ctx context.Context, req features.TriggerTestEventRequest) error {
+		// Validate enable key.
+		if req.EnableKey != s.config.TestEnableKey {
+			s.debugLog("triggerTestEvent: enable key mismatch")
+			return fmt.Errorf("invalid enable key")
+		}
+
+		return s.dispatchTrigger(ctx, req.EventTrigger)
+	})
+}
+
+// dispatchTrigger routes a trigger opcode to the appropriate domain handler.
+func (s *DeviceService) dispatchTrigger(ctx context.Context, trigger uint64) error {
+	domain := features.TriggerDomain(trigger)
+
+	switch domain {
+	case uint16(model.FeatureDeviceInfo):
+		return s.handleCommissioningTrigger(ctx, trigger)
+	case uint16(model.FeatureStatus):
+		return s.handleStatusTrigger(ctx, trigger)
+	case uint16(model.FeatureMeasurement):
+		return s.handleMeasurementTrigger(ctx, trigger)
+	case uint16(model.FeatureChargingSession):
+		return s.handleChargingSessionTrigger(ctx, trigger)
+	default:
+		return fmt.Errorf("unknown trigger domain: 0x%04x", domain)
+	}
+}
+
+// handleCommissioningTrigger handles DeviceInfo-domain triggers.
+func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger uint64) error {
+	switch trigger {
+	case features.TriggerEnterCommissioningMode:
+		s.debugLog("trigger: entering commissioning mode")
+		return s.EnterCommissioningMode()
+	case features.TriggerExitCommissioningMode:
+		s.debugLog("trigger: exiting commissioning mode")
+		return s.ExitCommissioningMode()
+	case features.TriggerFactoryReset:
+		s.debugLog("trigger: factory reset (removing all zones)")
+		for _, zoneID := range s.ListZoneIDs() {
+			_ = s.RemoveZone(zoneID)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown commissioning trigger: 0x%016x", trigger)
+	}
+}
+
+// handleStatusTrigger handles Status-domain triggers.
+func (s *DeviceService) handleStatusTrigger(_ context.Context, trigger uint64) error {
+	for _, ep := range s.device.Endpoints() {
+		feat, err := ep.GetFeatureByID(uint8(model.FeatureStatus))
+		if err != nil {
+			continue
+		}
+
+		switch trigger {
+		case features.TriggerFault:
+			s.debugLog("trigger: setting fault state", "endpoint", ep.ID())
+			_ = feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateFault))
+			_ = feat.SetAttributeInternal(features.StatusAttrFaultCode, uint32(1))
+			_ = feat.SetAttributeInternal(features.StatusAttrFaultMessage, "Test trigger fault")
+			return nil
+		case features.TriggerClearFault:
+			s.debugLog("trigger: clearing fault", "endpoint", ep.ID())
+			_ = feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateRunning))
+			_ = feat.SetAttributeInternal(features.StatusAttrFaultCode, uint32(0))
+			_ = feat.SetAttributeInternal(features.StatusAttrFaultMessage, "")
+			return nil
+		case features.TriggerSetStandby:
+			s.debugLog("trigger: setting standby", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateStandby))
+		case features.TriggerSetRunning:
+			s.debugLog("trigger: setting running", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateRunning))
+		default:
+			return fmt.Errorf("unknown status trigger: 0x%016x", trigger)
+		}
+	}
+	return fmt.Errorf("no Status feature found on any endpoint")
+}
+
+// handleMeasurementTrigger handles Measurement-domain triggers.
+func (s *DeviceService) handleMeasurementTrigger(_ context.Context, trigger uint64) error {
+	for _, ep := range s.device.Endpoints() {
+		feat, err := ep.GetFeatureByID(uint8(model.FeatureMeasurement))
+		if err != nil {
+			continue
+		}
+
+		switch trigger {
+		case features.TriggerSetPower100:
+			s.debugLog("trigger: setting power to 100W", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.MeasurementAttrACActivePower, int64(100000))
+		case features.TriggerSetPower1000:
+			s.debugLog("trigger: setting power to 1kW", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.MeasurementAttrACActivePower, int64(1000000))
+		case features.TriggerSetPowerZero:
+			s.debugLog("trigger: setting power to 0W", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.MeasurementAttrACActivePower, int64(0))
+		case features.TriggerSetSoC50:
+			s.debugLog("trigger: setting SoC to 50%", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.MeasurementAttrStateOfCharge, uint8(50))
+		case features.TriggerSetSoC100:
+			s.debugLog("trigger: setting SoC to 100%", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.MeasurementAttrStateOfCharge, uint8(100))
+		default:
+			return fmt.Errorf("unknown measurement trigger: 0x%016x", trigger)
+		}
+	}
+	return fmt.Errorf("no Measurement feature found on any endpoint")
+}
+
+// handleChargingSessionTrigger handles ChargingSession-domain triggers.
+func (s *DeviceService) handleChargingSessionTrigger(_ context.Context, trigger uint64) error {
+	for _, ep := range s.device.Endpoints() {
+		_, err := ep.GetFeatureByID(uint8(model.FeatureChargingSession))
+		if err != nil {
+			continue
+		}
+
+		// ChargingSession triggers are placeholders for now.
+		switch trigger {
+		case features.TriggerEVPlugIn:
+			s.debugLog("trigger: EV plug in", "endpoint", ep.ID())
+			return nil
+		case features.TriggerEVUnplug:
+			s.debugLog("trigger: EV unplug", "endpoint", ep.ID())
+			return nil
+		case features.TriggerEVRequestCharge:
+			s.debugLog("trigger: EV request charge", "endpoint", ep.ID())
+			return nil
+		default:
+			return fmt.Errorf("unknown charging session trigger: 0x%016x", trigger)
+		}
+	}
+	return fmt.Errorf("no ChargingSession feature found on any endpoint")
+}

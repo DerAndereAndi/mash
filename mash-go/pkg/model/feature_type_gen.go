@@ -24,6 +24,8 @@ const (
 	FeatureSignals FeatureType = 0x08
 	// FeaturePlan: device intended behavior/schedule.
 	FeaturePlan FeatureType = 0x09
+	// FeatureTestControl: test control and event triggering.
+	FeatureTestControl FeatureType = 0x0A
 )
 
 // String returns the feature type name.
@@ -47,6 +49,8 @@ func (f FeatureType) String() string {
 		return "Signals"
 	case FeaturePlan:
 		return "Plan"
+	case FeatureTestControl:
+		return "TestControl"
 	default:
 		if f >= FeatureVendorBase {
 			return "Vendor"

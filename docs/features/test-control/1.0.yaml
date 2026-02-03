@@ -1,0 +1,25 @@
+name: TestControl
+id: 0x0A
+revision: 1
+mandatory: false
+description: "Test control and event triggering for conformance testing (Matter-inspired)."
+
+attributes:
+  - id: 1
+    name: testEventTriggersEnabled
+    type: bool
+    access: readOnly
+    mandatory: true
+    default: false
+    description: "Whether test event triggers are enabled on this device."
+
+commands:
+  - id: 0x01
+    name: triggerTestEvent
+    mandatory: true
+    description: "Trigger a test event by opcode. Requires matching 128-bit enableKey (hex-encoded, 32 chars). Matter-inspired safety gate."
+    parameters:
+      - { name: enableKey, type: string, required: true }
+      - { name: eventTrigger, type: uint64, required: true }
+    response:
+      - { name: success, type: bool, required: true }
