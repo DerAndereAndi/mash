@@ -10,6 +10,7 @@ import (
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/cert"
 )
 
 // registerZoneHandlers registers all zone management action handlers.
@@ -41,12 +42,12 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
-	zoneType, _ := params["zone_type"].(string)
+	zoneType, _ := params[KeyZoneType].(string)
 	if zoneType == "" {
 		zoneType = "HOME_MANAGER"
 	}
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
 	if zoneID == "" {
 		zoneID = generateZoneID()
 	}
@@ -78,14 +79,32 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 	zs.zones[zoneID] = zone
 	zs.zoneOrder = append(zs.zoneOrder, zoneID)
 
+	// Generate a real Zone CA and controller operational cert so that
+	// verify_controller_cert and cert fingerprint handlers work with
+	// actual cryptographic material.
+	zt := cert.ZoneTypeLocal
+	if zoneType == "GRID" || zoneType == "GRID_OPERATOR" {
+		zt = cert.ZoneTypeGrid
+	}
+	if zoneCA, err := cert.GenerateZoneCA(zoneID, zt); err == nil {
+		r.zoneCA = zoneCA
+		r.zoneCAPool = zoneCA.TLSClientCAs()
+		zone.CAFingerprint = certFingerprint(zoneCA.Certificate)
+		fingerprint = zone.CAFingerprint
+
+		if controllerCert, err := cert.GenerateControllerOperationalCert(zoneCA, "test-controller"); err == nil {
+			r.controllerCert = controllerCert
+		}
+	}
+
 	return map[string]any{
-		"zone_id":         zoneID,
-		"save_zone_id":    zoneID, // For save_as support in the engine.
-		"zone_created":    true,
-		"zone_type":       zoneType,
-		"fingerprint":     fingerprint,
-		"zone_id_present": zoneID != "",
-		"zone_id_length":  len(zoneID),
+		KeyZoneID:        zoneID,
+		KeySaveZoneID:    zoneID, // For save_as support in the engine.
+		KeyZoneCreated:   true,
+		KeyZoneType:      zoneType,
+		KeyFingerprint:   fingerprint,
+		KeyZoneIDPresent: zoneID != "",
+		KeyZoneIDLength:  len(zoneID),
 	}, nil
 }
 
@@ -94,8 +113,8 @@ func (r *Runner) handleAddZone(ctx context.Context, step *loader.Step, state *en
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
-	zoneID, _ := params["zone_id"].(string)
-	deviceID, _ := params["device_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
+	deviceID, _ := params[KeyDeviceID].(string)
 
 	zone, exists := zs.zones[zoneID]
 	if !exists {
@@ -105,8 +124,8 @@ func (r *Runner) handleAddZone(ctx context.Context, step *loader.Step, state *en
 	zone.DeviceIDs = append(zone.DeviceIDs, deviceID)
 
 	return map[string]any{
-		"device_added": true,
-		"zone_id":      zoneID,
+		KeyDeviceAdded: true,
+		KeyZoneID:      zoneID,
 	}, nil
 }
 
@@ -115,10 +134,10 @@ func (r *Runner) handleDeleteZone(ctx context.Context, step *loader.Step, state 
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
 
 	if _, exists := zs.zones[zoneID]; !exists {
-		return map[string]any{"zone_removed": false}, nil
+		return map[string]any{KeyZoneRemoved: false}, nil
 	}
 
 	delete(zs.zones, zoneID)
@@ -132,8 +151,8 @@ func (r *Runner) handleDeleteZone(ctx context.Context, step *loader.Step, state 
 	}
 
 	return map[string]any{
-		"zone_removed": true,
-		"zone_deleted": true,
+		KeyZoneRemoved: true,
+		KeyZoneDeleted: true,
 	}, nil
 }
 
@@ -147,20 +166,20 @@ func (r *Runner) handleGetZone(ctx context.Context, step *loader.Step, state *en
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
 
 	zone, exists := zs.zones[zoneID]
 	if !exists {
-		return map[string]any{"zone_found": false}, nil
+		return map[string]any{KeyZoneFound: false}, nil
 	}
 
 	return map[string]any{
-		"zone_found":    true,
-		"zone_id":       zone.ZoneID,
-		"zone_type":     zone.ZoneType,
-		"zone_metadata": zone.Metadata,
-		"connected":     zone.Connected,
-		"device_count":  len(zone.DeviceIDs),
+		KeyZoneFound:    true,
+		KeyZoneID:       zone.ZoneID,
+		KeyZoneType:     zone.ZoneType,
+		KeyZoneMetadata: zone.Metadata,
+		KeyConnected:    zone.Connected,
+		KeyDeviceCount:  len(zone.DeviceIDs),
 	}, nil
 }
 
@@ -169,10 +188,10 @@ func (r *Runner) handleHasZone(ctx context.Context, step *loader.Step, state *en
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
 	_, exists := zs.zones[zoneID]
 
-	return map[string]any{"zone_exists": exists}, nil
+	return map[string]any{KeyZoneExists: exists}, nil
 }
 
 // handleListZones lists all active zones.
@@ -183,23 +202,23 @@ func (r *Runner) handleListZones(ctx context.Context, step *loader.Step, state *
 	for _, id := range zs.zoneOrder {
 		if z, ok := zs.zones[id]; ok {
 			zones = append(zones, map[string]any{
-				"zone_id":   z.ZoneID,
-				"zone_type": z.ZoneType,
-				"connected": z.Connected,
+				KeyZoneID:    z.ZoneID,
+				KeyZoneType:  z.ZoneType,
+				KeyConnected: z.Connected,
 			})
 		}
 	}
 
 	return map[string]any{
-		"zones":      zones,
-		"zone_count": len(zones),
+		KeyZones:     zones,
+		KeyZoneCount: len(zones),
 	}, nil
 }
 
 // handleZoneCount returns the number of active zones.
 func (r *Runner) handleZoneCount(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	zs := getZoneState(state)
-	return map[string]any{"count": len(zs.zones)}, nil
+	return map[string]any{KeyCount: len(zs.zones)}, nil
 }
 
 // handleGetZoneMetadata returns zone metadata.
@@ -207,29 +226,34 @@ func (r *Runner) handleGetZoneMetadata(ctx context.Context, step *loader.Step, s
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
 
 	zone, exists := zs.zones[zoneID]
 	if !exists {
-		return map[string]any{"metadata": nil}, nil
+		return map[string]any{KeyMetadata: nil}, nil
 	}
 
-	return map[string]any{"metadata": zone.Metadata}, nil
+	return map[string]any{KeyMetadata: zone.Metadata}, nil
 }
 
 // handleGetZoneCAFingerprint returns the Zone CA fingerprint.
 func (r *Runner) handleGetZoneCAFingerprint(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// Prefer the real Zone CA cert fingerprint when available.
+	if r.zoneCA != nil && r.zoneCA.Certificate != nil {
+		return map[string]any{KeyFingerprint: certFingerprint(r.zoneCA.Certificate)}, nil
+	}
+
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
 
 	zone, exists := zs.zones[zoneID]
 	if !exists {
-		return map[string]any{"fingerprint": ""}, nil
+		return map[string]any{KeyFingerprint: ""}, nil
 	}
 
-	return map[string]any{"fingerprint": zone.CAFingerprint}, nil
+	return map[string]any{KeyFingerprint: zone.CAFingerprint}, nil
 }
 
 // handleVerifyZoneCA verifies a Zone CA is valid.
@@ -237,27 +261,27 @@ func (r *Runner) handleVerifyZoneCA(ctx context.Context, step *loader.Step, stat
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
 
 	zone, exists := zs.zones[zoneID]
 	if !exists {
-		return map[string]any{"ca_valid": false}, nil
+		return map[string]any{KeyCAValid: false}, nil
 	}
 
 	outputs := map[string]any{
-		"ca_valid":    zone.CAFingerprint != "",
-		"fingerprint": zone.CAFingerprint,
+		KeyCAValid:     zone.CAFingerprint != "",
+		KeyFingerprint: zone.CAFingerprint,
 	}
 
 	// Add cert details from the runner's Zone CA if available.
 	if r.zoneCA != nil && r.zoneCA.Certificate != nil {
 		cert := r.zoneCA.Certificate
-		outputs["path_length"] = cert.MaxPathLen
-		outputs["algorithm"] = cert.SignatureAlgorithm.String()
-		outputs["basic_constraints_ca"] = cert.IsCA
+		outputs[KeyPathLength] = cert.MaxPathLen
+		outputs[KeyAlgorithm] = cert.SignatureAlgorithm.String()
+		outputs[KeyBasicConstraintsCA] = cert.IsCA
 		// Validity period in years.
 		years := cert.NotAfter.Sub(cert.NotBefore).Hours() / (24 * 365)
-		outputs["validity_years_min"] = years
+		outputs[KeyValidityYearsMin] = years
 	}
 
 	return outputs, nil
@@ -268,12 +292,12 @@ func (r *Runner) handleVerifyZoneBinding(ctx context.Context, step *loader.Step,
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
-	zoneID, _ := params["zone_id"].(string)
-	deviceID, _ := params["device_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
+	deviceID, _ := params[KeyDeviceID].(string)
 
 	zone, exists := zs.zones[zoneID]
 	if !exists {
-		return map[string]any{"binding_valid": false}, nil
+		return map[string]any{KeyBindingValid: false}, nil
 	}
 
 	found := false
@@ -284,19 +308,19 @@ func (r *Runner) handleVerifyZoneBinding(ctx context.Context, step *loader.Step,
 		}
 	}
 
-	return map[string]any{"binding_valid": found}, nil
+	return map[string]any{KeyBindingValid: found}, nil
 }
 
 // handleVerifyZoneIDDerivation verifies zone ID derivation from cert.
 func (r *Runner) handleVerifyZoneIDDerivation(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
 
 	// Zone IDs are 16 hex chars (64 bits of SHA-256).
 	valid := len(zoneID) == 16 && isHex(zoneID)
 
-	return map[string]any{"derivation_valid": valid}, nil
+	return map[string]any{KeyDerivationValid: valid}, nil
 }
 
 // handleHighestPriorityZone returns the zone with the highest priority.
@@ -304,7 +328,7 @@ func (r *Runner) handleHighestPriorityZone(ctx context.Context, step *loader.Ste
 	zs := getZoneState(state)
 
 	if len(zs.zones) == 0 {
-		return map[string]any{"zone_id": "", "zone_type": ""}, nil
+		return map[string]any{KeyZoneID: "", KeyZoneType: ""}, nil
 	}
 
 	var best *zoneInfo
@@ -315,8 +339,8 @@ func (r *Runner) handleHighestPriorityZone(ctx context.Context, step *loader.Ste
 	}
 
 	return map[string]any{
-		"zone_id":   best.ZoneID,
-		"zone_type": best.ZoneType,
+		KeyZoneID:   best.ZoneID,
+		KeyZoneType: best.ZoneType,
 	}, nil
 }
 
@@ -332,12 +356,12 @@ func (r *Runner) handleHighestPriorityConnectedZone(ctx context.Context, step *l
 	}
 
 	if best == nil {
-		return map[string]any{"zone_id": "", "zone_type": ""}, nil
+		return map[string]any{KeyZoneID: "", KeyZoneType: ""}, nil
 	}
 
 	return map[string]any{
-		"zone_id":   best.ZoneID,
-		"zone_type": best.ZoneType,
+		KeyZoneID:   best.ZoneID,
+		KeyZoneType: best.ZoneType,
 	}, nil
 }
 
@@ -346,11 +370,11 @@ func (r *Runner) handleDisconnectZone(ctx context.Context, step *loader.Step, st
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID := resolveZoneParam(params)
 
 	zone, exists := zs.zones[zoneID]
 	if !exists {
-		return map[string]any{"zone_disconnected": false}, nil
+		return map[string]any{KeyZoneDisconnected: false}, nil
 	}
 
 	zone.Connected = false
@@ -364,7 +388,7 @@ func (r *Runner) handleDisconnectZone(ctx context.Context, step *loader.Step, st
 		delete(ct.zoneConnections, zoneID)
 	}
 
-	return map[string]any{"zone_disconnected": true}, nil
+	return map[string]any{KeyZoneDisconnected: true}, nil
 }
 
 // handleVerifyOtherZone verifies another zone's state during multi-zone tests.
@@ -372,17 +396,17 @@ func (r *Runner) handleVerifyOtherZone(ctx context.Context, step *loader.Step, s
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
 
 	zone, exists := zs.zones[zoneID]
 	if !exists {
-		return map[string]any{"zone_exists": false}, nil
+		return map[string]any{KeyZoneExists: false}, nil
 	}
 
 	return map[string]any{
-		"zone_exists": true,
-		"zone_type":   zone.ZoneType,
-		"connected":   zone.Connected,
+		KeyZoneExists:  true,
+		KeyZoneType:    zone.ZoneType,
+		KeyConnected:   zone.Connected,
 	}, nil
 }
 
@@ -392,7 +416,7 @@ func (r *Runner) handleVerifyBidirectionalActive(ctx context.Context, step *load
 	active := r.conn != nil && r.conn.connected
 
 	return map[string]any{
-		"bidirectional_active": active,
+		KeyBidirectionalActive: active,
 	}, nil
 }
 
@@ -402,7 +426,7 @@ func (r *Runner) handleVerifyRestoreSequence(ctx context.Context, step *loader.S
 	restored := r.conn != nil && r.conn.connected
 
 	return map[string]any{
-		"sequence_restored": restored,
+		KeySequenceRestored: restored,
 	}, nil
 }
 
@@ -412,8 +436,8 @@ func (r *Runner) handleVerifyTLSState(ctx context.Context, step *loader.Step, st
 
 	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
 		return map[string]any{
-			"tls_active":  false,
-			"tls_version": 0,
+			KeyTLSActive:  false,
+			KeyTLSVersion: 0,
 		}, nil
 	}
 
@@ -426,10 +450,10 @@ func (r *Runner) handleVerifyTLSState(ctx context.Context, step *loader.Step, st
 	}
 
 	return map[string]any{
-		"tls_active":          true,
-		"tls_version":         int(tlsState.Version),
-		"negotiated_protocol": tlsState.NegotiatedProtocol,
-		"version_matches":     versionMatch,
+		KeyTLSActive:          true,
+		KeyTLSVersion:         int(tlsState.Version),
+		KeyNegotiatedProtocol: tlsState.NegotiatedProtocol,
+		KeyVersionMatches:     versionMatch,
 	}, nil
 }
 

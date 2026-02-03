@@ -79,20 +79,20 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	params := engine.InterpolateParams(step.Params, state)
 	ct := getConnectionTracker(state)
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID := resolveZoneParam(params)
 
 	// Enforce 5-zone connection limit.
 	if len(ct.zoneConnections) >= 5 {
 		return map[string]any{
-			"connection_established": false,
-			"zone_id":                zoneID,
-			"error":                  "MAX_CONNECTIONS_EXCEEDED",
-			"error_code":             "MAX_CONNECTIONS_EXCEEDED",
+			KeyConnectionEstablished: false,
+			KeyZoneID:                zoneID,
+			KeyError:                 "MAX_CONNECTIONS_EXCEEDED",
+			KeyErrorCode:             "MAX_CONNECTIONS_EXCEEDED",
 		}, nil
 	}
 
 	target := r.config.Target
-	if t, ok := params["target"].(string); ok && t != "" {
+	if t, ok := params[KeyTarget].(string); ok && t != "" {
 		target = t
 	}
 
@@ -113,10 +113,10 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
 		return map[string]any{
-			"connection_established": false,
-			"zone_id":                zoneID,
-			"error":                  err.Error(),
-			"error_code":             classifyConnectError(err),
+			KeyConnectionEstablished: false,
+			KeyZoneID:                zoneID,
+			KeyError:                 err.Error(),
+			KeyErrorCode:             classifyConnectError(err),
 		}, nil
 	}
 
@@ -127,17 +127,29 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	}
 
 	ct.zoneConnections[zoneID] = newConn
-	state.Set("zone_"+zoneID+"_connection", newConn)
+	state.Set(ZoneConnectionStateKey(zoneID), newConn)
 
 	return map[string]any{
-		"connection_established": true,
-		"zone_id":                zoneID,
-		"state":                  "OPERATIONAL",
+		KeyConnectionEstablished: true,
+		KeyZoneID:                zoneID,
+		KeyState:                 "OPERATIONAL",
 	}, nil
 }
 
+// resolveZoneParam extracts the zone identifier from params, accepting both
+// "zone_id" and "zone" keys (test cases use "zone", code convention is "zone_id").
+func resolveZoneParam(params map[string]any) string {
+	if zid, ok := params[KeyZoneID].(string); ok && zid != "" {
+		return zid
+	}
+	if z, ok := params["zone"].(string); ok && z != "" {
+		return z
+	}
+	return ""
+}
+
 func (r *Runner) getZoneConnection(state *engine.ExecutionState, params map[string]any) (*Connection, string, error) {
-	zoneID, _ := params["zone_id"].(string)
+	zoneID := resolveZoneParam(params)
 	ct := getConnectionTracker(state)
 
 	conn, ok := ct.zoneConnections[zoneID]
@@ -156,11 +168,11 @@ func (r *Runner) handleReadAsZone(ctx context.Context, step *loader.Step, state 
 		return nil, err
 	}
 
-	endpointID, err := r.resolver.ResolveEndpoint(params["endpoint"])
+	endpointID, err := r.resolver.ResolveEndpoint(params[KeyEndpoint])
 	if err != nil {
 		return nil, fmt.Errorf("resolving endpoint: %w", err)
 	}
-	featureID, err := r.resolver.ResolveFeature(params["feature"])
+	featureID, err := r.resolver.ResolveFeature(params[KeyFeature])
 	if err != nil {
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
@@ -189,9 +201,9 @@ func (r *Runner) handleReadAsZone(ctx context.Context, step *loader.Step, state 
 	}
 
 	return map[string]any{
-		"read_success": resp.IsSuccess(),
-		"value":        resp.Payload,
-		"status":       resp.Status,
+		KeyReadSuccess: resp.IsSuccess(),
+		KeyValue:       resp.Payload,
+		KeyStatus:      resp.Status,
 	}, nil
 }
 
@@ -204,11 +216,11 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 		return nil, err
 	}
 
-	endpointID, err := r.resolver.ResolveEndpoint(params["endpoint"])
+	endpointID, err := r.resolver.ResolveEndpoint(params[KeyEndpoint])
 	if err != nil {
 		return nil, fmt.Errorf("resolving endpoint: %w", err)
 	}
-	featureID, err := r.resolver.ResolveFeature(params["feature"])
+	featureID, err := r.resolver.ResolveFeature(params[KeyFeature])
 	if err != nil {
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
@@ -238,9 +250,9 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 	}
 
 	return map[string]any{
-		"invoke_success": resp.IsSuccess(),
-		"result":         resp.Payload,
-		"status":         resp.Status,
+		KeyInvokeSuccess: resp.IsSuccess(),
+		KeyResult:        resp.Payload,
+		KeyStatus:        resp.Status,
 	}, nil
 }
 
@@ -253,11 +265,11 @@ func (r *Runner) handleSubscribeAsZone(ctx context.Context, step *loader.Step, s
 		return nil, err
 	}
 
-	endpointID, err := r.resolver.ResolveEndpoint(params["endpoint"])
+	endpointID, err := r.resolver.ResolveEndpoint(params[KeyEndpoint])
 	if err != nil {
 		return nil, fmt.Errorf("resolving endpoint: %w", err)
 	}
-	featureID, err := r.resolver.ResolveFeature(params["feature"])
+	featureID, err := r.resolver.ResolveFeature(params[KeyFeature])
 	if err != nil {
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
@@ -286,9 +298,9 @@ func (r *Runner) handleSubscribeAsZone(ctx context.Context, step *loader.Step, s
 	}
 
 	return map[string]any{
-		"subscribe_success": resp.IsSuccess(),
-		"subscription_id":   resp.Payload,
-		"status":            resp.Status,
+		KeySubscribeSuccess: resp.IsSuccess(),
+		KeySubscriptionID:   resp.Payload,
+		KeyStatus:           resp.Status,
 	}, nil
 }
 
@@ -302,7 +314,7 @@ func (r *Runner) handleWaitForNotificationAsZone(ctx context.Context, step *load
 	}
 
 	timeoutMs := 5000
-	if t, ok := params["timeout_ms"].(float64); ok {
+	if t, ok := params[KeyTimeoutMs].(float64); ok {
 		timeoutMs = int(t)
 	}
 
@@ -322,14 +334,14 @@ func (r *Runner) handleWaitForNotificationAsZone(ctx context.Context, step *load
 	select {
 	case res := <-ch:
 		if res.err != nil {
-			return map[string]any{"notification_received": false}, nil
+			return map[string]any{KeyNotificationReceived: false}, nil
 		}
 		return map[string]any{
-			"notification_received": true,
-			"notification_data":     res.data,
+			KeyNotificationReceived: true,
+			KeyNotificationData:     res.data,
 		}, nil
 	case <-readCtx.Done():
-		return map[string]any{"notification_received": false}, nil
+		return map[string]any{KeyNotificationReceived: false}, nil
 	}
 }
 
@@ -347,8 +359,8 @@ func (r *Runner) handleConnectWithTiming(ctx context.Context, step *loader.Step,
 		return nil, err
 	}
 
-	result["connect_duration_ms"] = elapsed.Milliseconds()
-	state.Set("connect_duration_ms", elapsed.Milliseconds())
+	result[KeyConnectDurationMs] = elapsed.Milliseconds()
+	state.Set(StateConnectDurationMs, elapsed.Milliseconds())
 
 	return result, nil
 }
@@ -356,25 +368,25 @@ func (r *Runner) handleConnectWithTiming(ctx context.Context, step *loader.Step,
 // handleSendClose sends a close frame.
 func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected {
-		return map[string]any{"close_sent": false}, nil
+		return map[string]any{KeyCloseSent: false}, nil
 	}
 
 	err := r.conn.Close()
 	return map[string]any{
-		"close_sent": err == nil,
+		KeyCloseSent: err == nil,
 	}, nil
 }
 
 // handleSimultaneousClose sends close while reading for close from peer.
 func (r *Runner) handleSimultaneousClose(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected {
-		return map[string]any{"close_sent": false}, nil
+		return map[string]any{KeyCloseSent: false}, nil
 	}
 
 	err := r.conn.Close()
 	return map[string]any{
-		"close_sent":   err == nil,
-		"simultaneous": true,
+		KeyCloseSent:    err == nil,
+		KeySimultaneous: true,
 	}, nil
 }
 
@@ -383,12 +395,12 @@ func (r *Runner) handleWaitDisconnect(ctx context.Context, step *loader.Step, st
 	params := engine.InterpolateParams(step.Params, state)
 
 	timeoutMs := 10000
-	if t, ok := params["timeout_ms"].(float64); ok {
+	if t, ok := params[KeyTimeoutMs].(float64); ok {
 		timeoutMs = int(t)
 	}
 
 	if r.conn == nil || !r.conn.connected {
-		return map[string]any{"disconnected": true}, nil
+		return map[string]any{KeyDisconnected: true}, nil
 	}
 
 	readCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
@@ -405,11 +417,11 @@ func (r *Runner) handleWaitDisconnect(ctx context.Context, step *loader.Step, st
 		// EOF or error means disconnected.
 		if err != nil {
 			r.conn.connected = false
-			return map[string]any{"disconnected": true}, nil
+			return map[string]any{KeyDisconnected: true}, nil
 		}
-		return map[string]any{"disconnected": false}, nil
+		return map[string]any{KeyDisconnected: false}, nil
 	case <-readCtx.Done():
-		return map[string]any{"disconnected": false}, nil
+		return map[string]any{KeyDisconnected: false}, nil
 	}
 }
 
@@ -418,7 +430,7 @@ func (r *Runner) handleCancelReconnect(ctx context.Context, step *loader.Step, s
 	ct := getConnectionTracker(state)
 	ct.backoffState = nil
 
-	return map[string]any{"reconnect_cancelled": true}, nil
+	return map[string]any{KeyReconnectCancelled: true}, nil
 }
 
 // ============================================================================
@@ -435,7 +447,7 @@ func (r *Runner) handleMonitorReconnect(ctx context.Context, step *loader.Step, 
 	}
 
 	return map[string]any{
-		"monitoring_started": true,
+		KeyMonitoringStarted: true,
 	}, nil
 }
 
@@ -454,8 +466,8 @@ func (r *Runner) handleDisconnectAndMonitorBackoff(ctx context.Context, step *lo
 	}
 
 	return map[string]any{
-		"disconnected":       true,
-		"monitoring_backoff": true,
+		KeyDisconnected:      true,
+		KeyMonitoringBackoff: true,
 	}, nil
 }
 
@@ -467,29 +479,37 @@ func (r *Runner) handleDisconnectAndMonitorBackoff(ctx context.Context, step *lo
 func (r *Runner) handlePing(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.connected {
-		return map[string]any{"pong_received": false, "error": "not connected"}, nil
+	// Check for zone-scoped connection first.
+	if zoneID := resolveZoneParam(params); zoneID != "" {
+		ct := getConnectionTracker(state)
+		if conn, ok := ct.zoneConnections[zoneID]; ok && conn.connected {
+			// Zone connection exists and is alive -- pong succeeds.
+		} else {
+			return map[string]any{KeyPongReceived: false, KeyError: fmt.Sprintf("no active connection for zone %s", zoneID)}, nil
+		}
+	} else if r.conn == nil || !r.conn.connected {
+		return map[string]any{KeyPongReceived: false, KeyError: "not connected"}, nil
 	}
 
 	// Check if a timeout threshold was specified.
 	latencyUnder := true
-	if timeoutMs, ok := params["timeout_ms"].(float64); ok {
+	if timeoutMs, ok := params[KeyTimeoutMs].(float64); ok {
 		latencyUnder = timeoutMs > 0 // Connection is alive, so latency is within any positive timeout.
 	}
 
 	// Increment pong sequence.
 	seq := uint32(1)
-	if s, exists := state.Get("pong_seq"); exists {
+	if s, exists := state.Get(StatePongSeq); exists {
 		if si, ok := s.(uint32); ok {
 			seq = si + 1
 		}
 	}
-	state.Set("pong_seq", seq)
+	state.Set(StatePongSeq, seq)
 
 	return map[string]any{
-		"pong_received": true,
-		"latency_under": latencyUnder,
-		"pong_seq":      seq,
+		KeyPongReceived: true,
+		KeyLatencyUnder: latencyUnder,
+		KeyPongSeq:      seq,
 	}, nil
 }
 
@@ -498,22 +518,22 @@ func (r *Runner) handlePingMultiple(ctx context.Context, step *loader.Step, stat
 	params := engine.InterpolateParams(step.Params, state)
 
 	count := 3
-	if c, ok := params["count"].(float64); ok {
+	if c, ok := params[KeyCount].(float64); ok {
 		count = int(c)
 	}
 
 	allReceived := true
 	for i := 0; i < count; i++ {
 		out, _ := r.handlePing(ctx, step, state)
-		if out["pong_received"] != true {
+		if out[KeyPongReceived] != true {
 			allReceived = false
 			break
 		}
 	}
 
 	return map[string]any{
-		"all_pongs_received": allReceived,
-		"count":              count,
+		KeyAllPongsReceived: allReceived,
+		KeyCount:            count,
 	}, nil
 }
 
@@ -522,7 +542,7 @@ func (r *Runner) handleVerifyKeepalive(ctx context.Context, step *loader.Step, s
 	active := r.conn != nil && r.conn.connected
 
 	return map[string]any{
-		"keepalive_active": active,
+		KeyKeepaliveActive: active,
 	}, nil
 }
 
@@ -584,23 +604,23 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 
 	if len(data) == 0 {
 		return map[string]any{
-			"raw_sent":      false,
-			"parse_success": false,
-			"error":         "message is empty",
+			KeyRawSent:      false,
+			KeyParseSuccess: false,
+			KeyError:        "message is empty",
 		}, nil
 	}
 
 	err = r.conn.framer.WriteFrame(data)
 	if err != nil {
 		return map[string]any{
-			"raw_sent": false,
-			"error":    err.Error(),
+			KeyRawSent: false,
+			KeyError:   err.Error(),
 		}, err
 	}
 
 	outputs := map[string]any{
-		"raw_sent":      true,
-		"parse_success": true,
+		KeyRawSent:      true,
+		KeyParseSuccess: true,
 	}
 
 	// Try to read a response with a short timeout.
@@ -620,24 +640,24 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 	select {
 	case res := <-ch:
 		if res.err != nil {
-			outputs["response_received"] = false
+			outputs[KeyResponseReceived] = false
 		} else {
-			outputs["response_received"] = true
+			outputs[KeyResponseReceived] = true
 			// Try to decode as CBOR to extract status fields.
 			var respMap map[any]any
 			if err := cbor.Unmarshal(res.data, &respMap); err == nil {
 				// Look for status field (key 3 in wire protocol).
 				if status, ok := respMap[uint64(3)]; ok {
-					outputs["status"] = status
+					outputs[KeyStatus] = status
 				}
 				// Look for error status.
 				if errStatus, ok := respMap[uint64(4)]; ok {
-					outputs["error_status"] = errStatus
+					outputs[KeyErrorStatus] = errStatus
 				}
 			}
 		}
 	case <-readCtx.Done():
-		outputs["response_received"] = false
+		outputs[KeyResponseReceived] = false
 	}
 
 	return outputs, nil
@@ -690,7 +710,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 
 	_, err := r.conn.tlsConn.Write(data)
 	return map[string]any{
-		"raw_bytes_sent": err == nil,
+		KeyRawBytesSent: err == nil,
 	}, err
 }
 
@@ -708,7 +728,7 @@ func (r *Runner) handleSendTLSAlert(ctx context.Context, step *loader.Step, stat
 	// Close the TLS connection which sends a close_notify alert.
 	err := r.conn.Close()
 	return map[string]any{
-		"alert_sent": err == nil,
+		KeyAlertSent: err == nil,
 	}, nil
 }
 
@@ -721,7 +741,7 @@ func (r *Runner) handleQueueCommand(ctx context.Context, step *loader.Step, stat
 	params := engine.InterpolateParams(step.Params, state)
 	ct := getConnectionTracker(state)
 
-	action, _ := params["action"].(string)
+	action, _ := params[KeyAction].(string)
 	cmdParams, _ := params["params"].(map[string]any)
 
 	ct.pendingQueue = append(ct.pendingQueue, queuedCommand{
@@ -730,8 +750,8 @@ func (r *Runner) handleQueueCommand(ctx context.Context, step *loader.Step, stat
 	})
 
 	return map[string]any{
-		"command_queued": true,
-		"queue_length":   len(ct.pendingQueue),
+		KeyCommandQueued: true,
+		KeyQueueLength:   len(ct.pendingQueue),
 	}, nil
 }
 
@@ -741,8 +761,8 @@ func (r *Runner) handleWaitForQueuedResult(ctx context.Context, step *loader.Ste
 
 	if len(ct.pendingQueue) == 0 {
 		return map[string]any{
-			"result_received": false,
-			"queue_empty":     true,
+			KeyResultReceived: false,
+			KeyQueueEmpty:     true,
 		}, nil
 	}
 
@@ -751,9 +771,9 @@ func (r *Runner) handleWaitForQueuedResult(ctx context.Context, step *loader.Ste
 	ct.pendingQueue = ct.pendingQueue[1:]
 
 	return map[string]any{
-		"result_received": true,
-		"action":          cmd.Action,
-		"queue_remaining": len(ct.pendingQueue),
+		KeyResultReceived:  true,
+		KeyAction:          cmd.Action,
+		KeyQueueRemaining:  len(ct.pendingQueue),
 	}, nil
 }
 
@@ -762,7 +782,7 @@ func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loa
 	params := engine.InterpolateParams(step.Params, state)
 
 	count := 3
-	if c, ok := params["count"].(float64); ok {
+	if c, ok := params[KeyCount].(float64); ok {
 		count = int(c)
 	}
 
@@ -790,8 +810,8 @@ func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loa
 	_ = r.conn.Close()
 
 	return map[string]any{
-		"messages_sent": sent,
-		"disconnected":  true,
+		KeyMessagesSent: sent,
+		KeyDisconnected: true,
 	}, nil
 }
 
@@ -804,7 +824,7 @@ func (r *Runner) handleReadConcurrent(ctx context.Context, step *loader.Step, st
 	params := engine.InterpolateParams(step.Params, state)
 
 	count := 2
-	if c, ok := params["count"].(float64); ok {
+	if c, ok := params[KeyCount].(float64); ok {
 		count = int(c)
 	}
 
@@ -813,15 +833,15 @@ func (r *Runner) handleReadConcurrent(ctx context.Context, step *loader.Step, st
 	for i := 0; i < count; i++ {
 		out, err := r.handleRead(ctx, step, state)
 		if err != nil {
-			results = append(results, map[string]any{"error": err.Error()})
+			results = append(results, map[string]any{KeyError: err.Error()})
 		} else {
 			results = append(results, out)
 		}
 	}
 
 	return map[string]any{
-		"read_count": count,
-		"results":    results,
+		KeyReadCount: count,
+		KeyResults:   results,
 	}, nil
 }
 
@@ -833,7 +853,7 @@ func (r *Runner) handleInvokeWithDisconnect(ctx context.Context, step *loader.St
 	}
 
 	_ = r.conn.Close()
-	result["disconnected_after_invoke"] = true
+	result[KeyDisconnectedAfterInvoke] = true
 
 	return result, nil
 }
@@ -856,23 +876,23 @@ func (r *Runner) handleSubscribeMultiple(ctx context.Context, step *loader.Step,
 
 	var targets []subTarget
 
-	if subs, ok := params["subscriptions"].([]any); ok {
+	if subs, ok := params[KeySubscriptions].([]any); ok {
 		// Subscriptions array of objects with endpoint+feature.
 		for _, s := range subs {
 			m, ok := s.(map[string]any)
 			if !ok {
 				continue
 			}
-			ep := m["endpoint"]
+			ep := m[KeyEndpoint]
 			if ep == nil {
-				ep = params["endpoint"]
+				ep = params[KeyEndpoint]
 			}
-			targets = append(targets, subTarget{endpoint: ep, feature: m["feature"]})
+			targets = append(targets, subTarget{endpoint: ep, feature: m[KeyFeature]})
 		}
 	} else if features, ok := params["features"].([]any); ok {
 		// Simple features array (uses shared endpoint).
 		for _, f := range features {
-			targets = append(targets, subTarget{endpoint: params["endpoint"], feature: f})
+			targets = append(targets, subTarget{endpoint: params[KeyEndpoint], feature: f})
 		}
 	} else {
 		return nil, fmt.Errorf("either 'features' or 'subscriptions' parameter is required")
@@ -882,20 +902,20 @@ func (r *Runner) handleSubscribeMultiple(ctx context.Context, step *loader.Step,
 	for _, t := range targets {
 		featureStep := &loader.Step{
 			Params: map[string]any{
-				"endpoint": t.endpoint,
-				"feature":  t.feature,
+				KeyEndpoint: t.endpoint,
+				KeyFeature:  t.feature,
 			},
 		}
 		out, err := r.handleSubscribe(ctx, featureStep, state)
 		if err != nil {
 			return nil, fmt.Errorf("subscribe to %v: %w", t.feature, err)
 		}
-		subscriptions = append(subscriptions, out["subscription_id"])
+		subscriptions = append(subscriptions, out[KeySubscriptionID])
 	}
 
 	return map[string]any{
-		"subscribe_count": len(subscriptions),
-		"subscriptions":   subscriptions,
+		KeySubscribeCount: len(subscriptions),
+		KeySubscriptions:  subscriptions,
 	}, nil
 }
 
@@ -908,11 +928,11 @@ func (r *Runner) handleSubscribeOrdered(ctx context.Context, step *loader.Step, 
 func (r *Runner) handleUnsubscribe(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	subID := params["subscription_id"]
-	state.Set("unsubscribed_id", subID)
+	subID := params[KeySubscriptionID]
+	state.Set(StateUnsubscribedID, subID)
 
 	return map[string]any{
-		"unsubscribed": true,
+		KeyUnsubscribed: true,
 	}, nil
 }
 
@@ -926,14 +946,14 @@ func (r *Runner) handleReceiveNotifications(ctx context.Context, step *loader.St
 	params := engine.InterpolateParams(step.Params, state)
 
 	count := 1
-	if c, ok := params["count"].(float64); ok {
+	if c, ok := params[KeyCount].(float64); ok {
 		count = int(c)
 	}
 
 	received := 0
 	for i := 0; i < count; i++ {
 		out, _ := r.handleWaitNotification(ctx, step, state)
-		if out["notification_received"] == true {
+		if out[KeyNotificationReceived] == true {
 			received++
 		} else {
 			break
@@ -941,7 +961,7 @@ func (r *Runner) handleReceiveNotifications(ctx context.Context, step *loader.St
 	}
 
 	return map[string]any{
-		"notifications_received": received,
-		"all_received":           received == count,
+		KeyNotificationsReceived: received,
+		KeyAllReceived:           received == count,
 	}, nil
 }

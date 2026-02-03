@@ -38,9 +38,9 @@ func (r *Runner) registerCertHandlers() {
 func (r *Runner) handleVerifyCertificate(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
 		return map[string]any{
-			"cert_valid":  false,
-			"chain_valid": false,
-			"not_expired": false,
+			KeyCertValid:  false,
+			KeyChainValid: false,
+			KeyNotExpired: false,
 		}, nil
 	}
 
@@ -71,10 +71,10 @@ func (r *Runner) handleVerifyCertificate(ctx context.Context, step *loader.Step,
 	}
 
 	return map[string]any{
-		"cert_valid":  hasCerts && notExpired,
-		"chain_valid": chainValid,
-		"not_expired": notExpired,
-		"has_certs":   hasCerts,
+		KeyCertValid:  hasCerts && notExpired,
+		KeyChainValid: chainValid,
+		KeyNotExpired: notExpired,
+		KeyHasCerts:   hasCerts,
 	}, nil
 }
 
@@ -82,15 +82,15 @@ func (r *Runner) handleVerifyCertificate(ctx context.Context, step *loader.Step,
 func (r *Runner) handleVerifyCertSubject(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	expectedDeviceID, _ := params["device_id"].(string)
+	expectedDeviceID, _ := params[KeyDeviceID].(string)
 
 	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
-		return map[string]any{"subject_matches": false}, nil
+		return map[string]any{KeySubjectMatches: false}, nil
 	}
 
 	tlsState := r.conn.tlsConn.ConnectionState()
 	if len(tlsState.PeerCertificates) == 0 {
-		return map[string]any{"subject_matches": false}, nil
+		return map[string]any{KeySubjectMatches: false}, nil
 	}
 
 	cert := tlsState.PeerCertificates[0]
@@ -99,8 +99,8 @@ func (r *Runner) handleVerifyCertSubject(ctx context.Context, step *loader.Step,
 	matches := expectedDeviceID == "" || strings.Contains(cn, expectedDeviceID)
 
 	return map[string]any{
-		"subject_matches": matches,
-		"common_name":     cn,
+		KeySubjectMatches: matches,
+		KeyCommonName:     cn,
 	}, nil
 }
 
@@ -134,9 +134,9 @@ func (r *Runner) handleVerifyDeviceCert(ctx context.Context, step *loader.Step, 
 		}
 	}
 
-	result["has_operational_cert"] = hasOperationalCert
-	result["cert_signed_by_zone_ca"] = certSignedByZoneCA
-	result["cert_validity_days"] = certValidityDays
+	result[KeyHasOperationalCert] = hasOperationalCert
+	result[KeyCertSignedByZoneCA] = certSignedByZoneCA
+	result[KeyCertValidityDays] = certValidityDays
 
 	return result, nil
 }
@@ -144,46 +144,55 @@ func (r *Runner) handleVerifyDeviceCert(ctx context.Context, step *loader.Step, 
 // handleVerifyDeviceCertStore verifies device has certs stored.
 func (r *Runner) handleVerifyDeviceCertStore(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
-		return map[string]any{"cert_store_valid": false}, nil
+		return map[string]any{KeyCertStoreValid: false}, nil
 	}
 
 	tlsState := r.conn.tlsConn.ConnectionState()
 
 	return map[string]any{
-		"cert_store_valid": len(tlsState.PeerCertificates) > 0,
-		"cert_count":       len(tlsState.PeerCertificates),
+		KeyCertStoreValid: len(tlsState.PeerCertificates) > 0,
+		KeyCertCount:      len(tlsState.PeerCertificates),
 	}, nil
 }
 
 // handleGetCertFingerprint returns SHA-256 fingerprint of a cert.
+// Prefers the controller's own cert; falls back to the TLS peer cert.
 func (r *Runner) handleGetCertFingerprint(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// Prefer the runner's own controller cert (used by controller_action dispatch).
+	if r.controllerCert != nil && r.controllerCert.Certificate != nil {
+		return map[string]any{
+			KeyFingerprint: certFingerprint(r.controllerCert.Certificate),
+		}, nil
+	}
+
+	// Fall back to TLS peer cert.
 	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
-		return map[string]any{"fingerprint": ""}, nil
+		return map[string]any{KeyFingerprint: ""}, nil
 	}
 
 	tlsState := r.conn.tlsConn.ConnectionState()
 	if len(tlsState.PeerCertificates) == 0 {
-		return map[string]any{"fingerprint": ""}, nil
+		return map[string]any{KeyFingerprint: ""}, nil
 	}
 
-	cert := tlsState.PeerCertificates[0]
-	hash := sha256.Sum256(cert.Raw)
+	c := tlsState.PeerCertificates[0]
+	hash := sha256.Sum256(c.Raw)
 	fingerprint := hex.EncodeToString(hash[:])
 
 	return map[string]any{
-		"fingerprint": fingerprint,
+		KeyFingerprint: fingerprint,
 	}, nil
 }
 
 // handleExtractCertDeviceID extracts device ID from cert CN.
 func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
-		return map[string]any{"device_id": "", "extracted": false}, nil
+		return map[string]any{KeyDeviceID: "", KeyExtracted: false}, nil
 	}
 
 	tlsState := r.conn.tlsConn.ConnectionState()
 	if len(tlsState.PeerCertificates) == 0 {
-		return map[string]any{"device_id": "", "extracted": false}, nil
+		return map[string]any{KeyDeviceID: "", KeyExtracted: false}, nil
 	}
 
 	cert := tlsState.PeerCertificates[0]
@@ -195,11 +204,11 @@ func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Ste
 		deviceID = cn[idx+1:]
 	}
 
-	state.Set("extracted_device_id", deviceID)
+	state.Set(StateExtractedDeviceID, deviceID)
 
 	return map[string]any{
-		"device_id": deviceID,
-		"extracted": true,
+		KeyDeviceID:  deviceID,
+		KeyExtracted: true,
 	}, nil
 }
 
@@ -226,8 +235,8 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 	matches := expectedState == "" || currentState == expectedState
 
 	return map[string]any{
-		"commissioning_state": currentState,
-		"state_matches":       matches,
+		KeyCommissioningState: currentState,
+		KeyStateMatches:       matches,
 	}, nil
 }
 
@@ -235,11 +244,11 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 func (r *Runner) handleResetPASESession(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	r.paseState = nil
 
-	state.Set("session_established", false)
-	state.Set("pase_pending", false)
+	state.Set(KeySessionEstablished, false)
+	state.Set(StatePasePending, false)
 
 	return map[string]any{
-		"pase_reset": true,
+		KeyPASEReset: true,
 	}, nil
 }
 
@@ -260,7 +269,7 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 	// Send raw through framer.
 	err := r.conn.framer.WriteFrame(xValue)
 	return map[string]any{
-		"pase_x_sent": err == nil,
+		KeyPASEXSent: err == nil,
 	}, err
 }
 
@@ -269,35 +278,37 @@ func (r *Runner) handleDeviceVerifyPeer(ctx context.Context, step *loader.Step, 
 	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
 		// No active TLS connection -- check D2D precondition state
 		// to simulate the verification result.
-		if sameZone, _ := state.Get("two_devices_same_zone"); sameZone == true {
+		// Check expired first: it's more specific than same_zone (a test can
+		// set both two_devices_same_zone AND device_b_cert_expired).
+		if expired, _ := state.Get(PrecondDeviceBCertExpired); expired == true {
 			return map[string]any{
-				"peer_valid":           true,
-				"verification_success": true,
-				"same_zone_ca":         true,
-				"error":                "",
+				KeyPeerValid:            false,
+				KeyVerificationSuccess:  false,
+				KeySameZoneCA:           false,
+				KeyError:                "certificate_expired",
 			}, nil
 		}
-		if expired, _ := state.Get("device_b_cert_expired"); expired == true {
+		if sameZone, _ := state.Get(PrecondTwoDevicesSameZone); sameZone == true {
 			return map[string]any{
-				"peer_valid":           false,
-				"verification_success": false,
-				"same_zone_ca":         false,
-				"error":                "certificate_expired",
+				KeyPeerValid:            true,
+				KeyVerificationSuccess:  true,
+				KeySameZoneCA:           true,
+				KeyError:                "",
 			}, nil
 		}
-		if diffZone, _ := state.Get("two_devices_different_zones"); diffZone == true {
+		if diffZone, _ := state.Get(PrecondTwoDevicesDifferentZones); diffZone == true {
 			return map[string]any{
-				"peer_valid":           false,
-				"verification_success": false,
-				"same_zone_ca":         false,
-				"error":                "unknown_ca",
+				KeyPeerValid:            false,
+				KeyVerificationSuccess:  false,
+				KeySameZoneCA:           false,
+				KeyError:                "unknown_ca",
 			}, nil
 		}
 		return map[string]any{
-			"peer_valid":           false,
-			"verification_success": false,
-			"same_zone_ca":         false,
-			"error":                "no active connection",
+			KeyPeerValid:            false,
+			KeyVerificationSuccess:  false,
+			KeySameZoneCA:           false,
+			KeyError:                "no active connection",
 		}, nil
 	}
 
@@ -329,10 +340,10 @@ func (r *Runner) handleDeviceVerifyPeer(ctx context.Context, step *loader.Step, 
 	}
 
 	return map[string]any{
-		"peer_valid":           hasPeerCert,
-		"verification_success": verificationSuccess,
-		"same_zone_ca":         sameZoneCA,
-		"error":                verifyError,
+		KeyPeerValid:           hasPeerCert,
+		KeyVerificationSuccess: verificationSuccess,
+		KeySameZoneCA:          sameZoneCA,
+		KeyError:               verifyError,
 	}, nil
 }
 

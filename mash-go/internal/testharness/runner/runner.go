@@ -355,8 +355,8 @@ func (r *Runner) registerHandlers() {
 	r.engine.RegisterHandler("verify", r.handleVerify)
 
 	// Register custom expectation checkers
-	r.engine.RegisterChecker("connection_established", r.checkConnectionEstablished)
-	r.engine.RegisterChecker("response_received", r.checkResponseReceived)
+	r.engine.RegisterChecker(CheckerConnectionEstablished, r.checkConnectionEstablished)
+	r.engine.RegisterChecker(CheckerResponseReceived, r.checkResponseReceived)
 
 	// Certificate renewal handlers
 	r.registerRenewalHandlers()
@@ -380,6 +380,18 @@ func (r *Runner) registerHandlers() {
 
 // handleConnect establishes a connection to the target.
 func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// Simulate connection failure when device_port_closed is set.
+	if portClosed, _ := state.Get(PrecondDevicePortClosed); portClosed == true {
+		return map[string]any{
+			KeyConnectionEstablished: false,
+			KeyConnected:             false,
+			KeyTLSHandshakeSuccess:   false,
+			KeyError:                 "CONNECTION_FAILED",
+			KeyErrorCode:             "CONNECTION_FAILED",
+			KeyErrorDetail:           "connection refused (simulated)",
+		}, nil
+	}
+
 	target := r.config.Target
 	if t, ok := step.Params["target"].(string); ok && t != "" {
 		target = t
@@ -400,7 +412,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 
 	// Check if this is a commissioning connection
 	commissioning := false
-	if c, ok := step.Params["commissioning"].(bool); ok {
+	if c, ok := step.Params[KeyCommissioning].(bool); ok {
 		commissioning = c
 	}
 
@@ -434,16 +446,18 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
+		errorCode := classifyConnectError(err)
 		// Return connection failure as outputs so tests can assert on TLS errors.
 		return map[string]any{
-			"connection_established": false,
-			"connected":              false,
-			"tls_handshake_success":  false,
-			"target":                 target,
-			"error":                  err.Error(),
-			"error_code":             classifyConnectError(err),
-			"tls_error":              err.Error(),
-			"tls_alert":              extractTLSAlert(err),
+			KeyConnectionEstablished: false,
+			KeyConnected:             false,
+			KeyTLSHandshakeSuccess:   false,
+			KeyTarget:                target,
+			KeyError:                 errorCode,
+			KeyErrorCode:             errorCode,
+			KeyErrorDetail:           err.Error(),
+			KeyTLSError:              err.Error(),
+			KeyTLSAlert:              extractTLSAlert(err),
 		}, nil
 	}
 
@@ -458,7 +472,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}
 
 	// Store connection info in state
-	state.Set("connection", r.conn)
+	state.Set(StateConnection, r.conn)
 
 	// Extract TLS connection details.
 	cs := conn.ConnectionState()
@@ -476,29 +490,29 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}
 
 	return map[string]any{
-		"connection_established":  true,
-		"connected":               true,
-		"tls_handshake_success":   true,
-		"target":                  target,
-		"tls_version":             tlsVersionName(cs.Version),
-		"negotiated_version":      tlsVersionName(cs.Version),
-		"negotiated_cipher":       tls.CipherSuiteName(cs.CipherSuite),
-		"negotiated_group":        curveIDName(cs.CurveID),
-		"negotiated_protocol":     cs.NegotiatedProtocol,
-		"negotiated_alpn":         cs.NegotiatedProtocol,
-		"mutual_auth":             mutualAuth,
-		"chain_validated":         chainValidated,
-		"self_signed_accepted":    serverCertSelfSigned && hasPeerCerts,
-		"server_cert_cn_prefix":   serverCertCNPrefix,
-		"server_cert_self_signed": serverCertSelfSigned,
-		"has_peer_certs":          hasPeerCerts,
+		KeyConnectionEstablished: true,
+		KeyConnected:             true,
+		KeyTLSHandshakeSuccess:   true,
+		KeyTarget:                target,
+		KeyTLSVersion:            tlsVersionName(cs.Version),
+		KeyNegotiatedVersion:     tlsVersionName(cs.Version),
+		KeyNegotiatedCipher:      tls.CipherSuiteName(cs.CipherSuite),
+		KeyNegotiatedGroup:       curveIDName(cs.CurveID),
+		KeyNegotiatedProtocol:    cs.NegotiatedProtocol,
+		KeyNegotiatedALPN:        cs.NegotiatedProtocol,
+		KeyMutualAuth:            mutualAuth,
+		KeyChainValidated:        chainValidated,
+		KeySelfSignedAccepted:    serverCertSelfSigned && hasPeerCerts,
+		KeyServerCertCNPrefix:    serverCertCNPrefix,
+		KeyServerCertSelfSigned:  serverCertSelfSigned,
+		KeyHasPeerCerts:          hasPeerCerts,
 	}, nil
 }
 
 // handleDisconnect closes the connection.
 func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected {
-		return map[string]any{"disconnected": true}, nil
+		return map[string]any{KeyDisconnected: true}, nil
 	}
 
 	err := r.conn.Close()
@@ -506,7 +520,7 @@ func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state 
 		return nil, fmt.Errorf("failed to disconnect: %w", err)
 	}
 
-	return map[string]any{"disconnected": true}, nil
+	return map[string]any{KeyDisconnected: true}, nil
 }
 
 // sendRequest sends an encoded request and reads the decoded response.
@@ -542,12 +556,12 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 	params := engine.InterpolateParams(step.Params, state)
 
 	// Resolve endpoint, feature, and attribute names
-	endpointID, err := r.resolver.ResolveEndpoint(params["endpoint"])
+	endpointID, err := r.resolver.ResolveEndpoint(params[KeyEndpoint])
 	if err != nil {
 		return nil, fmt.Errorf("resolving endpoint: %w", err)
 	}
 
-	featureID, err := r.resolver.ResolveFeature(params["feature"])
+	featureID, err := r.resolver.ResolveFeature(params[KeyFeature])
 	if err != nil {
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
@@ -573,10 +587,10 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 	}
 
 	outputs := map[string]any{
-		"read_success": resp.IsSuccess(),
-		"response":     resp,
-		"value":        resp.Payload,
-		"status":       resp.Status,
+		KeyReadSuccess: resp.IsSuccess(),
+		KeyResponse:    resp,
+		KeyValue:       resp.Payload,
+		KeyStatus:      resp.Status,
 	}
 
 	// Add attribute-specific outputs
@@ -597,17 +611,17 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 	params := engine.InterpolateParams(step.Params, state)
 
 	// Resolve endpoint and feature names
-	endpointID, err := r.resolver.ResolveEndpoint(params["endpoint"])
+	endpointID, err := r.resolver.ResolveEndpoint(params[KeyEndpoint])
 	if err != nil {
 		return nil, fmt.Errorf("resolving endpoint: %w", err)
 	}
 
-	featureID, err := r.resolver.ResolveFeature(params["feature"])
+	featureID, err := r.resolver.ResolveFeature(params[KeyFeature])
 	if err != nil {
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
 
-	value := params["value"]
+	value := params[KeyValue]
 
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
@@ -628,9 +642,9 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 	}
 
 	return map[string]any{
-		"write_success": resp.IsSuccess(),
-		"response":      resp,
-		"status":        resp.Status,
+		KeyWriteSuccess: resp.IsSuccess(),
+		KeyResponse:     resp,
+		KeyStatus:       resp.Status,
 	}, nil
 }
 
@@ -644,12 +658,12 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 	params := engine.InterpolateParams(step.Params, state)
 
 	// Resolve endpoint and feature names
-	endpointID, err := r.resolver.ResolveEndpoint(params["endpoint"])
+	endpointID, err := r.resolver.ResolveEndpoint(params[KeyEndpoint])
 	if err != nil {
 		return nil, fmt.Errorf("resolving endpoint: %w", err)
 	}
 
-	featureID, err := r.resolver.ResolveFeature(params["feature"])
+	featureID, err := r.resolver.ResolveFeature(params[KeyFeature])
 	if err != nil {
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
@@ -672,9 +686,9 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 	}
 
 	return map[string]any{
-		"subscribe_success": resp.IsSuccess(),
-		"subscription_id":   resp.Payload,
-		"status":            resp.Status,
+		KeySubscribeSuccess: resp.IsSuccess(),
+		KeySubscriptionID:   resp.Payload,
+		KeyStatus:           resp.Status,
 	}, nil
 }
 
@@ -688,12 +702,12 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 	params := engine.InterpolateParams(step.Params, state)
 
 	// Resolve endpoint and feature names
-	endpointID, err := r.resolver.ResolveEndpoint(params["endpoint"])
+	endpointID, err := r.resolver.ResolveEndpoint(params[KeyEndpoint])
 	if err != nil {
 		return nil, fmt.Errorf("resolving endpoint: %w", err)
 	}
 
-	featureID, err := r.resolver.ResolveFeature(params["feature"])
+	featureID, err := r.resolver.ResolveFeature(params[KeyFeature])
 	if err != nil {
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
@@ -719,9 +733,9 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 	}
 
 	return map[string]any{
-		"invoke_success": resp.IsSuccess(),
-		"result":         resp.Payload,
-		"status":         resp.Status,
+		KeyInvokeSuccess: resp.IsSuccess(),
+		KeyResult:        resp.Payload,
+		KeyStatus:        resp.Status,
 	}, nil
 }
 
@@ -738,7 +752,7 @@ func (r *Runner) handleWait(ctx context.Context, step *loader.Step, state *engin
 	case <-time.After(time.Duration(durationMs) * time.Millisecond):
 	}
 
-	return map[string]any{"waited": true}, nil
+	return map[string]any{KeyWaited: true}, nil
 }
 
 func (r *Runner) handleVerify(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
@@ -748,7 +762,7 @@ func (r *Runner) handleVerify(ctx context.Context, step *loader.Step, state *eng
 
 // Custom expectation checkers
 func (r *Runner) checkConnectionEstablished(key string, expected any, state *engine.ExecutionState) *engine.ExpectResult {
-	actual, exists := state.Get("connection_established")
+	actual, exists := state.Get(KeyConnectionEstablished)
 	if !exists {
 		return &engine.ExpectResult{
 			Key:      key,
@@ -770,7 +784,7 @@ func (r *Runner) checkConnectionEstablished(key string, expected any, state *eng
 }
 
 func (r *Runner) checkResponseReceived(key string, expected any, state *engine.ExecutionState) *engine.ExpectResult {
-	actual, exists := state.Get("response")
+	actual, exists := state.Get(KeyResponse)
 	return &engine.ExpectResult{
 		Key:      key,
 		Expected: expected,
@@ -907,7 +921,8 @@ func classifyConnectError(err error) string {
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline"):
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline") ||
+		strings.Contains(msg, "unreachable"):
 		return "TIMEOUT"
 	case strings.Contains(msg, "connection refused"):
 		return "CONNECTION_FAILED"

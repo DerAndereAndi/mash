@@ -35,7 +35,7 @@ func NewWithConfig(config *EngineConfig) *Engine {
 	}
 
 	// Register default checkers
-	e.RegisterChecker("default", defaultChecker)
+	e.RegisterChecker(CheckerNameDefault, defaultChecker)
 
 	return e
 }
@@ -178,6 +178,13 @@ func (e *Engine) executeStep(ctx context.Context, step *loader.Step, index int, 
 		result.Output[k] = v
 	}
 
+	// Store the complete step output for save_as/value_equals checkers.
+	outputCopy := make(map[string]interface{}, len(result.Output))
+	for k, v := range result.Output {
+		outputCopy[k] = v
+	}
+	state.Set(InternalStepOutput, outputCopy)
+
 	// Check expectations with PICS-aware interpolation
 	result.Passed = true
 	interpolatedExpect := InterpolateParamsWithPICS(step.Expect, state, e.config.PICS)
@@ -199,7 +206,7 @@ func (e *Engine) checkExpectation(key string, expected interface{}, state *Execu
 	e.mu.RLock()
 	checker, exists := e.checkers[key]
 	if !exists {
-		checker = e.checkers["default"]
+		checker = e.checkers[CheckerNameDefault]
 	}
 	e.mu.RUnlock()
 

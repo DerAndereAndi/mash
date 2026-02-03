@@ -240,20 +240,20 @@ func TestHandleConnectOperational_ErrorOutputs(t *testing.T) {
 
 	step := &loader.Step{Params: map[string]any{
 		"target":  "127.0.0.1:1",
-		"zone_id": "zone-test",
+		KeyZoneID: "zone-test",
 	}}
 	out, err := r.handleConnectOperational(context.Background(), step, state)
 	// Should return output map, not an error.
 	if err != nil {
 		t.Fatalf("expected nil error (output map), got: %v", err)
 	}
-	if out["connection_established"] != false {
+	if out[KeyConnectionEstablished] != false {
 		t.Error("expected connection_established=false")
 	}
 	if _, ok := out["error_code"]; !ok {
 		t.Error("expected error_code key in output")
 	}
-	if _, ok := out["error"]; !ok {
+	if _, ok := out[KeyError]; !ok {
 		t.Error("expected error key in output")
 	}
 }

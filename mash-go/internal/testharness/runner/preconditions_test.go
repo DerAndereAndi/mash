@@ -24,28 +24,28 @@ func TestPreconditionLevel(t *testing.T) {
 		{
 			name: "session_established true",
 			conditions: []loader.Condition{
-				{"session_established": true},
+				{PrecondSessionEstablished: true},
 			},
 			wantLevel: 3,
 		},
 		{
 			name: "device_commissioned true",
 			conditions: []loader.Condition{
-				{"device_commissioned": true},
+				{PrecondDeviceCommissioned: true},
 			},
 			wantLevel: 3,
 		},
 		{
 			name: "tls_connection_established true",
 			conditions: []loader.Condition{
-				{"tls_connection_established": true},
+				{PrecondTLSConnectionEstablished: true},
 			},
 			wantLevel: 2,
 		},
 		{
 			name: "connection_established true",
 			conditions: []loader.Condition{
-				{"connection_established": true},
+				{PrecondConnectionEstablished: true},
 			},
 			wantLevel: 2,
 		},
@@ -66,23 +66,23 @@ func TestPreconditionLevel(t *testing.T) {
 		{
 			name: "multiple conditions highest wins",
 			conditions: []loader.Condition{
-				{"connection_established": true},
-				{"session_established": true},
+				{PrecondConnectionEstablished: true},
+				{PrecondSessionEstablished: true},
 			},
 			wantLevel: 3,
 		},
 		{
 			name: "false value ignored",
 			conditions: []loader.Condition{
-				{"session_established": false},
+				{PrecondSessionEstablished: false},
 			},
 			wantLevel: 0,
 		},
 		{
 			name: "mixed true and false",
 			conditions: []loader.Condition{
-				{"session_established": false},
-				{"connection_established": true},
+				{PrecondSessionEstablished: false},
+				{PrecondConnectionEstablished: true},
 			},
 			wantLevel: 2,
 		},
@@ -185,7 +185,7 @@ func TestEnsureCommissioned_AlreadyDone(t *testing.T) {
 	}
 
 	// Verify state was populated
-	v, ok := state.Get("session_established")
+	v, ok := state.Get(PrecondSessionEstablished)
 	if !ok {
 		t.Fatal("expected session_established in state")
 	}
@@ -193,7 +193,7 @@ func TestEnsureCommissioned_AlreadyDone(t *testing.T) {
 		t.Errorf("expected session_established=true, got %v", v)
 	}
 
-	v, ok = state.Get("connection_established")
+	v, ok = state.Get(PrecondConnectionEstablished)
 	if !ok {
 		t.Fatal("expected connection_established in state")
 	}
@@ -204,11 +204,11 @@ func TestEnsureCommissioned_AlreadyDone(t *testing.T) {
 
 func TestSortByPreconditionLevel(t *testing.T) {
 	cases := []*loader.TestCase{
-		{ID: "TC-COMM-001", Preconditions: []loader.Condition{{"device_commissioned": true}}},          // level 3
+		{ID: "TC-COMM-001", Preconditions: []loader.Condition{{PrecondDeviceCommissioned: true}}},          // level 3
 		{ID: "TC-DISC-001", Preconditions: nil},                                                        // level 0
-		{ID: "TC-CONN-001", Preconditions: []loader.Condition{{"connection_established": true}}},       // level 2
+		{ID: "TC-CONN-001", Preconditions: []loader.Condition{{PrecondConnectionEstablished: true}}},       // level 2
 		{ID: "TC-PASE-001", Preconditions: []loader.Condition{{"device_in_commissioning_mode": true}}}, // level 1
-		{ID: "TC-COMM-002", Preconditions: []loader.Condition{{"session_established": true}}},          // level 3
+		{ID: "TC-COMM-002", Preconditions: []loader.Condition{{PrecondSessionEstablished: true}}},          // level 3
 		{ID: "TC-DISC-002", Preconditions: nil},                                                        // level 0
 		{ID: "TC-PASE-002", Preconditions: []loader.Condition{{"device_uncommissioned": true}}},        // level 1
 	}
@@ -243,7 +243,7 @@ func TestPreconditionLevel_NewKeys(t *testing.T) {
 		wantLevel int
 	}{
 		{"device_uncommissioned", "device_uncommissioned", 1},
-		{"commissioning_window_open", "commissioning_window_open", 1},
+		{PrecondCommissioningWindowOpen, PrecondCommissioningWindowOpen, 1},
 	}
 
 	for _, tt := range tests {

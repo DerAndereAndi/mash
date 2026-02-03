@@ -38,7 +38,7 @@ func (r *Runner) handleTriggerTestEvent(ctx context.Context, step *loader.Step, 
 	}
 
 	// Get event trigger: accepts hex string (0x...) or numeric value.
-	trigger, err := parseEventTrigger(params["event_trigger"])
+	trigger, err := parseEventTrigger(params[KeyEventTrigger])
 	if err != nil {
 		return nil, fmt.Errorf("invalid event_trigger: %w", err)
 	}
@@ -83,10 +83,10 @@ func (r *Runner) handleTriggerTestEvent(ctx context.Context, step *loader.Step, 
 	}
 
 	return map[string]any{
-		"trigger_sent":  true,
-		"event_trigger": trigger,
-		"success":       success,
-		"status":        resp.Status,
+		KeyTriggerSent:  true,
+		KeyEventTrigger: trigger,
+		KeySuccess:      success,
+		KeyStatus:       resp.Status,
 	}, nil
 }
 
@@ -96,7 +96,7 @@ func (r *Runner) sendTrigger(ctx context.Context, trigger uint64, state *engine.
 	syntheticStep := &loader.Step{
 		Action: "trigger_test_event",
 		Params: map[string]any{
-			"event_trigger": trigger,
+			KeyEventTrigger: trigger,
 		},
 	}
 	return r.handleTriggerTestEvent(ctx, syntheticStep, state)

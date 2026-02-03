@@ -2,11 +2,13 @@ package runner
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/cert"
 )
 
 // registerControllerHandlers registers all controller action handlers.
@@ -21,6 +23,9 @@ func (r *Runner) registerControllerHandlers() {
 	r.engine.RegisterHandler("remove_device", r.handleRemoveDevice)
 	r.engine.RegisterHandler("renew_cert", r.handleRenewCert)
 	r.engine.RegisterHandler("check_renewal", r.handleCheckRenewal)
+
+	// Custom checkers for controller cert tests.
+	r.engine.RegisterChecker("validity_days_min", r.checkValidityDaysMin)
 }
 
 // handleControllerAction dispatches to controller sub-actions.
@@ -29,7 +34,7 @@ func (r *Runner) handleControllerAction(ctx context.Context, step *loader.Step, 
 
 	subAction, _ := params["sub_action"].(string)
 	if subAction == "" {
-		subAction, _ = params["action"].(string)
+		subAction, _ = params[KeyAction].(string)
 	}
 
 	subStep := &loader.Step{Params: params}
@@ -68,13 +73,15 @@ func (r *Runner) handleControllerAction(ctx context.Context, step *loader.Step, 
 		result, err = r.handleGetCertFingerprint(ctx, subStep, state)
 	case "set_cert_expiry_days":
 		result, err = r.handleSetCertExpiryDays(ctx, subStep, state)
+	case "restart":
+		result, err = r.handleControllerRestart(ctx, subStep, state)
 	default:
 		return nil, fmt.Errorf("unknown controller_action sub_action: %s", subAction)
 	}
 
 	// Mark successful dispatches so tests can verify the action was triggered.
 	if err == nil && result != nil {
-		result["action_triggered"] = true
+		result[KeyActionTriggered] = true
 	}
 	return result, err
 }
@@ -85,8 +92,8 @@ func (r *Runner) handleCommissionWithAdmin(ctx context.Context, step *loader.Ste
 	cs := getControllerState(state)
 
 	token, _ := params["admin_token"].(string)
-	deviceID, _ := params["device_id"].(string)
-	zoneID, _ := params["zone_id"].(string)
+	deviceID, _ := params[KeyDeviceID].(string)
+	zoneID, _ := params[KeyZoneID].(string)
 
 	if token == "" {
 		return nil, fmt.Errorf("admin_token required")
@@ -95,9 +102,9 @@ func (r *Runner) handleCommissionWithAdmin(ctx context.Context, step *loader.Ste
 	cs.devices[deviceID] = zoneID
 
 	return map[string]any{
-		"commissioned": true,
-		"device_id":    deviceID,
-		"zone_id":      zoneID,
+		KeyCommissioned: true,
+		KeyDeviceID:     deviceID,
+		KeyZoneID:       zoneID,
 	}, nil
 }
 
@@ -111,40 +118,46 @@ func (r *Runner) handleGetControllerID(ctx context.Context, step *loader.Step, s
 	}
 
 	return map[string]any{
-		"controller_id": id,
+		KeyControllerID: id,
 	}, nil
 }
 
-// handleVerifyControllerCert verifies the controller cert validity.
+// handleVerifyControllerCert verifies the controller's own operational cert.
 func (r *Runner) handleVerifyControllerCert(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	// Check if TLS connection has peer certificates.
-	if r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
-		tlsState := r.conn.tlsConn.ConnectionState()
-		hasCerts := len(tlsState.PeerCertificates) > 0
+	// Check the runner's own controller certificate (not the TLS peer cert).
+	if r.controllerCert != nil && r.controllerCert.Certificate != nil {
+		c := r.controllerCert.Certificate
+		notExpired := time.Now().Before(c.NotAfter)
+		validityDays := int(time.Until(c.NotAfter).Hours() / 24)
 
 		signedByZoneCA := false
-		notExpired := false
-		if hasCerts {
-			cert := tlsState.PeerCertificates[0]
-			notExpired = time.Now().Before(cert.NotAfter)
-			// A cert signed by a Zone CA has a different issuer than subject.
-			signedByZoneCA = cert.Issuer.CommonName != cert.Subject.CommonName
+		issuerFP := ""
+		if r.zoneCA != nil && r.zoneCA.Certificate != nil {
+			opts := x509.VerifyOptions{
+				Roots: r.zoneCAPool,
+			}
+			_, err := c.Verify(opts)
+			signedByZoneCA = err == nil
+			issuerFP = certFingerprint(r.zoneCA.Certificate)
 		}
 
 		return map[string]any{
-			"cert_valid":        hasCerts,
-			"cert_count":        len(tlsState.PeerCertificates),
-			"cert_present":      hasCerts,
-			"signed_by_zone_ca": signedByZoneCA,
-			"not_expired":       notExpired,
+			KeyCertValid:         true,
+			KeyCertPresent:       true,
+			KeySignedByZoneCA:    signedByZoneCA,
+			KeyNotExpired:        notExpired,
+			KeyIssuerFingerprint: issuerFP,
+			KeyValidityDaysMin:   validityDays,
 		}, nil
 	}
 
 	return map[string]any{
-		"cert_valid":        false,
-		"cert_present":      false,
-		"signed_by_zone_ca": false,
-		"not_expired":       false,
+		KeyCertValid:         false,
+		KeyCertPresent:       false,
+		KeySignedByZoneCA:    false,
+		KeyNotExpired:        false,
+		KeyIssuerFingerprint: "",
+		KeyValidityDaysMin:   0,
 	}, nil
 }
 
@@ -154,15 +167,15 @@ func (r *Runner) handleVerifyControllerState(ctx context.Context, step *loader.S
 	cs := getControllerState(state)
 
 	allMatch := true
-	if expected, ok := params["device_count"].(float64); ok {
+	if expected, ok := params[KeyDeviceCount].(float64); ok {
 		if len(cs.devices) != int(expected) {
 			allMatch = false
 		}
 	}
 
 	return map[string]any{
-		"state_valid":  allMatch,
-		"device_count": len(cs.devices),
+		KeyStateValid:  allMatch,
+		KeyDeviceCount: len(cs.devices),
 	}, nil
 }
 
@@ -172,11 +185,11 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 	cs := getControllerState(state)
 
 	minutes := 15.0
-	if v, ok := params["minutes"]; ok {
+	if v, ok := params[KeyMinutes]; ok {
 		minutes = toFloat(v)
 	}
 	// Also accept duration_seconds param (convert to minutes).
-	if v, ok := params["duration_seconds"]; ok {
+	if v, ok := params[KeyDurationSeconds]; ok {
 		minutes = toFloat(v) / 60.0
 	}
 
@@ -196,10 +209,10 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 	cs.commissioningWindowDuration = time.Duration(minutes * float64(time.Minute))
 
 	return map[string]any{
-		"duration_set":     true,
-		"minutes":          minutes,
-		"duration_seconds": minutes * 60,
-		"result":           result,
+		KeyDurationSet:     true,
+		KeyMinutes:         minutes,
+		KeyDurationSeconds: minutes * 60,
+		KeyResult:          result,
 	}, nil
 }
 
@@ -211,10 +224,10 @@ func (r *Runner) handleGetCommissioningWindowDuration(ctx context.Context, step 
 	seconds := minutes * 60
 
 	return map[string]any{
-		"minutes":              minutes,
-		"duration_seconds":     seconds,
-		"duration_seconds_min": seconds,
-		"duration_seconds_max": seconds,
+		KeyMinutes:            minutes,
+		KeyDurationSeconds:    seconds,
+		KeyDurationSecondsMin: seconds,
+		KeyDurationSecondsMax: seconds,
 	}, nil
 }
 
@@ -223,30 +236,110 @@ func (r *Runner) handleRemoveDevice(ctx context.Context, step *loader.Step, stat
 	params := engine.InterpolateParams(step.Params, state)
 	cs := getControllerState(state)
 
-	deviceID, _ := params["device_id"].(string)
+	deviceID, _ := params[KeyDeviceID].(string)
 
 	_, existed := cs.devices[deviceID]
 	delete(cs.devices, deviceID)
 
 	return map[string]any{
-		"device_removed": existed,
+		KeyDeviceRemoved: existed,
 	}, nil
 }
 
 // handleRenewCert triggers certificate renewal.
+// If a Zone CA is available, the controller cert is renewed locally without
+// the wire protocol. Otherwise it falls back to the full renewal flow.
 func (r *Runner) handleRenewCert(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	// Delegate to existing full_renewal_flow handler.
-	return r.handleFullRenewalFlow(ctx, step, state)
+	if r.zoneCA != nil {
+		newCert, err := cert.GenerateControllerOperationalCert(r.zoneCA, "test-controller")
+		if err != nil {
+			return nil, fmt.Errorf("renew controller cert: %w", err)
+		}
+		r.controllerCert = newCert
+		state.Set(StateRenewalComplete, true)
+
+		return map[string]any{
+			KeyRenewalComplete: true,
+			KeyRenewalSuccess:  true,
+			KeyStatus:          0,
+		}, nil
+	}
+
+	// Fall back to full wire renewal flow.
+	result, err := r.handleFullRenewalFlow(ctx, step, state)
+	if err != nil {
+		return result, err
+	}
+	if complete, ok := result[KeyRenewalComplete].(bool); ok {
+		result[KeyRenewalSuccess] = complete
+	}
+	return result, nil
 }
 
-// handleCheckRenewal checks renewal status.
+// handleCheckRenewal checks renewal status and whether renewal should be initiated.
 func (r *Runner) handleCheckRenewal(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	// Check if renewal was completed.
-	renewalComplete, _ := state.Get("renewal_complete")
-	status, _ := state.Get("status")
+	renewalInitiated := false
+
+	// Check simulated cert expiry set via set_cert_expiry_days.
+	if daysVal, ok := state.Get(StateCertDaysUntilExpiry); ok {
+		if days, ok := daysVal.(int); ok && days <= 30 {
+			renewalInitiated = true
+		}
+	}
+
+	// Also check controller cert directly.
+	if r.controllerCert != nil && r.controllerCert.NeedsRenewal() {
+		renewalInitiated = true
+	}
+
+	renewalComplete, _ := state.Get(StateRenewalComplete)
+	status, _ := state.Get(KeyStatus)
 
 	return map[string]any{
-		"renewal_complete": renewalComplete,
-		"status":           status,
+		KeyRenewalInitiated: renewalInitiated,
+		KeyRenewalComplete:  renewalComplete,
+		KeyStatus:           status,
 	}, nil
+}
+
+// handleControllerRestart simulates a controller restart.
+// The controller cert persists across restarts.
+func (r *Runner) handleControllerRestart(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	return map[string]any{
+		KeyRestarted: true,
+	}, nil
+}
+
+// checkValidityDaysMin verifies that validity_days_min output is >= expected.
+func (r *Runner) checkValidityDaysMin(key string, expected interface{}, state *engine.ExecutionState) *engine.ExpectResult {
+	actual, exists := state.Get(key)
+	if !exists {
+		return &engine.ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Passed:   false,
+			Message:  fmt.Sprintf("key %q not found", key),
+		}
+	}
+
+	actualNum, ok1 := engine.ToFloat64(actual)
+	expectedNum, ok2 := engine.ToFloat64(expected)
+	if !ok1 || !ok2 {
+		return &engine.ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Actual:   actual,
+			Passed:   false,
+			Message:  fmt.Sprintf("cannot compare: actual=%T expected=%T", actual, expected),
+		}
+	}
+
+	passed := actualNum >= expectedNum
+	return &engine.ExpectResult{
+		Key:      key,
+		Expected: expected,
+		Actual:   actual,
+		Passed:   passed,
+		Message:  fmt.Sprintf("%v >= %v = %v", actualNum, expectedNum, passed),
+	}
 }

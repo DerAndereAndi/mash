@@ -12,28 +12,28 @@ func TestZoneCreateHasListCount(t *testing.T) {
 	state := newTestState()
 
 	// Create two zones.
-	step := &loader.Step{Params: map[string]any{"zone_type": "GRID_OPERATOR", "zone_id": "grid-01"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneType: "GRID_OPERATOR", KeyZoneID: "grid-01"}}
 	out, err := r.handleCreateZone(context.Background(), step, state)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["zone_created"] != true {
+	if out[KeyZoneCreated] != true {
 		t.Error("expected zone_created=true")
 	}
 
-	step = &loader.Step{Params: map[string]any{"zone_type": "HOME_MANAGER", "zone_id": "home-01"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneType: "HOME_MANAGER", KeyZoneID: "home-01"}}
 	_, err = r.handleCreateZone(context.Background(), step, state)
 	if err != nil {
 		t.Fatalf("unexpected error creating second zone: %v", err)
 	}
 
 	// has_zone.
-	step = &loader.Step{Params: map[string]any{"zone_id": "grid-01"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneID: "grid-01"}}
 	out, err = r.handleHasZone(context.Background(), step, state)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["zone_exists"] != true {
+	if out[KeyZoneExists] != true {
 		t.Error("expected zone_exists=true")
 	}
 
@@ -42,8 +42,8 @@ func TestZoneCreateHasListCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["zone_count"] != 2 {
-		t.Errorf("expected zone_count=2, got %v", out["zone_count"])
+	if out[KeyZoneCount] != 2 {
+		t.Errorf("expected zone_count=2, got %v", out[KeyZoneCount])
 	}
 
 	// zone_count.
@@ -51,8 +51,8 @@ func TestZoneCreateHasListCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["count"] != 2 {
-		t.Errorf("expected count=2, got %v", out["count"])
+	if out[KeyCount] != 2 {
+		t.Errorf("expected count=2, got %v", out[KeyCount])
 	}
 }
 
@@ -60,13 +60,13 @@ func TestZoneDuplicateTypeError(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	step := &loader.Step{Params: map[string]any{"zone_type": "HOME_MANAGER", "zone_id": "z1"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneType: "HOME_MANAGER", KeyZoneID: "z1"}}
 	_, err := r.handleCreateZone(context.Background(), step, state)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	step = &loader.Step{Params: map[string]any{"zone_type": "HOME_MANAGER", "zone_id": "z2"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneType: "HOME_MANAGER", KeyZoneID: "z2"}}
 	_, err = r.handleCreateZone(context.Background(), step, state)
 	if err == nil {
 		t.Error("expected error for duplicate zone type")
@@ -77,29 +77,29 @@ func TestZoneDeleteRemove(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	step := &loader.Step{Params: map[string]any{"zone_type": "USER_APP", "zone_id": "u1"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneType: "USER_APP", KeyZoneID: "u1"}}
 	_, _ = r.handleCreateZone(context.Background(), step, state)
 
 	// Delete it.
-	step = &loader.Step{Params: map[string]any{"zone_id": "u1"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneID: "u1"}}
 	out, err := r.handleDeleteZone(context.Background(), step, state)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["zone_removed"] != true {
+	if out[KeyZoneRemoved] != true {
 		t.Error("expected zone_removed=true")
 	}
 
 	// Verify gone.
-	step = &loader.Step{Params: map[string]any{"zone_id": "u1"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneID: "u1"}}
 	out, _ = r.handleHasZone(context.Background(), step, state)
-	if out["zone_exists"] != false {
+	if out[KeyZoneExists] != false {
 		t.Error("expected zone_exists=false after delete")
 	}
 
 	// Delete non-existent -> zone_removed false.
 	out, _ = r.handleDeleteZone(context.Background(), step, state)
-	if out["zone_removed"] != false {
+	if out[KeyZoneRemoved] != false {
 		t.Error("expected zone_removed=false for non-existent zone")
 	}
 }
@@ -109,13 +109,13 @@ func TestHighestPriorityZone(t *testing.T) {
 	state := newTestState()
 
 	// Create zones with different priorities.
-	step := &loader.Step{Params: map[string]any{"zone_type": "USER_APP", "zone_id": "user"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneType: "USER_APP", KeyZoneID: "user"}}
 	_, _ = r.handleCreateZone(context.Background(), step, state)
 
-	step = &loader.Step{Params: map[string]any{"zone_type": "GRID_OPERATOR", "zone_id": "grid"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneType: "GRID_OPERATOR", KeyZoneID: "grid"}}
 	_, _ = r.handleCreateZone(context.Background(), step, state)
 
-	step = &loader.Step{Params: map[string]any{"zone_type": "HOME_MANAGER", "zone_id": "home"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneType: "HOME_MANAGER", KeyZoneID: "home"}}
 	_, _ = r.handleCreateZone(context.Background(), step, state)
 
 	// Highest priority should be GRID_OPERATOR.
@@ -123,11 +123,11 @@ func TestHighestPriorityZone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["zone_type"] != "GRID_OPERATOR" {
-		t.Errorf("expected GRID_OPERATOR, got %v", out["zone_type"])
+	if out[KeyZoneType] != "GRID_OPERATOR" {
+		t.Errorf("expected GRID_OPERATOR, got %v", out[KeyZoneType])
 	}
-	if out["zone_id"] != "grid" {
-		t.Errorf("expected zone_id=grid, got %v", out["zone_id"])
+	if out[KeyZoneID] != "grid" {
+		t.Errorf("expected zone_id=grid, got %v", out[KeyZoneID])
 	}
 }
 
@@ -135,15 +135,15 @@ func TestHighestPriorityConnectedZone(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	step := &loader.Step{Params: map[string]any{"zone_type": "GRID_OPERATOR", "zone_id": "grid"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneType: "GRID_OPERATOR", KeyZoneID: "grid"}}
 	_, _ = r.handleCreateZone(context.Background(), step, state)
 
-	step = &loader.Step{Params: map[string]any{"zone_type": "HOME_MANAGER", "zone_id": "home"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneType: "HOME_MANAGER", KeyZoneID: "home"}}
 	_, _ = r.handleCreateZone(context.Background(), step, state)
 
 	// None connected -> empty.
 	out, _ := r.handleHighestPriorityConnectedZone(context.Background(), &loader.Step{}, state)
-	if out["zone_id"] != "" {
+	if out[KeyZoneID] != "" {
 		t.Error("expected empty zone_id when none connected")
 	}
 
@@ -152,8 +152,8 @@ func TestHighestPriorityConnectedZone(t *testing.T) {
 	zs.zones["home"].Connected = true
 
 	out, _ = r.handleHighestPriorityConnectedZone(context.Background(), &loader.Step{}, state)
-	if out["zone_id"] != "home" {
-		t.Errorf("expected home, got %v", out["zone_id"])
+	if out[KeyZoneID] != "home" {
+		t.Errorf("expected home, got %v", out[KeyZoneID])
 	}
 }
 
@@ -161,29 +161,29 @@ func TestAddZoneAndVerifyBinding(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	step := &loader.Step{Params: map[string]any{"zone_type": "HOME_MANAGER", "zone_id": "h1"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneType: "HOME_MANAGER", KeyZoneID: "h1"}}
 	_, _ = r.handleCreateZone(context.Background(), step, state)
 
-	step = &loader.Step{Params: map[string]any{"zone_id": "h1", "device_id": "dev-001"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneID: "h1", KeyDeviceID: "dev-001"}}
 	out, err := r.handleAddZone(context.Background(), step, state)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["device_added"] != true {
+	if out[KeyDeviceAdded] != true {
 		t.Error("expected device_added=true")
 	}
 
 	// Verify binding.
-	step = &loader.Step{Params: map[string]any{"zone_id": "h1", "device_id": "dev-001"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneID: "h1", KeyDeviceID: "dev-001"}}
 	out, _ = r.handleVerifyZoneBinding(context.Background(), step, state)
-	if out["binding_valid"] != true {
+	if out[KeyBindingValid] != true {
 		t.Error("expected binding_valid=true")
 	}
 
 	// Non-existent device.
-	step = &loader.Step{Params: map[string]any{"zone_id": "h1", "device_id": "dev-999"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneID: "h1", KeyDeviceID: "dev-999"}}
 	out, _ = r.handleVerifyZoneBinding(context.Background(), step, state)
-	if out["binding_valid"] != false {
+	if out[KeyBindingValid] != false {
 		t.Error("expected binding_valid=false for unknown device")
 	}
 }
@@ -193,16 +193,16 @@ func TestVerifyZoneIDDerivation(t *testing.T) {
 	state := newTestState()
 
 	// Valid: 16 hex chars.
-	step := &loader.Step{Params: map[string]any{"zone_id": "a1b2c3d4e5f6a7b8"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneID: "a1b2c3d4e5f6a7b8"}}
 	out, _ := r.handleVerifyZoneIDDerivation(context.Background(), step, state)
-	if out["derivation_valid"] != true {
+	if out[KeyDerivationValid] != true {
 		t.Error("expected derivation_valid=true for valid hex ID")
 	}
 
 	// Invalid: too short.
-	step = &loader.Step{Params: map[string]any{"zone_id": "abc123"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneID: "abc123"}}
 	out, _ = r.handleVerifyZoneIDDerivation(context.Background(), step, state)
-	if out["derivation_valid"] != false {
+	if out[KeyDerivationValid] != false {
 		t.Error("expected derivation_valid=false for short ID")
 	}
 }
@@ -211,14 +211,14 @@ func TestDisconnectZone(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	step := &loader.Step{Params: map[string]any{"zone_type": "HOME_MANAGER", "zone_id": "h1"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneType: "HOME_MANAGER", KeyZoneID: "h1"}}
 	_, _ = r.handleCreateZone(context.Background(), step, state)
 	zs := getZoneState(state)
 	zs.zones["h1"].Connected = true
 
-	step = &loader.Step{Params: map[string]any{"zone_id": "h1"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneID: "h1"}}
 	out, _ := r.handleDisconnectZone(context.Background(), step, state)
-	if out["zone_disconnected"] != true {
+	if out[KeyZoneDisconnected] != true {
 		t.Error("expected zone_disconnected=true")
 	}
 
@@ -231,13 +231,13 @@ func TestHandleCreateZone_SaveZoneID(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	step := &loader.Step{Params: map[string]any{"zone_type": "HOME_MANAGER", "zone_id": "test-zone-123"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneType: "HOME_MANAGER", KeyZoneID: "test-zone-123"}}
 	out, err := r.handleCreateZone(context.Background(), step, state)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["save_zone_id"] != "test-zone-123" {
-		t.Errorf("expected save_zone_id=test-zone-123, got %v", out["save_zone_id"])
+	if out[KeySaveZoneID] != "test-zone-123" {
+		t.Errorf("expected save_zone_id=test-zone-123, got %v", out[KeySaveZoneID])
 	}
 }
 
@@ -245,19 +245,21 @@ func TestHandleVerifyZoneCA_WithRunnerZoneCA(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	// Create a zone in state.
-	step := &loader.Step{Params: map[string]any{"zone_type": "HOME_MANAGER", "zone_id": "z1"}}
+	// Create a zone in state (now also generates a real Zone CA).
+	step := &loader.Step{Params: map[string]any{KeyZoneType: "HOME_MANAGER", KeyZoneID: "z1"}}
 	_, _ = r.handleCreateZone(context.Background(), step, state)
 
-	// Without runner zoneCA - only base fields.
-	step = &loader.Step{Params: map[string]any{"zone_id": "z1"}}
+	step = &loader.Step{Params: map[string]any{KeyZoneID: "z1"}}
 	out, _ := r.handleVerifyZoneCA(context.Background(), step, state)
-	if out["ca_valid"] != true {
+	if out[KeyCAValid] != true {
 		t.Error("expected ca_valid=true")
 	}
-	// No cert details without runner zoneCA.
-	if _, exists := out["algorithm"]; exists {
-		t.Error("expected no algorithm field without zoneCA")
+	// handleCreateZone now generates a real Zone CA, so cert details should be present.
+	if _, exists := out[KeyAlgorithm]; !exists {
+		t.Error("expected algorithm field with generated zoneCA")
+	}
+	if out[KeyBasicConstraintsCA] != true {
+		t.Error("expected basic_constraints_ca=true for Zone CA")
 	}
 }
 

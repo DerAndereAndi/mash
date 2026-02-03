@@ -60,8 +60,8 @@ func (r *Runner) handleCompare(ctx context.Context, step *loader.Step, state *en
 	}
 
 	return map[string]any{
-		"comparison_result": result,
-		"values_equal":      fmt.Sprintf("%v", left) == fmt.Sprintf("%v", right),
+		KeyComparisonResult: result,
+		KeyValuesEqual:      fmt.Sprintf("%v", left) == fmt.Sprintf("%v", right),
 	}, nil
 }
 
@@ -76,8 +76,8 @@ func (r *Runner) handleCompareValues(ctx context.Context, step *loader.Step, sta
 
 	if len(values) == 0 {
 		return map[string]any{
-			"all_equal":     true,
-			"all_different": true,
+			KeyAllEqual:     true,
+			KeyAllDifferent: true,
 		}, nil
 	}
 
@@ -100,8 +100,8 @@ func (r *Runner) handleCompareValues(ctx context.Context, step *loader.Step, sta
 	}
 
 	return map[string]any{
-		"all_equal":     allEqual,
-		"all_different": allDifferent,
+		KeyAllEqual:     allEqual,
+		KeyAllDifferent: allDifferent,
 	}, nil
 }
 
@@ -114,16 +114,16 @@ func (r *Runner) handleEvaluate(ctx context.Context, step *loader.Step, state *e
 	if expr != "" {
 		val, exists := state.Get(expr)
 		if exists {
-			return map[string]any{"result": toBool(val)}, nil
+			return map[string]any{KeyResult: toBool(val)}, nil
 		}
 	}
 
 	// Direct value evaluation.
-	if v, ok := params["value"]; ok {
-		return map[string]any{"result": toBool(v)}, nil
+	if v, ok := params[KeyValue]; ok {
+		return map[string]any{KeyResult: toBool(v)}, nil
 	}
 
-	return map[string]any{"result": false}, nil
+	return map[string]any{KeyResult: false}, nil
 }
 
 // handleConditionalRead reads only if a condition is met.
@@ -135,8 +135,8 @@ func (r *Runner) handleConditionalRead(ctx context.Context, step *loader.Step, s
 		val, exists := state.Get(condKey)
 		if !exists || !toBool(val) {
 			return map[string]any{
-				"skipped":      true,
-				"read_success": false,
+				KeySkipped:     true,
+				KeyReadSuccess: false,
 			}, nil
 		}
 	}
@@ -148,7 +148,7 @@ func (r *Runner) handleConditionalRead(ctx context.Context, step *loader.Step, s
 func (r *Runner) handleRecordTime(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	key, _ := params["key"].(string)
+	key, _ := params[KeyKey].(string)
 	if key == "" {
 		key = "recorded_time"
 	}
@@ -157,8 +157,8 @@ func (r *Runner) handleRecordTime(ctx context.Context, step *loader.Step, state 
 	state.Set(key, now)
 
 	return map[string]any{
-		"time_recorded": true,
-		"timestamp_ms":  now.UnixMilli(),
+		KeyTimeRecorded: true,
+		KeyTimestampMs:  now.UnixMilli(),
 	}, nil
 }
 
@@ -180,9 +180,9 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 
 	if !startOK || !endOK {
 		return map[string]any{
-			"within_tolerance": false,
-			"elapsed_ms":      int64(0),
-			"error":           "start or end time not recorded",
+			KeyWithinTolerance: false,
+			KeyElapsedMs:       int64(0),
+			KeyError:           "start or end time not recorded",
 		}, nil
 	}
 
@@ -190,9 +190,9 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 	endTime, eok := endVal.(time.Time)
 	if !sok || !eok {
 		return map[string]any{
-			"within_tolerance": false,
-			"elapsed_ms":      int64(0),
-			"error":           "recorded values are not time.Time",
+			KeyWithinTolerance: false,
+			KeyElapsedMs:       int64(0),
+			KeyError:           "recorded values are not time.Time",
 		}, nil
 	}
 
@@ -214,8 +214,8 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 	}
 
 	return map[string]any{
-		"within_tolerance": withinTolerance,
-		"elapsed_ms":      elapsedMs,
+		KeyWithinTolerance: withinTolerance,
+		KeyElapsedMs:       elapsedMs,
 	}, nil
 }
 
@@ -225,7 +225,7 @@ func (r *Runner) handleCheckResponse(ctx context.Context, step *loader.Step, sta
 
 	statusMatches := true
 	if expected, ok := params["expected_status"]; ok {
-		actual, _ := state.Get("status")
+		actual, _ := state.Get(KeyStatus)
 		statusMatches = fmt.Sprintf("%v", actual) == fmt.Sprintf("%v", expected)
 	}
 
@@ -241,8 +241,8 @@ func (r *Runner) handleCheckResponse(ctx context.Context, step *loader.Step, sta
 	}
 
 	return map[string]any{
-		"status_matches":  statusMatches,
-		"payload_matches": payloadMatches,
+		KeyStatusMatches:  statusMatches,
+		KeyPayloadMatches: payloadMatches,
 	}, nil
 }
 
@@ -265,7 +265,7 @@ func (r *Runner) handleVerifyCorrelation(ctx context.Context, step *loader.Step,
 	valid := reqOK && respOK && fmt.Sprintf("%v", reqVal) == fmt.Sprintf("%v", respVal)
 
 	return map[string]any{
-		"correlation_valid": valid,
+		KeyCorrelationValid: valid,
 	}, nil
 }
 
@@ -273,10 +273,10 @@ func (r *Runner) handleVerifyCorrelation(ctx context.Context, step *loader.Step,
 func (r *Runner) handleWaitForState(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	key, _ := params["key"].(string)
-	expected := params["value"]
+	key, _ := params[KeyKey].(string)
+	expected := params[KeyValue]
 	timeoutMs := 5000
-	if t, ok := params["timeout_ms"].(float64); ok {
+	if t, ok := params[KeyTimeoutMs].(float64); ok {
 		timeoutMs = int(t)
 	}
 	pollMs := 100
@@ -291,12 +291,12 @@ func (r *Runner) handleWaitForState(ctx context.Context, step *loader.Step, stat
 	for {
 		actual, exists := state.Get(key)
 		if exists && fmt.Sprintf("%v", actual) == fmt.Sprintf("%v", expected) {
-			return map[string]any{"state_reached": true}, nil
+			return map[string]any{KeyStateReached: true}, nil
 		}
 
 		select {
 		case <-deadline:
-			return map[string]any{"state_reached": false}, nil
+			return map[string]any{KeyStateReached: false}, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-ticker.C:
@@ -310,16 +310,16 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 	params := engine.InterpolateParams(step.Params, state)
 
 	timeoutMs := 5000
-	if t, ok := params["timeout_ms"].(float64); ok {
+	if t, ok := params[KeyTimeoutMs].(float64); ok {
 		timeoutMs = int(t)
 	}
 
-	eventType, _ := params["event_type"].(string)
+	eventType, _ := params[KeyEventType].(string)
 
 	if r.conn == nil || !r.conn.connected {
 		return map[string]any{
-			"notification_received": false,
-			"error":                 "not connected",
+			KeyNotificationReceived: false,
+			KeyError:                "not connected",
 		}, nil
 	}
 
@@ -342,19 +342,19 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 	case res := <-ch:
 		if res.err != nil {
 			return map[string]any{
-				"notification_received": false,
-				"error":                 res.err.Error(),
+				KeyNotificationReceived: false,
+				KeyError:                res.err.Error(),
 			}, nil
 		}
 		return map[string]any{
-			"notification_received": true,
-			"event_type":            eventType,
-			"notification_data":     res.data,
+			KeyNotificationReceived: true,
+			KeyEventType:            eventType,
+			KeyNotificationData:     res.data,
 		}, nil
 	case <-readCtx.Done():
 		return map[string]any{
-			"notification_received": false,
-			"event_type":            eventType,
+			KeyNotificationReceived: false,
+			KeyEventType:            eventType,
 		}, nil
 	}
 }
@@ -364,14 +364,14 @@ func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state 
 	params := engine.InterpolateParams(step.Params, state)
 
 	timeoutMs := 5000
-	if t, ok := params["timeout_ms"].(float64); ok {
+	if t, ok := params[KeyTimeoutMs].(float64); ok {
 		timeoutMs = int(t)
 	}
 
 	if r.conn == nil || !r.conn.connected {
 		return map[string]any{
-			"report_received": false,
-			"error":           "not connected",
+			KeyReportReceived: false,
+			KeyError:          "not connected",
 		}, nil
 	}
 
@@ -393,17 +393,17 @@ func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state 
 	case res := <-ch:
 		if res.err != nil {
 			return map[string]any{
-				"report_received": false,
-				"error":           res.err.Error(),
+				KeyReportReceived: false,
+				KeyError:          res.err.Error(),
 			}, nil
 		}
 		return map[string]any{
-			"report_received": true,
-			"report_data":     res.data,
+			KeyReportReceived: true,
+			KeyReportData:     res.data,
 		}, nil
 	case <-readCtx.Done():
 		return map[string]any{
-			"report_received": false,
+			KeyReportReceived: false,
 		}, nil
 	}
 }
@@ -420,26 +420,26 @@ func (r *Runner) handleParseQR(ctx context.Context, step *loader.Step, state *en
 		payload, _ = params["content"].(string)
 	}
 	if payload == "" {
-		return map[string]any{"valid": false, "parse_success": false, "error": "no_payload"}, nil
+		return map[string]any{KeyValid: false, KeyParseSuccess: false, KeyError: "no_payload"}, nil
 	}
 
 	qr, err := discovery.ParseQRCode(payload)
 	if err != nil {
 		errorCode := mapQRError(err)
 		return map[string]any{
-			"valid":        false,
-			"parse_success": false,
-			"error":        errorCode,
-			"error_detail": err.Error(),
+			KeyValid:       false,
+			KeyParseSuccess: false,
+			KeyError:       errorCode,
+			KeyErrorDetail: err.Error(),
 		}, nil
 	}
 
 	return map[string]any{
-		"valid":         true,
-		"parse_success": true,
-		"version":       int(qr.Version),
-		"discriminator": int(qr.Discriminator),
-		"setup_code":    qr.SetupCode,
+		KeyValid:        true,
+		KeyParseSuccess: true,
+		KeyVersion:      int(qr.Version),
+		KeyDiscriminator: int(qr.Discriminator),
+		KeySetupCode:    qr.SetupCode,
 	}, nil
 }
 

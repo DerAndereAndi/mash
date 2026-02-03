@@ -16,7 +16,7 @@ func TestHandleResetPASESession(t *testing.T) {
 		sessionKey: []byte{1, 2, 3},
 		completed:  true,
 	}
-	state.Set("session_established", true)
+	state.Set(PrecondSessionEstablished, true)
 
 	out, err := r.handleResetPASESession(context.Background(), &loader.Step{}, state)
 	if err != nil {
@@ -29,7 +29,7 @@ func TestHandleResetPASESession(t *testing.T) {
 		t.Error("expected paseState to be nil after reset")
 	}
 
-	established, _ := state.Get("session_established")
+	established, _ := state.Get(PrecondSessionEstablished)
 	if established != false {
 		t.Error("expected session_established=false after reset")
 	}
@@ -87,7 +87,7 @@ func TestHandleVerifyCertSubjectNotConnected(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	step := &loader.Step{Params: map[string]any{"device_id": "dev-123"}}
+	step := &loader.Step{Params: map[string]any{KeyDeviceID: "dev-123"}}
 	out, _ := r.handleVerifyCertSubject(context.Background(), step, state)
 	if out["subject_matches"] != false {
 		t.Error("expected subject_matches=false when not connected")
@@ -128,8 +128,8 @@ func TestHandleDeviceVerifyPeerNotConnected(t *testing.T) {
 	if out["same_zone_ca"] != false {
 		t.Error("expected same_zone_ca=false when not connected")
 	}
-	if out["error"] != "no active connection" {
-		t.Errorf("expected 'no active connection' error, got %v", out["error"])
+	if out[KeyError] != "no active connection" {
+		t.Errorf("expected 'no active connection' error, got %v", out[KeyError])
 	}
 }
 
@@ -166,8 +166,8 @@ func TestDeviceVerifyPeer_D2DPreconditions_SameZone(t *testing.T) {
 	if out["same_zone_ca"] != true {
 		t.Error("expected same_zone_ca=true for same zone")
 	}
-	if out["error"] != "" {
-		t.Errorf("expected empty error, got %v", out["error"])
+	if out[KeyError] != "" {
+		t.Errorf("expected empty error, got %v", out[KeyError])
 	}
 }
 
@@ -182,8 +182,8 @@ func TestDeviceVerifyPeer_D2DPreconditions_Expired(t *testing.T) {
 	if out["peer_valid"] != false {
 		t.Error("expected peer_valid=false for expired cert")
 	}
-	if out["error"] != "certificate_expired" {
-		t.Errorf("expected error=certificate_expired, got %v", out["error"])
+	if out[KeyError] != "certificate_expired" {
+		t.Errorf("expected error=certificate_expired, got %v", out[KeyError])
 	}
 }
 
@@ -201,8 +201,8 @@ func TestDeviceVerifyPeer_D2DPreconditions_DiffZone(t *testing.T) {
 	if out["same_zone_ca"] != false {
 		t.Error("expected same_zone_ca=false for different zones")
 	}
-	if out["error"] != "unknown_ca" {
-		t.Errorf("expected error=unknown_ca, got %v", out["error"])
+	if out[KeyError] != "unknown_ca" {
+		t.Errorf("expected error=unknown_ca, got %v", out[KeyError])
 	}
 }
 

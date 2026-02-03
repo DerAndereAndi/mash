@@ -32,33 +32,61 @@ const (
 )
 
 // preconditionKeyLevels maps known precondition keys to their required level.
-// d2dPreconditionKeys are precondition keys that should be stored in
-// execution state so that handlers (e.g. device_verify_peer) can adapt
-// their behavior based on the simulated scenario.
-var d2dPreconditionKeys = map[string]bool{
-	"two_devices_same_zone":       true,
-	"two_devices_different_zones": true,
-	"device_b_cert_expired":       true,
+// simulationPreconditionKeys are precondition keys that should be stored in
+// execution state so that handlers can adapt their behavior based on the
+// simulated scenario (D2D, environment, capacity, etc.).
+var simulationPreconditionKeys = map[string]bool{
+	// D2D simulation.
+	PrecondTwoDevicesSameZone:       true,
+	PrecondTwoDevicesDifferentZones: true,
+	PrecondDeviceBCertExpired:       true,
+	// Environment / capacity simulation.
+	PrecondDeviceZonesFull:            true,
+	PrecondNoDevicesAdvertising:       true,
+	PrecondDeviceSRVPresent:           true,
+	PrecondDeviceAAAAMissing:          true,
+	PrecondDeviceAddressValid:         true,
+	PrecondDevicePortClosed:           true,
+	PrecondDeviceWillAppearAfterDelay: true,
+	PrecondFiveZonesConnected:         true,
+	PrecondDeviceListening:            true,
 }
 
 var preconditionKeyLevels = map[string]int{
 	// Level 0: Always-true environment preconditions (no setup needed).
-	"device_booted":      precondLevelNone,
-	"controller_running": precondLevelNone,
-	"device_in_network":  precondLevelNone,
+	PrecondDeviceBooted:      precondLevelNone,
+	PrecondControllerRunning: precondLevelNone,
+	PrecondDeviceInNetwork:   precondLevelNone,
+	PrecondDeviceListening:   precondLevelNone,
 
 	// D2D simulation preconditions (no actual connection needed).
-	"two_devices_same_zone":       precondLevelNone,
-	"two_devices_different_zones": precondLevelNone,
-	"device_b_cert_expired":       precondLevelNone,
+	PrecondTwoDevicesSameZone:       precondLevelNone,
+	PrecondTwoDevicesDifferentZones: precondLevelNone,
+	PrecondDeviceBCertExpired:       precondLevelNone,
 
-	"device_in_commissioning_mode": precondLevelCommissioning,
-	"device_uncommissioned":        precondLevelCommissioning,
-	"commissioning_window_open":    precondLevelCommissioning,
-	"tls_connection_established":   precondLevelConnected,
-	"connection_established":       precondLevelConnected,
-	"device_commissioned":          precondLevelCommissioned,
-	"session_established":          precondLevelCommissioned,
+	// Controller preconditions (zone/cert state, no connection needed).
+	PrecondZoneCreated:              precondLevelNone,
+	PrecondControllerHasCert:        precondLevelNone,
+	PrecondControllerCertNearExpiry: precondLevelNone,
+
+	// Environment/negative-test preconditions (simulation, no connection needed).
+	PrecondDeviceZonesFull:            precondLevelNone,
+	PrecondNoDevicesAdvertising:       precondLevelNone,
+	PrecondDeviceSRVPresent:           precondLevelNone,
+	PrecondDeviceAAAAMissing:          precondLevelNone,
+	PrecondDeviceAddressValid:         precondLevelNone,
+	PrecondDevicePortClosed:           precondLevelNone,
+	PrecondDeviceWillAppearAfterDelay: precondLevelNone,
+	PrecondFiveZonesConnected:         precondLevelNone,
+
+	PrecondDeviceInCommissioningMode: precondLevelCommissioning,
+	PrecondDeviceUncommissioned:      precondLevelCommissioning,
+	PrecondCommissioningWindowOpen:   precondLevelCommissioning,
+	PrecondDeviceConnected:           precondLevelConnected,
+	PrecondTLSConnectionEstablished:  precondLevelConnected,
+	PrecondConnectionEstablished:     precondLevelConnected,
+	PrecondDeviceCommissioned:        precondLevelCommissioned,
+	PrecondSessionEstablished:        precondLevelCommissioned,
 }
 
 // preconditionLevelFor determines the highest setup level needed for the given conditions.
@@ -111,15 +139,43 @@ func (r *Runner) currentLevel() int {
 func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState) error {
 	// Populate setup_code so that test steps using ${setup_code} resolve correctly.
 	if r.config.SetupCode != "" {
-		state.Set("setup_code", r.config.SetupCode)
+		state.Set(StateSetupCode, r.config.SetupCode)
 	}
 
-	// Store D2D precondition keys in state so handlers can check them.
+	// Store simulation precondition keys in state so handlers can check them.
 	for _, cond := range tc.Preconditions {
 		for key, val := range cond {
-			if d2dPreconditionKeys[key] {
+			if simulationPreconditionKeys[key] {
 				if b, ok := val.(bool); ok {
 					state.Set(key, b)
+				}
+			}
+		}
+	}
+
+	// Handle preconditions that require special setup.
+	for _, cond := range tc.Preconditions {
+		for key, val := range cond {
+			b, ok := val.(bool)
+			if !ok || !b {
+				continue
+			}
+			switch key {
+			case PrecondZoneCreated, PrecondControllerHasCert:
+				// Create a default zone (generates Zone CA + controller cert).
+				if r.zoneCA == nil {
+					step := &loader.Step{Params: map[string]any{KeyZoneType: "LOCAL"}}
+					_, _ = r.handleCreateZone(ctx, step, state)
+				}
+			case PrecondControllerCertNearExpiry:
+				state.Set(StateCertDaysUntilExpiry, 29)
+			case PrecondFiveZonesConnected:
+				// Pre-populate connection tracker with 5 dummy zone connections.
+				ct := getConnectionTracker(state)
+				for _, name := range []string{"GRID", "BUILDING", "HOME", "USER1", "USER2"} {
+					if _, exists := ct.zoneConnections[name]; !exists {
+						ct.zoneConnections[name] = &Connection{connected: true}
+					}
 				}
 			}
 		}
@@ -169,7 +225,7 @@ func (r *Runner) ensureConnected(ctx context.Context, state *engine.ExecutionSta
 	step := &loader.Step{
 		Action: "connect",
 		Params: map[string]any{
-			"commissioning": true,
+			KeyCommissioning: true,
 		},
 	}
 
@@ -179,8 +235,8 @@ func (r *Runner) ensureConnected(ctx context.Context, state *engine.ExecutionSta
 	}
 
 	// handleConnect returns connection_established in outputs even on TLS failure.
-	if established, ok := outputs["connection_established"].(bool); ok && !established {
-		errMsg, _ := outputs["error"].(string)
+	if established, ok := outputs[KeyConnectionEstablished].(bool); ok && !established {
+		errMsg, _ := outputs[KeyError].(string)
 		return fmt.Errorf("precondition connect failed: %s", errMsg)
 	}
 
@@ -196,11 +252,11 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 
 	// If already commissioned, populate state and return.
 	if r.paseState != nil && r.paseState.completed {
-		state.Set("session_established", true)
-		state.Set("connection_established", true)
+		state.Set(KeySessionEstablished, true)
+		state.Set(KeyConnectionEstablished, true)
 		if r.paseState.sessionKey != nil {
-			state.Set("session_key", r.paseState.sessionKey)
-			state.Set("session_key_length", len(r.paseState.sessionKey))
+			state.Set(StateSessionKey, r.paseState.sessionKey)
+			state.Set(StateSessionKeyLen, len(r.paseState.sessionKey))
 		}
 		return nil
 	}

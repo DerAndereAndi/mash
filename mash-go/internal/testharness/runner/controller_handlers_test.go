@@ -47,8 +47,8 @@ func TestHandleCommissionWithAdmin(t *testing.T) {
 	step = &loader.Step{
 		Params: map[string]any{
 			"admin_token": "token-123",
-			"device_id":   "dev-001",
-			"zone_id":     "zone-abc",
+			KeyDeviceID:   "dev-001",
+			KeyZoneID:     "zone-abc",
 		},
 	}
 	out, err := r.handleCommissionWithAdmin(context.Background(), step, state)
@@ -181,7 +181,7 @@ func TestHandleRemoveDevice(t *testing.T) {
 	cs := getControllerState(state)
 	cs.devices["dev-001"] = "zone-abc"
 
-	step := &loader.Step{Params: map[string]any{"device_id": "dev-001"}}
+	step := &loader.Step{Params: map[string]any{KeyDeviceID: "dev-001"}}
 	out, _ := r.handleRemoveDevice(context.Background(), step, state)
 	if out["device_removed"] != true {
 		t.Error("expected device_removed=true")

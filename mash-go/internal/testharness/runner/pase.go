@@ -50,15 +50,18 @@ func (r *Runner) registerPASEHandlers() {
 // connection first. This ensures the connection and PASE handshake happen
 // atomically without any delay between them.
 func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// Interpolate parameters so ${setup_code} etc. resolve.
+	params := engine.InterpolateParams(step.Params, state)
+
 	// Get setup code from params or config
-	setupCode, err := r.getSetupCode(step.Params)
+	setupCode, err := r.getSetupCode(params)
 	if err != nil {
 		return nil, fmt.Errorf("invalid setup code: %w", err)
 	}
 
 	// Get identities from params or use defaults
-	clientIdentity := r.getClientIdentity(step.Params)
-	serverIdentity := r.getServerIdentity(step.Params)
+	clientIdentity := r.getClientIdentity(params)
+	serverIdentity := r.getServerIdentity(params)
 
 	// Establish commissioning connection if not already connected
 	// This ensures connection + PASE happen atomically
@@ -68,7 +71,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	} else {
 		// Create new commissioning connection
 		target := r.config.Target
-		if t, ok := step.Params["target"].(string); ok && t != "" {
+		if t, ok := params[KeyTarget].(string); ok && t != "" {
 			target = t
 		}
 
@@ -85,8 +88,8 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		r.conn.connected = true
 		conn = tlsConn
 
-		state.Set("connection", r.conn)
-		state.Set("connection_established", true)
+		state.Set(StateConnection, r.conn)
+		state.Set(KeyConnectionEstablished, true)
 	}
 
 	// Create PASE client session
@@ -114,9 +117,9 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		// Return structured output so tests can assert on the failure
 		// rather than propagating an error that breaks preconditions.
 		return map[string]any{
-			"session_established": false,
-			"commission_success":  false,
-			"error":              err.Error(),
+			KeySessionEstablished: false,
+			KeyCommissionSuccess:  false,
+			KeyError:              err.Error(),
 		}, fmt.Errorf("PASE handshake failed: %w", err)
 	}
 
@@ -149,21 +152,21 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	}
 
 	// Also store in execution state for test assertions
-	state.Set("session_established", true)
-	state.Set("session_key", sessionKey)
-	state.Set("session_key_length", len(sessionKey))
+	state.Set(KeySessionEstablished, true)
+	state.Set(StateSessionKey, sessionKey)
+	state.Set(StateSessionKeyLen, len(sessionKey))
 	if deviceID != "" {
-		state.Set("device_id", deviceID)
+		state.Set(StateDeviceID, deviceID)
 	}
 
 	outputs := map[string]any{
-		"session_established": true,
-		"commission_success":  true,
-		"key_length":          len(sessionKey),
-		"key_not_zero":        !isZeroKey(sessionKey),
+		KeySessionEstablished: true,
+		KeyCommissionSuccess:  true,
+		KeyKeyLength:          len(sessionKey),
+		KeyKeyNotZero:        !isZeroKey(sessionKey),
 	}
 	if deviceID != "" {
-		outputs["device_id"] = deviceID
+		outputs[KeyDeviceID] = deviceID
 	}
 
 	return outputs, nil
@@ -251,11 +254,11 @@ func (r *Runner) handlePASERequest(ctx context.Context, step *loader.Step, state
 	}
 
 	// Store params for the deferred handshake
-	state.Set("pase_pending", true)
+	state.Set(StatePasePending, true)
 
 	return map[string]any{
-		"request_sent": true,
-		"pA_generated": true,
+		KeyRequestSent: true,
+		KeyPAGenerated: true,
 	}, nil
 }
 
@@ -267,8 +270,8 @@ func (r *Runner) handlePASEReceiveResponse(ctx context.Context, step *loader.Ste
 	}
 
 	return map[string]any{
-		"response_received": true,
-		"pB_received":       true,
+		KeyResponseReceived: true,
+		KeyPBReceived:       true,
 	}, nil
 }
 
@@ -280,7 +283,7 @@ func (r *Runner) handlePASEConfirm(ctx context.Context, step *loader.Step, state
 	}
 
 	return map[string]any{
-		"confirm_sent": true,
+		KeyConfirmSent: true,
 	}, nil
 }
 
@@ -306,12 +309,12 @@ func (r *Runner) handlePASEReceiveVerify(ctx context.Context, step *loader.Step,
 	r.paseState.sessionKey = sessionKey
 	r.paseState.completed = true
 
-	state.Set("session_established", true)
-	state.Set("session_key", sessionKey)
+	state.Set(KeySessionEstablished, true)
+	state.Set(StateSessionKey, sessionKey)
 
 	return map[string]any{
-		"verify_received":     true,
-		"session_established": true,
+		KeyVerifyReceived:     true,
+		KeySessionEstablished: true,
 	}, nil
 }
 
@@ -328,15 +331,15 @@ func (r *Runner) handleVerifySessionKey(ctx context.Context, step *loader.Step, 
 	key := r.paseState.sessionKey
 
 	return map[string]any{
-		"key_length":   len(key),
-		"key_not_zero": !isZeroKey(key),
+		KeyKeyLength:  len(key),
+		KeyKeyNotZero: !isZeroKey(key),
 	}, nil
 }
 
 // getSetupCode extracts the setup code from step parameters.
 func (r *Runner) getSetupCode(params map[string]any) (commissioning.SetupCode, error) {
 	// Try "setup_code" parameter first
-	if sc, ok := params["setup_code"].(string); ok && sc != "" {
+	if sc, ok := params[KeySetupCode].(string); ok && sc != "" {
 		return commissioning.ParseSetupCode(sc)
 	}
 

@@ -24,7 +24,7 @@ func (r *Runner) registerNetworkHandlers() {
 func (r *Runner) handleNetworkPartition(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	zoneID, _ := params["zone_id"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
 
 	// Simulate by closing the connection.
 	if r.conn != nil && r.conn.connected {
@@ -40,11 +40,11 @@ func (r *Runner) handleNetworkPartition(ctx context.Context, step *loader.Step, 
 		}
 	}
 
-	state.Set("network_partitioned", true)
+	state.Set(StateNetworkPartitioned, true)
 
 	return map[string]any{
-		"partition_active": true,
-		"zone_id":          zoneID,
+		KeyPartitionActive: true,
+		KeyZoneID:          zoneID,
 	}, nil
 }
 
@@ -52,13 +52,13 @@ func (r *Runner) handleNetworkPartition(ctx context.Context, step *loader.Step, 
 func (r *Runner) handleNetworkFilter(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	filterType, _ := params["filter_type"].(string)
+	filterType, _ := params[KeyFilterType].(string)
 
-	state.Set("network_filter", filterType)
+	state.Set(StateNetworkFilter, filterType)
 
 	return map[string]any{
-		"filter_active": true,
-		"filter_type":   filterType,
+		KeyFilterActive: true,
+		KeyFilterType:   filterType,
 	}, nil
 }
 
@@ -77,19 +77,19 @@ func (r *Runner) handleInterfaceDown(ctx context.Context, step *loader.Step, sta
 		delete(ct.zoneConnections, id)
 	}
 
-	state.Set("interface_up", false)
+	state.Set(StateInterfaceUp, false)
 
 	return map[string]any{
-		"interface_down": true,
+		KeyInterfaceDown: true,
 	}, nil
 }
 
 // handleInterfaceUp simulates network interface coming up.
 func (r *Runner) handleInterfaceUp(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	state.Set("interface_up", true)
+	state.Set(StateInterfaceUp, true)
 
 	return map[string]any{
-		"interface_up": true,
+		KeyInterfaceUp: true,
 	}, nil
 }
 
@@ -98,7 +98,7 @@ func (r *Runner) handleInterfaceFlap(ctx context.Context, step *loader.Step, sta
 	params := engine.InterpolateParams(step.Params, state)
 
 	count := 3
-	if c, ok := params["count"].(float64); ok {
+	if c, ok := params[KeyCount].(float64); ok {
 		count = int(c)
 	}
 	intervalMs := 100
@@ -119,11 +119,11 @@ func (r *Runner) handleInterfaceFlap(ctx context.Context, step *loader.Step, sta
 		}
 
 		// Up (just mark as up, actual reconnect is separate).
-		state.Set("interface_up", true)
+		state.Set(StateInterfaceUp, true)
 	}
 
 	return map[string]any{
-		"flap_count": count,
+		KeyFlapCount: count,
 	}, nil
 }
 
@@ -131,8 +131,8 @@ func (r *Runner) handleInterfaceFlap(ctx context.Context, step *loader.Step, sta
 func (r *Runner) handleChangeAddress(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	newAddress, _ := params["new_address"].(string)
-	state.Set("device_address", newAddress)
+	newAddress, _ := params[KeyNewAddress].(string)
+	state.Set(StateDeviceAddress, newAddress)
 
 	// Close existing connections (address changed).
 	if r.conn != nil && r.conn.connected {
@@ -140,8 +140,8 @@ func (r *Runner) handleChangeAddress(ctx context.Context, step *loader.Step, sta
 	}
 
 	return map[string]any{
-		"address_changed": true,
-		"new_address":     newAddress,
+		KeyAddressChanged: true,
+		KeyNewAddress:     newAddress,
 	}, nil
 }
 
@@ -152,9 +152,9 @@ func (r *Runner) handleCheckDisplay(ctx context.Context, step *loader.Step, stat
 	hasQR := ds.qrPayload != ""
 
 	return map[string]any{
-		"display_checked": true,
-		"qr_displayed":    hasQR,
-		"qr_payload":      ds.qrPayload,
+		KeyDisplayChecked: true,
+		KeyQRDisplayed:    hasQR,
+		KeyQRPayload:      ds.qrPayload,
 	}, nil
 }
 
@@ -164,7 +164,7 @@ func (r *Runner) handleAdjustClock(ctx context.Context, step *loader.Step, state
 	ct := getConnectionTracker(state)
 
 	offsetMs := int64(0)
-	if o, ok := params["offset_ms"].(float64); ok {
+	if o, ok := params[KeyOffsetMs].(float64); ok {
 		offsetMs = int64(o)
 	}
 	if d, ok := params["offset_days"].(float64); ok {
@@ -172,10 +172,10 @@ func (r *Runner) handleAdjustClock(ctx context.Context, step *loader.Step, state
 	}
 
 	ct.clockOffset = time.Duration(offsetMs) * time.Millisecond
-	state.Set("clock_offset_ms", offsetMs)
+	state.Set(StateClockOffsetMs, offsetMs)
 
 	return map[string]any{
-		"clock_adjusted": true,
-		"offset_ms":      offsetMs,
+		KeyClockAdjusted: true,
+		KeyOffsetMs:      offsetMs,
 	}, nil
 }

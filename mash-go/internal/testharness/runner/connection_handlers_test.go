@@ -294,8 +294,8 @@ func TestHandleSendRaw_EmptyData(t *testing.T) {
 	if out["raw_sent"] != false {
 		t.Error("expected raw_sent=false for empty data")
 	}
-	if out["error"] != "message is empty" {
-		t.Errorf("expected 'message is empty' error, got %v", out["error"])
+	if out[KeyError] != "message is empty" {
+		t.Errorf("expected 'message is empty' error, got %v", out[KeyError])
 	}
 }
 
@@ -333,7 +333,7 @@ func TestHandleConnectAsZone_ErrorOutputs(t *testing.T) {
 	state := newTestState()
 
 	step := &loader.Step{Params: map[string]any{
-		"zone_id": "zone-test",
+		KeyZoneID: "zone-test",
 		"target":  "127.0.0.1:1",
 	}}
 	out, err := r.handleConnectAsZone(context.Background(), step, state)
@@ -341,11 +341,11 @@ func TestHandleConnectAsZone_ErrorOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error (output map), got: %v", err)
 	}
-	if out["connection_established"] != false {
+	if out[KeyConnectionEstablished] != false {
 		t.Error("expected connection_established=false")
 	}
-	if out["zone_id"] != "zone-test" {
-		t.Errorf("expected zone_id=zone-test, got %v", out["zone_id"])
+	if out[KeyZoneID] != "zone-test" {
+		t.Errorf("expected zone_id=zone-test, got %v", out[KeyZoneID])
 	}
 	if _, ok := out["error_code"]; !ok {
 		t.Error("expected error_code key in output")
@@ -400,13 +400,13 @@ func TestConnectAsZone_StateOutput(t *testing.T) {
 
 	// 6th zone should be rejected (C5).
 	step := &loader.Step{Params: map[string]any{
-		"zone_id": "zone5",
+		KeyZoneID: "zone5",
 	}}
 	out, err := r.handleConnectAsZone(context.Background(), step, state)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["connection_established"] != false {
+	if out[KeyConnectionEstablished] != false {
 		t.Error("expected connection_established=false for 6th zone")
 	}
 	if out["error_code"] != "MAX_CONNECTIONS_EXCEEDED" {
@@ -426,7 +426,7 @@ func TestConnectAsZone_ZoneLimit(t *testing.T) {
 	// should NOT be MAX_CONNECTIONS_EXCEEDED.)
 	ct.zoneConnections["zone0"] = &Connection{connected: true}
 	step := &loader.Step{Params: map[string]any{
-		"zone_id": "zone1",
+		KeyZoneID: "zone1",
 		"target":  "127.0.0.1:1",
 	}}
 	out, _ := r.handleConnectAsZone(context.Background(), step, state)

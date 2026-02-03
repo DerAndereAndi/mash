@@ -48,7 +48,7 @@ func (r *Runner) handleSendRenewalRequest(ctx context.Context, step *loader.Step
 
 	// Get nonce length from params (default 32)
 	nonceLen := 32
-	if n, ok := step.Params["nonce_length"].(float64); ok {
+	if n, ok := step.Params[KeyNonceLength].(float64); ok {
 		nonceLen = int(n)
 	}
 
@@ -59,7 +59,7 @@ func (r *Runner) handleSendRenewalRequest(ctx context.Context, step *loader.Step
 	}
 
 	// Store nonce in state for later verification
-	state.Set("renewal_nonce", nonce)
+	state.Set(StateRenewalNonce, nonce)
 
 	// Create and encode request
 	req := &commissioning.CertRenewalRequest{
@@ -78,9 +78,9 @@ func (r *Runner) handleSendRenewalRequest(ctx context.Context, step *loader.Step
 	}
 
 	return map[string]any{
-		"request_sent":    true,
-		"nonce_generated": true,
-		"nonce_length":    nonceLen,
+		KeyRequestSent:    true,
+		KeyNonceGenerated: true,
+		KeyNonceLength:    nonceLen,
 	}, nil
 }
 
@@ -115,12 +115,12 @@ func (r *Runner) handleReceiveRenewalCSR(ctx context.Context, step *loader.Step,
 	}
 
 	// Store CSR for later signing
-	state.Set("pending_csr", csr.CSR)
+	state.Set(StatePendingCSR, csr.CSR)
 
 	return map[string]any{
-		"csr_received": true,
-		"csr_valid":    csrValid,
-		"csr_length":   len(csr.CSR),
+		KeyCSRReceived: true,
+		KeyCSRValid:    csrValid,
+		KeyCSRLength:   len(csr.CSR),
 	}, nil
 }
 
@@ -131,7 +131,7 @@ func (r *Runner) handleSendCertInstall(ctx context.Context, step *loader.Step, s
 	}
 
 	// Get pending CSR from state
-	csrData, exists := state.Get("pending_csr")
+	csrData, exists := state.Get(StatePendingCSR)
 	if !exists {
 		return nil, fmt.Errorf("no pending CSR")
 	}
@@ -148,12 +148,12 @@ func (r *Runner) handleSendCertInstall(ctx context.Context, step *loader.Step, s
 
 	// Get or increment sequence
 	seq := uint32(1)
-	if seqVal, exists := state.Get("cert_sequence"); exists {
+	if seqVal, exists := state.Get(StateCertSequence); exists {
 		if s, ok := seqVal.(uint32); ok {
 			seq = s + 1
 		}
 	}
-	state.Set("cert_sequence", seq)
+	state.Set(StateCertSequence, seq)
 
 	// Create and send install message
 	install := &commissioning.CertRenewalInstall{
@@ -172,9 +172,9 @@ func (r *Runner) handleSendCertInstall(ctx context.Context, step *loader.Step, s
 	}
 
 	return map[string]any{
-		"cert_sent":           true,
-		"sequence_incremented": true,
-		"new_sequence":         seq,
+		KeyCertSent:           true,
+		KeySequenceIncremented: true,
+		KeyNewSequence:         seq,
 	}, nil
 }
 
@@ -202,10 +202,10 @@ func (r *Runner) handleReceiveRenewalAck(ctx context.Context, step *loader.Step,
 	}
 
 	return map[string]any{
-		"ack_received":     true,
-		"status":           int(ack.Status),
-		"active_sequence":  ack.ActiveSequence,
-		"new_cert_active":  ack.Status == commissioning.RenewalStatusSuccess,
+		KeyAckReceived:    true,
+		KeyStatus:         int(ack.Status),
+		KeyActiveSequence: ack.ActiveSequence,
+		KeyNewCertActive:  ack.Status == commissioning.RenewalStatusSuccess,
 	}, nil
 }
 
@@ -213,12 +213,12 @@ func (r *Runner) handleReceiveRenewalAck(ctx context.Context, step *loader.Step,
 func (r *Runner) handleFullRenewalFlow(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Step 1: Send renewal request
 	reqOutputs, err := r.handleSendRenewalRequest(ctx, &loader.Step{
-		Params: map[string]any{"nonce_length": 32},
+		Params: map[string]any{KeyNonceLength: 32},
 	}, state)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
-	if !reqOutputs["request_sent"].(bool) {
+	if !reqOutputs[KeyRequestSent].(bool) {
 		return nil, fmt.Errorf("request not sent")
 	}
 
@@ -227,7 +227,7 @@ func (r *Runner) handleFullRenewalFlow(ctx context.Context, step *loader.Step, s
 	if err != nil {
 		return nil, fmt.Errorf("receive CSR: %w", err)
 	}
-	if !csrOutputs["csr_valid"].(bool) {
+	if !csrOutputs[KeyCSRValid].(bool) {
 		return nil, fmt.Errorf("invalid CSR received")
 	}
 
@@ -236,7 +236,7 @@ func (r *Runner) handleFullRenewalFlow(ctx context.Context, step *loader.Step, s
 	if err != nil {
 		return nil, fmt.Errorf("send install: %w", err)
 	}
-	if !installOutputs["cert_sent"].(bool) {
+	if !installOutputs[KeyCertSent].(bool) {
 		return nil, fmt.Errorf("cert not sent")
 	}
 
@@ -246,42 +246,42 @@ func (r *Runner) handleFullRenewalFlow(ctx context.Context, step *loader.Step, s
 		return nil, fmt.Errorf("receive ack: %w", err)
 	}
 
-	status := ackOutputs["status"].(int)
+	status := ackOutputs[KeyStatus].(int)
 
 	return map[string]any{
-		"renewal_complete": status == 0,
-		"status":           status,
+		KeyRenewalComplete: status == 0,
+		KeyStatus:          status,
 	}, nil
 }
 
 // handleRecordSubscriptionState records the current subscription state.
 func (r *Runner) handleRecordSubscriptionState(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Get subscription ID from state (set by subscribe action)
-	subID, exists := state.Get("subscription_id")
+	subID, exists := state.Get(StateSubscriptionID)
 	if !exists {
 		return nil, fmt.Errorf("no subscription_id in state")
 	}
 
 	// Record for later comparison
-	state.Set("recorded_subscription_id", subID)
+	state.Set(StateRecordedSubscriptionID, subID)
 
 	return map[string]any{
-		"subscription_id_recorded": true,
-		"subscription_id":          subID,
+		KeySubscriptionIDRecorded: true,
+		KeySubscriptionID:         subID,
 	}, nil
 }
 
 // handleVerifySubscriptionActive verifies the subscription is still active.
 func (r *Runner) handleVerifySubscriptionActive(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Get recorded and current subscription IDs
-	recordedID, recorded := state.Get("recorded_subscription_id")
-	currentID, current := state.Get("subscription_id")
+	recordedID, recorded := state.Get(StateRecordedSubscriptionID)
+	currentID, current := state.Get(StateSubscriptionID)
 
 	sameID := recorded && current && fmt.Sprintf("%v", recordedID) == fmt.Sprintf("%v", currentID)
 
 	return map[string]any{
-		"same_subscription_id": sameID,
-		"subscription_active":  current,
+		KeySameSubscriptionID: sameID,
+		KeySubscriptionActive: current,
 	}, nil
 }
 
@@ -300,28 +300,34 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 	}
 
 	return map[string]any{
-		"same_connection":                sameConn,
-		"no_reconnection_required":       sameConn,
-		"operational_connection_active":  operationalActive,
-		"mutual_tls":                     mutualTLS,
-		"pase_performed":                 pasePerformed,
-		"commissioning_connection_closed": !sameConn || !pasePerformed,
+		KeySameConnection:                sameConn,
+		KeyNoReconnectionRequired:        sameConn,
+		KeyOperationalConnectionActive:   operationalActive,
+		KeyMutualTLS:                     mutualTLS,
+		KeyPasePerformed:                 pasePerformed,
+		KeyCommissioningConnectionClosed: !sameConn || !pasePerformed,
 	}, nil
 }
 
 // handleSetCertExpiry sets the certificate expiry for testing.
 func (r *Runner) handleSetCertExpiry(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	params := engine.InterpolateParams(step.Params, state)
+
 	days := 30 // default
-	if d, ok := step.Params["days_until_expiry"].(float64); ok {
+	if d, ok := params[KeyDaysUntilExpiry].(float64); ok {
+		days = int(d)
+	}
+	// Also accept days_remaining (used by controller cert tests).
+	if d, ok := params[KeyDaysRemaining].(float64); ok {
 		days = int(d)
 	}
 
 	// Store in state for test verification
-	state.Set("cert_days_until_expiry", days)
+	state.Set(StateCertDaysUntilExpiry, days)
 
 	return map[string]any{
-		"cert_expiry_set":      true,
-		"days_until_expiry":    days,
+		KeyCertExpirySet:   true,
+		KeyDaysUntilExpiry: days,
 	}, nil
 }
 
@@ -333,7 +339,7 @@ func (r *Runner) handleWaitForNotification(ctx context.Context, step *loader.Ste
 	}
 
 	timeoutMs := 5000
-	if t, ok := step.Params["timeout_ms"].(float64); ok {
+	if t, ok := step.Params[KeyTimeoutMs].(float64); ok {
 		timeoutMs = int(t)
 	}
 
@@ -346,24 +352,24 @@ func (r *Runner) handleWaitForNotification(ctx context.Context, step *loader.Ste
 	<-timeoutCtx.Done()
 
 	// Simulate that we received the notification
-	state.Set("received_event", eventType)
+	state.Set(StateReceivedEvent, eventType)
 	return map[string]any{
-		"notification_received": true,
-		"event_type":            eventType,
+		KeyNotificationReceived: true,
+		KeyEventType:            eventType,
 	}, nil
 }
 
 // handleVerifyNotificationContent verifies the notification content.
 func (r *Runner) handleVerifyNotificationContent(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Get the received event from state
-	event, _ := state.Get("received_event")
-	days, _ := state.Get("cert_days_until_expiry")
+	event, _ := state.Get(StateReceivedEvent)
+	days, _ := state.Get(StateCertDaysUntilExpiry)
 
 	return map[string]any{
-		"event":                event,
-		"zone_id_present":      true, // Would verify in real impl
-		"expires_at_present":   true, // Would verify in real impl
-		"days_remaining_valid": days != nil,
+		KeyEvent:                event,
+		KeyZoneIDPresent:       true, // Would verify in real impl
+		KeyExpiresAtPresent:    true, // Would verify in real impl
+		KeyDaysRemainingValid:  days != nil,
 	}, nil
 }
 
@@ -374,21 +380,21 @@ func (r *Runner) handleSimulateCertExpiry(ctx context.Context, step *loader.Step
 		expired = e
 	}
 
-	state.Set("cert_expired", expired)
+	state.Set(StateCertExpired, expired)
 
 	return map[string]any{
-		"cert_expired": expired,
+		StateCertExpired: expired,
 	}, nil
 }
 
 // handleConnectExpectFailure attempts a connection expecting failure.
 func (r *Runner) handleConnectExpectFailure(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Check if we're simulating expiry
-	expired, _ := state.Get("cert_expired")
+	expired, _ := state.Get(StateCertExpired)
 	if expired == true {
 		return map[string]any{
-			"connection_failed": true,
-			"error_type":        "certificate_expired",
+			KeyConnectionFailed: true,
+			KeyErrorType:        "certificate_expired",
 		}, nil
 	}
 
@@ -396,13 +402,13 @@ func (r *Runner) handleConnectExpectFailure(ctx context.Context, step *loader.St
 	_, err := r.handleConnect(ctx, step, state)
 	if err != nil {
 		return map[string]any{
-			"connection_failed": true,
-			"error_type":        "connection_error",
+			KeyConnectionFailed: true,
+			KeyErrorType:        "connection_error",
 		}, nil
 	}
 
 	return map[string]any{
-		"connection_failed": false,
+		KeyConnectionFailed: false,
 	}, nil
 }
 
@@ -413,11 +419,11 @@ func (r *Runner) handleSetGracePeriod(ctx context.Context, step *loader.Step, st
 		days = int(d)
 	}
 
-	state.Set("grace_period_days", days)
+	state.Set(StateGracePeriodDays, days)
 
 	return map[string]any{
-		"grace_period_set": true,
-		"grace_days":       days,
+		KeyGracePeriodSet: true,
+		KeyGraceDays:      days,
 	}, nil
 }
 
@@ -429,7 +435,7 @@ func (r *Runner) handleSimulateTimeAdvance(ctx context.Context, step *loader.Ste
 	}
 
 	graceDays := 7
-	if g, ok := state.Get("grace_period_days"); ok {
+	if g, ok := state.Get(StateGracePeriodDays); ok {
 		if gd, ok := g.(int); ok {
 			graceDays = gd
 		}
@@ -438,23 +444,23 @@ func (r *Runner) handleSimulateTimeAdvance(ctx context.Context, step *loader.Ste
 	inGracePeriod := daysPastExpiry > 0 && daysPastExpiry <= graceDays
 	graceExpired := daysPastExpiry > graceDays
 
-	state.Set("days_past_expiry", daysPastExpiry)
-	state.Set("in_grace_period", inGracePeriod)
-	state.Set("grace_period_expired", graceExpired)
+	state.Set(StateDaysPastExpiry, daysPastExpiry)
+	state.Set(StateInGracePeriod, inGracePeriod)
+	state.Set(StateGracePeriodExpired, graceExpired)
 
 	return map[string]any{
-		"time_advanced":        true,
-		"days_past_expiry":     daysPastExpiry,
-		"in_grace_period":      inGracePeriod,
-		"grace_period_expired": graceExpired,
+		KeyTimeAdvanced:    true,
+		StateDaysPastExpiry:      daysPastExpiry,
+		StateInGracePeriod:       inGracePeriod,
+		StateGracePeriodExpired:  graceExpired,
 	}, nil
 }
 
 // handleCheckGracePeriodStatus checks the current grace period status.
 func (r *Runner) handleCheckGracePeriodStatus(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	inGrace, _ := state.Get("in_grace_period")
-	daysPast, _ := state.Get("days_past_expiry")
-	graceDays, _ := state.Get("grace_period_days")
+	inGrace, _ := state.Get(StateInGracePeriod)
+	daysPast, _ := state.Get(StateDaysPastExpiry)
+	graceDays, _ := state.Get(StateGracePeriodDays)
 
 	daysRemaining := 0
 	if gd, ok := graceDays.(int); ok {
@@ -464,7 +470,7 @@ func (r *Runner) handleCheckGracePeriodStatus(ctx context.Context, step *loader.
 	}
 
 	return map[string]any{
-		"in_grace_period": inGrace,
-		"days_remaining":  daysRemaining,
+		StateInGracePeriod: inGrace,
+		KeyDaysRemaining:  daysRemaining,
 	}, nil
 }

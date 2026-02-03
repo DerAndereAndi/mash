@@ -115,7 +115,7 @@ func TestHandleEvaluate(t *testing.T) {
 
 	// Evaluate direct value.
 	step = &loader.Step{
-		Params: map[string]any{"value": false},
+		Params: map[string]any{KeyValue: false},
 	}
 	out, err = r.handleEvaluate(context.Background(), step, state)
 	if err != nil {
@@ -265,7 +265,7 @@ func TestHandleWaitForState(t *testing.T) {
 	step := &loader.Step{
 		Params: map[string]any{
 			"key":        "ready",
-			"value":      true,
+			KeyValue:     true,
 			"timeout_ms": float64(100),
 			"poll_ms":    float64(10),
 		},
@@ -282,7 +282,7 @@ func TestHandleWaitForState(t *testing.T) {
 	step = &loader.Step{
 		Params: map[string]any{
 			"key":        "never_set",
-			"value":      "done",
+			KeyValue:     "done",
 			"timeout_ms": float64(50),
 			"poll_ms":    float64(10),
 		},
@@ -311,7 +311,7 @@ func TestHandleParseQR(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if out["valid"] != true {
-		t.Errorf("expected valid=true, got error=%v", out["error"])
+		t.Errorf("expected valid=true, got error=%v", out[KeyError])
 	}
 	if out["version"] != 1 {
 		t.Errorf("expected version=1, got %v", out["version"])
@@ -396,8 +396,8 @@ func TestHandleParseQR_ErrorCodes(t *testing.T) {
 			if out["valid"] != false {
 				t.Error("expected valid=false")
 			}
-			if out["error"] != tt.wantCode {
-				t.Errorf("expected error=%q, got %q", tt.wantCode, out["error"])
+			if out[KeyError] != tt.wantCode {
+				t.Errorf("expected error=%q, got %q", tt.wantCode, out[KeyError])
 			}
 			// error_detail should contain the full error message.
 			if out["error_detail"] == nil || out["error_detail"] == "" {
@@ -419,7 +419,7 @@ func TestHandleParseQR_LeadingZerosPreserved(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if out["valid"] != true {
-		t.Errorf("expected valid=true, got error=%v", out["error"])
+		t.Errorf("expected valid=true, got error=%v", out[KeyError])
 	}
 	if out["setup_code"] != "00000001" {
 		t.Errorf("expected setup_code=00000001, got %v", out["setup_code"])

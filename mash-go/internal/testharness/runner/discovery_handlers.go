@@ -67,7 +67,7 @@ func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params 
 		}
 
 	case discovery.ServiceTypeOperational, "operational":
-		zoneID, _ := params["zone_id"].(string)
+		zoneID, _ := params[KeyZoneID].(string)
 		ch, err := browser.BrowseOperational(browseCtx, zoneID)
 		if err != nil {
 			return nil, fmt.Errorf("browse operational: %w", err)
@@ -117,9 +117,48 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDiscoveryState(state)
 
-	serviceType, _ := params["service_type"].(string)
+	// Simulated environment conditions (set via preconditions).
+	if noAdv, _ := state.Get(PrecondNoDevicesAdvertising); noAdv == true {
+		ds.services = nil
+		return map[string]any{
+			KeyDeviceFound:  false,
+			KeyServiceCount: 0,
+			KeyErrorCode:    "NO_DEVICES_FOUND",
+		}, nil
+	}
+	if srvPresent, _ := state.Get(PrecondDeviceSRVPresent); srvPresent == true {
+		if aaaaMissing, _ := state.Get(PrecondDeviceAAAAMissing); aaaaMissing == true {
+			ds.services = []discoveredService{{
+				InstanceName: "MASH-SIM-SRV",
+				Host:         "device.local",
+				ServiceType:  discovery.ServiceTypeCommissionable,
+				// No addresses -- triggers ADDRESS_RESOLUTION_FAILED.
+			}}
+			return map[string]any{
+				KeyDeviceFound:  true,
+				KeyServiceCount: 1,
+				KeyErrorCode:    "ADDRESS_RESOLUTION_FAILED",
+			}, nil
+		}
+	}
+	if willAppear, _ := state.Get(PrecondDeviceWillAppearAfterDelay); willAppear == true {
+		retryParam, _ := params["retry"].(bool)
+		if retryParam {
+			ds.services = []discoveredService{{
+				InstanceName: "MASH-SIM-DELAYED",
+				ServiceType:  discovery.ServiceTypeCommissionable,
+			}}
+			return map[string]any{
+				KeyDeviceFound:         true,
+				KeyServiceCount:        1,
+				KeyRetriesPerformedMin: 1,
+			}, nil
+		}
+	}
+
+	serviceType, _ := params[KeyServiceType].(string)
 	timeoutMs := 5000
-	if t, ok := params["timeout_ms"].(float64); ok {
+	if t, ok := params[KeyTimeoutMs].(float64); ok {
 		timeoutMs = int(t)
 	}
 
@@ -172,24 +211,24 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	}
 
 	outputs := map[string]any{
-		"device_found":               len(services) > 0,
-		"service_count":              len(services),
-		"services":                   services,
-		"devices_found":              devicesFound,
-		"controllers_found":          controllersFound,
-		"devices_found_min":          devicesFound,
-		"controllers_found_min":      controllersFound,
-		"controller_found":           controllersFound > 0,
-		"retries_performed_min":      retries,
-		"instance_conflict_resolved": !instanceConflict,
+		KeyDeviceFound:              len(services) > 0,
+		KeyServiceCount:             len(services),
+		KeyServices:                 services,
+		KeyDevicesFound:             devicesFound,
+		KeyControllersFound:         controllersFound,
+		KeyDevicesFoundMin:          devicesFound,
+		KeyControllersFoundMin:      controllersFound,
+		KeyControllerFound:          controllersFound > 0,
+		KeyRetriesPerformedMin:      retries,
+		KeyInstanceConflictResolved: !instanceConflict,
 	}
 
 	// Set error_code when no services found.
 	if len(services) == 0 {
-		if _, hasDisc := params["discriminator"]; hasDisc {
-			outputs["error_code"] = "DISCRIMINATOR_MISMATCH"
+		if _, hasDisc := params[KeyDiscriminator]; hasDisc {
+			outputs[KeyErrorCode] = "DISCRIMINATOR_MISMATCH"
 		} else {
-			outputs["error_code"] = "NO_DEVICES_FOUND"
+			outputs[KeyErrorCode] = "NO_DEVICES_FOUND"
 		}
 	}
 
@@ -197,7 +236,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	if len(services) > 0 {
 		for _, svc := range services {
 			if len(svc.Addresses) == 0 && svc.Host != "" {
-				outputs["error_code"] = "ADDRESS_RESOLUTION_FAILED"
+				outputs[KeyErrorCode] = "ADDRESS_RESOLUTION_FAILED"
 				break
 			}
 		}
@@ -206,8 +245,8 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	// Add first-service details for easy assertion.
 	if len(services) > 0 {
 		first := services[0]
-		outputs["instance_name"] = first.InstanceName
-		outputs["instances_for_device"] = len(services) // count when filtering
+		outputs[KeyInstanceName] = first.InstanceName
+		outputs[KeyInstancesForDevice] = len(services) // count when filtering
 
 		// Add all TXT record fields.
 		for k, v := range first.TXTRecords {
@@ -219,25 +258,25 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		case discovery.ServiceTypeCommissionable:
 			// Discriminator fields.
 			outputs["txt_field_D"] = fmt.Sprintf("%d", first.Discriminator)
-			outputs["txt_D_range"] = first.Discriminator <= discovery.MaxDiscriminator
+			outputs[KeyTXTDRange] = first.Discriminator <= discovery.MaxDiscriminator
 			// Instance name format.
-			outputs["instance_name_prefix"] = strings.HasPrefix(first.InstanceName, "MASH-")
+			outputs[KeyInstanceNamePrefix] = strings.HasPrefix(first.InstanceName, "MASH-")
 
 		case discovery.ServiceTypeOperational:
 			// Zone/device ID fields from TXT records.
 			zi := first.TXTRecords["ZI"]
 			di := first.TXTRecords["DI"]
-			outputs["zone_id_length"] = len(zi)
-			outputs["device_id_length"] = len(di)
-			outputs["zone_id_hex_valid"] = isValidHex(zi)
-			outputs["device_id_hex_valid"] = isValidHex(di)
+			outputs[KeyZoneIDLengthDisc] = len(zi)
+			outputs[KeyDeviceIDLength] = len(di)
+			outputs[KeyZoneIDHexValid] = isValidHex(zi)
+			outputs[KeyDeviceIDHexValid] = isValidHex(di)
 			// Instance name format: <zone-id>-<device-id>.
-			outputs["instance_name_format"] = strings.Contains(first.InstanceName, "-")
+			outputs[KeyInstanceNameFormat] = strings.Contains(first.InstanceName, "-")
 
 		case discovery.ServiceTypeCommissioner:
 			// Commissioner-specific fields.
 			zi := first.TXTRecords["ZI"]
-			outputs["txt_ZI_length"] = len(zi)
+			outputs[KeyTXTZILength] = len(zi)
 		}
 	}
 
@@ -255,7 +294,7 @@ func isValidHex(s string) bool {
 
 // handleBrowseCommissioners browses for commissioner services.
 func (r *Runner) handleBrowseCommissioners(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	step.Params["service_type"] = "commissioner"
+	step.Params[KeyServiceType] = "commissioner"
 	return r.handleBrowseMDNS(ctx, step, state)
 }
 
@@ -265,11 +304,11 @@ func (r *Runner) handleReadMDNSTXT(ctx context.Context, step *loader.Step, state
 	ds := getDiscoveryState(state)
 
 	index := 0
-	if idx, ok := params["index"].(float64); ok {
+	if idx, ok := params[KeyIndex].(float64); ok {
 		index = int(idx)
 	}
 
-	instanceName, _ := params["instance_name"].(string)
+	instanceName, _ := params[KeyInstanceName].(string)
 
 	// Find service by index or instance name.
 	var svc *discoveredService
@@ -286,15 +325,15 @@ func (r *Runner) handleReadMDNSTXT(ctx context.Context, step *loader.Step, state
 
 	if svc == nil {
 		return map[string]any{
-			"txt_found": false,
+			KeyTXTFound: false,
 		}, nil
 	}
 
 	outputs := map[string]any{
-		"txt_found":     true,
-		"instance_name": svc.InstanceName,
-		"host":          svc.Host,
-		"port":          int(svc.Port),
+		KeyTXTFound:     true,
+		KeyInstanceName: svc.InstanceName,
+		KeyHost:         svc.Host,
+		KeyPort:         int(svc.Port),
 	}
 	for k, v := range svc.TXTRecords {
 		outputs["txt_"+k] = v
@@ -307,7 +346,7 @@ func (r *Runner) handleReadMDNSTXT(ctx context.Context, step *loader.Step, state
 func (r *Runner) handleVerifyMDNSAdvertising(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	serviceType, _ := params["service_type"].(string)
+	serviceType, _ := params[KeyServiceType].(string)
 	if serviceType == "" {
 		serviceType = "commissionable"
 	}
@@ -315,20 +354,20 @@ func (r *Runner) handleVerifyMDNSAdvertising(ctx context.Context, step *loader.S
 	// Perform a short browse.
 	browseStep := &loader.Step{
 		Params: map[string]any{
-			"service_type": serviceType,
-			"timeout_ms":   float64(3000),
+			KeyServiceType: serviceType,
+			KeyTimeoutMs:   float64(3000),
 		},
 	}
 	result, err := r.handleBrowseMDNS(ctx, browseStep, state)
 	if err != nil {
-		return map[string]any{"advertising": false, "error": err.Error()}, nil
+		return map[string]any{KeyAdvertising: false, KeyError: err.Error()}, nil
 	}
 
-	found := result["service_count"].(int) > 0
+	found := result[KeyServiceCount].(int) > 0
 
 	return map[string]any{
-		"advertising":   found,
-		"service_count": result["service_count"],
+		KeyAdvertising:  found,
+		KeyServiceCount: result[KeyServiceCount],
 	}, nil
 }
 
@@ -341,7 +380,7 @@ func (r *Runner) handleVerifyMDNSBrowsing(ctx context.Context, step *loader.Step
 func (r *Runner) handleVerifyMDNSNotAdvertising(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	serviceType, _ := params["service_type"].(string)
+	serviceType, _ := params[KeyServiceType].(string)
 	if serviceType == "" {
 		serviceType = "commissionable"
 	}
@@ -350,21 +389,21 @@ func (r *Runner) handleVerifyMDNSNotAdvertising(ctx context.Context, step *loade
 	// test-mode auto-reenter of commissioning mode.
 	browseStep := &loader.Step{
 		Params: map[string]any{
-			"service_type": serviceType,
-			"timeout_ms":   float64(1000),
+			KeyServiceType: serviceType,
+			KeyTimeoutMs:   float64(1000),
 		},
 	}
 	result, err := r.handleBrowseMDNS(ctx, browseStep, state)
 	if err != nil {
 		// Browse error likely means no service found.
-		return map[string]any{"advertising": false, "not_advertising": true}, nil
+		return map[string]any{KeyAdvertising: false, KeyNotAdvertising: true}, nil
 	}
 
-	found := result["service_count"].(int) > 0
+	found := result[KeyServiceCount].(int) > 0
 
 	return map[string]any{
-		"advertising":     found,
-		"not_advertising": !found,
+		KeyAdvertising:    found,
+		KeyNotAdvertising: !found,
 	}, nil
 }
 
@@ -376,7 +415,7 @@ func (r *Runner) handleVerifyMDNSNotBrowsing(ctx context.Context, step *loader.S
 	}
 	// Add not_browsing alias.
 	if result != nil {
-		result["not_browsing"] = result["not_advertising"]
+		result[KeyNotBrowsing] = result[KeyNotAdvertising]
 	}
 	return result, nil
 }
@@ -390,17 +429,17 @@ func (r *Runner) handleGetQRPayload(ctx context.Context, step *loader.Step, stat
 	if payload, ok := params["payload"].(string); ok && payload != "" {
 		ds.qrPayload = payload
 		return map[string]any{
-			"qr_payload": payload,
-			"valid":      true,
+			KeyQRPayload: payload,
+			KeyValid:     true,
 		}, nil
 	}
 
 	// Construct from params.
 	discriminator := uint16(0)
-	if d, ok := params["discriminator"].(float64); ok {
+	if d, ok := params[KeyDiscriminator].(float64); ok {
 		discriminator = uint16(d)
 	}
-	setupCode, _ := params["setup_code"].(string)
+	setupCode, _ := params[KeySetupCode].(string)
 	if setupCode == "" {
 		setupCode = r.config.SetupCode
 	}
@@ -409,16 +448,16 @@ func (r *Runner) handleGetQRPayload(ctx context.Context, step *loader.Step, stat
 		payload := fmt.Sprintf("MASH:1:%d:%s:0x0000:0x0000", discriminator, setupCode)
 		ds.qrPayload = payload
 		return map[string]any{
-			"qr_payload":    payload,
-			"discriminator": int(discriminator),
-			"setup_code":    setupCode,
-			"valid":         true,
+			KeyQRPayload:     payload,
+			KeyDiscriminator: int(discriminator),
+			KeySetupCode:     setupCode,
+			KeyValid:         true,
 		}, nil
 	}
 
 	return map[string]any{
-		"valid": false,
-		"error": "no QR payload available",
+		KeyValid: false,
+		KeyError: "no QR payload available",
 	}, nil
 }
 
@@ -427,21 +466,21 @@ func (r *Runner) handleAnnouncePairingRequest(ctx context.Context, step *loader.
 	params := engine.InterpolateParams(step.Params, state)
 
 	discriminator := uint16(0)
-	if d, ok := params["discriminator"].(float64); ok {
+	if d, ok := params[KeyDiscriminator].(float64); ok {
 		discriminator = uint16(d)
 	}
-	zoneID, _ := params["zone_id"].(string)
-	zoneName, _ := params["zone_name"].(string)
+	zoneID, _ := params[KeyZoneID].(string)
+	zoneName, _ := params[KeyZoneName].(string)
 
 	// Store in state for verification.
-	state.Set("pairing_request_discriminator", int(discriminator))
-	state.Set("pairing_request_zone_id", zoneID)
+	state.Set(StatePairingRequestDiscriminator, int(discriminator))
+	state.Set(StatePairingRequestZoneID, zoneID)
 
 	return map[string]any{
-		"pairing_request_announced": true,
-		"discriminator":             int(discriminator),
-		"zone_id":                   zoneID,
-		"zone_name":                 zoneName,
+		KeyPairingRequestAnnounced: true,
+		KeyDiscriminator:           int(discriminator),
+		KeyZoneID:                  zoneID,
+		KeyZoneName:                zoneName,
 	}, nil
 }
 
@@ -450,7 +489,7 @@ func (r *Runner) handleStartDiscoveryReal(ctx context.Context, step *loader.Step
 	ds := getDiscoveryState(state)
 	ds.active = true
 
-	return map[string]any{"discovery_started": true}, nil
+	return map[string]any{KeyDiscoveryStarted: true}, nil
 }
 
 // handleWaitForDeviceReal replaces the stub from runner.go.
@@ -458,12 +497,12 @@ func (r *Runner) handleWaitForDeviceReal(ctx context.Context, step *loader.Step,
 	params := engine.InterpolateParams(step.Params, state)
 
 	timeoutMs := 10000
-	if t, ok := params["timeout_ms"].(float64); ok {
+	if t, ok := params[KeyTimeoutMs].(float64); ok {
 		timeoutMs = int(t)
 	}
 
 	discriminator := uint16(0)
-	if d, ok := params["discriminator"].(float64); ok {
+	if d, ok := params[KeyDiscriminator].(float64); ok {
 		discriminator = uint16(d)
 	}
 
@@ -474,8 +513,8 @@ func (r *Runner) handleWaitForDeviceReal(ctx context.Context, step *loader.Step,
 		browser, err := discovery.NewMDNSBrowser(discovery.DefaultBrowserConfig())
 		if err != nil {
 			return map[string]any{
-				"device_found":           false,
-				"device_has_txt_records": false,
+				KeyDeviceFound:         false,
+				KeyDeviceHasTXTRecords: false,
 			}, nil
 		}
 		defer browser.Stop()
@@ -483,8 +522,8 @@ func (r *Runner) handleWaitForDeviceReal(ctx context.Context, step *loader.Step,
 		svc, err := browser.FindByDiscriminator(browseCtx, discriminator)
 		if err != nil || svc == nil {
 			return map[string]any{
-				"device_found":           false,
-				"device_has_txt_records": false,
+				KeyDeviceFound:         false,
+				KeyDeviceHasTXTRecords: false,
 			}, nil
 		}
 
@@ -499,8 +538,8 @@ func (r *Runner) handleWaitForDeviceReal(ctx context.Context, step *loader.Step,
 		}}
 
 		return map[string]any{
-			"device_found":           true,
-			"device_has_txt_records": true,
+			KeyDeviceFound:         true,
+			KeyDeviceHasTXTRecords: true,
 		}, nil
 	}
 
@@ -513,8 +552,8 @@ func (r *Runner) handleWaitForDeviceReal(ctx context.Context, step *loader.Step,
 		TXTRecords:   map[string]string{},
 	}}
 	return map[string]any{
-		"device_found":           true,
-		"device_has_txt_records": true,
+		KeyDeviceFound:         true,
+		KeyDeviceHasTXTRecords: true,
 	}, nil
 }
 
@@ -523,7 +562,7 @@ func (r *Runner) handleStopDiscoveryReal(ctx context.Context, step *loader.Step,
 	ds := getDiscoveryState(state)
 	ds.active = false
 
-	return map[string]any{"discovery_stopped": true}, nil
+	return map[string]any{KeyDiscoveryStopped: true}, nil
 }
 
 // handleVerifyTXTRecordsReal replaces the stub from runner.go.
@@ -532,7 +571,7 @@ func (r *Runner) handleVerifyTXTRecordsReal(ctx context.Context, step *loader.St
 	ds := getDiscoveryState(state)
 
 	if len(ds.services) == 0 {
-		return map[string]any{"txt_valid": false}, nil
+		return map[string]any{KeyTXTValid: false}, nil
 	}
 
 	svc := ds.services[0]
@@ -569,5 +608,5 @@ func (r *Runner) handleVerifyTXTRecordsReal(ctx context.Context, step *loader.St
 		}
 	}
 
-	return map[string]any{"txt_valid": allValid}, nil
+	return map[string]any{KeyTXTValid: allValid}, nil
 }

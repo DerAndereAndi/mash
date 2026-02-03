@@ -65,13 +65,13 @@ func TestHandleNetworkPartition(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	step := &loader.Step{Params: map[string]any{"zone_id": "z1"}}
+	step := &loader.Step{Params: map[string]any{KeyZoneID: "z1"}}
 	out, _ := r.handleNetworkPartition(context.Background(), step, state)
 	if out["partition_active"] != true {
 		t.Error("expected partition_active=true")
 	}
-	if out["zone_id"] != "z1" {
-		t.Errorf("expected z1, got %v", out["zone_id"])
+	if out[KeyZoneID] != "z1" {
+		t.Errorf("expected z1, got %v", out[KeyZoneID])
 	}
 }
 

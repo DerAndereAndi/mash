@@ -197,7 +197,7 @@ func TestHandleAnnouncePairingRequest(t *testing.T) {
 	step := &loader.Step{
 		Params: map[string]any{
 			"discriminator": float64(1234),
-			"zone_id":       "a1b2c3d4e5f6a7b8",
+			KeyZoneID:       "a1b2c3d4e5f6a7b8",
 			"zone_name":     "My Home",
 		},
 	}

@@ -196,24 +196,33 @@ func TestChecker_MapSizeEquals(t *testing.T) {
 	}
 }
 
-// TestChecker_SaveAs tests the save_as checker (stores value for later use).
+// TestChecker_SaveAs tests the save_as checker (stores step output for later use).
 func TestChecker_SaveAs(t *testing.T) {
 	state := NewExecutionState(context.Background())
-	state.Set("original", "test-value")
 
-	// SaveAs should copy value to new key
-	result := CheckerSaveAs("original", "copied", state)
+	// Simulate step output (engine stores __step_output before running checkers).
+	stepOutput := map[string]interface{}{
+		"fingerprint": "abc123",
+	}
+	state.Set(InternalStepOutput, stepOutput)
+
+	// SaveAs should save the step output under the target key.
+	result := CheckerSaveAs(CheckerNameSaveAs, "saved_output", state)
 	if !result.Passed {
-		t.Errorf("SaveAs(original, copied) failed: %s", result.Message)
+		t.Errorf("SaveAs failed: %s", result.Message)
 	}
 
-	// Check that value was copied
-	copied, exists := state.Get("copied")
+	// Check that the step output was saved.
+	saved, exists := state.Get("saved_output")
 	if !exists {
-		t.Error("SaveAs did not create 'copied' key")
+		t.Error("SaveAs did not create 'saved_output' key")
 	}
-	if copied != "test-value" {
-		t.Errorf("copied = %v, want 'test-value'", copied)
+	savedMap, ok := saved.(map[string]interface{})
+	if !ok {
+		t.Fatalf("saved value is %T, want map[string]interface{}", saved)
+	}
+	if savedMap["fingerprint"] != "abc123" {
+		t.Errorf("saved fingerprint = %v, want abc123", savedMap["fingerprint"])
 	}
 }
 
@@ -227,12 +236,12 @@ func TestChecker_NotFound(t *testing.T) {
 		fn     ExpectChecker
 		expect interface{}
 	}{
-		{"value_greater_than", CheckerValueGreaterThan, float64(5)},
-		{"value_less_than", CheckerValueLessThan, float64(5)},
-		{"value_in_range", CheckerValueInRange, map[string]interface{}{"min": 0, "max": 10}},
-		{"value_is_map", CheckerValueIsMap, true},
-		{"contains", CheckerContains, "value"},
-		{"map_size_equals", CheckerMapSizeEquals, float64(1)},
+		{CheckerNameValueGreaterThan, CheckerValueGreaterThan, float64(5)},
+		{CheckerNameValueLessThan, CheckerValueLessThan, float64(5)},
+		{CheckerNameValueInRange, CheckerValueInRange, map[string]interface{}{"min": 0, "max": 10}},
+		{CheckerNameValueIsMap, CheckerValueIsMap, true},
+		{CheckerNameContains, CheckerContains, "value"},
+		{CheckerNameMapSizeEquals, CheckerMapSizeEquals, float64(1)},
 	}
 
 	for _, tc := range checkers {

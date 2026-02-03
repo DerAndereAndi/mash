@@ -49,7 +49,7 @@ func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step,
 	subAction, _ := params["sub_action"].(string)
 	if subAction == "" {
 		// Try action field.
-		subAction, _ = params["action"].(string)
+		subAction, _ = params[KeyAction].(string)
 	}
 
 	// Create a new step with the same params for dispatch.
@@ -135,25 +135,25 @@ func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step,
 		result, err = r.handleGetQRPayload(ctx, subStep, state)
 		// Enrich with format validation fields.
 		if result != nil {
-			payload, _ := result["qr_payload"].(string)
-			result["qr_present"] = payload != ""
-			result["format_valid"] = len(payload) > 0
-			if disc, ok := result["discriminator"].(int); ok {
-				result["discriminator_length"] = len(fmt.Sprintf("%d", disc))
+			payload, _ := result[KeyQRPayload].(string)
+			result[KeyQRPresent] = payload != ""
+			result[KeyFormatValid] = len(payload) > 0
+			if disc, ok := result[KeyDiscriminator].(int); ok {
+				result[KeyDiscriminatorLength] = len(fmt.Sprintf("%d", disc))
 			}
-			if sc, ok := result["setup_code"].(string); ok {
-				result["setup_code_length"] = len(sc)
+			if sc, ok := result[KeySetupCode].(string); ok {
+				result[KeySetupCodeLength] = len(sc)
 			}
 		}
 	case "check_display":
 		// Check if the device has a QR display.
 		result, err = r.handleGetQRPayload(ctx, subStep, state)
 		if result != nil {
-			payload, _ := result["qr_payload"].(string)
-			result["qr_present"] = payload != ""
-			result["format_valid"] = len(payload) > 0
-			if disc, ok := result["discriminator"].(int); ok {
-				result["discriminator_length"] = len(fmt.Sprintf("%d", disc))
+			payload, _ := result[KeyQRPayload].(string)
+			result[KeyQRPresent] = payload != ""
+			result[KeyFormatValid] = len(payload) > 0
+			if disc, ok := result[KeyDiscriminator].(int); ok {
+				result[KeyDiscriminatorLength] = len(fmt.Sprintf("%d", disc))
 			}
 		}
 	case "enter_commissioning_mode":
@@ -164,7 +164,7 @@ func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step,
 
 	// Mark successful dispatches so tests can verify the action was triggered.
 	if err == nil && result != nil {
-		result["action_triggered"] = true
+		result[KeyActionTriggered] = true
 	}
 	return result, err
 }
@@ -175,8 +175,8 @@ func (r *Runner) handleDeviceSetValue(ctx context.Context, step *loader.Step, st
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDeviceState(state)
 
-	key, _ := params["key"].(string)
-	value := params["value"]
+	key, _ := params[KeyKey].(string)
+	value := params[KeyValue]
 
 	if key != "" {
 		ds.attributes[key] = value
@@ -184,8 +184,8 @@ func (r *Runner) handleDeviceSetValue(ctx context.Context, step *loader.Step, st
 	}
 
 	return map[string]any{
-		"value_set": true,
-		"key":       key,
+		KeyValueSet: true,
+		KeyKey:      key,
 	}, nil
 }
 
@@ -207,8 +207,8 @@ func (r *Runner) handleDeviceSetValuesRapid(ctx context.Context, step *loader.St
 	}
 
 	return map[string]any{
-		"values_set": count,
-		"rapid":      true,
+		KeyValuesSet: count,
+		KeyRapid:     true,
 	}, nil
 }
 
@@ -216,12 +216,12 @@ func (r *Runner) handleDeviceSetValuesRapid(ctx context.Context, step *loader.St
 func (r *Runner) handleDeviceTrigger(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	event, _ := params["event"].(string)
-	state.Set("last_trigger", event)
+	event, _ := params[KeyEvent].(string)
+	state.Set(StateLastTrigger, event)
 
 	return map[string]any{
-		"triggered":  true,
-		"event_type": event,
+		KeyTriggered: true,
+		KeyEventType: event,
 	}, nil
 }
 
@@ -241,7 +241,7 @@ func (r *Runner) handleConfigureDevice(ctx context.Context, step *loader.Step, s
 	}
 
 	return map[string]any{
-		"device_configured": true,
+		KeyDeviceConfigured: true,
 	}, nil
 }
 
@@ -258,7 +258,7 @@ func (r *Runner) handleConfigureExposedDevice(ctx context.Context, step *loader.
 	}
 
 	return map[string]any{
-		"exposed_device_configured": true,
+		KeyExposedDeviceConfigured: true,
 	}, nil
 }
 
@@ -268,14 +268,14 @@ func (r *Runner) handleUpdateExposedAttribute(ctx context.Context, step *loader.
 	ds := getDeviceState(state)
 
 	key, _ := params["attribute"].(string)
-	value := params["value"]
+	value := params[KeyValue]
 
 	if key != "" {
 		ds.attributes[key] = value
 	}
 
 	return map[string]any{
-		"attribute_updated": true,
+		KeyAttributeUpdated: true,
 	}, nil
 }
 
@@ -288,25 +288,25 @@ func (r *Runner) handleChangeState(ctx context.Context, step *loader.Step, state
 
 	if s, ok := params["operating_state"].(string); ok {
 		ds.operatingState = s
-		state.Set("operating_state", s)
+		state.Set(StateOperatingState, s)
 		changed = true
 	}
 	if s, ok := params["control_state"].(string); ok {
 		ds.controlState = s
-		state.Set("control_state", s)
+		state.Set(StateControlState, s)
 		changed = true
 	}
 	if s, ok := params["process_state"].(string); ok {
 		ds.processState = s
-		state.Set("process_state", s)
+		state.Set(StateProcessState, s)
 		changed = true
 	}
 
 	return map[string]any{
-		"state_changed":   changed,
-		"operating_state": ds.operatingState,
-		"control_state":   ds.controlState,
-		"process_state":   ds.processState,
+		KeyStateChanged:      changed,
+		StateOperatingState:  ds.operatingState,
+		StateControlState:    ds.controlState,
+		StateProcessState:    ds.processState,
 	}, nil
 }
 
@@ -315,15 +315,15 @@ func (r *Runner) handleSetStateDetail(ctx context.Context, step *loader.Step, st
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDeviceState(state)
 
-	key, _ := params["key"].(string)
-	value := params["value"]
+	key, _ := params[KeyKey].(string)
+	value := params[KeyValue]
 
 	if key != "" {
 		ds.stateDetails[key] = value
 	}
 
 	return map[string]any{
-		"detail_set": true,
+		KeyDetailSet: true,
 	}, nil
 }
 
@@ -333,7 +333,7 @@ func (r *Runner) handleTriggerFault(ctx context.Context, step *loader.Step, stat
 	ds := getDeviceState(state)
 
 	code := uint32(0)
-	if c, ok := params["fault_code"].(float64); ok {
+	if c, ok := params[KeyFaultCode].(float64); ok {
 		code = uint32(c)
 	}
 	message, _ := params["fault_message"].(string)
@@ -345,12 +345,12 @@ func (r *Runner) handleTriggerFault(ctx context.Context, step *loader.Step, stat
 	})
 	ds.operatingState = "FAULT"
 
-	state.Set("active_fault_count", len(ds.faults))
+	state.Set(StateActiveFaultCount, len(ds.faults))
 
 	return map[string]any{
-		"fault_triggered":    true,
-		"fault_code":         code,
-		"active_fault_count": len(ds.faults),
+		KeyFaultTriggered:    true,
+		KeyFaultCode:         code,
+		StateActiveFaultCount: len(ds.faults),
 	}, nil
 }
 
@@ -360,7 +360,7 @@ func (r *Runner) handleClearFault(ctx context.Context, step *loader.Step, state 
 	ds := getDeviceState(state)
 
 	code := uint32(0)
-	if c, ok := params["fault_code"].(float64); ok {
+	if c, ok := params[KeyFaultCode].(float64); ok {
 		code = uint32(c)
 	}
 
@@ -377,11 +377,11 @@ func (r *Runner) handleClearFault(ctx context.Context, step *loader.Step, state 
 		ds.operatingState = "STANDBY"
 	}
 
-	state.Set("active_fault_count", len(ds.faults))
+	state.Set(StateActiveFaultCount, len(ds.faults))
 
 	return map[string]any{
-		"fault_cleared":      found,
-		"active_fault_count": len(ds.faults),
+		KeyFaultCleared:       found,
+		StateActiveFaultCount: len(ds.faults),
 	}, nil
 }
 
@@ -390,12 +390,12 @@ func (r *Runner) handleQueryDeviceState(ctx context.Context, step *loader.Step, 
 	ds := getDeviceState(state)
 
 	return map[string]any{
-		"operating_state":  ds.operatingState,
-		"control_state":    ds.controlState,
-		"process_state":    ds.processState,
-		"active_faults":    len(ds.faults),
-		"ev_connected":     ds.evConnected,
-		"cable_plugged_in": ds.cablePluggedIn,
+		StateOperatingState: ds.operatingState,
+		StateControlState:   ds.controlState,
+		StateProcessState:   ds.processState,
+		KeyActiveFaults:     len(ds.faults),
+		KeyEVConnected:      ds.evConnected,
+		KeyCablePluggedIn:   ds.cablePluggedIn,
 	}, nil
 }
 
@@ -422,10 +422,10 @@ func (r *Runner) handleVerifyDeviceState(ctx context.Context, step *loader.Step,
 	}
 
 	return map[string]any{
-		"state_matches":   allMatch,
-		"operating_state": ds.operatingState,
-		"control_state":   ds.controlState,
-		"process_state":   ds.processState,
+		KeyStateMatches:     allMatch,
+		StateOperatingState: ds.operatingState,
+		StateControlState:   ds.controlState,
+		StateProcessState:   ds.processState,
 	}, nil
 }
 
@@ -433,18 +433,18 @@ func (r *Runner) handleVerifyDeviceState(ctx context.Context, step *loader.Step,
 func (r *Runner) handleSetConnected(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
 	ds.controlState = "CONTROLLED"
-	state.Set("device_connected", true)
+	state.Set(StateDeviceConnected, true)
 
-	return map[string]any{"connected": true}, nil
+	return map[string]any{KeyConnected: true}, nil
 }
 
 // handleSetDisconnected sets the disconnection state.
 func (r *Runner) handleSetDisconnected(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
 	ds.controlState = "FAILSAFE"
-	state.Set("device_connected", false)
+	state.Set(StateDeviceConnected, false)
 
-	return map[string]any{"disconnected": true}, nil
+	return map[string]any{KeyDisconnected: true}, nil
 }
 
 // handleSetFailsafeLimit sets the failsafe power limit.
@@ -453,16 +453,16 @@ func (r *Runner) handleSetFailsafeLimit(ctx context.Context, step *loader.Step, 
 	ds := getDeviceState(state)
 
 	limit := 0.0
-	if l, ok := params["limit_watts"].(float64); ok {
+	if l, ok := params[KeyLimitWatts].(float64); ok {
 		limit = l
 	}
 
 	ds.failsafeLimit = &limit
-	state.Set("failsafe_limit", limit)
+	state.Set(StateFailsafeLimit, limit)
 
 	return map[string]any{
-		"failsafe_limit_set": true,
-		"limit_watts":        limit,
+		KeyFailsafeLimitSet: true,
+		KeyLimitWatts:        limit,
 	}, nil
 }
 
@@ -470,9 +470,9 @@ func (r *Runner) handleSetFailsafeLimit(ctx context.Context, step *loader.Step, 
 func (r *Runner) handleMakeProcessAvailable(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
 	ds.processState = "AVAILABLE"
-	state.Set("process_state", "AVAILABLE")
+	state.Set(StateProcessState, "AVAILABLE")
 
-	return map[string]any{"process_state": "AVAILABLE"}, nil
+	return map[string]any{StateProcessState: "AVAILABLE"}, nil
 }
 
 // handleStartOperation begins process execution.
@@ -480,12 +480,12 @@ func (r *Runner) handleStartOperation(ctx context.Context, step *loader.Step, st
 	ds := getDeviceState(state)
 	ds.processState = "RUNNING"
 	ds.operatingState = "RUNNING"
-	state.Set("process_state", "RUNNING")
-	state.Set("operating_state", "RUNNING")
+	state.Set(StateProcessState, "RUNNING")
+	state.Set(StateOperatingState, "RUNNING")
 
 	return map[string]any{
-		"process_state":  "RUNNING",
-		"operation_started": true,
+		StateProcessState:  "RUNNING",
+		KeyOperationStarted: true,
 	}, nil
 }
 
@@ -494,9 +494,9 @@ func (r *Runner) handleEVConnect(ctx context.Context, step *loader.Step, state *
 	ds := getDeviceState(state)
 	ds.evConnected = true
 	ds.cablePluggedIn = true
-	state.Set("ev_connected", true)
+	state.Set(StateEVConnected, true)
 
-	return map[string]any{"ev_connected": true}, nil
+	return map[string]any{KeyEVConnected: true}, nil
 }
 
 // handleEVDisconnect simulates EV disconnection.
@@ -504,27 +504,27 @@ func (r *Runner) handleEVDisconnect(ctx context.Context, step *loader.Step, stat
 	ds := getDeviceState(state)
 	ds.evConnected = false
 	ds.cablePluggedIn = false
-	state.Set("ev_connected", false)
+	state.Set(StateEVConnected, false)
 
-	return map[string]any{"ev_disconnected": true}, nil
+	return map[string]any{KeyEVDisconnected: true}, nil
 }
 
 // handleEVRequestsCharge simulates EV requesting charge.
 func (r *Runner) handleEVRequestsCharge(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
 	ds.evConnected = true
-	state.Set("ev_charge_requested", true)
+	state.Set(StateEVChargeRequested, true)
 
-	return map[string]any{"charge_requested": true}, nil
+	return map[string]any{KeyChargeRequested: true}, nil
 }
 
 // handlePlugInCable simulates plugging in the cable.
 func (r *Runner) handlePlugInCable(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
 	ds.cablePluggedIn = true
-	state.Set("cable_plugged_in", true)
+	state.Set(StateCablePluggedIn, true)
 
-	return map[string]any{"cable_plugged_in": true}, nil
+	return map[string]any{KeyCablePluggedIn: true}, nil
 }
 
 // handleUnplugCable simulates unplugging the cable.
@@ -532,21 +532,21 @@ func (r *Runner) handleUnplugCable(ctx context.Context, step *loader.Step, state
 	ds := getDeviceState(state)
 	ds.cablePluggedIn = false
 	ds.evConnected = false
-	state.Set("cable_plugged_in", false)
-	state.Set("ev_connected", false)
+	state.Set(StateCablePluggedIn, false)
+	state.Set(StateEVConnected, false)
 
-	return map[string]any{"cable_unplugged": true}, nil
+	return map[string]any{KeyCableUnplugged: true}, nil
 }
 
 // handleUserOverride simulates a user override command.
 func (r *Runner) handleUserOverride(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
 	ds.controlState = "OVERRIDE"
-	state.Set("control_state", "OVERRIDE")
+	state.Set(StateControlState, "OVERRIDE")
 
 	return map[string]any{
-		"override_active": true,
-		"control_state":   "OVERRIDE",
+		KeyOverrideActive: true,
+		StateControlState: "OVERRIDE",
 	}, nil
 }
 
@@ -564,9 +564,9 @@ func (r *Runner) handleFactoryReset(ctx context.Context, step *loader.Step, stat
 	state.Custom["device_state"] = s
 
 	return map[string]any{
-		"factory_reset":   true,
-		"operating_state": "STANDBY",
-		"control_state":   "AUTONOMOUS",
+		KeyFactoryReset:     true,
+		StateOperatingState: "STANDBY",
+		StateControlState:   "AUTONOMOUS",
 	}, nil
 }
 
@@ -583,8 +583,8 @@ func (r *Runner) handlePowerCycle(ctx context.Context, step *loader.Step, state 
 	}
 
 	return map[string]any{
-		"power_cycled":    true,
-		"operating_state": "STANDBY",
+		KeyPowerCycled:      true,
+		StateOperatingState: "STANDBY",
 	}, nil
 }
 
@@ -594,8 +594,8 @@ func (r *Runner) handlePowerOnDevice(ctx context.Context, step *loader.Step, sta
 	ds.operatingState = "STANDBY"
 
 	return map[string]any{
-		"powered_on":      true,
-		"operating_state": "STANDBY",
+		KeyPoweredOn:        true,
+		StateOperatingState: "STANDBY",
 	}, nil
 }
 

@@ -4,8 +4,8 @@ import (
 	"fmt"
 )
 
-// toFloat64 converts various numeric types to float64 for comparison.
-func toFloat64(v interface{}) (float64, bool) {
+// ToFloat64 converts various numeric types to float64 for comparison.
+func ToFloat64(v interface{}) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
 		return n, true
@@ -41,8 +41,8 @@ func CheckerValueGreaterThan(key string, expected interface{}, state *ExecutionS
 		}
 	}
 
-	actualNum, ok1 := toFloat64(actual)
-	expectedNum, ok2 := toFloat64(expected)
+	actualNum, ok1 := ToFloat64(actual)
+	expectedNum, ok2 := ToFloat64(expected)
 	if !ok1 || !ok2 {
 		return &ExpectResult{
 			Key:      key,
@@ -76,8 +76,8 @@ func CheckerValueLessThan(key string, expected interface{}, state *ExecutionStat
 		}
 	}
 
-	actualNum, ok1 := toFloat64(actual)
-	expectedNum, ok2 := toFloat64(expected)
+	actualNum, ok1 := ToFloat64(actual)
+	expectedNum, ok2 := ToFloat64(expected)
 	if !ok1 || !ok2 {
 		return &ExpectResult{
 			Key:      key,
@@ -136,9 +136,9 @@ func CheckerValueInRange(key string, expected interface{}, state *ExecutionState
 		}
 	}
 
-	actualNum, ok1 := toFloat64(actual)
-	minNum, ok2 := toFloat64(minVal)
-	maxNum, ok3 := toFloat64(maxVal)
+	actualNum, ok1 := ToFloat64(actual)
+	minNum, ok2 := ToFloat64(minVal)
+	maxNum, ok3 := ToFloat64(maxVal)
 	if !ok1 || !ok2 || !ok3 {
 		return &ExpectResult{
 			Key:      key,
@@ -284,7 +284,7 @@ func CheckerMapSizeEquals(key string, expected interface{}, state *ExecutionStat
 		}
 	}
 
-	expectedSize, ok := toFloat64(expected)
+	expectedSize, ok := ToFloat64(expected)
 	if !ok {
 		return &ExpectResult{
 			Key:      key,
@@ -322,49 +322,156 @@ func CheckerMapSizeEquals(key string, expected interface{}, state *ExecutionStat
 	}
 }
 
-// CheckerSaveAs copies a value to another key (always passes).
-// This is a side-effect checker that stores the actual value under the expected key name.
+// CheckerSaveAs saves the current step's complete output under the given name.
+// This allows later steps to compare their output against the saved snapshot
+// using the value_equals checker.
 func CheckerSaveAs(key string, expected interface{}, state *ExecutionState) *ExpectResult {
-	actual, exists := state.Get(key)
+	targetKey, ok := expected.(string)
+	if !ok {
+		return &ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Actual:   nil,
+			Passed:   false,
+			Message:  fmt.Sprintf("save_as target must be a string, got %T", expected),
+		}
+	}
+
+	output, exists := state.Get(InternalStepOutput)
 	if !exists {
 		return &ExpectResult{
 			Key:      key,
 			Expected: expected,
 			Actual:   nil,
 			Passed:   false,
-			Message:  fmt.Sprintf("key %q not found, cannot save", key),
+			Message:  "no step output to save",
 		}
 	}
 
-	targetKey, ok := expected.(string)
+	state.Set(targetKey, output)
+	return &ExpectResult{
+		Key:      key,
+		Expected: expected,
+		Actual:   output,
+		Passed:   true,
+		Message:  fmt.Sprintf("saved step output as %q", targetKey),
+	}
+}
+
+// CheckerValueEquals compares the current step's output with a previously saved
+// output (stored via save_as). All keys present in the saved map must match.
+func CheckerValueEquals(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+	savedName, ok := expected.(string)
 	if !ok {
 		return &ExpectResult{
 			Key:      key,
 			Expected: expected,
-			Actual:   actual,
 			Passed:   false,
-			Message:  fmt.Sprintf("save_as target must be a string, got %T", expected),
+			Message:  fmt.Sprintf("value_equals target must be a string, got %T", expected),
 		}
 	}
 
-	state.Set(targetKey, actual)
+	savedVal, exists := state.Get(savedName)
+	if !exists {
+		return &ExpectResult{
+			Key:      key,
+			Expected: savedName,
+			Passed:   false,
+			Message:  fmt.Sprintf("saved value %q not found", savedName),
+		}
+	}
+
+	currentOutput, _ := state.Get(InternalStepOutput)
+
+	savedMap, savedIsMap := savedVal.(map[string]interface{})
+	currentMap, currentIsMap := currentOutput.(map[string]interface{})
+
+	if savedIsMap && currentIsMap {
+		var mismatches []string
+		for k, sv := range savedMap {
+			cv, has := currentMap[k]
+			if !has || fmt.Sprintf("%v", sv) != fmt.Sprintf("%v", cv) {
+				mismatches = append(mismatches, fmt.Sprintf("%s: saved=%v current=%v", k, sv, cv))
+			}
+		}
+		passed := len(mismatches) == 0
+		msg := "values match"
+		if !passed {
+			msg = fmt.Sprintf("mismatches: %v", mismatches)
+		}
+		return &ExpectResult{
+			Key:      key,
+			Expected: savedVal,
+			Actual:   currentOutput,
+			Passed:   passed,
+			Message:  msg,
+		}
+	}
+
+	passed := fmt.Sprintf("%v", savedVal) == fmt.Sprintf("%v", currentOutput)
 	return &ExpectResult{
 		Key:      key,
-		Expected: expected,
-		Actual:   actual,
-		Passed:   true,
-		Message:  fmt.Sprintf("saved %q to %q", key, targetKey),
+		Expected: savedVal,
+		Actual:   currentOutput,
+		Passed:   passed,
+		Message:  fmt.Sprintf("saved=%v current=%v", savedVal, currentOutput),
+	}
+}
+
+// CheckerIssuerFingerprintEquals compares the issuer_fingerprint output of the
+// current step against a fingerprint stored in a previously saved output map.
+func CheckerIssuerFingerprintEquals(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+	savedName, ok := expected.(string)
+	if !ok {
+		return &ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Passed:   false,
+			Message:  fmt.Sprintf("issuer_fingerprint_equals target must be a string, got %T", expected),
+		}
+	}
+
+	savedVal, exists := state.Get(savedName)
+	if !exists {
+		return &ExpectResult{
+			Key:      key,
+			Expected: savedName,
+			Passed:   false,
+			Message:  fmt.Sprintf("saved value %q not found", savedName),
+		}
+	}
+
+	// Extract fingerprint from saved value (may be a map or plain string).
+	expectedFP := ""
+	if savedMap, ok := savedVal.(map[string]interface{}); ok {
+		expectedFP, _ = savedMap[KeyFingerprint].(string)
+	} else if s, ok := savedVal.(string); ok {
+		expectedFP = s
+	}
+
+	actualFP, _ := state.Get(KeyIssuerFingerprint)
+	actualFPStr := fmt.Sprintf("%v", actualFP)
+
+	passed := actualFPStr == expectedFP && expectedFP != ""
+	return &ExpectResult{
+		Key:      key,
+		Expected: expectedFP,
+		Actual:   actualFP,
+		Passed:   passed,
+		Message:  fmt.Sprintf("issuer_fingerprint=%v expected=%v", actualFP, expectedFP),
 	}
 }
 
 // RegisterEnhancedCheckers registers all enhanced checkers with the engine.
 func RegisterEnhancedCheckers(e *Engine) {
-	e.RegisterChecker("value_greater_than", CheckerValueGreaterThan)
-	e.RegisterChecker("value_less_than", CheckerValueLessThan)
-	e.RegisterChecker("value_in_range", CheckerValueInRange)
-	e.RegisterChecker("value_is_null", CheckerValueIsNull)
-	e.RegisterChecker("value_is_map", CheckerValueIsMap)
-	e.RegisterChecker("contains", CheckerContains)
-	e.RegisterChecker("map_size_equals", CheckerMapSizeEquals)
-	e.RegisterChecker("save_as", CheckerSaveAs)
+	e.RegisterChecker(CheckerNameValueGreaterThan, CheckerValueGreaterThan)
+	e.RegisterChecker(CheckerNameValueLessThan, CheckerValueLessThan)
+	e.RegisterChecker(CheckerNameValueInRange, CheckerValueInRange)
+	e.RegisterChecker(CheckerNameValueIsNull, CheckerValueIsNull)
+	e.RegisterChecker(CheckerNameValueIsMap, CheckerValueIsMap)
+	e.RegisterChecker(CheckerNameContains, CheckerContains)
+	e.RegisterChecker(CheckerNameMapSizeEquals, CheckerMapSizeEquals)
+	e.RegisterChecker(CheckerNameSaveAs, CheckerSaveAs)
+	e.RegisterChecker(CheckerNameValueEquals, CheckerValueEquals)
+	e.RegisterChecker(CheckerNameIssuerFingerprintEquals, CheckerIssuerFingerprintEquals)
 }
