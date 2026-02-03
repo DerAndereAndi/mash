@@ -19,6 +19,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/internal/testharness/reporter"
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
@@ -259,9 +260,19 @@ func (r *Runner) runAutoPICS(ctx context.Context) error {
 		stdlog.Printf("Auto-PICS: discovered %d items from device", len(pf.Items))
 	}
 
-	// Send RemoveZone so the device re-enters commissioning mode, then
-	// disconnect. Without RemoveZone the device retains the auto-PICS zone
-	// and won't accept PASE connections from tests.
+	// Force the device into commissioning mode while we still have a live
+	// zone session. This handles stale zones from previous test runs:
+	// the device persists zone memberships, so on restart it may have
+	// zones that sendRemoveZone won't clear (it only removes our zone).
+	// Without the trigger, the stale zones keep the device in operational
+	// mode, causing PASE failures in subsequent tests.
+	if r.config.EnableKey != "" {
+		_, _ = r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
+	}
+
+	// Send RemoveZone so the device drops our auto-PICS zone, then
+	// disconnect. The trigger above ensures commissioning mode persists
+	// even if stale zones remain after our zone is removed.
 	r.sendRemoveZone()
 	r.ensureDisconnected()
 	return nil
@@ -355,14 +366,22 @@ func (r *Runner) Close() error {
 	return nil
 }
 
-// Close closes the connection.
+// Close closes the connection. It is idempotent: calling Close on an
+// already-closed connection is a no-op.
 func (c *Connection) Close() error {
 	c.connected = false
 	if c.tlsConn != nil {
-		return c.tlsConn.Close()
+		err := c.tlsConn.Close()
+		c.tlsConn = nil
+		c.conn = nil
+		c.framer = nil
+		return err
 	}
 	if c.conn != nil {
-		return c.conn.Close()
+		err := c.conn.Close()
+		c.conn = nil
+		c.framer = nil
+		return err
 	}
 	return nil
 }

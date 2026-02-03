@@ -189,6 +189,17 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		time.Sleep(50 * time.Millisecond)
 	}
 
+	// Force-close any stale main connection whose socket is still open
+	// despite being marked as disconnected. A failed request sets
+	// connected=false without closing the socket, leaving the device
+	// zone active and preventing commissioning mode.
+	if r.conn != nil && !r.conn.connected && (r.conn.tlsConn != nil || r.conn.conn != nil) {
+		_ = r.conn.Close()
+		if r.config.Target != "" {
+			r.lastDeviceConnClose = time.Now()
+		}
+	}
+
 	// DEC-059: On backward transition from commissioned, send RemoveZone
 	// so the device re-enters commissioning mode before we disconnect.
 	// This must happen before special precondition handlers (e.g.,
@@ -255,13 +266,6 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 				// in an earlier test's precondition setup, so hadActive was
 				// false for this test even though the device is still busy
 				// with RemoveZone -> EnterCommissioningMode transitions.
-				//
-				// After explicit RemoveZone the device needs ~1s to complete:
-				// mDNS de-registration -> state persistence ->
-				// mDNS re-registration -> ready for PASE.
-				// This is a safety net for cases where RemoveZone was sent
-				// during closeActiveZoneConns; without RemoveZone the device
-				// recovery takes much longer (~5s+).
 				if !r.lastDeviceConnClose.IsZero() {
 					elapsed := time.Since(r.lastDeviceConnClose)
 					minWait := 1500 * time.Millisecond
@@ -475,10 +479,14 @@ func (r *Runner) closeActiveZoneConns() {
 				r.sendRemoveZoneOnConn(conn, zoneID)
 			}
 		}
-		if conn.connected {
-			_ = conn.Close()
+		// Always close the underlying socket, even if connected was set
+		// to false by a failed request. Without this, the device still
+		// sees an active TCP connection and the zone remains "active",
+		// preventing it from re-entering commissioning mode.
+		if conn.tlsConn != nil || conn.conn != nil {
 			closedAny = true
 		}
+		_ = conn.Close()
 		delete(r.activeZoneConns, id)
 		delete(r.activeZoneIDs, id)
 	}
@@ -488,7 +496,10 @@ func (r *Runner) closeActiveZoneConns() {
 }
 
 func (r *Runner) ensureDisconnected() {
-	if r.conn != nil && r.conn.connected {
+	// Always close the socket, not just when connected=true. A failed
+	// request sets connected=false without closing the underlying TCP
+	// socket, which leaves a phantom zone on the device.
+	if r.conn != nil {
 		_ = r.conn.Close()
 	}
 	r.paseState = nil
