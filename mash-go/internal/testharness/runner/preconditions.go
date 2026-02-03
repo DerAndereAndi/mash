@@ -182,11 +182,27 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 					}
 				}
 			case PrecondTwoZonesConnected:
-				// Pre-populate connection tracker with 2 dummy zone connections.
 				ct := getConnectionTracker(state)
 				for _, name := range []string{"GRID", "LOCAL"} {
 					if _, exists := ct.zoneConnections[name]; !exists {
-						ct.zoneConnections[name] = &Connection{connected: true}
+						if r.config.Target != "" {
+							// Establish real zone connections so tests can perform I/O.
+							step := &loader.Step{
+								Action: "connect_as_zone",
+								Params: map[string]any{KeyZoneID: name},
+							}
+							outputs, err := r.handleConnectAsZone(ctx, step, state)
+							if err != nil {
+								return fmt.Errorf("precondition connect zone %s: %w", name, err)
+							}
+							if established, ok := outputs[KeyConnectionEstablished].(bool); ok && !established {
+								errMsg, _ := outputs[KeyError].(string)
+								return fmt.Errorf("precondition connect zone %s: %s", name, errMsg)
+							}
+						} else {
+							// No target available (unit tests): use dummy connections.
+							ct.zoneConnections[name] = &Connection{connected: true}
+						}
 					}
 				}
 			}

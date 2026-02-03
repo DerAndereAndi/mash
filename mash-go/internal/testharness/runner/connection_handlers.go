@@ -156,6 +156,9 @@ func (r *Runner) getZoneConnection(state *engine.ExecutionState, params map[stri
 	if !ok || !conn.connected {
 		return nil, zoneID, fmt.Errorf("no active connection for zone %s", zoneID)
 	}
+	if conn.framer == nil {
+		return nil, zoneID, fmt.Errorf("connection for zone %s has no framer (dummy connection cannot perform I/O)", zoneID)
+	}
 	return conn, zoneID, nil
 }
 
