@@ -57,10 +57,10 @@ type zoneInfo struct {
 
 // zonePriority maps zone types to their priority (higher number = higher priority).
 var zonePriority = map[string]int{
-	"GRID_OPERATOR":    4,
-	"BUILDING_MANAGER": 3,
-	"HOME_MANAGER":     2,
-	"USER_APP":         1,
+	ZoneTypeGridOperator:    4,
+	ZoneTypeBuildingManager: 3,
+	ZoneTypeHomeManager:     2,
+	ZoneTypeUserApp:         1,
 }
 
 // getZoneState retrieves or creates zone state from execution state.
@@ -103,9 +103,9 @@ func getDeviceState(state *engine.ExecutionState) *deviceState {
 		return s
 	}
 	s := &deviceState{
-		operatingState: "STANDBY",
-		controlState:   "AUTONOMOUS",
-		processState:   "NONE",
+		operatingState: OperatingStateStandby,
+		controlState:   ControlStateAutonomous,
+		processState:   ProcessStateNone,
 		faults:         make([]faultEntry, 0),
 		stateDetails:   make(map[string]any),
 		attributes:     make(map[string]any),

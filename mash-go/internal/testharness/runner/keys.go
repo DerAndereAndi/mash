@@ -38,6 +38,8 @@ const (
 	PrecondDeviceWillAppearAfterDelay = "device_will_appear_after_delay"
 	PrecondFiveZonesConnected         = "five_zones_connected"
 	PrecondTwoZonesConnected          = "two_zones_connected"
+	PrecondDeviceInZone               = "device_in_zone"
+	PrecondDeviceInTwoZones           = "device_in_two_zones"
 )
 
 // Connection/commissioning preconditions.
@@ -522,6 +524,71 @@ const (
 func ZoneConnectionStateKey(zoneID string) string {
 	return "zone_" + zoneID + "_connection"
 }
+
+// PASE timing analysis error types.
+const (
+	TimingErrorInvalidPubkey = "invalid_pubkey"
+	TimingErrorWrongPassword = "wrong_password"
+)
+
+// Service type short aliases -- used in YAML params alongside discovery.ServiceType* mDNS constants.
+const (
+	ServiceAliasCommissionable = "commissionable"
+	ServiceAliasOperational    = "operational"
+	ServiceAliasCommissioner   = "commissioner"
+)
+
+// Connection state values.
+const (
+	ConnectionStateOperational = "OPERATIONAL"
+)
+
+// Zone type string values -- protocol-defined zone types for multi-zone architecture.
+const (
+	ZoneTypeGridOperator    = "GRID_OPERATOR"
+	ZoneTypeBuildingManager = "BUILDING_MANAGER"
+	ZoneTypeHomeManager     = "HOME_MANAGER"
+	ZoneTypeUserApp         = "USER_APP"
+)
+
+// OperatingStateEnum values.
+const (
+	OperatingStateStandby = "STANDBY"
+	OperatingStateRunning = "RUNNING"
+	OperatingStateFault   = "FAULT"
+)
+
+// ControlStateEnum values.
+const (
+	ControlStateAutonomous = "AUTONOMOUS"
+	ControlStateControlled = "CONTROLLED"
+	ControlStateLimited    = "LIMITED"
+	ControlStateFailsafe   = "FAILSAFE"
+	ControlStateOverride   = "OVERRIDE"
+)
+
+// ProcessStateEnum values.
+const (
+	ProcessStateNone      = "NONE"
+	ProcessStateAvailable = "AVAILABLE"
+	ProcessStateScheduled = "SCHEDULED"
+	ProcessStateRunning   = "RUNNING"
+	ProcessStatePaused    = "PAUSED"
+	ProcessStateCompleted = "COMPLETED"
+	ProcessStateAborted   = "ABORTED"
+)
+
+// Error code values -- used as KeyErrorCode values in output maps.
+const (
+	ErrCodeTimeout               = "TIMEOUT"
+	ErrCodeConnectionFailed      = "CONNECTION_FAILED"
+	ErrCodeTLSError              = "TLS_ERROR"
+	ErrCodeConnectionError       = "CONNECTION_ERROR"
+	ErrCodeMaxConnsExceeded      = "MAX_CONNECTIONS_EXCEEDED"
+	ErrCodeNoDevicesFound        = "NO_DEVICES_FOUND"
+	ErrCodeAddrResolutionFailed  = "ADDRESS_RESOLUTION_FAILED"
+	ErrCodeDiscriminatorMismatch = "DISCRIMINATOR_MISMATCH"
+)
 
 // Checker registration names -- used in runner's registerHandlers.
 const (

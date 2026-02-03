@@ -313,7 +313,7 @@ func (r *Runner) handleConnectOperational(ctx context.Context, step *loader.Step
 	return map[string]any{
 		KeyConnectionEstablished: true,
 		KeyZoneID:                zoneID,
-		KeyConnectionType:        "operational",
+		KeyConnectionType:        ServiceAliasOperational,
 	}, nil
 }
 
@@ -629,7 +629,7 @@ func (r *Runner) handlePASERequestInvalidPubkey(ctx context.Context, step *loade
 	errorCode := 1 // AUTH_FAILED
 	errorName := "AUTH_FAILED"
 
-	state.Set(StateLastErrorType, "invalid_pubkey")
+	state.Set(StateLastErrorType, TimingErrorInvalidPubkey)
 	state.Set(StateLastErrorDelayMs, delay.Milliseconds())
 
 	return map[string]any{
@@ -646,7 +646,7 @@ func (r *Runner) handlePASERequestWrongPassword(ctx context.Context, step *loade
 	errorCode := 1 // AUTH_FAILED
 	errorName := "AUTH_FAILED"
 
-	state.Set(StateLastErrorType, "wrong_password")
+	state.Set(StateLastErrorType, TimingErrorWrongPassword)
 	state.Set(StateLastErrorDelayMs, delay.Milliseconds())
 
 	return map[string]any{
@@ -660,7 +660,7 @@ func (r *Runner) handlePASERequestWrongPassword(ctx context.Context, step *loade
 func (r *Runner) handleMeasureErrorTiming(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
 
-	errorType := "invalid_pubkey"
+	errorType := TimingErrorInvalidPubkey
 	if et, ok := params[KeyErrorType].(string); ok {
 		errorType = et
 	}
@@ -679,7 +679,7 @@ func (r *Runner) handleMeasureErrorTiming(ctx context.Context, step *loader.Step
 	}
 
 	setupCode := "00000000"
-	if errorType == "invalid_pubkey" {
+	if errorType == TimingErrorInvalidPubkey {
 		setupCode = "00000001"
 	}
 
@@ -713,8 +713,8 @@ func (r *Runner) handleCompareTimingDistributions(ctx context.Context, step *loa
 	secState := getSecurityState(state)
 
 	// Get the two timing samples
-	pubkeySample := secState.timingSamples["invalid_pubkey"]
-	passwordSample := secState.timingSamples["wrong_password"]
+	pubkeySample := secState.timingSamples[TimingErrorInvalidPubkey]
+	passwordSample := secState.timingSamples[TimingErrorWrongPassword]
 
 	if pubkeySample == nil || passwordSample == nil {
 		return nil, fmt.Errorf("timing samples not collected for both error types")

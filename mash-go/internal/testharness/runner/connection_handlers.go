@@ -86,8 +86,8 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 		return map[string]any{
 			KeyConnectionEstablished: false,
 			KeyZoneID:                zoneID,
-			KeyError:                 "MAX_CONNECTIONS_EXCEEDED",
-			KeyErrorCode:             "MAX_CONNECTIONS_EXCEEDED",
+			KeyError:                 ErrCodeMaxConnsExceeded,
+			KeyErrorCode:             ErrCodeMaxConnsExceeded,
 		}, nil
 	}
 
@@ -132,7 +132,7 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	return map[string]any{
 		KeyConnectionEstablished: true,
 		KeyZoneID:                zoneID,
-		KeyState:                 "OPERATIONAL",
+		KeyState:                 ConnectionStateOperational,
 	}, nil
 }
 

@@ -381,7 +381,7 @@ func TestBrowseMDNS_TwoDevicesSameDiscriminator(t *testing.T) {
 
 	step := &loader.Step{
 		Params: map[string]any{
-			KeyServiceType: "commissionable",
+			KeyServiceType: ServiceAliasCommissionable,
 			KeyTimeoutMs:   float64(1000),
 		},
 	}
@@ -450,5 +450,134 @@ func TestWaitForDevice_PopulatesServices(t *testing.T) {
 	}
 	if txtOut["txt_valid"] != true {
 		t.Error("expected txt_valid=true for synthetic service")
+	}
+}
+
+func TestBrowseMDNS_DeviceInZone_Operational(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set the simulation precondition.
+	state.Set(PrecondDeviceInZone, true)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasOperational,
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if out[KeyDeviceFound] != true {
+		t.Error("expected device_found=true")
+	}
+	instancesForDevice, _ := out[KeyInstancesForDevice].(int)
+	if instancesForDevice != 1 {
+		t.Errorf("expected instances_for_device=1, got %v", out[KeyInstancesForDevice])
+	}
+
+	ds := getDiscoveryState(state)
+	if len(ds.services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(ds.services))
+	}
+	if ds.services[0].ServiceType != discovery.ServiceTypeOperational {
+		t.Errorf("expected operational service type, got %v", ds.services[0].ServiceType)
+	}
+}
+
+func TestBrowseMDNS_DeviceInZone_Commissionable(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set the simulation precondition.
+	state.Set(PrecondDeviceInZone, true)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasCommissionable,
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if out[KeyDeviceFound] != true {
+		t.Error("expected device_found=true for commissionable browse with device_in_zone")
+	}
+
+	ds := getDiscoveryState(state)
+	if len(ds.services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(ds.services))
+	}
+	if ds.services[0].ServiceType != discovery.ServiceTypeCommissionable {
+		t.Errorf("expected commissionable service type, got %v", ds.services[0].ServiceType)
+	}
+}
+
+func TestBrowseMDNS_DeviceInTwoZones_Operational(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set the simulation precondition.
+	state.Set(PrecondDeviceInTwoZones, true)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasOperational,
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if out[KeyDeviceFound] != true {
+		t.Error("expected device_found=true")
+	}
+	instancesForDevice, _ := out[KeyInstancesForDevice].(int)
+	if instancesForDevice != 2 {
+		t.Errorf("expected instances_for_device=2, got %v", out[KeyInstancesForDevice])
+	}
+
+	ds := getDiscoveryState(state)
+	if len(ds.services) != 2 {
+		t.Fatalf("expected 2 services, got %d", len(ds.services))
+	}
+	// Both should be operational.
+	for i, svc := range ds.services {
+		if svc.ServiceType != discovery.ServiceTypeOperational {
+			t.Errorf("service[%d]: expected operational, got %v", i, svc.ServiceType)
+		}
+	}
+	// Should have different zone IDs.
+	zi0 := ds.services[0].TXTRecords["ZI"]
+	zi1 := ds.services[1].TXTRecords["ZI"]
+	if zi0 == zi1 {
+		t.Error("expected different zone IDs for two-zone simulation")
+	}
+}
+
+func TestBrowseMDNS_InstancesForDevice_AlwaysSet(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// No devices advertising -> instances_for_device should still be set.
+	state.Set(PrecondNoDevicesAdvertising, true)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	v, ok := out[KeyInstancesForDevice]
+	if !ok {
+		t.Error("expected instances_for_device key to be present even with no services")
+	}
+	if v != 0 {
+		t.Errorf("expected instances_for_device=0, got %v", v)
 	}
 }

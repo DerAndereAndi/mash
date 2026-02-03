@@ -409,8 +409,8 @@ func TestConnectAsZone_StateOutput(t *testing.T) {
 	if out[KeyConnectionEstablished] != false {
 		t.Error("expected connection_established=false for 6th zone")
 	}
-	if out["error_code"] != "MAX_CONNECTIONS_EXCEEDED" {
-		t.Errorf("expected error_code=MAX_CONNECTIONS_EXCEEDED, got %v", out["error_code"])
+	if out[KeyErrorCode] != ErrCodeMaxConnsExceeded {
+		t.Errorf("expected error_code=MAX_CONNECTIONS_EXCEEDED, got %v", out[KeyErrorCode])
 	}
 }
 
@@ -430,7 +430,7 @@ func TestConnectAsZone_ZoneLimit(t *testing.T) {
 		"target":  "127.0.0.1:1",
 	}}
 	out, _ := r.handleConnectAsZone(context.Background(), step, state)
-	if out["error_code"] == "MAX_CONNECTIONS_EXCEEDED" {
+	if out[KeyErrorCode] == ErrCodeMaxConnsExceeded {
 		t.Error("should not hit zone limit with only 1 existing zone")
 	}
 }

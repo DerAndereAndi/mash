@@ -386,8 +386,8 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			KeyConnectionEstablished: false,
 			KeyConnected:             false,
 			KeyTLSHandshakeSuccess:   false,
-			KeyError:                 "CONNECTION_FAILED",
-			KeyErrorCode:             "CONNECTION_FAILED",
+			KeyError:                 ErrCodeConnectionFailed,
+			KeyErrorCode:             ErrCodeConnectionFailed,
 			KeyErrorDetail:           "connection refused (simulated)",
 		}, nil
 	}
@@ -931,12 +931,12 @@ func classifyConnectError(err error) string {
 	switch {
 	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline") ||
 		strings.Contains(msg, "unreachable"):
-		return "TIMEOUT"
+		return ErrCodeTimeout
 	case strings.Contains(msg, "connection refused"):
-		return "CONNECTION_FAILED"
+		return ErrCodeConnectionFailed
 	case strings.Contains(msg, "tls") || strings.Contains(msg, "certificate"):
-		return "TLS_ERROR"
+		return ErrCodeTLSError
 	default:
-		return "CONNECTION_ERROR"
+		return ErrCodeConnectionError
 	}
 }

@@ -201,12 +201,12 @@ func TestClassifyConnectError(t *testing.T) {
 		want string
 	}{
 		{"nil", nil, ""},
-		{"timeout", fmt.Errorf("dial tcp: i/o timeout"), "TIMEOUT"},
-		{"deadline", fmt.Errorf("context deadline exceeded"), "TIMEOUT"},
-		{"refused", fmt.Errorf("dial tcp 127.0.0.1:8443: connection refused"), "CONNECTION_FAILED"},
-		{"tls", fmt.Errorf("tls: bad certificate"), "TLS_ERROR"},
-		{"certificate", fmt.Errorf("x509: certificate signed by unknown authority"), "TLS_ERROR"},
-		{"generic", fmt.Errorf("some other error"), "CONNECTION_ERROR"},
+		{"timeout", fmt.Errorf("dial tcp: i/o timeout"), ErrCodeTimeout},
+		{"deadline", fmt.Errorf("context deadline exceeded"), ErrCodeTimeout},
+		{"refused", fmt.Errorf("dial tcp 127.0.0.1:8443: connection refused"), ErrCodeConnectionFailed},
+		{"tls", fmt.Errorf("tls: bad certificate"), ErrCodeTLSError},
+		{"certificate", fmt.Errorf("x509: certificate signed by unknown authority"), ErrCodeTLSError},
+		{"generic", fmt.Errorf("some other error"), ErrCodeConnectionError},
 	}
 
 	for _, tt := range tests {

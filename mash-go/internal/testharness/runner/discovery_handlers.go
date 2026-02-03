@@ -45,7 +45,7 @@ func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params 
 	var services []discoveredService
 
 	switch serviceType {
-	case discovery.ServiceTypeCommissionable, "commissionable", "":
+	case discovery.ServiceTypeCommissionable, ServiceAliasCommissionable, "":
 		added, _, err := browser.BrowseCommissionable(browseCtx)
 		if err != nil {
 			return nil, fmt.Errorf("browse commissionable: %w", err)
@@ -66,7 +66,7 @@ func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params 
 			})
 		}
 
-	case discovery.ServiceTypeOperational, "operational":
+	case discovery.ServiceTypeOperational, ServiceAliasOperational:
 		zoneID, _ := params[KeyZoneID].(string)
 		ch, err := browser.BrowseOperational(browseCtx, zoneID)
 		if err != nil {
@@ -86,7 +86,7 @@ func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params 
 			})
 		}
 
-	case discovery.ServiceTypeCommissioner, "commissioner":
+	case discovery.ServiceTypeCommissioner, ServiceAliasCommissioner:
 		ch, err := browser.BrowseCommissioners(browseCtx)
 		if err != nil {
 			return nil, fmt.Errorf("browse commissioners: %w", err)
@@ -121,9 +121,10 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	if noAdv, _ := state.Get(PrecondNoDevicesAdvertising); noAdv == true {
 		ds.services = nil
 		return map[string]any{
-			KeyDeviceFound:  false,
-			KeyServiceCount: 0,
-			KeyErrorCode:    "NO_DEVICES_FOUND",
+			KeyDeviceFound:        false,
+			KeyServiceCount:       0,
+			KeyInstancesForDevice: 0,
+			KeyErrorCode:          ErrCodeNoDevicesFound,
 		}, nil
 	}
 	if srvPresent, _ := state.Get(PrecondDeviceSRVPresent); srvPresent == true {
@@ -135,9 +136,10 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 				// No addresses -- triggers ADDRESS_RESOLUTION_FAILED.
 			}}
 			return map[string]any{
-				KeyDeviceFound:  true,
-				KeyServiceCount: 1,
-				KeyErrorCode:    "ADDRESS_RESOLUTION_FAILED",
+				KeyDeviceFound:        true,
+				KeyServiceCount:       1,
+				KeyInstancesForDevice: 1,
+				KeyErrorCode:          ErrCodeAddrResolutionFailed,
 			}, nil
 		}
 	}
@@ -151,9 +153,75 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 			return map[string]any{
 				KeyDeviceFound:         true,
 				KeyServiceCount:        1,
+				KeyInstancesForDevice:  1,
 				KeyRetriesPerformedMin: 1,
 			}, nil
 		}
+	}
+
+	// Simulate a device already commissioned into a zone.
+	if inZone, _ := state.Get(PrecondDeviceInZone); inZone == true {
+		serviceType, _ := params[KeyServiceType].(string)
+		switch serviceType {
+		case discovery.ServiceTypeOperational, ServiceAliasOperational:
+			ds.services = []discoveredService{{
+				InstanceName: "a1b2c3d4-00112233",
+				ServiceType:  discovery.ServiceTypeOperational,
+				Host:         "device.local",
+				Port:         8443,
+				Addresses:    []string{"192.168.1.10"},
+				TXTRecords:   map[string]string{"ZI": "a1b2c3d4", "DI": "00112233"},
+			}}
+		default:
+			// Commissionable or unspecified -- return a single commissionable service.
+			ds.services = []discoveredService{{
+				InstanceName:  "MASH-SIM-ZONE",
+				ServiceType:   discovery.ServiceTypeCommissionable,
+				Host:          "device.local",
+				Port:          8443,
+				Addresses:     []string{"192.168.1.10"},
+				Discriminator: 1234,
+				TXTRecords:    map[string]string{"brand": "Test", "model": "Sim"},
+			}}
+		}
+		return r.buildBrowseOutput(ds)
+	}
+
+	// Simulate a device commissioned into two zones.
+	if inTwoZones, _ := state.Get(PrecondDeviceInTwoZones); inTwoZones == true {
+		serviceType, _ := params[KeyServiceType].(string)
+		switch serviceType {
+		case discovery.ServiceTypeOperational, ServiceAliasOperational:
+			ds.services = []discoveredService{
+				{
+					InstanceName: "a1b2c3d4-00112233",
+					ServiceType:  discovery.ServiceTypeOperational,
+					Host:         "device.local",
+					Port:         8443,
+					Addresses:    []string{"192.168.1.10"},
+					TXTRecords:   map[string]string{"ZI": "a1b2c3d4", "DI": "00112233"},
+				},
+				{
+					InstanceName: "e5f6a7b8-00112233",
+					ServiceType:  discovery.ServiceTypeOperational,
+					Host:         "device.local",
+					Port:         8443,
+					Addresses:    []string{"192.168.1.10"},
+					TXTRecords:   map[string]string{"ZI": "e5f6a7b8", "DI": "00112233"},
+				},
+			}
+		default:
+			ds.services = []discoveredService{{
+				InstanceName:  "MASH-SIM-TWOZONE",
+				ServiceType:   discovery.ServiceTypeCommissionable,
+				Host:          "device.local",
+				Port:          8443,
+				Addresses:     []string{"192.168.1.10"},
+				Discriminator: 1234,
+				TXTRecords:    map[string]string{"brand": "Test", "model": "Sim"},
+			}}
+		}
+		return r.buildBrowseOutput(ds)
 	}
 
 	// Simulate two devices with the same discriminator.
@@ -213,7 +281,38 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		ds.services = services
 	}
 
-	// Compute per-service-type counts and first-service metadata.
+	outputs, err := r.buildBrowseOutput(ds)
+	if err != nil {
+		return nil, err
+	}
+	outputs[KeyRetriesPerformedMin] = retries
+
+	// Set error_code when no services found.
+	if len(ds.services) == 0 {
+		if _, hasDisc := params[KeyDiscriminator]; hasDisc {
+			outputs[KeyErrorCode] = ErrCodeDiscriminatorMismatch
+		} else {
+			outputs[KeyErrorCode] = ErrCodeNoDevicesFound
+		}
+	}
+
+	// Check for address resolution issues: device found but no resolved addresses.
+	if len(ds.services) > 0 {
+		for _, svc := range ds.services {
+			if len(svc.Addresses) == 0 && svc.Host != "" {
+				outputs[KeyErrorCode] = ErrCodeAddrResolutionFailed
+				break
+			}
+		}
+	}
+
+	return outputs, nil
+}
+
+// buildBrowseOutput constructs the standard output map from discovery state.
+// This is shared by simulation paths and the real mDNS browse path.
+func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
+	// Compute per-service-type counts.
 	devicesFound := 0
 	controllersFound := 0
 	for _, svc := range ds.services {
@@ -247,34 +346,15 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		KeyDevicesFoundMin:          devicesFound,
 		KeyControllersFoundMin:      controllersFound,
 		KeyControllerFound:          controllersFound > 0,
-		KeyRetriesPerformedMin:      retries,
+		KeyRetriesPerformedMin:      0,
 		KeyInstanceConflictResolved: !instanceConflict,
-	}
-
-	// Set error_code when no services found.
-	if len(ds.services) == 0 {
-		if _, hasDisc := params[KeyDiscriminator]; hasDisc {
-			outputs[KeyErrorCode] = "DISCRIMINATOR_MISMATCH"
-		} else {
-			outputs[KeyErrorCode] = "NO_DEVICES_FOUND"
-		}
-	}
-
-	// Check for address resolution issues: device found but no resolved addresses.
-	if len(ds.services) > 0 {
-		for _, svc := range ds.services {
-			if len(svc.Addresses) == 0 && svc.Host != "" {
-				outputs[KeyErrorCode] = "ADDRESS_RESOLUTION_FAILED"
-				break
-			}
-		}
+		KeyInstancesForDevice:       len(ds.services),
 	}
 
 	// Add first-service details for easy assertion.
 	if len(ds.services) > 0 {
 		first := ds.services[0]
 		outputs[KeyInstanceName] = first.InstanceName
-		outputs[KeyInstancesForDevice] = len(ds.services) // count when filtering
 
 		// Add all TXT record fields.
 		for k, v := range first.TXTRecords {
@@ -322,7 +402,7 @@ func isValidHex(s string) bool {
 
 // handleBrowseCommissioners browses for commissioner services.
 func (r *Runner) handleBrowseCommissioners(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	step.Params[KeyServiceType] = "commissioner"
+	step.Params[KeyServiceType] = ServiceAliasCommissioner
 	return r.handleBrowseMDNS(ctx, step, state)
 }
 
@@ -376,7 +456,7 @@ func (r *Runner) handleVerifyMDNSAdvertising(ctx context.Context, step *loader.S
 
 	serviceType, _ := params[KeyServiceType].(string)
 	if serviceType == "" {
-		serviceType = "commissionable"
+		serviceType = ServiceAliasCommissionable
 	}
 
 	// Perform a short browse.
@@ -410,7 +490,7 @@ func (r *Runner) handleVerifyMDNSNotAdvertising(ctx context.Context, step *loade
 
 	serviceType, _ := params[KeyServiceType].(string)
 	if serviceType == "" {
-		serviceType = "commissionable"
+		serviceType = ServiceAliasCommissionable
 	}
 
 	// Use a short browse timeout (1s) to reduce false positives from

@@ -343,7 +343,7 @@ func (r *Runner) handleTriggerFault(ctx context.Context, step *loader.Step, stat
 		Message: message,
 		Time:    time.Now(),
 	})
-	ds.operatingState = "FAULT"
+	ds.operatingState = OperatingStateFault
 
 	state.Set(StateActiveFaultCount, len(ds.faults))
 
@@ -374,7 +374,7 @@ func (r *Runner) handleClearFault(ctx context.Context, step *loader.Step, state 
 	}
 
 	if len(ds.faults) == 0 {
-		ds.operatingState = "STANDBY"
+		ds.operatingState = OperatingStateStandby
 	}
 
 	state.Set(StateActiveFaultCount, len(ds.faults))
@@ -432,7 +432,7 @@ func (r *Runner) handleVerifyDeviceState(ctx context.Context, step *loader.Step,
 // handleSetConnected sets the connection state flag.
 func (r *Runner) handleSetConnected(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
-	ds.controlState = "CONTROLLED"
+	ds.controlState = ControlStateControlled
 	state.Set(StateDeviceConnected, true)
 
 	return map[string]any{KeyConnected: true}, nil
@@ -441,7 +441,7 @@ func (r *Runner) handleSetConnected(ctx context.Context, step *loader.Step, stat
 // handleSetDisconnected sets the disconnection state.
 func (r *Runner) handleSetDisconnected(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
-	ds.controlState = "FAILSAFE"
+	ds.controlState = ControlStateFailsafe
 	state.Set(StateDeviceConnected, false)
 
 	return map[string]any{KeyDisconnected: true}, nil
@@ -469,22 +469,22 @@ func (r *Runner) handleSetFailsafeLimit(ctx context.Context, step *loader.Step, 
 // handleMakeProcessAvailable sets processState to AVAILABLE.
 func (r *Runner) handleMakeProcessAvailable(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
-	ds.processState = "AVAILABLE"
-	state.Set(StateProcessState, "AVAILABLE")
+	ds.processState = ProcessStateAvailable
+	state.Set(StateProcessState, ProcessStateAvailable)
 
-	return map[string]any{StateProcessState: "AVAILABLE"}, nil
+	return map[string]any{StateProcessState: ProcessStateAvailable}, nil
 }
 
 // handleStartOperation begins process execution.
 func (r *Runner) handleStartOperation(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
-	ds.processState = "RUNNING"
-	ds.operatingState = "RUNNING"
-	state.Set(StateProcessState, "RUNNING")
-	state.Set(StateOperatingState, "RUNNING")
+	ds.processState = ProcessStateRunning
+	ds.operatingState = OperatingStateRunning
+	state.Set(StateProcessState, ProcessStateRunning)
+	state.Set(StateOperatingState, OperatingStateRunning)
 
 	return map[string]any{
-		StateProcessState:  "RUNNING",
+		StateProcessState:  ProcessStateRunning,
 		KeyOperationStarted: true,
 	}, nil
 }
@@ -541,12 +541,12 @@ func (r *Runner) handleUnplugCable(ctx context.Context, step *loader.Step, state
 // handleUserOverride simulates a user override command.
 func (r *Runner) handleUserOverride(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
-	ds.controlState = "OVERRIDE"
-	state.Set(StateControlState, "OVERRIDE")
+	ds.controlState = ControlStateOverride
+	state.Set(StateControlState, ControlStateOverride)
 
 	return map[string]any{
 		KeyOverrideActive: true,
-		StateControlState: "OVERRIDE",
+		StateControlState: ControlStateOverride,
 	}, nil
 }
 
@@ -554,9 +554,9 @@ func (r *Runner) handleUserOverride(ctx context.Context, step *loader.Step, stat
 func (r *Runner) handleFactoryReset(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Reset device state to defaults.
 	s := &deviceState{
-		operatingState: "STANDBY",
-		controlState:   "AUTONOMOUS",
-		processState:   "NONE",
+		operatingState: OperatingStateStandby,
+		controlState:   ControlStateAutonomous,
+		processState:   ProcessStateNone,
 		faults:         make([]faultEntry, 0),
 		stateDetails:   make(map[string]any),
 		attributes:     make(map[string]any),
@@ -565,17 +565,17 @@ func (r *Runner) handleFactoryReset(ctx context.Context, step *loader.Step, stat
 
 	return map[string]any{
 		KeyFactoryReset:     true,
-		StateOperatingState: "STANDBY",
-		StateControlState:   "AUTONOMOUS",
+		StateOperatingState: OperatingStateStandby,
+		StateControlState:   ControlStateAutonomous,
 	}, nil
 }
 
 // handlePowerCycle simulates a power cycle.
 func (r *Runner) handlePowerCycle(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
-	ds.operatingState = "STANDBY"
-	ds.controlState = "AUTONOMOUS"
-	ds.processState = "NONE"
+	ds.operatingState = OperatingStateStandby
+	ds.controlState = ControlStateAutonomous
+	ds.processState = ProcessStateNone
 
 	// Close connection if any.
 	if r.conn != nil && r.conn.connected {
@@ -584,18 +584,18 @@ func (r *Runner) handlePowerCycle(ctx context.Context, step *loader.Step, state 
 
 	return map[string]any{
 		KeyPowerCycled:      true,
-		StateOperatingState: "STANDBY",
+		StateOperatingState: OperatingStateStandby,
 	}, nil
 }
 
 // handlePowerOnDevice simulates powering on a device.
 func (r *Runner) handlePowerOnDevice(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
-	ds.operatingState = "STANDBY"
+	ds.operatingState = OperatingStateStandby
 
 	return map[string]any{
 		KeyPoweredOn:        true,
-		StateOperatingState: "STANDBY",
+		StateOperatingState: OperatingStateStandby,
 	}, nil
 }
 

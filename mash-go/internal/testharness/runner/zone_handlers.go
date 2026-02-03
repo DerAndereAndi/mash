@@ -44,7 +44,7 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 
 	zoneType, _ := params[KeyZoneType].(string)
 	if zoneType == "" {
-		zoneType = "HOME_MANAGER"
+		zoneType = ZoneTypeHomeManager
 	}
 
 	zoneID, _ := params[KeyZoneID].(string)
@@ -83,7 +83,7 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 	// verify_controller_cert and cert fingerprint handlers work with
 	// actual cryptographic material.
 	zt := cert.ZoneTypeLocal
-	if zoneType == "GRID" || zoneType == "GRID_OPERATOR" {
+	if zoneType == "GRID" || zoneType == ZoneTypeGridOperator {
 		zt = cert.ZoneTypeGrid
 	}
 	if zoneCA, err := cert.GenerateZoneCA(zoneID, zt); err == nil {

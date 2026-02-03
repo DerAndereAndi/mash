@@ -49,7 +49,7 @@ func TestGetZoneState(t *testing.T) {
 	}
 
 	// Mutate and verify persistence.
-	zs.zones["test-zone"] = &zoneInfo{ZoneID: "test-zone", ZoneType: "HOME_MANAGER"}
+	zs.zones["test-zone"] = &zoneInfo{ZoneID: "test-zone", ZoneType: ZoneTypeHomeManager}
 	zs2 := getZoneState(state)
 	if _, ok := zs2.zones["test-zone"]; !ok {
 		t.Error("expected zone to persist")
@@ -63,13 +63,13 @@ func TestGetDeviceState(t *testing.T) {
 	if ds == nil {
 		t.Fatal("expected non-nil deviceState")
 	}
-	if ds.operatingState != "STANDBY" {
+	if ds.operatingState != OperatingStateStandby {
 		t.Errorf("expected STANDBY, got %s", ds.operatingState)
 	}
-	if ds.controlState != "AUTONOMOUS" {
+	if ds.controlState != ControlStateAutonomous {
 		t.Errorf("expected AUTONOMOUS, got %s", ds.controlState)
 	}
-	if ds.processState != "NONE" {
+	if ds.processState != ProcessStateNone {
 		t.Errorf("expected NONE, got %s", ds.processState)
 	}
 	if len(ds.faults) != 0 {
@@ -80,9 +80,9 @@ func TestGetDeviceState(t *testing.T) {
 	}
 
 	// Mutate and verify persistence.
-	ds.controlState = "CONTROLLED"
+	ds.controlState = ControlStateControlled
 	ds2 := getDeviceState(state)
-	if ds2.controlState != "CONTROLLED" {
+	if ds2.controlState != ControlStateControlled {
 		t.Error("expected state to persist")
 	}
 }
@@ -135,13 +135,13 @@ func TestGetControllerState(t *testing.T) {
 }
 
 func TestZonePriority(t *testing.T) {
-	if zonePriority["GRID_OPERATOR"] <= zonePriority["BUILDING_MANAGER"] {
+	if zonePriority[ZoneTypeGridOperator] <= zonePriority[ZoneTypeBuildingManager] {
 		t.Error("GRID_OPERATOR should have higher priority than BUILDING_MANAGER")
 	}
-	if zonePriority["BUILDING_MANAGER"] <= zonePriority["HOME_MANAGER"] {
+	if zonePriority[ZoneTypeBuildingManager] <= zonePriority[ZoneTypeHomeManager] {
 		t.Error("BUILDING_MANAGER should have higher priority than HOME_MANAGER")
 	}
-	if zonePriority["HOME_MANAGER"] <= zonePriority["USER_APP"] {
+	if zonePriority[ZoneTypeHomeManager] <= zonePriority[ZoneTypeUserApp] {
 		t.Error("HOME_MANAGER should have higher priority than USER_APP")
 	}
 }

@@ -25,11 +25,11 @@ func TestHandleChangeState(t *testing.T) {
 	if out["state_changed"] != true {
 		t.Error("expected state_changed=true")
 	}
-	if out["operating_state"] != "RUNNING" {
-		t.Errorf("expected RUNNING, got %v", out["operating_state"])
+	if out[StateOperatingState] != OperatingStateRunning {
+		t.Errorf("expected RUNNING, got %v", out[StateOperatingState])
 	}
-	if out["control_state"] != "CONTROLLED" {
-		t.Errorf("expected CONTROLLED, got %v", out["control_state"])
+	if out[StateControlState] != ControlStateControlled {
+		t.Errorf("expected CONTROLLED, got %v", out[StateControlState])
 	}
 }
 
@@ -56,7 +56,7 @@ func TestHandleTriggerAndClearFault(t *testing.T) {
 	}
 
 	ds := getDeviceState(state)
-	if ds.operatingState != "FAULT" {
+	if ds.operatingState != OperatingStateFault {
 		t.Errorf("expected FAULT state, got %s", ds.operatingState)
 	}
 
@@ -74,7 +74,7 @@ func TestHandleTriggerAndClearFault(t *testing.T) {
 	if out["active_fault_count"] != 0 {
 		t.Errorf("expected 0 faults, got %v", out["active_fault_count"])
 	}
-	if ds.operatingState != "STANDBY" {
+	if ds.operatingState != OperatingStateStandby {
 		t.Errorf("expected STANDBY after all faults cleared, got %s", ds.operatingState)
 	}
 }
@@ -93,8 +93,8 @@ func TestHandleDeviceLocalAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["operating_state"] != "RUNNING" {
-		t.Errorf("expected RUNNING, got %v", out["operating_state"])
+	if out[StateOperatingState] != OperatingStateRunning {
+		t.Errorf("expected RUNNING, got %v", out[StateOperatingState])
 	}
 
 	// Unknown sub_action.
@@ -173,8 +173,8 @@ func TestHandleFactoryReset(t *testing.T) {
 
 	// Change some state.
 	ds := getDeviceState(state)
-	ds.operatingState = "FAULT"
-	ds.controlState = "FAILSAFE"
+	ds.operatingState = OperatingStateFault
+	ds.controlState = ControlStateFailsafe
 
 	out, _ := r.handleFactoryReset(context.Background(), &loader.Step{}, state)
 	if out["factory_reset"] != true {
@@ -182,10 +182,10 @@ func TestHandleFactoryReset(t *testing.T) {
 	}
 
 	ds = getDeviceState(state)
-	if ds.operatingState != "STANDBY" {
+	if ds.operatingState != OperatingStateStandby {
 		t.Errorf("expected STANDBY after reset, got %s", ds.operatingState)
 	}
-	if ds.controlState != "AUTONOMOUS" {
+	if ds.controlState != ControlStateAutonomous {
 		t.Errorf("expected AUTONOMOUS after reset, got %s", ds.controlState)
 	}
 }
@@ -195,8 +195,8 @@ func TestHandleUserOverride(t *testing.T) {
 	state := newTestState()
 
 	out, _ := r.handleUserOverride(context.Background(), &loader.Step{}, state)
-	if out["control_state"] != "OVERRIDE" {
-		t.Errorf("expected OVERRIDE, got %v", out["control_state"])
+	if out[StateControlState] != ControlStateOverride {
+		t.Errorf("expected OVERRIDE, got %v", out[StateControlState])
 	}
 }
 
