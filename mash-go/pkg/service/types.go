@@ -168,6 +168,12 @@ type DeviceConfig struct {
 	// Default: 500ms.
 	ErrorDelayMax time.Duration
 
+	// TestMode disables security hardening for test harness usage.
+	// When enabled: PASE backoff tracking is skipped, the commissioning window
+	// is extended to 24h (if at the default 15m), connection cooldown is skipped,
+	// and the commissioning window auto-reopens after each successful commission.
+	TestMode bool
+
 	// SnapshotPolicy controls when capability snapshots are emitted to the protocol log.
 	SnapshotPolicy SnapshotPolicy
 

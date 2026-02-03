@@ -57,85 +57,95 @@ func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step,
 		Params: params,
 	}
 
+	var result map[string]any
+	var err error
+
 	switch subAction {
 	case "change_state":
-		return r.handleChangeState(ctx, subStep, state)
+		result, err = r.handleChangeState(ctx, subStep, state)
 	case "trigger_fault":
-		return r.handleTriggerFault(ctx, subStep, state)
+		result, err = r.handleTriggerFault(ctx, subStep, state)
 	case "clear_fault":
-		return r.handleClearFault(ctx, subStep, state)
+		result, err = r.handleClearFault(ctx, subStep, state)
 	case "set_connected":
-		return r.handleSetConnected(ctx, subStep, state)
+		result, err = r.handleSetConnected(ctx, subStep, state)
 	case "set_disconnected":
-		return r.handleSetDisconnected(ctx, subStep, state)
+		result, err = r.handleSetDisconnected(ctx, subStep, state)
 	case "ev_connect":
-		return r.handleEVConnect(ctx, subStep, state)
+		result, err = r.handleEVConnect(ctx, subStep, state)
 	case "ev_disconnect":
-		return r.handleEVDisconnect(ctx, subStep, state)
+		result, err = r.handleEVDisconnect(ctx, subStep, state)
 	case "ev_requests_charge":
-		return r.handleEVRequestsCharge(ctx, subStep, state)
+		result, err = r.handleEVRequestsCharge(ctx, subStep, state)
 	case "plug_in_cable":
-		return r.handlePlugInCable(ctx, subStep, state)
+		result, err = r.handlePlugInCable(ctx, subStep, state)
 	case "unplug_cable":
-		return r.handleUnplugCable(ctx, subStep, state)
+		result, err = r.handleUnplugCable(ctx, subStep, state)
 	case "make_process_available":
-		return r.handleMakeProcessAvailable(ctx, subStep, state)
+		result, err = r.handleMakeProcessAvailable(ctx, subStep, state)
 	case "start_operation":
-		return r.handleStartOperation(ctx, subStep, state)
+		result, err = r.handleStartOperation(ctx, subStep, state)
 	case "set_failsafe_limit":
-		return r.handleSetFailsafeLimit(ctx, subStep, state)
+		result, err = r.handleSetFailsafeLimit(ctx, subStep, state)
 	case "user_override":
-		return r.handleUserOverride(ctx, subStep, state)
+		result, err = r.handleUserOverride(ctx, subStep, state)
 	case "factory_reset":
-		return r.handleFactoryReset(ctx, subStep, state)
+		result, err = r.handleFactoryReset(ctx, subStep, state)
 	case "power_cycle":
-		return r.handlePowerCycle(ctx, subStep, state)
+		result, err = r.handlePowerCycle(ctx, subStep, state)
 	case "reboot":
-		return r.handleReboot(ctx, subStep, state)
+		result, err = r.handleReboot(ctx, subStep, state)
 	case "restart":
-		return r.handleRestart(ctx, subStep, state)
+		result, err = r.handleRestart(ctx, subStep, state)
 	case "set_state_detail":
-		return r.handleSetStateDetail(ctx, subStep, state)
+		result, err = r.handleSetStateDetail(ctx, subStep, state)
 	case "configure_device":
-		return r.handleConfigureDevice(ctx, subStep, state)
+		result, err = r.handleConfigureDevice(ctx, subStep, state)
 	case "set_value":
-		return r.handleDeviceSetValue(ctx, subStep, state)
+		result, err = r.handleDeviceSetValue(ctx, subStep, state)
 
 	// Zone management sub-actions.
 	case "add_zone":
-		return r.handleAddZone(ctx, subStep, state)
+		result, err = r.handleAddZone(ctx, subStep, state)
 	case "remove_zone":
-		return r.handleRemoveZone(ctx, subStep, state)
+		result, err = r.handleRemoveZone(ctx, subStep, state)
 	case "has_zone":
-		return r.handleHasZone(ctx, subStep, state)
+		result, err = r.handleHasZone(ctx, subStep, state)
 	case "list_zones":
-		return r.handleListZones(ctx, subStep, state)
+		result, err = r.handleListZones(ctx, subStep, state)
 	case "zone_count":
-		return r.handleZoneCount(ctx, subStep, state)
+		result, err = r.handleZoneCount(ctx, subStep, state)
 	case "highest_priority_zone":
-		return r.handleHighestPriorityZone(ctx, subStep, state)
+		result, err = r.handleHighestPriorityZone(ctx, subStep, state)
 
 	// Network simulation sub-actions.
 	case "interface_down":
-		return r.handleInterfaceDown(ctx, subStep, state)
+		result, err = r.handleInterfaceDown(ctx, subStep, state)
 	case "interface_up":
-		return r.handleInterfaceUp(ctx, subStep, state)
+		result, err = r.handleInterfaceUp(ctx, subStep, state)
 	case "change_address":
-		return r.handleChangeAddress(ctx, subStep, state)
+		result, err = r.handleChangeAddress(ctx, subStep, state)
 	case "adjust_clock":
-		return r.handleAdjustClock(ctx, subStep, state)
+		result, err = r.handleAdjustClock(ctx, subStep, state)
 
 	// Discovery sub-actions.
 	case "browse_commissioners":
-		return r.handleBrowseCommissioners(ctx, subStep, state)
+		result, err = r.handleBrowseCommissioners(ctx, subStep, state)
 	case "get_qr_payload":
-		return r.handleGetQRPayload(ctx, subStep, state)
+		result, err = r.handleGetQRPayload(ctx, subStep, state)
 	case "enter_commissioning_mode":
-		return r.handleEnterCommissioningMode(ctx, subStep, state)
+		result, err = r.handleEnterCommissioningMode(ctx, subStep, state)
 	default:
 		return nil, fmt.Errorf("unknown device_local_action sub_action: %s", subAction)
 	}
+
+	// Mark successful dispatches so tests can verify the action was triggered.
+	if err == nil && result != nil {
+		result["action_triggered"] = true
+	}
+	return result, err
 }
+
 
 // handleDeviceSetValue sets an attribute value on the device.
 func (r *Runner) handleDeviceSetValue(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {

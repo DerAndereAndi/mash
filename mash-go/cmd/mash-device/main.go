@@ -113,6 +113,9 @@ type Config struct {
 
 	// Protocol logging
 	ProtocolLogFile string
+
+	// Test harness support
+	TestMode bool
 }
 
 // DeviceType implements interactive.DeviceConfig.
@@ -153,6 +156,8 @@ func init() {
 	flag.BoolVar(&config.Reset, "reset", false, "Clear all persisted state before starting")
 
 	flag.StringVar(&config.ProtocolLogFile, "protocol-log", "", "File path for protocol event logging (CBOR format)")
+
+	flag.BoolVar(&config.TestMode, "test-mode", false, "Disable security hardening for test harness usage")
 }
 
 func main() {
@@ -192,6 +197,7 @@ func main() {
 	svcConfig.DeviceName = config.DeviceName
 	svcConfig.Categories = []discovery.DeviceCategory{deviceCategory}
 	svcConfig.ListenAddress = fmt.Sprintf(":%d", config.Port)
+	svcConfig.TestMode = config.TestMode
 
 	// Set up protocol logging if requested
 	var protocolLogger *mashlog.FileLogger

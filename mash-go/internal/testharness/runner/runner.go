@@ -5,10 +5,12 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -30,6 +32,10 @@ type Runner struct {
 	messageID uint32 // Atomic counter for message IDs
 	paseState *PASEState
 	pics      *loader.PICSFile // Cached PICS for handler access
+
+	// zoneCAPool holds the Zone CA certificate pool obtained during commissioning.
+	// Used for TLS verification on operational (non-commissioning) connections.
+	zoneCAPool *x509.CertPool
 }
 
 // Config configures the test runner.
@@ -261,6 +267,11 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			MinVersion:         tls.VersionTLS13,
 			InsecureSkipVerify: insecure,
 			NextProtos:         []string{transport.ALPNProtocol},
+		}
+		// Use Zone CA pool for operational connections when available.
+		if !insecure && r.zoneCAPool != nil {
+			tlsConfig.RootCAs = r.zoneCAPool
+			tlsConfig.InsecureSkipVerify = false
 		}
 	}
 
@@ -679,17 +690,17 @@ func generateConnectionID() string {
 	return hex.EncodeToString(b)
 }
 
-// tlsVersionName returns a human-readable TLS version string.
+// tlsVersionName returns a short TLS version string matching test expectations.
 func tlsVersionName(version uint16) string {
 	switch version {
 	case tls.VersionTLS13:
-		return "TLS 1.3"
+		return "1.3"
 	case tls.VersionTLS12:
-		return "TLS 1.2"
+		return "1.2"
 	case tls.VersionTLS11:
-		return "TLS 1.1"
+		return "1.1"
 	case tls.VersionTLS10:
-		return "TLS 1.0"
+		return "1.0"
 	default:
 		return fmt.Sprintf("unknown (0x%04x)", version)
 	}
@@ -727,7 +738,7 @@ func extractTLSAlert(err error) string {
 	}
 	for _, kw := range alertKeywords {
 		if contains(msg, kw) {
-			return kw
+			return strings.ReplaceAll(kw, " ", "_")
 		}
 	}
 	// Return the full error as fallback.

@@ -412,20 +412,26 @@ func (r *Runner) handleParseQR(ctx context.Context, step *loader.Step, state *en
 	params := engine.InterpolateParams(step.Params, state)
 
 	payload, _ := params["payload"].(string)
+	// Accept "content" as fallback when "payload" is empty.
 	if payload == "" {
-		return map[string]any{"valid": false, "error": "no payload provided"}, nil
+		payload, _ = params["content"].(string)
+	}
+	if payload == "" {
+		return map[string]any{"valid": false, "parse_success": false, "error": "no payload provided"}, nil
 	}
 
 	qr, err := commissioning.ParseQRCode(payload)
 	if err != nil {
 		return map[string]any{
-			"valid": false,
-			"error": err.Error(),
+			"valid":         false,
+			"parse_success": false,
+			"error":         err.Error(),
 		}, nil
 	}
 
 	return map[string]any{
 		"valid":         true,
+		"parse_success": true,
 		"version":       qr.Version,
 		"discriminator": int(qr.Discriminator),
 		"setup_code":    fmt.Sprintf("%08d", qr.SetupCode),

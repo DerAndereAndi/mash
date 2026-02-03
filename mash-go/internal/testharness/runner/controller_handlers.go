@@ -34,40 +34,49 @@ func (r *Runner) handleControllerAction(ctx context.Context, step *loader.Step, 
 
 	subStep := &loader.Step{Params: params}
 
+	var result map[string]any
+	var err error
+
 	switch subAction {
 	case "commission_with_admin":
-		return r.handleCommissionWithAdmin(ctx, subStep, state)
+		result, err = r.handleCommissionWithAdmin(ctx, subStep, state)
 	case "get_controller_id":
-		return r.handleGetControllerID(ctx, subStep, state)
+		result, err = r.handleGetControllerID(ctx, subStep, state)
 	case "verify_controller_cert":
-		return r.handleVerifyControllerCert(ctx, subStep, state)
+		result, err = r.handleVerifyControllerCert(ctx, subStep, state)
 	case "verify_controller_state":
-		return r.handleVerifyControllerState(ctx, subStep, state)
+		result, err = r.handleVerifyControllerState(ctx, subStep, state)
 	case "set_commissioning_window_duration":
-		return r.handleSetCommissioningWindowDuration(ctx, subStep, state)
+		result, err = r.handleSetCommissioningWindowDuration(ctx, subStep, state)
 	case "get_commissioning_window_duration":
-		return r.handleGetCommissioningWindowDuration(ctx, subStep, state)
+		result, err = r.handleGetCommissioningWindowDuration(ctx, subStep, state)
 	case "remove_device":
-		return r.handleRemoveDevice(ctx, subStep, state)
+		result, err = r.handleRemoveDevice(ctx, subStep, state)
 	case "renew_cert":
-		return r.handleRenewCert(ctx, subStep, state)
+		result, err = r.handleRenewCert(ctx, subStep, state)
 	case "check_renewal":
-		return r.handleCheckRenewal(ctx, subStep, state)
+		result, err = r.handleCheckRenewal(ctx, subStep, state)
 
 	// Zone management sub-actions.
 	case "create_zone":
-		return r.handleCreateZone(ctx, subStep, state)
+		result, err = r.handleCreateZone(ctx, subStep, state)
 	case "get_zone_ca_fingerprint":
-		return r.handleGetZoneCAFingerprint(ctx, subStep, state)
+		result, err = r.handleGetZoneCAFingerprint(ctx, subStep, state)
 
 	// Cert sub-actions.
 	case "get_cert_fingerprint":
-		return r.handleGetCertFingerprint(ctx, subStep, state)
+		result, err = r.handleGetCertFingerprint(ctx, subStep, state)
 	case "set_cert_expiry_days":
-		return r.handleSetCertExpiryDays(ctx, subStep, state)
+		result, err = r.handleSetCertExpiryDays(ctx, subStep, state)
 	default:
 		return nil, fmt.Errorf("unknown controller_action sub_action: %s", subAction)
 	}
+
+	// Mark successful dispatches so tests can verify the action was triggered.
+	if err == nil && result != nil {
+		result["action_triggered"] = true
+	}
+	return result, err
 }
 
 // handleCommissionWithAdmin commissions using an admin token.
@@ -113,14 +122,29 @@ func (r *Runner) handleVerifyControllerCert(ctx context.Context, step *loader.St
 		tlsState := r.conn.tlsConn.ConnectionState()
 		hasCerts := len(tlsState.PeerCertificates) > 0
 
+		signedByZoneCA := false
+		notExpired := false
+		if hasCerts {
+			cert := tlsState.PeerCertificates[0]
+			notExpired = time.Now().Before(cert.NotAfter)
+			// A cert signed by a Zone CA has a different issuer than subject.
+			signedByZoneCA = cert.Issuer.CommonName != cert.Subject.CommonName
+		}
+
 		return map[string]any{
-			"cert_valid": hasCerts,
-			"cert_count": len(tlsState.PeerCertificates),
+			"cert_valid":       hasCerts,
+			"cert_count":       len(tlsState.PeerCertificates),
+			"cert_present":     hasCerts,
+			"signed_by_zone_ca": signedByZoneCA,
+			"not_expired":      notExpired,
 		}, nil
 	}
 
 	return map[string]any{
-		"cert_valid": false,
+		"cert_valid":       false,
+		"cert_present":     false,
+		"signed_by_zone_ca": false,
+		"not_expired":      false,
 	}, nil
 }
 

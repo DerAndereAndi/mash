@@ -88,6 +88,11 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 		InsecureSkipVerify: r.config.InsecureSkipVerify,
 		NextProtos:         []string{transport.ALPNProtocol},
 	}
+	// Use Zone CA pool for operational zone connections when available.
+	if !r.config.InsecureSkipVerify && r.zoneCAPool != nil {
+		tlsConfig.RootCAs = r.zoneCAPool
+		tlsConfig.InsecureSkipVerify = false
+	}
 
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)

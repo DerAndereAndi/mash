@@ -4,9 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"sort"
+	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
@@ -28,6 +33,11 @@ const (
 
 // preconditionKeyLevels maps known precondition keys to their required level.
 var preconditionKeyLevels = map[string]int{
+	// Level 0: Always-true environment preconditions (no setup needed).
+	"device_booted":       precondLevelNone,
+	"controller_running":  precondLevelNone,
+	"device_in_network":   precondLevelNone,
+
 	"device_in_commissioning_mode": precondLevelCommissioning,
 	"device_uncommissioned":        precondLevelCommissioning,
 	"commissioning_window_open":    precondLevelCommissioning,
@@ -178,10 +188,47 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 
 	_, err := r.handleCommission(ctx, step, state)
 	if err != nil {
+		// On transient errors (EOF, connection reset, broken pipe), retry once
+		// after a short delay. The device may still be cycling its commissioning
+		// window in test mode.
+		if isTransientError(err) {
+			r.ensureDisconnected()
+			time.Sleep(1 * time.Second)
+			if connErr := r.ensureConnected(ctx, state); connErr != nil {
+				return fmt.Errorf("precondition commission retry connect failed: %w", connErr)
+			}
+			_, err = r.handleCommission(ctx, step, state)
+			if err != nil {
+				return fmt.Errorf("precondition commission retry failed: %w", err)
+			}
+			return nil
+		}
 		return fmt.Errorf("precondition commission failed: %w", err)
 	}
 
 	return nil
+}
+
+// isTransientError returns true for IO-level errors that may resolve on retry.
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if err == io.EOF || err == io.ErrUnexpectedEOF {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "EOF") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection refused") ||
+		isNetError(err)
+}
+
+// isNetError checks if the error is a network-level error.
+func isNetError(err error) bool {
+	var netErr *net.OpError
+	return errors.As(err, &netErr)
 }
 
 // ensureDisconnected closes any existing connection for a clean start.

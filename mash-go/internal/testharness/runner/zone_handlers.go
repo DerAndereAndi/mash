@@ -79,10 +79,12 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 	zs.zoneOrder = append(zs.zoneOrder, zoneID)
 
 	return map[string]any{
-		"zone_id":      zoneID,
-		"zone_created": true,
-		"zone_type":    zoneType,
-		"fingerprint":  fingerprint,
+		"zone_id":        zoneID,
+		"zone_created":   true,
+		"zone_type":      zoneType,
+		"fingerprint":    fingerprint,
+		"zone_id_present": zoneID != "",
+		"zone_id_length": len(zoneID),
 	}, nil
 }
 
@@ -128,7 +130,10 @@ func (r *Runner) handleDeleteZone(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
-	return map[string]any{"zone_removed": true}, nil
+	return map[string]any{
+		"zone_removed": true,
+		"zone_deleted": true,
+	}, nil
 }
 
 // handleRemoveZone is an alias for delete_zone.

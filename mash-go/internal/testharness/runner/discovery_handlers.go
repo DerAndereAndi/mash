@@ -118,11 +118,37 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 
 	ds.services = services
 
-	return map[string]any{
-		"device_found":  len(services) > 0,
-		"service_count": len(services),
-		"services":      services,
-	}, nil
+	// Compute per-service-type counts and first-service metadata.
+	devicesFound := 0
+	controllersFound := 0
+	for _, svc := range services {
+		switch svc.ServiceType {
+		case discovery.ServiceTypeCommissionable, discovery.ServiceTypeOperational:
+			devicesFound++
+		case discovery.ServiceTypeCommissioner:
+			controllersFound++
+		}
+	}
+
+	outputs := map[string]any{
+		"device_found":      len(services) > 0,
+		"service_count":     len(services),
+		"services":          services,
+		"devices_found":     devicesFound,
+		"controllers_found": controllersFound,
+	}
+
+	// Add first-service details for easy assertion.
+	if len(services) > 0 {
+		first := services[0]
+		outputs["instance_name"] = first.InstanceName
+		outputs["instances_for_device"] = len(services) // count when filtering
+		for k, v := range first.TXTRecords {
+			outputs["txt_field_"+k] = v
+		}
+	}
+
+	return outputs, nil
 }
 
 // handleBrowseCommissioners browses for commissioner services.
@@ -218,28 +244,39 @@ func (r *Runner) handleVerifyMDNSNotAdvertising(ctx context.Context, step *loade
 		serviceType = "commissionable"
 	}
 
+	// Use a short browse timeout (1s) to reduce false positives from
+	// test-mode auto-reenter of commissioning mode.
 	browseStep := &loader.Step{
 		Params: map[string]any{
 			"service_type": serviceType,
-			"timeout_ms":   float64(2000),
+			"timeout_ms":   float64(1000),
 		},
 	}
 	result, err := r.handleBrowseMDNS(ctx, browseStep, state)
 	if err != nil {
 		// Browse error likely means no service found.
-		return map[string]any{"advertising": false}, nil
+		return map[string]any{"advertising": false, "not_advertising": true}, nil
 	}
 
 	found := result["service_count"].(int) > 0
 
 	return map[string]any{
-		"advertising": found,
+		"advertising":     found,
+		"not_advertising": !found,
 	}, nil
 }
 
 // handleVerifyMDNSNotBrowsing verifies service NOT found by browser.
 func (r *Runner) handleVerifyMDNSNotBrowsing(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	return r.handleVerifyMDNSNotAdvertising(ctx, step, state)
+	result, err := r.handleVerifyMDNSNotAdvertising(ctx, step, state)
+	if err != nil {
+		return result, err
+	}
+	// Add not_browsing alias.
+	if result != nil {
+		result["not_browsing"] = result["not_advertising"]
+	}
+	return result, nil
 }
 
 // handleGetQRPayload gets device's QR code payload.

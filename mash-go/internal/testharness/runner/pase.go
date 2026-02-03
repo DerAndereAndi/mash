@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"time"
@@ -108,8 +109,13 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		// the connection is in an unusable state (the device closes
 		// it on PASE failure per the MASH spec).
 		r.conn.connected = false
-		// Return error directly so test framework shows it clearly
-		return nil, fmt.Errorf("PASE handshake failed: %w", err)
+		// Return structured output so tests can assert on the failure
+		// rather than propagating an error that breaks preconditions.
+		return map[string]any{
+			"session_established": false,
+			"commission_success":  false,
+			"error":              err.Error(),
+		}, fmt.Errorf("PASE handshake failed: %w", err)
 	}
 
 	// Store successful state
@@ -119,6 +125,18 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		completed:  true,
 	}
 
+	// Extract and store peer certificate for operational TLS trust.
+	if r.conn.tlsConn != nil {
+		cs := r.conn.tlsConn.ConnectionState()
+		if len(cs.PeerCertificates) > 0 {
+			pool := x509.NewCertPool()
+			for _, cert := range cs.PeerCertificates {
+				pool.AddCert(cert)
+			}
+			r.zoneCAPool = pool
+		}
+	}
+
 	// Also store in execution state for test assertions
 	state.Set("session_established", true)
 	state.Set("session_key", sessionKey)
@@ -126,6 +144,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 
 	return map[string]any{
 		"session_established": true,
+		"commission_success":  true,
 		"key_length":          len(sessionKey),
 		"key_not_zero":        !isZeroKey(sessionKey),
 	}, nil

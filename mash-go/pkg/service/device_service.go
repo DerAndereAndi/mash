@@ -141,8 +141,15 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 	svc.subscriptionManager = subscription.NewManagerWithConfig(subConfig)
 
 	// Initialize PASE attempt tracker (DEC-047)
-	if config.PASEBackoffEnabled {
+	// Skip in test mode to avoid blocking rapid commissioning cycles.
+	if config.PASEBackoffEnabled && !config.TestMode {
 		svc.paseTracker = NewPASEAttemptTracker(config.PASEBackoffTiers)
+	}
+
+	// In test mode, extend the commissioning window to 24h if still at the default 15m,
+	// so the test harness has time to run the full suite without the window expiring.
+	if config.TestMode && svc.config.CommissioningWindowDuration == 15*time.Minute {
+		svc.config.CommissioningWindowDuration = 24 * time.Hour
 	}
 
 	// Register service-level commands on DeviceInfo feature
@@ -587,6 +594,17 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// The device should no longer advertise as commissionable
 	if err := s.ExitCommissioningMode(); err != nil {
 		s.debugLog("handleCommissioningConnection: failed to exit commissioning mode", "error", err)
+	}
+
+	// In test mode, schedule auto-reentry into commissioning mode so the next
+	// test can commission without waiting for manual intervention.
+	if s.config.TestMode {
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			if err := s.EnterCommissioningMode(); err != nil {
+				s.debugLog("handleCommissioningConnection: test-mode auto-reenter failed", "error", err)
+			}
+		}()
 	}
 
 	// Create zone session for this connection
@@ -1988,8 +2006,8 @@ func (s *DeviceService) acceptCommissioningConnection() bool {
 		return false
 	}
 
-	// Check 2: Connection cooldown
-	if s.config.ConnectionCooldown > 0 {
+	// Check 2: Connection cooldown (skip in test mode)
+	if s.config.ConnectionCooldown > 0 && !s.config.TestMode {
 		if time.Since(s.lastCommissioningAttempt) < s.config.ConnectionCooldown {
 			return false
 		}
