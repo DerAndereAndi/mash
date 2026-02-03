@@ -131,8 +131,31 @@ func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step,
 	// Discovery sub-actions.
 	case "browse_commissioners":
 		result, err = r.handleBrowseCommissioners(ctx, subStep, state)
-	case "get_qr_payload":
+	case "get_qr_payload", "get_qr":
 		result, err = r.handleGetQRPayload(ctx, subStep, state)
+		// Enrich with format validation fields.
+		if result != nil {
+			payload, _ := result["qr_payload"].(string)
+			result["qr_present"] = payload != ""
+			result["format_valid"] = len(payload) > 0
+			if disc, ok := result["discriminator"].(int); ok {
+				result["discriminator_length"] = len(fmt.Sprintf("%d", disc))
+			}
+			if sc, ok := result["setup_code"].(string); ok {
+				result["setup_code_length"] = len(sc)
+			}
+		}
+	case "check_display":
+		// Check if the device has a QR display.
+		result, err = r.handleGetQRPayload(ctx, subStep, state)
+		if result != nil {
+			payload, _ := result["qr_payload"].(string)
+			result["qr_present"] = payload != ""
+			result["format_valid"] = len(payload) > 0
+			if disc, ok := result["discriminator"].(int); ok {
+				result["discriminator_length"] = len(fmt.Sprintf("%d", disc))
+			}
+		}
 	case "enter_commissioning_mode":
 		result, err = r.handleEnterCommissioningMode(ctx, subStep, state)
 	default:

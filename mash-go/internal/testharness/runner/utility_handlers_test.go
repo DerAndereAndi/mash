@@ -300,10 +300,10 @@ func TestHandleParseQR(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	// Valid QR payload.
+	// Valid QR payload (4-field discovery format).
 	step := &loader.Step{
 		Params: map[string]any{
-			"payload": "MASH:1:1234:12345678:0x1234:0x5678",
+			"payload": "MASH:1:1234:12345678",
 		},
 	}
 	out, err := r.handleParseQR(context.Background(), step, state)
@@ -345,6 +345,84 @@ func TestHandleParseQR(t *testing.T) {
 	}
 	if out["valid"] != false {
 		t.Error("expected valid=false for empty payload")
+	}
+}
+
+func TestHandleParseQR_ErrorCodes(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	tests := []struct {
+		name     string
+		payload  string
+		wantCode string
+	}{
+		{
+			name:     "InvalidPrefix",
+			payload:  "EEBUS:1:1234:12345678",
+			wantCode: "invalid_prefix",
+		},
+		{
+			name:     "InvalidFieldCount",
+			payload:  "MASH:1:1234",
+			wantCode: "invalid_field_count",
+		},
+		{
+			name:     "InvalidVersion",
+			payload:  "MASH:0:1234:12345678",
+			wantCode: "invalid_version",
+		},
+		{
+			name:     "DiscriminatorOutOfRange",
+			payload:  "MASH:1:9999:12345678",
+			wantCode: "discriminator_out_of_range",
+		},
+		{
+			name:     "InvalidSetupCode",
+			payload:  "MASH:1:1234:123",
+			wantCode: "invalid_setup_code",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			step := &loader.Step{
+				Params: map[string]any{"payload": tt.payload},
+			}
+			out, err := r.handleParseQR(context.Background(), step, state)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if out["valid"] != false {
+				t.Error("expected valid=false")
+			}
+			if out["error"] != tt.wantCode {
+				t.Errorf("expected error=%q, got %q", tt.wantCode, out["error"])
+			}
+			// error_detail should contain the full error message.
+			if out["error_detail"] == nil || out["error_detail"] == "" {
+				t.Error("expected error_detail to be set")
+			}
+		})
+	}
+}
+
+func TestHandleParseQR_LeadingZerosPreserved(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	step := &loader.Step{
+		Params: map[string]any{"payload": "MASH:1:1234:00000001"},
+	}
+	out, err := r.handleParseQR(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["valid"] != true {
+		t.Errorf("expected valid=true, got error=%v", out["error"])
+	}
+	if out["setup_code"] != "00000001" {
+		t.Errorf("expected setup_code=00000001, got %v", out["setup_code"])
 	}
 }
 

@@ -199,3 +199,78 @@ func TestHandleUserOverride(t *testing.T) {
 		t.Errorf("expected OVERRIDE, got %v", out["control_state"])
 	}
 }
+
+func TestHandleDeviceLocalAction_CheckDisplay(t *testing.T) {
+	r := newTestRunner()
+	r.config.SetupCode = "12345678"
+	state := newTestState()
+
+	step := &loader.Step{
+		Params: map[string]any{
+			"sub_action":    "check_display",
+			"discriminator": float64(1234),
+			"setup_code":    "12345678",
+		},
+	}
+	out, err := r.handleDeviceLocalAction(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["qr_present"] != true {
+		t.Error("expected qr_present=true")
+	}
+	if out["format_valid"] != true {
+		t.Error("expected format_valid=true")
+	}
+	if _, ok := out["discriminator_length"]; !ok {
+		t.Error("expected discriminator_length field")
+	}
+	if out["action_triggered"] != true {
+		t.Error("expected action_triggered=true")
+	}
+}
+
+func TestHandleDeviceLocalAction_GetQR(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	step := &loader.Step{
+		Params: map[string]any{
+			"sub_action":    "get_qr",
+			"discriminator": float64(567),
+			"setup_code":    "87654321",
+		},
+	}
+	out, err := r.handleDeviceLocalAction(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["qr_present"] != true {
+		t.Error("expected qr_present=true")
+	}
+	if out["format_valid"] != true {
+		t.Error("expected format_valid=true")
+	}
+	if _, ok := out["setup_code_length"]; !ok {
+		t.Error("expected setup_code_length field")
+	}
+}
+
+func TestHandleDeviceLocalAction_CheckDisplayNoPayload(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// No discriminator/setup_code -> no QR payload.
+	step := &loader.Step{
+		Params: map[string]any{
+			"sub_action": "check_display",
+		},
+	}
+	out, err := r.handleDeviceLocalAction(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["qr_present"] != false {
+		t.Error("expected qr_present=false when no payload")
+	}
+}

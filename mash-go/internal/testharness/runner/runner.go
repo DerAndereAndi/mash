@@ -18,6 +18,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/internal/testharness/reporter"
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
@@ -34,6 +35,12 @@ type Runner struct {
 	messageID    uint32 // Atomic counter for message IDs
 	paseState    *PASEState
 	pics         *loader.PICSFile // Cached PICS for handler access
+
+	// zoneCA is the Zone CA generated during commissioning cert exchange.
+	zoneCA *cert.ZoneCA
+
+	// controllerCert is the controller operational cert generated during commissioning.
+	controllerCert *cert.OperationalCert
 
 	// zoneCAPool holds the Zone CA certificate pool obtained during commissioning.
 	// Used for TLS verification on operational (non-commissioning) connections.
@@ -229,6 +236,85 @@ func (r *Runner) runAutoPICS(ctx context.Context) error {
 	return nil
 }
 
+// framerSyncConn adapts a transport.Framer to the service.SyncConnection interface.
+// This allows the cert exchange protocol (IssueInitialCertSync) to use the
+// existing PASE connection's framer for synchronous send/receive.
+type framerSyncConn struct {
+	framer *transport.Framer
+}
+
+// Send writes data as a framed message.
+func (f *framerSyncConn) Send(data []byte) error {
+	return f.framer.WriteFrame(data)
+}
+
+// ReadFrame reads a framed message.
+func (f *framerSyncConn) ReadFrame() ([]byte, error) {
+	return f.framer.ReadFrame()
+}
+
+// operationalTLSConfig builds a TLS config for operational (post-commissioning) connections.
+// It uses the Zone CA for chain validation but skips hostname verification since
+// MASH identifies peers by device ID in the certificate CN, not DNS hostname.
+func (r *Runner) operationalTLSConfig() *tls.Config {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		NextProtos: []string{transport.ALPNProtocol},
+	}
+
+	if r.zoneCAPool != nil {
+		// Skip hostname verification but validate the cert chain against Zone CA.
+		tlsConfig.InsecureSkipVerify = true
+		tlsConfig.VerifyPeerCertificate = r.verifyPeerCertAgainstZoneCA
+	} else if r.config.InsecureSkipVerify {
+		tlsConfig.InsecureSkipVerify = true
+	}
+
+	// Present controller cert for mutual TLS if available.
+	if r.controllerCert != nil {
+		tlsConfig.Certificates = []tls.Certificate{r.controllerCert.TLSCertificate()}
+	}
+
+	return tlsConfig
+}
+
+// verifyPeerCertAgainstZoneCA validates the peer certificate chain against
+// the Zone CA pool without checking hostname. This is used for operational
+// connections where MASH identifies peers by device ID in the cert CN.
+func (r *Runner) verifyPeerCertAgainstZoneCA(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+	if len(rawCerts) == 0 {
+		return fmt.Errorf("no peer certificates presented")
+	}
+
+	// Parse the leaf certificate.
+	leaf, err := x509.ParseCertificate(rawCerts[0])
+	if err != nil {
+		return fmt.Errorf("parse peer certificate: %w", err)
+	}
+
+	// Build intermediate pool from any additional certs.
+	intermediates := x509.NewCertPool()
+	for _, raw := range rawCerts[1:] {
+		c, err := x509.ParseCertificate(raw)
+		if err != nil {
+			continue
+		}
+		intermediates.AddCert(c)
+	}
+
+	// Verify the chain against the Zone CA pool.
+	opts := x509.VerifyOptions{
+		Roots:         r.zoneCAPool,
+		Intermediates: intermediates,
+	}
+
+	if _, err := leaf.Verify(opts); err != nil {
+		return fmt.Errorf("certificate chain verification failed: %w", err)
+	}
+
+	return nil
+}
+
 // Close cleans up runner resources.
 func (r *Runner) Close() error {
 	if r.conn != nil && r.conn.connected {
@@ -315,16 +401,14 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	if commissioning {
 		// Use proper commissioning TLS config for PASE
 		tlsConfig = transport.NewCommissioningTLSConfig()
+	} else if r.zoneCAPool != nil {
+		// Use operational TLS config with Zone CA validation (no hostname check).
+		tlsConfig = r.operationalTLSConfig()
 	} else {
 		tlsConfig = &tls.Config{
 			MinVersion:         tls.VersionTLS13,
 			InsecureSkipVerify: insecure,
 			NextProtos:         []string{transport.ALPNProtocol},
-		}
-		// Use Zone CA pool for operational connections when available.
-		if !insecure && r.zoneCAPool != nil {
-			tlsConfig.RootCAs = r.zoneCAPool
-			tlsConfig.InsecureSkipVerify = false
 		}
 	}
 

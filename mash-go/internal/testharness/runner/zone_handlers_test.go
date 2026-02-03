@@ -227,6 +227,40 @@ func TestDisconnectZone(t *testing.T) {
 	}
 }
 
+func TestHandleCreateZone_SaveZoneID(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	step := &loader.Step{Params: map[string]any{"zone_type": "HOME_MANAGER", "zone_id": "test-zone-123"}}
+	out, err := r.handleCreateZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["save_zone_id"] != "test-zone-123" {
+		t.Errorf("expected save_zone_id=test-zone-123, got %v", out["save_zone_id"])
+	}
+}
+
+func TestHandleVerifyZoneCA_WithRunnerZoneCA(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Create a zone in state.
+	step := &loader.Step{Params: map[string]any{"zone_type": "HOME_MANAGER", "zone_id": "z1"}}
+	_, _ = r.handleCreateZone(context.Background(), step, state)
+
+	// Without runner zoneCA - only base fields.
+	step = &loader.Step{Params: map[string]any{"zone_id": "z1"}}
+	out, _ := r.handleVerifyZoneCA(context.Background(), step, state)
+	if out["ca_valid"] != true {
+		t.Error("expected ca_valid=true")
+	}
+	// No cert details without runner zoneCA.
+	if _, exists := out["algorithm"]; exists {
+		t.Error("expected no algorithm field without zoneCA")
+	}
+}
+
 func TestIsHex(t *testing.T) {
 	tests := []struct {
 		input string

@@ -2,7 +2,9 @@ package runner
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -131,11 +133,14 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	}
 
 	outputs := map[string]any{
-		"device_found":      len(services) > 0,
-		"service_count":     len(services),
-		"services":          services,
-		"devices_found":     devicesFound,
-		"controllers_found": controllersFound,
+		"device_found":          len(services) > 0,
+		"service_count":         len(services),
+		"services":              services,
+		"devices_found":         devicesFound,
+		"controllers_found":     controllersFound,
+		"devices_found_min":     devicesFound,
+		"controllers_found_min": controllersFound,
+		"controller_found":      controllersFound > 0,
 	}
 
 	// Add first-service details for easy assertion.
@@ -143,12 +148,49 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		first := services[0]
 		outputs["instance_name"] = first.InstanceName
 		outputs["instances_for_device"] = len(services) // count when filtering
+
+		// Add all TXT record fields.
 		for k, v := range first.TXTRecords {
 			outputs["txt_field_"+k] = v
+		}
+
+		// Add service-type-specific derived fields.
+		switch first.ServiceType {
+		case discovery.ServiceTypeCommissionable:
+			// Discriminator fields.
+			outputs["txt_field_D"] = fmt.Sprintf("%d", first.Discriminator)
+			outputs["txt_D_range"] = first.Discriminator <= discovery.MaxDiscriminator
+			// Instance name format.
+			outputs["instance_name_prefix"] = strings.HasPrefix(first.InstanceName, "MASH-")
+
+		case discovery.ServiceTypeOperational:
+			// Zone/device ID fields from TXT records.
+			zi := first.TXTRecords["ZI"]
+			di := first.TXTRecords["DI"]
+			outputs["zone_id_length"] = len(zi)
+			outputs["device_id_length"] = len(di)
+			outputs["zone_id_hex_valid"] = isValidHex(zi)
+			outputs["device_id_hex_valid"] = isValidHex(di)
+			// Instance name format: <zone-id>-<device-id>.
+			outputs["instance_name_format"] = strings.Contains(first.InstanceName, "-")
+
+		case discovery.ServiceTypeCommissioner:
+			// Commissioner-specific fields.
+			zi := first.TXTRecords["ZI"]
+			outputs["txt_ZI_length"] = len(zi)
 		}
 	}
 
 	return outputs, nil
+}
+
+// isValidHex checks whether a string is valid hexadecimal.
+func isValidHex(s string) bool {
+	if s == "" {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
 }
 
 // handleBrowseCommissioners browses for commissioner services.

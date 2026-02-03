@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
@@ -88,7 +89,39 @@ func (r *Runner) handleVerifyCertSubject(ctx context.Context, step *loader.Step,
 
 // handleVerifyDeviceCert verifies the device's operational certificate.
 func (r *Runner) handleVerifyDeviceCert(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	return r.handleVerifyCertificate(ctx, step, state)
+	// Start with base verification.
+	result, err := r.handleVerifyCertificate(ctx, step, state)
+	if err != nil {
+		return result, err
+	}
+
+	// Enrich with device-cert-specific fields.
+	hasOperationalCert := false
+	certSignedByZoneCA := false
+	certValidityDays := 0
+
+	if r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
+		cs := r.conn.tlsConn.ConnectionState()
+		hasOperationalCert = len(cs.PeerCertificates) > 0
+
+		if hasOperationalCert {
+			cert := cs.PeerCertificates[0]
+			certValidityDays = int(time.Until(cert.NotAfter).Hours() / 24)
+
+			// Verify against Zone CA pool if available.
+			if r.zoneCAPool != nil {
+				opts := x509.VerifyOptions{Roots: r.zoneCAPool}
+				_, verifyErr := cert.Verify(opts)
+				certSignedByZoneCA = verifyErr == nil
+			}
+		}
+	}
+
+	result["has_operational_cert"] = hasOperationalCert
+	result["cert_signed_by_zone_ca"] = certSignedByZoneCA
+	result["cert_validity_days"] = certValidityDays
+
+	return result, nil
 }
 
 // handleVerifyDeviceCertStore verifies device has certs stored.

@@ -289,10 +289,23 @@ func (r *Runner) handleVerifySubscriptionActive(ctx context.Context, step *loade
 func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Check if we're still on the same connection
 	sameConn := r.conn != nil && r.conn.connected
+	pasePerformed := r.paseState != nil && r.paseState.completed
+	operationalActive := sameConn && pasePerformed
+
+	// Check mutual TLS (verified chains present).
+	mutualTLS := false
+	if sameConn && r.conn.tlsConn != nil {
+		cs := r.conn.tlsConn.ConnectionState()
+		mutualTLS = len(cs.VerifiedChains) > 0
+	}
 
 	return map[string]any{
-		"same_connection":          sameConn,
-		"no_reconnection_required": sameConn,
+		"same_connection":                sameConn,
+		"no_reconnection_required":       sameConn,
+		"operational_connection_active":  operationalActive,
+		"mutual_tls":                     mutualTLS,
+		"pase_performed":                 pasePerformed,
+		"commissioning_connection_closed": !sameConn || !pasePerformed,
 	}, nil
 }
 

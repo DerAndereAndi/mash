@@ -2,12 +2,13 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
-	"github.com/mash-protocol/mash-go/pkg/commissioning"
+	"github.com/mash-protocol/mash-go/pkg/discovery"
 )
 
 // registerUtilityHandlers registers utility action handlers.
@@ -408,6 +409,8 @@ func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state 
 }
 
 // handleParseQR parses a QR payload string into components.
+// Uses discovery.ParseQRCode (4-field format: MASH:v:d:s) which returns
+// specific sentinel errors for each failure mode, mapped to coded strings.
 func (r *Runner) handleParseQR(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
@@ -417,27 +420,45 @@ func (r *Runner) handleParseQR(ctx context.Context, step *loader.Step, state *en
 		payload, _ = params["content"].(string)
 	}
 	if payload == "" {
-		return map[string]any{"valid": false, "parse_success": false, "error": "no payload provided"}, nil
+		return map[string]any{"valid": false, "parse_success": false, "error": "no_payload"}, nil
 	}
 
-	qr, err := commissioning.ParseQRCode(payload)
+	qr, err := discovery.ParseQRCode(payload)
 	if err != nil {
+		errorCode := mapQRError(err)
 		return map[string]any{
-			"valid":         false,
+			"valid":        false,
 			"parse_success": false,
-			"error":         err.Error(),
+			"error":        errorCode,
+			"error_detail": err.Error(),
 		}, nil
 	}
 
 	return map[string]any{
 		"valid":         true,
 		"parse_success": true,
-		"version":       qr.Version,
+		"version":       int(qr.Version),
 		"discriminator": int(qr.Discriminator),
-		"setup_code":    fmt.Sprintf("%08d", qr.SetupCode),
-		"vendor_id":     int(qr.VendorID),
-		"product_id":    int(qr.ProductID),
+		"setup_code":    qr.SetupCode,
 	}, nil
+}
+
+// mapQRError maps discovery.ParseQRCode sentinel errors to coded strings.
+func mapQRError(err error) string {
+	switch {
+	case errors.Is(err, discovery.ErrInvalidPrefix):
+		return "invalid_prefix"
+	case errors.Is(err, discovery.ErrInvalidFieldCount):
+		return "invalid_field_count"
+	case errors.Is(err, discovery.ErrInvalidVersion):
+		return "invalid_version"
+	case errors.Is(err, discovery.ErrInvalidDiscriminator):
+		return "discriminator_out_of_range"
+	case errors.Is(err, discovery.ErrInvalidSetupCode):
+		return "invalid_setup_code"
+	default:
+		return "parse_error"
+	}
 }
 
 // toFloat converts various numeric types to float64.

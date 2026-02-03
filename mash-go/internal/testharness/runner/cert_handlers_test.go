@@ -123,3 +123,27 @@ func TestHandleDeviceVerifyPeerNotConnected(t *testing.T) {
 		t.Error("expected peer_valid=false when not connected")
 	}
 }
+
+func TestHandleVerifyDeviceCert_NotConnected(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	out, err := r.handleVerifyDeviceCert(context.Background(), &loader.Step{}, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Enriched fields should be present even when not connected.
+	if out["has_operational_cert"] != false {
+		t.Error("expected has_operational_cert=false when not connected")
+	}
+	if out["cert_signed_by_zone_ca"] != false {
+		t.Error("expected cert_signed_by_zone_ca=false when not connected")
+	}
+	if out["cert_validity_days"] != 0 {
+		t.Errorf("expected cert_validity_days=0, got %v", out["cert_validity_days"])
+	}
+	// Base fields from handleVerifyCertificate.
+	if out["cert_valid"] != false {
+		t.Error("expected cert_valid=false when not connected")
+	}
+}

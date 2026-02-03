@@ -79,12 +79,13 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 	zs.zoneOrder = append(zs.zoneOrder, zoneID)
 
 	return map[string]any{
-		"zone_id":        zoneID,
-		"zone_created":   true,
-		"zone_type":      zoneType,
-		"fingerprint":    fingerprint,
+		"zone_id":         zoneID,
+		"save_zone_id":    zoneID, // For save_as support in the engine.
+		"zone_created":    true,
+		"zone_type":       zoneType,
+		"fingerprint":     fingerprint,
 		"zone_id_present": zoneID != "",
-		"zone_id_length": len(zoneID),
+		"zone_id_length":  len(zoneID),
 	}, nil
 }
 
@@ -243,10 +244,23 @@ func (r *Runner) handleVerifyZoneCA(ctx context.Context, step *loader.Step, stat
 		return map[string]any{"ca_valid": false}, nil
 	}
 
-	return map[string]any{
+	outputs := map[string]any{
 		"ca_valid":    zone.CAFingerprint != "",
 		"fingerprint": zone.CAFingerprint,
-	}, nil
+	}
+
+	// Add cert details from the runner's Zone CA if available.
+	if r.zoneCA != nil && r.zoneCA.Certificate != nil {
+		cert := r.zoneCA.Certificate
+		outputs["path_length"] = cert.MaxPathLen
+		outputs["algorithm"] = cert.SignatureAlgorithm.String()
+		outputs["basic_constraints_ca"] = cert.IsCA
+		// Validity period in years.
+		years := cert.NotAfter.Sub(cert.NotBefore).Hours() / (24 * 365)
+		outputs["validity_years_min"] = years
+	}
+
+	return outputs, nil
 }
 
 // handleVerifyZoneBinding verifies a device is bound to a zone.

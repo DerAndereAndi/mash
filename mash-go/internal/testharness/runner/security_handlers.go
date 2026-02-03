@@ -262,11 +262,16 @@ func (r *Runner) handleConnectOperational(ctx context.Context, step *loader.Step
 		target = t
 	}
 
-	// For operational connection, use standard TLS with cert verification
-	tlsConfig := &tls.Config{
-		MinVersion:         tls.VersionTLS13,
-		InsecureSkipVerify: r.config.InsecureSkipVerify,
-		NextProtos:         []string{transport.ALPNProtocol},
+	// For operational connection, use Zone CA validation when available.
+	var tlsConfig *tls.Config
+	if r.zoneCAPool != nil {
+		tlsConfig = r.operationalTLSConfig()
+	} else {
+		tlsConfig = &tls.Config{
+			MinVersion:         tls.VersionTLS13,
+			InsecureSkipVerify: r.config.InsecureSkipVerify,
+			NextProtos:         []string{transport.ALPNProtocol},
+		}
 	}
 
 	dialer := &net.Dialer{Timeout: 10 * time.Second}

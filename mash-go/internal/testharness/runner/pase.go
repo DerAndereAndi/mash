@@ -10,7 +10,9 @@ import (
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
+	"github.com/mash-protocol/mash-go/pkg/service"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 )
 
@@ -125,15 +127,24 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		completed:  true,
 	}
 
-	// Extract and store peer certificate for operational TLS trust.
-	if r.conn.tlsConn != nil {
-		cs := r.conn.tlsConn.ConnectionState()
-		if len(cs.PeerCertificates) > 0 {
-			pool := x509.NewCertPool()
-			for _, cert := range cs.PeerCertificates {
-				pool.AddCert(cert)
+	// Perform certificate exchange after PASE (MsgType 30-33).
+	// This is required: the device blocks waiting for the cert exchange
+	// before it will accept operational messages (Read/Write/Invoke).
+	deviceID, certErr := r.performCertExchange(ctx)
+
+	// Even if cert exchange fails, fall back to commissioning TLS trust
+	// so basic tests that don't need operational connections still work.
+	if certErr != nil {
+		// Fall back: use peer cert from commissioning TLS.
+		if r.conn.tlsConn != nil {
+			cs := r.conn.tlsConn.ConnectionState()
+			if len(cs.PeerCertificates) > 0 {
+				pool := x509.NewCertPool()
+				for _, c := range cs.PeerCertificates {
+					pool.AddCert(c)
+				}
+				r.zoneCAPool = pool
 			}
-			r.zoneCAPool = pool
 		}
 	}
 
@@ -141,13 +152,69 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	state.Set("session_established", true)
 	state.Set("session_key", sessionKey)
 	state.Set("session_key_length", len(sessionKey))
+	if deviceID != "" {
+		state.Set("device_id", deviceID)
+	}
 
-	return map[string]any{
+	outputs := map[string]any{
 		"session_established": true,
 		"commission_success":  true,
 		"key_length":          len(sessionKey),
 		"key_not_zero":        !isZeroKey(sessionKey),
-	}, nil
+	}
+	if deviceID != "" {
+		outputs["device_id"] = deviceID
+	}
+
+	return outputs, nil
+}
+
+// performCertExchange executes the 4-message cert exchange after PASE.
+// It generates a Zone CA, uses IssueInitialCertSync to exchange certs with
+// the device, and stores the resulting certs on the runner for later TLS use.
+func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
+	if r.paseState == nil || r.paseState.sessionKey == nil {
+		return "", fmt.Errorf("no PASE session key")
+	}
+	if r.conn == nil || !r.conn.connected || r.conn.framer == nil {
+		return "", fmt.Errorf("no active connection")
+	}
+
+	// Derive zone ID from PASE shared secret (same derivation as device).
+	zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+
+	// Generate Zone CA for this zone.
+	zoneCA, err := cert.GenerateZoneCA(zoneID, cert.ZoneTypeLocal)
+	if err != nil {
+		return "", fmt.Errorf("generate zone CA: %w", err)
+	}
+
+	// Create a SyncConnection adapter wrapping the framer.
+	syncConn := &framerSyncConn{framer: r.conn.framer}
+
+	// Create the renewal handler and perform the 4-message cert exchange.
+	renewalHandler := service.NewControllerRenewalHandler(zoneCA, syncConn)
+	deviceCert, err := renewalHandler.IssueInitialCertSync(ctx, syncConn)
+	if err != nil {
+		return "", fmt.Errorf("cert exchange: %w", err)
+	}
+
+	// Store Zone CA and build the CA pool for operational TLS.
+	r.zoneCA = zoneCA
+	r.zoneCAPool = zoneCA.TLSClientCAs()
+
+	// Generate controller operational cert for mutual TLS.
+	controllerID := "test-controller"
+	controllerCert, err := cert.GenerateControllerOperationalCert(zoneCA, controllerID)
+	if err != nil {
+		return "", fmt.Errorf("generate controller cert: %w", err)
+	}
+	r.controllerCert = controllerCert
+
+	// Extract device ID from the signed certificate.
+	deviceID, _ := cert.ExtractDeviceID(deviceCert)
+
+	return deviceID, nil
 }
 
 // handlePASERequest handles the legacy pase_request action.

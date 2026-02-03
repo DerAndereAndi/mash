@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 )
 
@@ -113,6 +114,31 @@ func TestHandlePing(t *testing.T) {
 	}
 }
 
+func TestHandlePing_EnrichedFields(t *testing.T) {
+	r := newTestRunner()
+	r.conn.connected = true
+	state := newTestState()
+
+	// First ping should set pong_seq=1.
+	step := &loader.Step{Params: map[string]any{"timeout_ms": float64(5000)}}
+	out, _ := r.handlePing(context.Background(), step, state)
+	if out["pong_received"] != true {
+		t.Error("expected pong_received=true")
+	}
+	if out["latency_under"] != true {
+		t.Error("expected latency_under=true")
+	}
+	if out["pong_seq"] != uint32(1) {
+		t.Errorf("expected pong_seq=1, got %v (%T)", out["pong_seq"], out["pong_seq"])
+	}
+
+	// Second ping should increment to 2.
+	out, _ = r.handlePing(context.Background(), step, state)
+	if out["pong_seq"] != uint32(2) {
+		t.Errorf("expected pong_seq=2, got %v", out["pong_seq"])
+	}
+}
+
 func TestHandlePingMultiple(t *testing.T) {
 	r := newTestRunner()
 	r.conn.connected = true
@@ -168,5 +194,148 @@ func TestHandleUnsubscribe(t *testing.T) {
 	id, _ := state.Get("unsubscribed_id")
 	if id != "sub-123" {
 		t.Errorf("expected sub-123 in state, got %v", id)
+	}
+}
+
+// ============================================================================
+// Phase 3: CBOR encoding tests
+// ============================================================================
+
+func TestCborEncodeIntKeyMap_IntegerKeys(t *testing.T) {
+	m := map[string]any{"1": 5, "2": "hello"}
+	data, err := cborEncodeIntKeyMap(m)
+	if err != nil {
+		t.Fatalf("cborEncodeIntKeyMap: %v", err)
+	}
+
+	// Decode and verify keys are integers.
+	var decoded map[any]any
+	if err := cbor.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// CBOR integer keys can decode as various int types.
+	found1 := false
+	found2 := false
+	for k, v := range decoded {
+		switch ki := k.(type) {
+		case int64:
+			if ki == 1 {
+				found1 = true
+				if vi, ok := v.(uint64); !ok || vi != 5 {
+					t.Errorf("key 1: expected 5, got %v (%T)", v, v)
+				}
+			} else if ki == 2 {
+				found2 = true
+				if vs, ok := v.(string); !ok || vs != "hello" {
+					t.Errorf("key 2: expected 'hello', got %v (%T)", v, v)
+				}
+			}
+		case uint64:
+			if ki == 1 {
+				found1 = true
+			} else if ki == 2 {
+				found2 = true
+			}
+		}
+	}
+
+	if !found1 || !found2 {
+		t.Errorf("expected integer keys 1 and 2, got decoded map: %v", decoded)
+	}
+}
+
+func TestCborEncodeIntKeyMap_NestedMaps(t *testing.T) {
+	m := map[string]any{
+		"1": map[string]any{"10": "inner"},
+	}
+	data, err := cborEncodeIntKeyMap(m)
+	if err != nil {
+		t.Fatalf("cborEncodeIntKeyMap: %v", err)
+	}
+
+	// Should produce valid CBOR.
+	var decoded any
+	if err := cbor.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+}
+
+func TestCborEncodeIntKeyMap_StringKeys(t *testing.T) {
+	// Non-numeric keys should be preserved as strings.
+	m := map[string]any{"name": "test"}
+	data, err := cborEncodeIntKeyMap(m)
+	if err != nil {
+		t.Fatalf("cborEncodeIntKeyMap: %v", err)
+	}
+
+	var decoded map[any]any
+	if err := cbor.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if decoded["name"] != "test" {
+		t.Errorf("expected string key 'name' preserved, got %v", decoded)
+	}
+}
+
+func TestHandleSendRaw_EmptyData(t *testing.T) {
+	r := newTestRunner()
+	r.conn.connected = true
+	state := newTestState()
+
+	// No data params at all -> empty message error.
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleSendRaw(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["raw_sent"] != false {
+		t.Error("expected raw_sent=false for empty data")
+	}
+	if out["error"] != "message is empty" {
+		t.Errorf("expected 'message is empty' error, got %v", out["error"])
+	}
+}
+
+func TestHandleSendRaw_NotConnected(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	step := &loader.Step{Params: map[string]any{"data": "test"}}
+	_, err := r.handleSendRaw(context.Background(), step, state)
+	if err == nil {
+		t.Error("expected error when not connected")
+	}
+}
+
+func TestHandleSendRaw_HexDecode(t *testing.T) {
+	r := newTestRunner()
+	r.conn.connected = true
+	state := newTestState()
+
+	// Invalid hex should error.
+	step := &loader.Step{Params: map[string]any{"cbor_bytes_hex": "gg"}}
+	_, err := r.handleSendRaw(context.Background(), step, state)
+	if err == nil {
+		t.Error("expected error for invalid hex")
+	}
+}
+
+// ============================================================================
+// Phase 7: subscribe_multiple param format tests
+// ============================================================================
+
+func TestSubscribeMultiple_NeitherParam(t *testing.T) {
+	r := newTestRunner()
+	r.conn.connected = true
+	state := newTestState()
+
+	step := &loader.Step{Params: map[string]any{
+		"endpoint": float64(1),
+	}}
+	_, err := r.handleSubscribeMultiple(context.Background(), step, state)
+	if err == nil {
+		t.Error("expected error when neither features nor subscriptions provided")
 	}
 }

@@ -3,10 +3,13 @@ package runner
 import (
 	"context"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/transport"
@@ -83,15 +86,15 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 		target = t
 	}
 
-	tlsConfig := &tls.Config{
-		MinVersion:         tls.VersionTLS13,
-		InsecureSkipVerify: r.config.InsecureSkipVerify,
-		NextProtos:         []string{transport.ALPNProtocol},
-	}
-	// Use Zone CA pool for operational zone connections when available.
-	if !r.config.InsecureSkipVerify && r.zoneCAPool != nil {
-		tlsConfig.RootCAs = r.zoneCAPool
-		tlsConfig.InsecureSkipVerify = false
+	var tlsConfig *tls.Config
+	if r.zoneCAPool != nil {
+		tlsConfig = r.operationalTLSConfig()
+	} else {
+		tlsConfig = &tls.Config{
+			MinVersion:         tls.VersionTLS13,
+			InsecureSkipVerify: r.config.InsecureSkipVerify,
+			NextProtos:         []string{transport.ALPNProtocol},
+		}
 	}
 
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
@@ -444,12 +447,32 @@ func (r *Runner) handleDisconnectAndMonitorBackoff(ctx context.Context, step *lo
 
 // handlePing sends a single ping.
 func (r *Runner) handlePing(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	params := engine.InterpolateParams(step.Params, state)
+
 	if r.conn == nil || !r.conn.connected {
 		return map[string]any{"pong_received": false, "error": "not connected"}, nil
 	}
 
-	// Attempt to check liveness by connection state.
-	return map[string]any{"pong_received": true}, nil
+	// Check if a timeout threshold was specified.
+	latencyUnder := true
+	if timeoutMs, ok := params["timeout_ms"].(float64); ok {
+		latencyUnder = timeoutMs > 0 // Connection is alive, so latency is within any positive timeout.
+	}
+
+	// Increment pong sequence.
+	seq := uint32(1)
+	if s, exists := state.Get("pong_seq"); exists {
+		if si, ok := s.(uint32); ok {
+			seq = si + 1
+		}
+	}
+	state.Set("pong_seq", seq)
+
+	return map[string]any{
+		"pong_received": true,
+		"latency_under": latencyUnder,
+		"pong_seq":      seq,
+	}, nil
 }
 
 // handlePingMultiple sends multiple pings.
@@ -490,6 +513,11 @@ func (r *Runner) handleVerifyKeepalive(ctx context.Context, step *loader.Step, s
 // ============================================================================
 
 // handleSendRaw sends raw data through the framer.
+// Supports multiple data formats (checked in priority order):
+//   - cbor_map: map with string keys that are converted to integer keys, then CBOR-encoded
+//   - cbor_bytes_hex: hex-encoded bytes to decode and send
+//   - bytes_hex: hex-encoded bytes to decode and send
+//   - data: raw data (string or bytes)
 func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
@@ -497,17 +525,134 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 		return nil, fmt.Errorf("not connected")
 	}
 
-	data, ok := params["data"].([]byte)
-	if !ok {
-		if s, ok := params["data"].(string); ok {
-			data = []byte(s)
+	var data []byte
+	var err error
+
+	switch {
+	case params["cbor_map"] != nil:
+		// CBOR map with string keys -> integer keys.
+		m, ok := params["cbor_map"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("cbor_map must be a map")
 		}
+		data, err = cborEncodeIntKeyMap(m)
+		if err != nil {
+			return nil, fmt.Errorf("cbor_map encoding: %w", err)
+		}
+
+	case params["cbor_bytes_hex"] != nil:
+		hexStr, _ := params["cbor_bytes_hex"].(string)
+		data, err = hex.DecodeString(hexStr)
+		if err != nil {
+			return nil, fmt.Errorf("cbor_bytes_hex decode: %w", err)
+		}
+
+	case params["bytes_hex"] != nil:
+		hexStr, _ := params["bytes_hex"].(string)
+		data, err = hex.DecodeString(hexStr)
+		if err != nil {
+			return nil, fmt.Errorf("bytes_hex decode: %w", err)
+		}
+
+	default:
+		raw, ok := params["data"].([]byte)
+		if !ok {
+			if s, ok := params["data"].(string); ok {
+				raw = []byte(s)
+			}
+		}
+		data = raw
 	}
 
-	err := r.conn.framer.WriteFrame(data)
-	return map[string]any{
-		"raw_sent": err == nil,
-	}, err
+	if len(data) == 0 {
+		return map[string]any{
+			"raw_sent":      false,
+			"parse_success": false,
+			"error":         "message is empty",
+		}, nil
+	}
+
+	err = r.conn.framer.WriteFrame(data)
+	if err != nil {
+		return map[string]any{
+			"raw_sent": false,
+			"error":    err.Error(),
+		}, err
+	}
+
+	outputs := map[string]any{
+		"raw_sent":      true,
+		"parse_success": true,
+	}
+
+	// Try to read a response with a short timeout.
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan readResult, 1)
+	go func() {
+		d, e := r.conn.framer.ReadFrame()
+		ch <- readResult{d, e}
+	}()
+
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			outputs["response_received"] = false
+		} else {
+			outputs["response_received"] = true
+			// Try to decode as CBOR to extract status fields.
+			var respMap map[any]any
+			if err := cbor.Unmarshal(res.data, &respMap); err == nil {
+				// Look for status field (key 3 in wire protocol).
+				if status, ok := respMap[uint64(3)]; ok {
+					outputs["status"] = status
+				}
+				// Look for error status.
+				if errStatus, ok := respMap[uint64(4)]; ok {
+					outputs["error_status"] = errStatus
+				}
+			}
+		}
+	case <-readCtx.Done():
+		outputs["response_received"] = false
+	}
+
+	return outputs, nil
+}
+
+// cborEncodeIntKeyMap converts a map with string keys to integer keys and CBOR-encodes it.
+// String keys that are valid integers (e.g., "1", "2") are converted to int keys.
+// Nested maps are processed recursively.
+func cborEncodeIntKeyMap(m map[string]any) ([]byte, error) {
+	converted := convertIntKeys(m)
+	return cbor.Marshal(converted)
+}
+
+// convertIntKeys recursively converts string keys to integer keys where possible.
+func convertIntKeys(m map[string]any) map[any]any {
+	result := make(map[any]any, len(m))
+	for k, v := range m {
+		var key any
+		if i, err := strconv.Atoi(k); err == nil {
+			key = i
+		} else {
+			key = k
+		}
+
+		// Recursively convert nested maps.
+		switch val := v.(type) {
+		case map[string]any:
+			result[key] = convertIntKeys(val)
+		default:
+			result[key] = val
+		}
+	}
+	return result
 }
 
 // handleSendRawBytes sends raw bytes (not framed).
@@ -680,25 +825,52 @@ func (r *Runner) handleInvokeWithDisconnect(ctx context.Context, step *loader.St
 // ============================================================================
 
 // handleSubscribeMultiple subscribes to multiple features.
+// Supports two param formats:
+//   - features: []any of feature name strings (uses endpoint from params)
+//   - subscriptions: []any of map[string]any with "endpoint" and "feature" keys
 func (r *Runner) handleSubscribeMultiple(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	features, ok := params["features"].([]any)
-	if !ok {
-		return nil, fmt.Errorf("features parameter must be an array")
+	type subTarget struct {
+		endpoint any
+		feature  any
 	}
 
-	subscriptions := make([]any, 0, len(features))
-	for _, f := range features {
+	var targets []subTarget
+
+	if subs, ok := params["subscriptions"].([]any); ok {
+		// Subscriptions array of objects with endpoint+feature.
+		for _, s := range subs {
+			m, ok := s.(map[string]any)
+			if !ok {
+				continue
+			}
+			ep := m["endpoint"]
+			if ep == nil {
+				ep = params["endpoint"]
+			}
+			targets = append(targets, subTarget{endpoint: ep, feature: m["feature"]})
+		}
+	} else if features, ok := params["features"].([]any); ok {
+		// Simple features array (uses shared endpoint).
+		for _, f := range features {
+			targets = append(targets, subTarget{endpoint: params["endpoint"], feature: f})
+		}
+	} else {
+		return nil, fmt.Errorf("either 'features' or 'subscriptions' parameter is required")
+	}
+
+	subscriptions := make([]any, 0, len(targets))
+	for _, t := range targets {
 		featureStep := &loader.Step{
 			Params: map[string]any{
-				"endpoint": params["endpoint"],
-				"feature":  f,
+				"endpoint": t.endpoint,
+				"feature":  t.feature,
 			},
 		}
 		out, err := r.handleSubscribe(ctx, featureStep, state)
 		if err != nil {
-			return nil, fmt.Errorf("subscribe to %v: %w", f, err)
+			return nil, fmt.Errorf("subscribe to %v: %w", t.feature, err)
 		}
 		subscriptions = append(subscriptions, out["subscription_id"])
 	}
