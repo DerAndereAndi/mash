@@ -471,6 +471,111 @@ func TestToFloat(t *testing.T) {
 	}
 }
 
+func TestHandleVerifyTiming_WithinLimitAlias(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set up start and end times with a known gap.
+	now := time.Now()
+	state.Set("start_time", now.Add(-50*time.Millisecond))
+	state.Set("end_time", now)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			"max_ms": float64(5000),
+		},
+	}
+	out, err := r.handleVerifyTiming(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Both within_tolerance and within_limit should be present with the same value.
+	wt, wtOK := out[KeyWithinTolerance]
+	wl, wlOK := out[KeyWithinLimit]
+	if !wtOK {
+		t.Error("expected within_tolerance key in output")
+	}
+	if !wlOK {
+		t.Error("expected within_limit key in output")
+	}
+	if wt != wl {
+		t.Errorf("within_tolerance (%v) != within_limit (%v)", wt, wl)
+	}
+}
+
+func TestHandleVerifyTiming_MaxDuration(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set up timing with a 50ms gap.
+	now := time.Now()
+	state.Set("start_time", now.Add(-50*time.Millisecond))
+	state.Set("end_time", now)
+
+	// Use max_duration as a Go duration string ("6s" = 6000ms).
+	step := &loader.Step{
+		Params: map[string]any{
+			"max_duration": "6s",
+		},
+	}
+	out, err := r.handleVerifyTiming(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyWithinTolerance] != true {
+		t.Errorf("expected within_tolerance=true for 50ms < 6s, got %v", out[KeyWithinTolerance])
+	}
+
+	// Now test with a very short max_duration that should fail.
+	step = &loader.Step{
+		Params: map[string]any{
+			"max_duration": "1ms",
+		},
+	}
+	out, err = r.handleVerifyTiming(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyWithinTolerance] != false {
+		t.Errorf("expected within_tolerance=false for 50ms > 1ms, got %v", out[KeyWithinTolerance])
+	}
+}
+
+func TestHandleConnect_RecordsStartEndTime(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "127.0.0.1:1" // Connection refused -- fast failure
+	state := newTestState()
+
+	step := &loader.Step{
+		Params: map[string]any{},
+	}
+
+	// Connect will fail (port closed) but should still record timing.
+	_, _ = r.handleConnect(context.Background(), step, state)
+
+	startVal, startOK := state.Get("start_time")
+	endVal, endOK := state.Get("end_time")
+
+	if !startOK {
+		t.Error("expected start_time to be set in state after connect")
+	}
+	if !endOK {
+		t.Error("expected end_time to be set in state after connect")
+	}
+
+	if startOK {
+		if _, ok := startVal.(time.Time); !ok {
+			t.Errorf("expected start_time to be time.Time, got %T", startVal)
+		}
+	}
+	if endOK {
+		if _, ok := endVal.(time.Time); !ok {
+			t.Errorf("expected end_time to be time.Time, got %T", endVal)
+		}
+	}
+}
+
 func TestHandleCompareUnknownOperator(t *testing.T) {
 	r := newTestRunner()
 	state := engine.NewExecutionState(context.Background())

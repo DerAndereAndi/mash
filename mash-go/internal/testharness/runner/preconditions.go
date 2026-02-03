@@ -37,9 +37,10 @@ const (
 // simulated scenario (D2D, environment, capacity, etc.).
 var simulationPreconditionKeys = map[string]bool{
 	// D2D simulation.
-	PrecondTwoDevicesSameZone:       true,
-	PrecondTwoDevicesDifferentZones: true,
-	PrecondDeviceBCertExpired:       true,
+	PrecondTwoDevicesSameZone:          true,
+	PrecondTwoDevicesDifferentZones:    true,
+	PrecondDeviceBCertExpired:          true,
+	PrecondTwoDevicesSameDiscriminator: true,
 	// Environment / capacity simulation.
 	PrecondDeviceZonesFull:            true,
 	PrecondNoDevicesAdvertising:       true,
@@ -49,6 +50,7 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondDevicePortClosed:           true,
 	PrecondDeviceWillAppearAfterDelay: true,
 	PrecondFiveZonesConnected:         true,
+	PrecondTwoZonesConnected:          true,
 	PrecondDeviceListening:            true,
 }
 
@@ -60,9 +62,10 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceListening:   precondLevelNone,
 
 	// D2D simulation preconditions (no actual connection needed).
-	PrecondTwoDevicesSameZone:       precondLevelNone,
-	PrecondTwoDevicesDifferentZones: precondLevelNone,
-	PrecondDeviceBCertExpired:       precondLevelNone,
+	PrecondTwoDevicesSameZone:          precondLevelNone,
+	PrecondTwoDevicesDifferentZones:    precondLevelNone,
+	PrecondDeviceBCertExpired:          precondLevelNone,
+	PrecondTwoDevicesSameDiscriminator: precondLevelNone,
 
 	// Controller preconditions (zone/cert state, no connection needed).
 	PrecondZoneCreated:              precondLevelNone,
@@ -78,6 +81,7 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDevicePortClosed:           precondLevelNone,
 	PrecondDeviceWillAppearAfterDelay: precondLevelNone,
 	PrecondFiveZonesConnected:         precondLevelNone,
+	PrecondTwoZonesConnected:          precondLevelNone,
 
 	PrecondDeviceInCommissioningMode: precondLevelCommissioning,
 	PrecondDeviceUncommissioned:      precondLevelCommissioning,
@@ -173,6 +177,14 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 				// Pre-populate connection tracker with 5 dummy zone connections.
 				ct := getConnectionTracker(state)
 				for _, name := range []string{"GRID", "BUILDING", "HOME", "USER1", "USER2"} {
+					if _, exists := ct.zoneConnections[name]; !exists {
+						ct.zoneConnections[name] = &Connection{connected: true}
+					}
+				}
+			case PrecondTwoZonesConnected:
+				// Pre-populate connection tracker with 2 dummy zone connections.
+				ct := getConnectionTracker(state)
+				for _, name := range []string{"GRID", "LOCAL"} {
 					if _, exists := ct.zoneConnections[name]; !exists {
 						ct.zoneConnections[name] = &Connection{connected: true}
 					}

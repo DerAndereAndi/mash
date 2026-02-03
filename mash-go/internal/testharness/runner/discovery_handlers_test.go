@@ -372,6 +372,49 @@ func TestVerifyTXTRecords_RequiredKeys(t *testing.T) {
 	}
 }
 
+func TestBrowseMDNS_TwoDevicesSameDiscriminator(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set the simulation precondition.
+	state.Set(PrecondTwoDevicesSameDiscriminator, true)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType: "commissionable",
+			KeyTimeoutMs:   float64(1000),
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should find 2 devices.
+	devicesFound, _ := out[KeyDevicesFound].(int)
+	if devicesFound != 2 {
+		t.Errorf("expected devices_found=2, got %v", out[KeyDevicesFound])
+	}
+
+	// Instance conflict should be resolved (different names).
+	icr, _ := out[KeyInstanceConflictResolved].(bool)
+	if !icr {
+		t.Error("expected instance_conflict_resolved=true")
+	}
+
+	// Verify the discovery state has 2 services with the same discriminator.
+	ds := getDiscoveryState(state)
+	if len(ds.services) != 2 {
+		t.Fatalf("expected 2 services, got %d", len(ds.services))
+	}
+	if ds.services[0].Discriminator != ds.services[1].Discriminator {
+		t.Error("expected both services to have the same discriminator")
+	}
+	if ds.services[0].InstanceName == ds.services[1].InstanceName {
+		t.Error("expected different instance names")
+	}
+}
+
 // C8: wait_for_device fallback populates ds.services.
 func TestWaitForDevice_PopulatesServices(t *testing.T) {
 	r := newTestRunner()

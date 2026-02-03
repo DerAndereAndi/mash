@@ -442,10 +442,15 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		}
 	}
 
+	// Record start time for verify_timing.
+	startTime := time.Now()
+	state.Set("start_time", startTime)
+
 	// Connect with timeout
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
+		state.Set("end_time", time.Now())
 		errorCode := classifyConnectError(err)
 		// Return connection failure as outputs so tests can assert on TLS errors.
 		return map[string]any{
@@ -460,6 +465,9 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			KeyTLSAlert:              extractTLSAlert(err),
 		}, nil
 	}
+
+	// Record end time for verify_timing.
+	state.Set("end_time", time.Now())
 
 	r.conn.tlsConn = conn
 	r.conn.framer = transport.NewFramer(conn)

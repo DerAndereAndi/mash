@@ -204,11 +204,11 @@ func TestEnsureCommissioned_AlreadyDone(t *testing.T) {
 
 func TestSortByPreconditionLevel(t *testing.T) {
 	cases := []*loader.TestCase{
-		{ID: "TC-COMM-001", Preconditions: []loader.Condition{{PrecondDeviceCommissioned: true}}},          // level 3
+		{ID: "TC-COMM-001", Preconditions: []loader.Condition{{PrecondDeviceCommissioned: true}}},      // level 3
 		{ID: "TC-DISC-001", Preconditions: nil},                                                        // level 0
-		{ID: "TC-CONN-001", Preconditions: []loader.Condition{{PrecondConnectionEstablished: true}}},       // level 2
+		{ID: "TC-CONN-001", Preconditions: []loader.Condition{{PrecondConnectionEstablished: true}}},   // level 2
 		{ID: "TC-PASE-001", Preconditions: []loader.Condition{{"device_in_commissioning_mode": true}}}, // level 1
-		{ID: "TC-COMM-002", Preconditions: []loader.Condition{{PrecondSessionEstablished: true}}},          // level 3
+		{ID: "TC-COMM-002", Preconditions: []loader.Condition{{PrecondSessionEstablished: true}}},      // level 3
 		{ID: "TC-DISC-002", Preconditions: nil},                                                        // level 0
 		{ID: "TC-PASE-002", Preconditions: []loader.Condition{{"device_uncommissioned": true}}},        // level 1
 	}
@@ -416,6 +416,70 @@ func TestPreconditionLevel_D2DKeys(t *testing.T) {
 		if got != precondLevelNone {
 			t.Errorf("preconditionLevel(%s) = %d, want %d (level 0)", key, got, precondLevelNone)
 		}
+	}
+}
+
+func TestPreconditionLevel_TwoZonesConnected(t *testing.T) {
+	r := newTestRunner()
+	conditions := []loader.Condition{
+		{PrecondTwoZonesConnected: true},
+	}
+	got := r.preconditionLevel(conditions)
+	if got != precondLevelNone {
+		t.Errorf("preconditionLevel(two_zones_connected) = %d, want %d (level 0)", got, precondLevelNone)
+	}
+}
+
+func TestSetupPreconditions_TwoZonesConnected(t *testing.T) {
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+
+	tc := &loader.TestCase{
+		ID: "TC-MULTI-003",
+		Preconditions: []loader.Condition{
+			{PrecondTwoZonesConnected: true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// State key should be set.
+	v, ok := state.Get(PrecondTwoZonesConnected)
+	if !ok {
+		t.Error("expected two_zones_connected to be stored in state")
+	}
+	if v != true {
+		t.Errorf("expected true, got %v", v)
+	}
+
+	// Connection tracker should have exactly 2 zone connections.
+	ct := getConnectionTracker(state)
+	if len(ct.zoneConnections) != 2 {
+		t.Errorf("expected 2 zone connections, got %d", len(ct.zoneConnections))
+	}
+	for _, name := range []string{"GRID", "LOCAL"} {
+		conn, exists := ct.zoneConnections[name]
+		if !exists {
+			t.Errorf("expected zone connection %q to exist", name)
+			continue
+		}
+		if !conn.connected {
+			t.Errorf("expected zone %q to be connected", name)
+		}
+	}
+}
+
+func TestPreconditionLevel_TwoDevicesSameDiscriminator(t *testing.T) {
+	r := newTestRunner()
+	conditions := []loader.Condition{
+		{PrecondTwoDevicesSameDiscriminator: true},
+	}
+	got := r.preconditionLevel(conditions)
+	if got != precondLevelNone {
+		t.Errorf("preconditionLevel(two_devices_same_discriminator) = %d, want %d (level 0)", got, precondLevelNone)
 	}
 }
 

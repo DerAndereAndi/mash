@@ -423,6 +423,30 @@ func TestInterpolateParamsWithPICS_TypePreservation(t *testing.T) {
 	}
 }
 
+// TestInterpolate_DollarBraceLowercaseNotResolved documents that ${setup_code}
+// (lowercase) is NOT resolved by the PICS interpolator, which only matches
+// uppercase PICS item names. State variables must use {{ setup_code }} syntax.
+func TestInterpolate_DollarBraceLowercaseNotResolved(t *testing.T) {
+	state := NewExecutionState(context.Background())
+	state.Set("setup_code", "12345678")
+
+	pics := &loader.PICSFile{
+		Items: map[string]interface{}{},
+	}
+
+	// ${setup_code} should NOT be resolved (lowercase doesn't match PICS pattern).
+	dollarResult := InterpolateWithPICS("${setup_code}", state, pics)
+	if dollarResult != "${setup_code}" {
+		t.Errorf("${setup_code} should pass through unchanged, got %q", dollarResult)
+	}
+
+	// {{ setup_code }} SHOULD be resolved from state.
+	braceResult := InterpolateWithPICS("{{ setup_code }}", state, pics)
+	if braceResult != "12345678" {
+		t.Errorf("{{ setup_code }} should resolve to %q, got %q", "12345678", braceResult)
+	}
+}
+
 // TestIsPurePICSRef tests the PICS reference detection.
 func TestIsPurePICSRef(t *testing.T) {
 	tests := []struct {

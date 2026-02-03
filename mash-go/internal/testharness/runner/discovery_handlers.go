@@ -156,39 +156,67 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
-	serviceType, _ := params[KeyServiceType].(string)
-	timeoutMs := 5000
-	if t, ok := params[KeyTimeoutMs].(float64); ok {
-		timeoutMs = int(t)
-	}
-
-	// Determine if retry is requested.
-	retryRequested := false
-	if r, ok := params["retry"].(bool); ok {
-		retryRequested = r
-	}
-
-	services, err := r.browseMDNSOnce(ctx, serviceType, params, timeoutMs)
-	if err != nil {
-		return nil, err
-	}
-
-	// Retry once if requested and no services found.
+	// Simulate two devices with the same discriminator.
 	retries := 0
-	if retryRequested && len(services) == 0 {
-		retries = 1
-		services, err = r.browseMDNSOnce(ctx, serviceType, params, timeoutMs)
+	if twoDevs, _ := state.Get(PrecondTwoDevicesSameDiscriminator); twoDevs == true {
+		disc := uint16(1234)
+		if d, ok := params[KeyDiscriminator].(float64); ok {
+			disc = uint16(d)
+		}
+		ds.services = []discoveredService{
+			{
+				InstanceName:  fmt.Sprintf("MASH-%d", disc),
+				ServiceType:   discovery.ServiceTypeCommissionable,
+				Discriminator: disc,
+				Host:          "device-a.local",
+				Port:          8443,
+				Addresses:     []string{"192.168.1.10"},
+				TXTRecords:    map[string]string{"brand": "Test", "model": "A"},
+			},
+			{
+				InstanceName:  fmt.Sprintf("MASH-%d-2", disc),
+				ServiceType:   discovery.ServiceTypeCommissionable,
+				Discriminator: disc,
+				Host:          "device-b.local",
+				Port:          8443,
+				Addresses:     []string{"192.168.1.11"},
+				TXTRecords:    map[string]string{"brand": "Test", "model": "B"},
+			},
+		}
+	} else {
+		serviceType, _ := params[KeyServiceType].(string)
+		timeoutMs := 5000
+		if t, ok := params[KeyTimeoutMs].(float64); ok {
+			timeoutMs = int(t)
+		}
+
+		// Determine if retry is requested.
+		retryRequested := false
+		if r, ok := params["retry"].(bool); ok {
+			retryRequested = r
+		}
+
+		services, err := r.browseMDNSOnce(ctx, serviceType, params, timeoutMs)
 		if err != nil {
 			return nil, err
 		}
-	}
 
-	ds.services = services
+		// Retry once if requested and no services found.
+		if retryRequested && len(services) == 0 {
+			retries = 1
+			services, err = r.browseMDNSOnce(ctx, serviceType, params, timeoutMs)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		ds.services = services
+	}
 
 	// Compute per-service-type counts and first-service metadata.
 	devicesFound := 0
 	controllersFound := 0
-	for _, svc := range services {
+	for _, svc := range ds.services {
 		switch svc.ServiceType {
 		case discovery.ServiceTypeCommissionable, discovery.ServiceTypeOperational:
 			devicesFound++
@@ -198,8 +226,8 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	}
 
 	// Check for instance name conflicts (duplicate instance names).
-	instanceNames := make(map[string]int, len(services))
-	for _, svc := range services {
+	instanceNames := make(map[string]int, len(ds.services))
+	for _, svc := range ds.services {
 		instanceNames[svc.InstanceName]++
 	}
 	instanceConflict := false
@@ -211,9 +239,9 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	}
 
 	outputs := map[string]any{
-		KeyDeviceFound:              len(services) > 0,
-		KeyServiceCount:             len(services),
-		KeyServices:                 services,
+		KeyDeviceFound:              len(ds.services) > 0,
+		KeyServiceCount:             len(ds.services),
+		KeyServices:                 ds.services,
 		KeyDevicesFound:             devicesFound,
 		KeyControllersFound:         controllersFound,
 		KeyDevicesFoundMin:          devicesFound,
@@ -224,7 +252,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	}
 
 	// Set error_code when no services found.
-	if len(services) == 0 {
+	if len(ds.services) == 0 {
 		if _, hasDisc := params[KeyDiscriminator]; hasDisc {
 			outputs[KeyErrorCode] = "DISCRIMINATOR_MISMATCH"
 		} else {
@@ -233,8 +261,8 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	}
 
 	// Check for address resolution issues: device found but no resolved addresses.
-	if len(services) > 0 {
-		for _, svc := range services {
+	if len(ds.services) > 0 {
+		for _, svc := range ds.services {
 			if len(svc.Addresses) == 0 && svc.Host != "" {
 				outputs[KeyErrorCode] = "ADDRESS_RESOLUTION_FAILED"
 				break
@@ -243,10 +271,10 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	}
 
 	// Add first-service details for easy assertion.
-	if len(services) > 0 {
-		first := services[0]
+	if len(ds.services) > 0 {
+		first := ds.services[0]
 		outputs[KeyInstanceName] = first.InstanceName
-		outputs[KeyInstancesForDevice] = len(services) // count when filtering
+		outputs[KeyInstancesForDevice] = len(ds.services) // count when filtering
 
 		// Add all TXT record fields.
 		for k, v := range first.TXTRecords {

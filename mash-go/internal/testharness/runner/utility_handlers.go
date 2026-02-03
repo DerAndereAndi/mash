@@ -208,6 +208,13 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 		maxMs = int64(m)
 	}
 
+	// Support max_duration as a Go duration string (e.g., "6s").
+	if md, ok := params["max_duration"].(string); ok && md != "" {
+		if d, err := time.ParseDuration(md); err == nil {
+			maxMs = d.Milliseconds()
+		}
+	}
+
 	withinTolerance := elapsedMs >= minMs
 	if maxMs > 0 {
 		withinTolerance = withinTolerance && elapsedMs <= maxMs
@@ -215,6 +222,7 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 
 	return map[string]any{
 		KeyWithinTolerance: withinTolerance,
+		KeyWithinLimit:     withinTolerance,
 		KeyElapsedMs:       elapsedMs,
 	}, nil
 }
@@ -427,19 +435,19 @@ func (r *Runner) handleParseQR(ctx context.Context, step *loader.Step, state *en
 	if err != nil {
 		errorCode := mapQRError(err)
 		return map[string]any{
-			KeyValid:       false,
+			KeyValid:        false,
 			KeyParseSuccess: false,
-			KeyError:       errorCode,
-			KeyErrorDetail: err.Error(),
+			KeyError:        errorCode,
+			KeyErrorDetail:  err.Error(),
 		}, nil
 	}
 
 	return map[string]any{
-		KeyValid:        true,
-		KeyParseSuccess: true,
-		KeyVersion:      int(qr.Version),
+		KeyValid:         true,
+		KeyParseSuccess:  true,
+		KeyVersion:       int(qr.Version),
 		KeyDiscriminator: int(qr.Discriminator),
-		KeySetupCode:    qr.SetupCode,
+		KeySetupCode:     qr.SetupCode,
 	}, nil
 }
 
