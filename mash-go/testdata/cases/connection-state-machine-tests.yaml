@@ -610,7 +610,7 @@ pics_requirements:
 
 preconditions:
   - device_listening: true
-  - two_zones_commissioned: true
+  - two_zones_connected: true
 
 steps:
   - name: Connect Zone 1 (GRID)

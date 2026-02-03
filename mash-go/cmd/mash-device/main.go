@@ -61,6 +61,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -189,6 +190,21 @@ func main() {
 		log.Fatalf("Failed to create device of type: %s", config.Type)
 	}
 
+	// Create structured logger based on --log-level flag.
+	// This enables all debugLog() calls in device_service.go.
+	var slogLevel slog.Level
+	switch config.LogLevel {
+	case "debug":
+		slogLevel = slog.LevelDebug
+	case "warn":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	default:
+		slogLevel = slog.LevelInfo
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slogLevel}))
+
 	// Create device service
 	svcConfig := service.DefaultDeviceConfig()
 	svcConfig.Discriminator = config.Discriminator
@@ -201,6 +217,7 @@ func main() {
 	svcConfig.ListenAddress = fmt.Sprintf(":%d", config.Port)
 	svcConfig.TestMode = config.TestMode
 	svcConfig.TestEnableKey = config.EnableKey
+	svcConfig.Logger = logger
 
 	// In test mode, add TestControl feature to root endpoint.
 	var testControl *features.TestControl

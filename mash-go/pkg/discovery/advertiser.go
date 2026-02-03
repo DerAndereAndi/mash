@@ -190,6 +190,14 @@ func (m *DiscoveryManager) EnterCommissioningMode(ctx context.Context) error {
 	if windowDuration <= 0 {
 		windowDuration = CommissioningWindowDuration
 	}
+
+	// Stop any existing timer to prevent a leaked goroutine from firing
+	// exitCommissioningModeInternal at the wrong time (e.g., during
+	// test-mode auto-reentry).
+	if m.commissioningTimer != nil {
+		m.commissioningTimer.Stop()
+	}
+
 	m.commissioningTimer = time.AfterFunc(windowDuration, func() {
 		m.exitCommissioningModeInternal(false)
 	})

@@ -52,6 +52,17 @@ type Runner struct {
 	// appear "connected" on the device side).
 	activeZoneConns map[string]*Connection
 
+	// lastDeviceConnClose records when closeActiveZoneConns last closed
+	// real device connections. This allows PrecondTwoZonesConnected to
+	// wait for the device to process zone removals even when the current
+	// test's hadActive is false.
+	lastDeviceConnClose time.Time
+
+	// activeZoneIDs maps zone names to their derived zone IDs (from PASE
+	// session keys). Used by closeActiveZoneConns to send explicit
+	// RemoveZone commands before closing connections.
+	activeZoneIDs map[string]string
+
 	// commissionZoneType overrides the zone type used when generating the
 	// Zone CA during performCertExchange. Defaults to ZoneTypeLocal if zero.
 	commissionZoneType cert.ZoneType
@@ -148,7 +159,8 @@ func New(config *Config) *Runner {
 		conn:            &Connection{},
 		resolver:        NewResolver(),
 		activeZoneConns: make(map[string]*Connection),
-		pics:         pics,
+		activeZoneIDs:   make(map[string]string),
+		pics:            pics,
 	}
 
 	// Set precondition callback (must be after r is created since it's a method on r).

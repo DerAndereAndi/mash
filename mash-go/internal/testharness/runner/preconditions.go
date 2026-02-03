@@ -234,6 +234,26 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 				{"LOCAL", cert.ZoneTypeLocal},
 			}
 			if r.config.Target != "" {
+				// Wait for the device to finish processing zone removals
+				// from a previous test. closeActiveZoneConns may have run
+				// in an earlier test's precondition setup, so hadActive was
+				// false for this test even though the device is still busy
+				// with RemoveZone -> EnterCommissioningMode transitions.
+				//
+				// After explicit RemoveZone the device needs ~1s to complete:
+				// mDNS de-registration -> state persistence ->
+				// mDNS re-registration -> ready for PASE.
+				// This is a safety net for cases where RemoveZone was sent
+				// during closeActiveZoneConns; without RemoveZone the device
+				// recovery takes much longer (~5s+).
+				if !r.lastDeviceConnClose.IsZero() {
+					elapsed := time.Since(r.lastDeviceConnClose)
+					minWait := 1500 * time.Millisecond
+					if elapsed < minWait {
+						time.Sleep(minWait - elapsed)
+					}
+				}
+
 				// Commission each zone separately. Each PASE session
 				// creates a new zone on the device, and the PASE
 				// connection becomes that zone's live framer for
@@ -262,6 +282,11 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 					ct.zoneConnections[z.name] = zoneConn
 					r.activeZoneConns[z.name] = zoneConn
 					state.Set(ZoneConnectionStateKey(z.name), zoneConn)
+
+					// Store zone ID for explicit RemoveZone on teardown.
+					if r.paseState != nil && r.paseState.sessionKey != nil {
+						r.activeZoneIDs[z.name] = deriveZoneIDFromSecret(r.paseState.sessionKey)
+					}
 
 					// Detach from runner so the next iteration
 					// creates a fresh connection.
@@ -380,20 +405,27 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 
 	_, err := r.handleCommission(ctx, step, state)
 	if err != nil {
-		// On transient errors (EOF, connection reset, broken pipe), retry once
-		// after a short delay. The device may still be cycling its commissioning
-		// window in test mode.
+		// On transient errors (EOF, connection reset, broken pipe), retry
+		// up to 2 times after a short delay. The device may still be
+		// cycling its commissioning window in test mode, especially after
+		// zone removals that trigger mDNS and file I/O operations.
+		const maxRetries = 2
 		if isTransientError(err) {
-			r.ensureDisconnected()
-			time.Sleep(1 * time.Second)
-			if connErr := r.ensureConnected(ctx, state); connErr != nil {
-				return fmt.Errorf("precondition commission retry connect failed: %w", connErr)
+			for retry := 1; retry <= maxRetries; retry++ {
+				r.ensureDisconnected()
+				time.Sleep(1 * time.Second)
+				if connErr := r.ensureConnected(ctx, state); connErr != nil {
+					return fmt.Errorf("precondition commission retry %d connect failed: %w", retry, connErr)
+				}
+				_, err = r.handleCommission(ctx, step, state)
+				if err == nil {
+					return nil
+				}
+				if !isTransientError(err) {
+					break
+				}
 			}
-			_, err = r.handleCommission(ctx, step, state)
-			if err != nil {
-				return fmt.Errorf("precondition commission retry failed: %w", err)
-			}
-			return nil
+			return fmt.Errorf("precondition commission failed after %d retries: %w", maxRetries, err)
 		}
 		return fmt.Errorf("precondition commission failed: %w", err)
 	}
@@ -428,11 +460,27 @@ func isNetError(err error) bool {
 // previous tests. This ensures the device marks those zones as disconnected
 // and can accept new connections.
 func (r *Runner) closeActiveZoneConns() {
+	closedAny := false
 	for id, conn := range r.activeZoneConns {
+		// Send explicit RemoveZone before closing so the device can
+		// synchronously process the zone removal and re-enter commissioning
+		// mode quickly. Without this, the device relies on async TCP
+		// disconnect detection which is much slower and each premature
+		// PASE attempt further delays recovery.
+		if conn.connected && conn.framer != nil {
+			if zoneID, ok := r.activeZoneIDs[id]; ok {
+				r.sendRemoveZoneOnConn(conn, zoneID)
+			}
+		}
 		if conn.connected {
 			_ = conn.Close()
+			closedAny = true
 		}
 		delete(r.activeZoneConns, id)
+		delete(r.activeZoneIDs, id)
+	}
+	if closedAny {
+		r.lastDeviceConnClose = time.Now()
 	}
 }
 
@@ -479,6 +527,42 @@ func (r *Runner) sendRemoveZone() {
 
 	// Best-effort: send and read response, ignoring errors.
 	_, _ = r.sendRequest(data, "remove-zone")
+}
+
+// sendRemoveZoneOnConn sends a RemoveZone invoke on a specific zone connection.
+// Used by closeActiveZoneConns to explicitly remove zones before closing TCP
+// connections, giving the device a synchronous signal instead of relying on
+// async disconnect detection. A short read deadline prevents blocking when
+// the device enters commissioning mode before responding (e.g., last zone).
+func (r *Runner) sendRemoveZoneOnConn(conn *Connection, zoneID string) {
+	req := &wire.Request{
+		MessageID:  atomic.AddUint32(&r.messageID, 1),
+		Operation:  wire.OpInvoke,
+		EndpointID: 0,
+		FeatureID:  1, // DeviceInfo
+		Payload: &wire.InvokePayload{
+			CommandID:  16, // DeviceInfoCmdRemoveZone
+			Parameters: map[string]any{"zoneId": zoneID},
+		},
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return
+	}
+
+	if err := conn.framer.WriteFrame(data); err != nil {
+		return
+	}
+
+	// Read response with short deadline. The response arrives in <2ms when
+	// it's going to arrive at all. When the last zone is removed, the device
+	// enters commissioning mode and may close the connection before
+	// responding, so this deadline avoids a long unnecessary wait.
+	if conn.tlsConn != nil {
+		conn.tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	}
+	_, _ = conn.framer.ReadFrame()
 }
 
 // deriveZoneIDFromSecret derives a zone ID from a PASE shared secret

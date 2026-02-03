@@ -392,18 +392,30 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 	// Check if we're in commissioning mode
 	s.mu.RLock()
 	inCommissioningMode := s.discoveryManager != nil && s.discoveryManager.IsCommissioningMode()
+	var discoveryState string
+	if s.discoveryManager != nil {
+		discoveryState = s.discoveryManager.State().String()
+	}
 	s.mu.RUnlock()
 
 	// If the peer presented a client certificate, this is an operational
 	// reconnection from a known zone (not a new PASE commissioning).
 	peerHasCert := len(state.PeerCertificates) > 0
 
+	s.debugLog("handleConnection: routing decision",
+		"discoveryState", discoveryState,
+		"inCommissioningMode", inCommissioningMode,
+		"peerHasCert", peerHasCert,
+		"remoteAddr", tlsConn.RemoteAddr().String())
+
 	if inCommissioningMode && !peerHasCert {
+		s.debugLog("handleConnection: -> commissioning handler")
 		s.handleCommissioningConnection(tlsConn)
 	} else {
 		// Operational mode - handle reconnection from known zones.
 		// Also used when in commissioning mode but the peer presented
 		// a certificate (indicating an operational reconnection).
+		s.debugLog("handleConnection: -> operational handler")
 		s.handleOperationalConnection(tlsConn)
 	}
 }
@@ -422,8 +434,17 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 	s.mu.RUnlock()
 
 	if targetZoneID == "" {
-		// No known disconnected zones - reject connection
-		s.debugLog("handleOperationalConnection: no disconnected zones to reconnect")
+		// No known disconnected zones - reject connection.
+		// Log the full zone state map for diagnostics.
+		s.mu.RLock()
+		zoneStates := make([]string, 0, len(s.connectedZones))
+		for zid, cz := range s.connectedZones {
+			zoneStates = append(zoneStates, fmt.Sprintf("%s(connected=%v)", zid, cz.Connected))
+		}
+		s.mu.RUnlock()
+		s.debugLog("handleOperationalConnection: no disconnected zones to reconnect",
+			"zoneCount", len(zoneStates),
+			"zones", zoneStates)
 		conn.Close()
 		return
 	}
@@ -626,10 +647,15 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// In test mode, schedule auto-reentry into commissioning mode so the next
 	// test can commission without waiting for manual intervention.
 	if s.config.TestMode {
+		s.debugLog("handleCommissioningConnection: scheduling test-mode auto-reentry goroutine", "zoneID", zoneID)
 		go func() {
+			s.debugLog("handleCommissioningConnection: auto-reentry goroutine started, sleeping 500ms", "zoneID", zoneID)
 			time.Sleep(500 * time.Millisecond)
+			s.debugLog("handleCommissioningConnection: auto-reentry goroutine woke up, calling EnterCommissioningMode", "zoneID", zoneID)
 			if err := s.EnterCommissioningMode(); err != nil {
-				s.debugLog("handleCommissioningConnection: test-mode auto-reenter failed", "error", err)
+				s.debugLog("handleCommissioningConnection: test-mode auto-reenter failed", "zoneID", zoneID, "error", err)
+			} else {
+				s.debugLog("handleCommissioningConnection: test-mode auto-reenter succeeded", "zoneID", zoneID)
 			}
 		}()
 	}
@@ -1059,16 +1085,30 @@ func (s *DeviceService) EnterCommissioningMode() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	var discoveryState string
+	if s.discoveryManager != nil {
+		discoveryState = s.discoveryManager.State().String()
+	}
+	zoneCount := len(s.connectedZones)
+
+	s.debugLog("EnterCommissioningMode: called",
+		"serviceState", s.state.String(),
+		"discoveryState", discoveryState,
+		"zoneCount", zoneCount)
+
 	if s.state != StateRunning {
+		s.debugLog("EnterCommissioningMode: rejected - service not running", "state", s.state.String())
 		return ErrNotStarted
 	}
 
 	if s.discoveryManager != nil {
 		if err := s.discoveryManager.EnterCommissioningMode(s.ctx); err != nil {
+			s.debugLog("EnterCommissioningMode: failed", "error", err)
 			return err
 		}
 	}
 
+	s.debugLog("EnterCommissioningMode: success")
 	s.emitEvent(Event{Type: EventCommissioningOpened})
 	return nil
 }
@@ -1078,8 +1118,15 @@ func (s *DeviceService) ExitCommissioningMode() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	var discoveryState string
+	if s.discoveryManager != nil {
+		discoveryState = s.discoveryManager.State().String()
+	}
+	s.debugLog("ExitCommissioningMode: called", "discoveryState", discoveryState)
+
 	if s.discoveryManager != nil {
 		if err := s.discoveryManager.ExitCommissioningMode(); err != nil {
+			s.debugLog("ExitCommissioningMode: failed", "error", err)
 			return err
 		}
 	}
@@ -1087,6 +1134,7 @@ func (s *DeviceService) ExitCommissioningMode() error {
 	// DEC-047: Reset PASE tracker when commissioning window closes
 	s.ResetPASETracker()
 
+	s.debugLog("ExitCommissioningMode: success")
 	s.emitEvent(Event{Type: EventCommissioningClosed, Reason: "commissioned"})
 	return nil
 }
@@ -1227,6 +1275,8 @@ func (s *DeviceService) HandleZoneConnect(zoneID string, zoneType cert.ZoneType)
 
 // HandleZoneDisconnect handles a zone disconnection.
 func (s *DeviceService) HandleZoneDisconnect(zoneID string) {
+	s.debugLog("HandleZoneDisconnect: called", "zoneID", zoneID)
+
 	s.mu.Lock()
 
 	if cz, exists := s.connectedZones[zoneID]; exists {
@@ -1248,6 +1298,7 @@ func (s *DeviceService) HandleZoneDisconnect(zoneID string) {
 	// In test mode, immediately remove the zone so stale zones don't
 	// block commissioning in subsequent test runs.
 	if testMode {
+		s.debugLog("HandleZoneDisconnect: test-mode auto-remove triggered", "zoneID", zoneID)
 		_ = s.RemoveZone(zoneID)
 	}
 }
@@ -1803,8 +1854,13 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 	s.mu.RLock()
 	noZonesLeft := len(s.connectedZones) == 0
 	s.mu.RUnlock()
+	s.debugLog("RemoveZone: auto-reentry check",
+		"zoneID", zoneID,
+		"noZonesLeft", noZonesLeft)
 	if noZonesLeft {
-		s.EnterCommissioningMode()
+		if err := s.EnterCommissioningMode(); err != nil {
+			s.debugLog("RemoveZone: EnterCommissioningMode failed", "zoneID", zoneID, "error", err)
+		}
 	}
 
 	return nil

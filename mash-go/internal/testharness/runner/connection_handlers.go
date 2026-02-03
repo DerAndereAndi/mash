@@ -81,6 +81,18 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 
 	zoneID := resolveZoneParam(params)
 
+	// Reuse an existing connected zone from a precondition (e.g.,
+	// two_zones_connected) instead of creating a duplicate connection
+	// that would overwrite the precondition's PASE connection and
+	// leak its zone ID mapping needed for RemoveZone on teardown.
+	if existing, ok := ct.zoneConnections[zoneID]; ok && existing.connected {
+		return map[string]any{
+			KeyConnectionEstablished: true,
+			KeyZoneID:                zoneID,
+			KeyState:                 ConnectionStateOperational,
+		}, nil
+	}
+
 	// Enforce 5-zone connection limit.
 	if len(ct.zoneConnections) >= 5 {
 		return map[string]any{
