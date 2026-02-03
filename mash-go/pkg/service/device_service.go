@@ -1204,7 +1204,6 @@ func (s *DeviceService) HandleZoneConnect(zoneID string, zoneType cert.ZoneType)
 // HandleZoneDisconnect handles a zone disconnection.
 func (s *DeviceService) HandleZoneDisconnect(zoneID string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if cz, exists := s.connectedZones[zoneID]; exists {
 		cz.Connected = false
@@ -1214,10 +1213,19 @@ func (s *DeviceService) HandleZoneDisconnect(zoneID string) {
 	// The failsafe timer was already started on connect
 	// It will trigger if no reconnect happens
 
+	testMode := s.config.TestMode
+	s.mu.Unlock()
+
 	s.emitEvent(Event{
 		Type:   EventDisconnected,
 		ZoneID: zoneID,
 	})
+
+	// In test mode, immediately remove the zone so stale zones don't
+	// block commissioning in subsequent test runs.
+	if testMode {
+		_ = s.RemoveZone(zoneID)
+	}
 }
 
 // handleFailsafe handles a failsafe timer trigger.

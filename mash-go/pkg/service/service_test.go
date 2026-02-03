@@ -290,6 +290,78 @@ func TestDeviceServiceZoneManagement(t *testing.T) {
 	}
 }
 
+func TestHandleZoneDisconnect_TestMode_RemovesZone(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	config.TestMode = true
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	var receivedEvents []Event
+	var mu sync.Mutex
+
+	svc.OnEvent(func(e Event) {
+		mu.Lock()
+		receivedEvents = append(receivedEvents, e)
+		mu.Unlock()
+	})
+
+	// Connect a zone
+	zoneID := "zone-test-001"
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
+
+	if svc.GetZone(zoneID) == nil {
+		t.Fatal("zone should exist after connect")
+	}
+
+	// Disconnect -- in test mode this should also remove the zone
+	svc.HandleZoneDisconnect(zoneID)
+
+	// Give async event delivery a moment to settle
+	time.Sleep(50 * time.Millisecond)
+
+	// Zone should be fully removed, not just marked disconnected
+	if svc.GetZone(zoneID) != nil {
+		t.Error("zone should be removed after disconnect in test mode")
+	}
+
+	if svc.ZoneCount() != 0 {
+		t.Errorf("expected 0 zones, got %d", svc.ZoneCount())
+	}
+
+	// Verify both EventDisconnected and EventZoneRemoved were emitted
+	mu.Lock()
+	events := make([]Event, len(receivedEvents))
+	copy(events, receivedEvents)
+	mu.Unlock()
+
+	var sawDisconnected, sawRemoved bool
+	for _, e := range events {
+		if e.Type == EventDisconnected && e.ZoneID == zoneID {
+			sawDisconnected = true
+		}
+		if e.Type == EventZoneRemoved && e.ZoneID == zoneID {
+			sawRemoved = true
+		}
+	}
+
+	if !sawDisconnected {
+		t.Error("expected EventDisconnected event")
+	}
+	if !sawRemoved {
+		t.Error("expected EventZoneRemoved event")
+	}
+}
+
 func TestDeviceServiceEventHandlers(t *testing.T) {
 	device := model.NewDevice("test-device", 0x1234, 0x5678)
 	config := validDeviceConfig()
