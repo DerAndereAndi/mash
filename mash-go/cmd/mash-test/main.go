@@ -64,6 +64,8 @@ var (
 	clientIdentity = flag.String("client-identity", "", "Client identity for PASE (default: test-client)")
 	serverIdentity = flag.String("server-identity", "", "Server identity for PASE (default: test-device)")
 	protocolLog    = flag.String("protocol-log", "", "File path for protocol event logging (CBOR format)")
+	enableKey      = flag.String("enable-key", "00112233445566778899aabbccddeeff", "128-bit hex key for TestControl triggers (32 hex chars)")
+	autoPICS       = flag.Bool("auto-pics", false, "Discover PICS from device at startup (requires -setup-code)")
 )
 
 func main() {
@@ -88,6 +90,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *autoPICS && *setupCode == "" {
+		fmt.Fprintln(os.Stderr, "Error: --auto-pics requires -setup-code (commissioning needed to read device capabilities)")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if *autoPICS && *pics != "" {
+		log.Println("Warning: --auto-pics overrides -pics; static PICS file will be ignored")
+	}
+
 	// Determine output format
 	outputFormat := "text"
 	if *jsonOut {
@@ -105,7 +117,9 @@ func main() {
 		printBanner()
 		log.Printf("Target: %s", *target)
 		log.Printf("Mode: %s", *mode)
-		if *pics != "" {
+		if *autoPICS {
+			log.Println("PICS: auto-discovery enabled")
+		} else if *pics != "" {
 			log.Printf("PICS: %s", *pics)
 		}
 		if pattern != "" {
@@ -129,10 +143,15 @@ func main() {
 	}
 
 	// Create runner configuration
+	picsFile := *pics
+	if *autoPICS {
+		picsFile = "" // Auto-PICS overrides static PICS file.
+	}
+
 	config := &runner.Config{
 		Target:             *target,
 		Mode:               *mode,
-		PICSFile:           *pics,
+		PICSFile:           picsFile,
 		TestDir:            *tests,
 		Pattern:            pattern,
 		Timeout:            *timeout,
@@ -143,6 +162,8 @@ func main() {
 		SetupCode:          *setupCode,
 		ClientIdentity:     *clientIdentity,
 		ServerIdentity:     *serverIdentity,
+		EnableKey:          *enableKey,
+		AutoPICS:           *autoPICS,
 	}
 	// Only set logger when non-nil to avoid typed-nil interface issue.
 	if protocolLogger != nil {

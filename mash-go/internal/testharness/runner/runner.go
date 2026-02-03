@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	stdlog "log"
 	"net"
 	"strings"
 	"sync/atomic"
@@ -24,14 +25,15 @@ import (
 
 // Runner executes test cases against a target device or controller.
 type Runner struct {
-	config    *Config
-	engine    *engine.Engine
-	reporter  reporter.Reporter
-	conn      *Connection
-	resolver  *Resolver
-	messageID uint32 // Atomic counter for message IDs
-	paseState *PASEState
-	pics      *loader.PICSFile // Cached PICS for handler access
+	config       *Config
+	engine       *engine.Engine
+	engineConfig *engine.EngineConfig
+	reporter     reporter.Reporter
+	conn         *Connection
+	resolver     *Resolver
+	messageID    uint32 // Atomic counter for message IDs
+	paseState    *PASEState
+	pics         *loader.PICSFile // Cached PICS for handler access
 
 	// zoneCAPool holds the Zone CA certificate pool obtained during commissioning.
 	// Used for TLS verification on operational (non-commissioning) connections.
@@ -79,6 +81,15 @@ type Config struct {
 	// ServerIdentity for PASE (defaults to "test-device").
 	ServerIdentity string
 
+	// EnableKey is the hex-encoded 128-bit key for TestControl triggers.
+	// Defaults to "00112233445566778899aabbccddeeff" (well-known test key).
+	EnableKey string
+
+	// AutoPICS enables automatic PICS discovery from the device.
+	// When true, the runner commissions the device at startup and reads
+	// its capabilities to build a PICS file dynamically.
+	AutoPICS bool
+
 	// ProtocolLogger receives structured protocol events for debugging.
 	// Set to nil to disable protocol logging.
 	ProtocolLogger log.Logger
@@ -109,11 +120,12 @@ func New(config *Config) *Runner {
 	}
 
 	r := &Runner{
-		config:   config,
-		engine:   engine.NewWithConfig(engineConfig),
-		conn:     &Connection{},
-		resolver: NewResolver(),
-		pics:     pics,
+		config:       config,
+		engine:       engine.NewWithConfig(engineConfig),
+		engineConfig: engineConfig,
+		conn:         &Connection{},
+		resolver:     NewResolver(),
+		pics:         pics,
 	}
 
 	// Set precondition callback (must be after r is created since it's a method on r).
@@ -151,6 +163,13 @@ func (r *Runner) nextMessageID() uint32 {
 
 // Run executes all matching test cases and returns the suite result.
 func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
+	// Auto-PICS: discover device capabilities before loading tests.
+	if r.config.AutoPICS {
+		if err := r.runAutoPICS(ctx); err != nil {
+			return nil, fmt.Errorf("auto-PICS discovery failed: %w", err)
+		}
+	}
+
 	// Load test cases
 	cases, err := loader.LoadDirectory(r.config.TestDir)
 	if err != nil {
@@ -177,6 +196,37 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 	r.reporter.ReportSummary(result)
 
 	return result, nil
+}
+
+// runAutoPICS commissions the device, reads its capabilities, builds a PICS
+// file, and then disconnects so tests can manage their own connections.
+func (r *Runner) runAutoPICS(ctx context.Context) error {
+	state := engine.NewExecutionState(ctx)
+
+	// Commission the device to establish a session.
+	if err := r.ensureCommissioned(ctx, state); err != nil {
+		return fmt.Errorf("commissioning for auto-PICS: %w", err)
+	}
+
+	pf, err := r.buildAutoPICS(ctx)
+	if err != nil {
+		r.ensureDisconnected()
+		return err
+	}
+
+	// Install the discovered PICS.
+	r.pics = pf
+	r.engineConfig.PICS = pf
+
+	if r.config.Verbose {
+		logAutoPICS(pf)
+	} else {
+		stdlog.Printf("Auto-PICS: discovered %d items from device", len(pf.Items))
+	}
+
+	// Disconnect so tests start from a clean state.
+	r.ensureDisconnected()
+	return nil
 }
 
 // Close cleans up runner resources.
@@ -227,6 +277,9 @@ func (r *Runner) registerHandlers() {
 
 	// Security testing handlers (DEC-047)
 	r.registerSecurityHandlers()
+
+	// TestControl trigger handlers
+	r.registerTriggerHandlers()
 
 	// Extended handler groups
 	r.registerUtilityHandlers()
