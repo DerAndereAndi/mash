@@ -249,6 +249,20 @@ func defaultChecker(key string, expected interface{}, state *ExecutionState) *Ex
 		}
 	}
 
+	// Detect unresolved PICS references (e.g., "${MASH.S.ZONE.MAX + 1}").
+	// This happens when no PICS file is loaded but the expectation uses
+	// a PICS value. Report a clear error instead of a confusing string
+	// comparison between the raw expression and the actual value.
+	if expStr, ok := expected.(string); ok && picsPattern.MatchString(expStr) {
+		return &ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Actual:   actual,
+			Passed:   false,
+			Message:  fmt.Sprintf("unresolved PICS reference %s (no -pics flag provided?)", expStr),
+		}
+	}
+
 	// Simple equality check
 	passed := fmt.Sprintf("%v", expected) == fmt.Sprintf("%v", actual)
 	result := &ExpectResult{

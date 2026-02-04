@@ -81,7 +81,7 @@ items:
   MASH.S.COMM.ERROR_DELAY_MAX: 500         # Maximum error delay (ms)
 
   # Zone configuration (existing, but needed for connection model)
-  MASH.S.ZONE.MAX: 2                       # Maximum zones (GRID + LOCAL)
+  MASH.S.ZONE.MAX: 3                       # Maximum zones (GRID + LOCAL + TEST in test mode, DEC-060)
 
   # ==========================================================================
   # Transport-Level Connection Cap (DEC-062)
