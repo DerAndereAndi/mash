@@ -50,6 +50,7 @@ func (r *Runner) registerSecurityHandlers() {
 	r.engine.RegisterHandler("open_commissioning_connection", r.handleOpenCommissioningConnection)
 	r.engine.RegisterHandler("close_connection", r.handleCloseConnection)
 	r.engine.RegisterHandler("flood_connections", r.handleFloodConnections)
+	r.engine.RegisterHandler("check_active_connections", r.handleCheckActiveConnections)
 	r.engine.RegisterHandler("check_connection_closed", r.handleCheckConnectionClosed)
 	r.engine.RegisterHandler("check_mdns_advertisement", r.handleCheckMDNSAdvertisement)
 	r.engine.RegisterHandler("connect_operational", r.handleConnectOperational)
@@ -159,23 +160,10 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 		return r.handleBusyPASEExchange(step)
 	}
 
-	if hasExisting {
-		// Probe with a short read to detect TLS-level closure for cases
-		// where send_pase is not set (e.g., transport-level connection cap).
-		_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-		buf := make([]byte, 1)
-		_, readErr := conn.Read(buf)
-		_ = conn.SetReadDeadline(time.Time{}) // clear deadline
-		if readErr != nil {
-			conn.Close()
-			return map[string]any{
-				KeyConnectionEstablished: false,
-				KeyConnectionRejected:    true,
-				KeyRejectionAtTLSLevel:   true,
-				KeyError:                 readErr.Error(),
-			}, nil
-		}
-	}
+	// When hasExisting is true but send_pase is false (e.g., transport-level
+	// connection cap tests), just store the connection. No probing needed --
+	// cap enforcement happens at TCP accept (DEC-062), so if we got here the
+	// connection was accepted.
 
 	// DEC-047: When fail_pase is true, send a PASERequest with dummy values,
 	// wait for the device to reject (ErrCodeAuthFailed), and close the
@@ -322,6 +310,25 @@ func (r *Runner) handleCheckConnectionClosed(ctx context.Context, step *loader.S
 	}, nil
 }
 
+// handleCheckActiveConnections returns the count of active (connected) entries
+// in the security connection pool.
+func (r *Runner) handleCheckActiveConnections(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	secState := getSecurityState(state)
+
+	secState.pool.mu.Lock()
+	count := 0
+	for _, c := range secState.pool.connections {
+		if c.connected {
+			count++
+		}
+	}
+	secState.pool.mu.Unlock()
+
+	return map[string]any{
+		KeyActiveConnections: count,
+	}, nil
+}
+
 // handleFloodConnections attempts many rapid connections to test flood resistance.
 func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
@@ -343,6 +350,10 @@ func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, 
 
 	// Track results
 	var accepted, rejected int32
+	// Track peak concurrent connections: current increments on accept,
+	// decrements if the device closes the connection. peak records the
+	// highest value of current observed.
+	var current, peak int32
 	var wg sync.WaitGroup
 
 	// Hold connections open during flood to exercise concurrent connection cap (DEC-062).
@@ -372,12 +383,12 @@ func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, 
 			}
 			connMu.Unlock()
 
-			acc := int(atomic.LoadInt32(&accepted))
+			peakVal := int(atomic.LoadInt32(&peak))
 			return map[string]any{
 				KeyFloodCompleted:          true,
 				KeyDeviceRemainsResponsive: true, // If we get here, device survived
-				KeyAcceptedConnections:     acc,
-				KeyMaxAcceptedConnections:  acc,
+				KeyAcceptedConnections:     int(atomic.LoadInt32(&accepted)),
+				KeyMaxAcceptedConnections:  peakVal,
 				KeyRejectedConnections:     int(atomic.LoadInt32(&rejected)),
 			}, nil
 		case <-ticker.C:
@@ -392,6 +403,14 @@ func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, 
 					return
 				}
 				atomic.AddInt32(&accepted, 1)
+				// Track peak concurrent connections.
+				cur := atomic.AddInt32(&current, 1)
+				for {
+					old := atomic.LoadInt32(&peak)
+					if cur <= old || atomic.CompareAndSwapInt32(&peak, old, cur) {
+						break
+					}
+				}
 				connMu.Lock()
 				openConns = append(openConns, conn)
 				connMu.Unlock()

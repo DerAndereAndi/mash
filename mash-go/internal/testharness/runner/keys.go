@@ -352,6 +352,8 @@ const (
 	KeyBusyRetryAfterPresent    = "busy_retry_after_present"
 	KeyBusyRetryAfterValue      = "busy_retry_after_value"
 	KeyPaseFailed               = "pase_failed"
+	KeyTLSHandshakeFailed       = "tls_handshake_failed"
+	KeyActiveConnections        = "active_connections"
 )
 
 // Discovery handler output keys.

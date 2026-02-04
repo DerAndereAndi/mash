@@ -2,6 +2,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -521,6 +522,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}
 
 	// Apply TLS version constraints from params.
+	// Accept both "tls_version" (full override) and "tls_max_version" (max only).
 	if v, ok := step.Params["tls_version"].(string); ok {
 		switch v {
 		case "1.2":
@@ -531,6 +533,17 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			tlsConfig.MaxVersion = tls.VersionTLS13
 		case "1.2,1.3":
 			tlsConfig.MinVersion = tls.VersionTLS12
+			tlsConfig.MaxVersion = tls.VersionTLS13
+		}
+	}
+	if v, ok := step.Params["tls_max_version"].(string); ok {
+		switch v {
+		case "1.2":
+			tlsConfig.MaxVersion = tls.VersionTLS12
+			if tlsConfig.MinVersion > tls.VersionTLS12 {
+				tlsConfig.MinVersion = tls.VersionTLS12
+			}
+		case "1.3":
 			tlsConfig.MaxVersion = tls.VersionTLS13
 		}
 	}
@@ -626,6 +639,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			KeyConnectionEstablished: false,
 			KeyConnected:             false,
 			KeyTLSHandshakeSuccess:   false,
+			KeyTLSHandshakeFailed:    true,
 			KeyTarget:                target,
 			KeyError:                 errorCode,
 			KeyErrorCode:             errorCode,
@@ -668,18 +682,27 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 
 	// Server cert details.
 	serverCertCNPrefix := ""
+	serverCertCN := ""
 	serverCertSelfSigned := false
 	if hasPeerCerts {
 		cert := cs.PeerCertificates[0]
-		serverCertCNPrefix = cert.Subject.CommonName
-		serverCertSelfSigned = cert.IsCA || cert.Issuer.CommonName == cert.Subject.CommonName
+		serverCertCN = cert.Subject.CommonName
+		// Extract prefix: everything up to and including the first hyphen.
+		// E.g., "MASH-1234" -> "MASH-", "no-hyphen" -> "no-hyphen".
+		if idx := strings.Index(cert.Subject.CommonName, "-"); idx >= 0 {
+			serverCertCNPrefix = cert.Subject.CommonName[:idx+1]
+		} else {
+			serverCertCNPrefix = cert.Subject.CommonName
+		}
+		// Self-signed: issuer and subject are identical in the raw ASN.1.
+		serverCertSelfSigned = bytes.Equal(cert.RawIssuer, cert.RawSubject)
 	}
 
 	// Check for CN/discriminator mismatch when expected_discriminator is provided.
 	cnMismatchWarning := false
 	if expectedDisc, ok := step.Params["expected_discriminator"]; ok && hasPeerCerts {
 		expectedCN := fmt.Sprintf("MASH-%d", int(toFloat(expectedDisc)))
-		if serverCertCNPrefix != expectedCN {
+		if serverCertCN != expectedCN {
 			cnMismatchWarning = true
 		}
 	}
