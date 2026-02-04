@@ -1,0 +1,209 @@
+# Test Cases: Transport-Level Connection Cap (DEC-062)
+# Enforcement of max_zones+1 concurrent connection limit at TCP accept
+
+---
+id: TC-CONN-CAP-001
+name: Basic Cap Enforcement
+description: |
+  Verifies device enforces a total concurrent connection limit of max_zones + 1
+  at TCP accept level (before TLS handshake). With max_zones=2, the cap is 3.
+  A fourth connection attempt is rejected at TCP level. After closing one
+  connection, a new attempt succeeds.
+
+pics_requirements:
+  - MASH.S.TRANS.CONN_CAP
+  - MASH.S.ZONE.MAX
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - device_has_available_zone_slot: true
+
+steps:
+  - name: Open first TLS connection
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+  - name: Open second TLS connection
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+  - name: Open third TLS connection (at cap)
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+  - name: Attempt fourth connection (exceeds cap)
+    action: open_commissioning_connection
+    expect:
+      connection_established: false
+      rejection_before_tls: true
+
+  - name: Close first connection
+    action: close_connection
+    params:
+      index: 0
+
+  - name: Retry connection after closing one (slot freed)
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+postconditions:
+  - max_concurrent_connections: "${MASH.S.ZONE.MAX + 1}"
+  - connection_cap_enforced: true
+
+timeout: "30s"
+tags:
+  - security
+  - transport
+  - connection-cap
+  - DEC-062
+
+---
+id: TC-CONN-CAP-002
+name: Flood Resistance with Transport Cap
+description: |
+  Verifies device remains responsive under connection flood and that at most
+  max_zones+1 connections are accepted concurrently. Excess connections are
+  rejected at TCP accept level (before TLS handshake).
+
+pics_requirements:
+  - MASH.S.TRANS.CONN_CAP
+  - MASH.S.ZONE.MAX
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Launch connection flood
+    action: flood_connections
+    params:
+      rate_per_second: 100
+      duration_seconds: 5
+    expect:
+      device_remains_responsive: true
+      max_accepted_connections: "${MASH.S.ZONE.MAX + 1}"
+
+  - name: Verify device still accepts connections after flood
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+postconditions:
+  - device_responsive_after_flood: true
+  - connection_cap_held: true
+
+timeout: "60s"
+tags:
+  - security
+  - transport
+  - stress
+  - connection-cap
+  - DEC-062
+
+---
+id: TC-CONN-CAP-003
+name: Counter Decrement on TLS Failure
+description: |
+  Verifies that the active connection counter is decremented when a TLS
+  handshake fails, freeing a slot for subsequent connections. The cap slot
+  should not leak on handshake failures.
+
+pics_requirements:
+  - MASH.S.TRANS.CONN_CAP
+  - MASH.S.ZONE.MAX
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - device_has_available_zone_slot: true
+
+steps:
+  - name: Connect with invalid TLS config (forces handshake failure)
+    action: connect
+    params:
+      tls_max_version: "1.2"
+    expect:
+      connection_established: false
+      tls_handshake_failed: true
+
+  - name: Wait for handler cleanup
+    action: wait
+    params:
+      duration_ms: 200
+
+  - name: Open valid connections up to cap
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+postconditions:
+  - counter_decremented_on_tls_failure: true
+  - slot_available_after_failure: true
+
+timeout: "30s"
+tags:
+  - security
+  - transport
+  - counter
+  - connection-cap
+  - DEC-062
+
+---
+id: TC-CONN-CAP-004
+name: Counter Decrement on Client Close
+description: |
+  Verifies that the active connection counter is decremented when a client
+  closes its connection, freeing a slot for new connections.
+
+pics_requirements:
+  - MASH.S.TRANS.CONN_CAP
+  - MASH.S.ZONE.MAX
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - device_has_available_zone_slot: true
+
+steps:
+  - name: Fill cap with connections
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+  - name: Verify counter reflects open connection
+    action: check_active_connections
+    expect:
+      active_connections: 1
+
+  - name: Client closes connection
+    action: close_connection
+    params:
+      index: 0
+
+  - name: Wait for decrement
+    action: wait
+    params:
+      duration_ms: 200
+
+  - name: Verify counter decremented
+    action: check_active_connections
+    expect:
+      active_connections: 0
+
+  - name: Open new connection (slot freed)
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+postconditions:
+  - counter_decremented_on_client_close: true
+  - slot_immediately_available: true
+
+timeout: "30s"
+tags:
+  - security
+  - transport
+  - counter
+  - connection-cap
+  - DEC-062

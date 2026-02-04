@@ -3557,6 +3557,36 @@ The original `Handshake()` method is preserved as a wrapper calling both methods
 
 ---
 
+### DEC-062: Transport-Level Connection Cap
+
+**Date:** 2026-02-04
+**Status:** Accepted
+
+**Context:**
+The spec (DEC-047) defines a max_zones+1 connection cap, but enforcement was only at the PASE level (`acceptCommissioningConnection`). Flood connections that never send a PASE message bypassed this check entirely, because the PASE-level guard (DEC-061) only fires after the first application-layer message. This allowed a flood of raw TLS connections to exhaust device resources.
+
+**Decision:**
+Add an `atomic.Int32` counter (`activeConns`) to `DeviceService` and enforce the total connection cap at TCP accept, before the TLS handshake:
+
+1. **Increment** in `acceptLoop` after `Accept()`, before spawning the connection handler goroutine
+2. **Cap check** in `acceptLoop`: if `activeConns >= MaxZones + 1`, close the raw TCP connection immediately (before TLS handshake) and continue
+3. **Decrement** via `defer` at the top of `handleConnection` (covers all exit paths: TLS failure, PASE failure, normal close)
+4. **No TOCTOU race**: the check and increment both happen in `acceptLoop`, which is a single goroutine
+
+**Rationale:**
+- Earliest possible rejection point -- protects MCU memory from TLS handshake overhead
+- Matches Matter's approach (`CHIP_CONFIG_MAX_ACTIVE_TCP_CONNECTIONS=4`, rejection at TCP accept)
+- `atomic.Int32` is lock-free, suitable for constrained environments
+- The counter naturally includes all connection types (commissioning and operational), so a flood of any type is bounded
+
+**Declined Alternatives:**
+- **Per-type counters (separate commissioning vs operational):** Adds complexity without benefit. The total cap already covers the worst case. Per-type tracking remains at the application layer (DEC-047).
+- **Semaphore/channel-based limiting:** Heavier than an atomic counter and not needed since `acceptLoop` is single-goroutine.
+
+**Related:** DEC-047 (commissioning security hardening), DEC-061 (message-gated commissioning locking)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)

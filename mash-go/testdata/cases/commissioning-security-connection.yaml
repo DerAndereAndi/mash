@@ -194,6 +194,7 @@ description: |
 
 pics_requirements:
   - MASH.S.COMM.HARDENING
+  - MASH.S.TRANS.CONN_CAP
   - MASH.S.ZONE.MAX
 
 preconditions:
@@ -214,7 +215,7 @@ steps:
     params:
       setup_code: "{{ setup_code }}"
     expect:
-      commissioning_succeeds: true
+      commission_success: true
 
 postconditions:
   - device_commissioned: true
@@ -266,7 +267,7 @@ steps:
     params:
       setup_code: "{{ setup_code }}"
     expect:
-      commissioning_succeeds: true
+      commission_success: true
 
 postconditions:
   - device_commissioned: true

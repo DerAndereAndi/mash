@@ -277,6 +277,10 @@ func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, 
 	var accepted, rejected int32
 	var wg sync.WaitGroup
 
+	// Hold connections open during flood to exercise concurrent connection cap (DEC-062).
+	var connMu sync.Mutex
+	var openConns []net.Conn
+
 	// Create flood context with timeout
 	floodCtx, cancel := context.WithTimeout(ctx, time.Duration(duration)*time.Second)
 	defer cancel()
@@ -292,6 +296,14 @@ func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, 
 		select {
 		case <-floodCtx.Done():
 			wg.Wait()
+
+			// Close all held connections after flood completes.
+			connMu.Lock()
+			for _, c := range openConns {
+				_ = c.Close()
+			}
+			connMu.Unlock()
+
 			acc := int(atomic.LoadInt32(&accepted))
 			return map[string]any{
 				KeyFloodCompleted:          true,
@@ -312,7 +324,9 @@ func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, 
 					return
 				}
 				atomic.AddInt32(&accepted, 1)
-				_ = conn.Close()
+				connMu.Lock()
+				openConns = append(openConns, conn)
+				connMu.Unlock()
 			}()
 		}
 	}

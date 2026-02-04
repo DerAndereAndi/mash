@@ -84,6 +84,13 @@ items:
   MASH.S.ZONE.MAX: 2                       # Maximum zones (GRID + LOCAL)
 
   # ==========================================================================
+  # Transport-Level Connection Cap (DEC-062)
+  # ==========================================================================
+
+  MASH.S.TRANS.CONN_CAP: true              # Device enforces transport-level connection cap
+  # Note: Cap value = MASH.S.ZONE.MAX + 1 (derived, not independently configured)
+
+  # ==========================================================================
   # Commissioning Window Timing (DEC-048)
   # ==========================================================================
 
@@ -176,6 +183,7 @@ items:
 #
 # TC-SEC-CONN-005 (Flood Resistance):
 #   - MASH.S.COMM.HARDENING: true
+#   - MASH.S.TRANS.CONN_CAP: true
 #   - MASH.S.ZONE.MAX: 2
 #
 # TC-SEC-BACKOFF-001 (PASE Backoff Tier Enforcement):
@@ -223,3 +231,23 @@ items:
 #   - MASH.S.COMM: true
 #   - MASH.S.COMM.WINDOW_CONFIGURABLE: true
 #   - MASH.S.COMM.WINDOW_MIN: 180
+#
+# =============================================================================
+# Transport-Level Connection Cap Tests (DEC-062)
+# =============================================================================
+#
+# TC-CONN-CAP-001 (Basic Cap Enforcement):
+#   - MASH.S.TRANS.CONN_CAP: true
+#   - MASH.S.ZONE.MAX: 2
+#
+# TC-CONN-CAP-002 (Flood Resistance with Transport Cap):
+#   - MASH.S.TRANS.CONN_CAP: true
+#   - MASH.S.ZONE.MAX: 2
+#
+# TC-CONN-CAP-003 (Counter Decrement on TLS Failure):
+#   - MASH.S.TRANS.CONN_CAP: true
+#   - MASH.S.ZONE.MAX: 2
+#
+# TC-CONN-CAP-004 (Counter Decrement on Client Close):
+#   - MASH.S.TRANS.CONN_CAP: true
+#   - MASH.S.ZONE.MAX: 2

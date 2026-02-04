@@ -174,6 +174,21 @@ Connection limits are derived from zone capacity to ensure predictable resource 
 2. When commissioning rejected, device SHOULD send TLS alert `user_canceled` (90)
 3. Device MUST NOT reveal current connection count or zone capacity
 4. Device MAY implement per-IP tracking for diagnostics
+5. Device MUST enforce the total connection cap at the transport level (DEC-062)
+
+**Transport-Level Enforcement (DEC-062):**
+
+The total connection cap (max_zones + 1) MUST be enforced at TCP accept, before the TLS handshake begins. This is the earliest rejection point and protects constrained devices from resource exhaustion by connections that never send application-layer messages.
+
+| Requirement | Description |
+|-------------|-------------|
+| Counter increment | MUST occur after TCP accept, before spawning connection handler |
+| Cap check | If active connections >= max_zones + 1, MUST close raw TCP connection immediately |
+| Counter decrement | MUST occur when connection handler returns (any exit path) |
+| Atomicity | Check and increment MUST be free of TOCTOU races |
+| Scope | Counter covers ALL connection types (commissioning and operational) |
+
+The transport-level cap operates independently of the PASE-level commissioning lock (DEC-047) and the message-gated locking (DEC-061). A connection that is rejected at the transport level never reaches the TLS handshake or PASE exchange.
 
 **Rationale:**
 - Limits derived from zone capacity are logically defensible

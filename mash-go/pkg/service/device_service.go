@@ -11,6 +11,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -102,6 +103,9 @@ type DeviceService struct {
 
 	// PASE attempt tracking
 	paseTracker *PASEAttemptTracker
+
+	// Transport-level connection cap (DEC-062)
+	activeConns atomic.Int32
 }
 
 // generateConnectionID generates a random connection ID for logging.
@@ -373,12 +377,22 @@ func (s *DeviceService) acceptLoop() {
 			}
 		}
 
+		// Transport-level connection cap (DEC-062): reject at TCP level before TLS.
+		// Both check and increment happen here in acceptLoop (single goroutine), so no TOCTOU race.
+		if s.activeConns.Load() >= int32(s.config.MaxZones+1) {
+			_ = conn.Close()
+			continue
+		}
+		s.activeConns.Add(1)
+
 		go s.handleConnection(conn)
 	}
 }
 
 // handleConnection handles an incoming connection.
 func (s *DeviceService) handleConnection(conn net.Conn) {
+	defer s.activeConns.Add(-1) // DEC-062: decrement on any exit path
+
 	// TLS handshake
 	tlsConn := tls.Server(conn, s.tlsConfig)
 	if err := tlsConn.HandshakeContext(s.ctx); err != nil {
@@ -1050,6 +1064,11 @@ func (s *DeviceService) TLSAddr() net.Addr {
 		return s.tlsListener.Addr()
 	}
 	return nil
+}
+
+// ActiveConns returns the current number of active connections (DEC-062).
+func (s *DeviceService) ActiveConns() int32 {
+	return s.activeConns.Load()
 }
 
 // ServerIdentity returns the server identity used for PASE.
