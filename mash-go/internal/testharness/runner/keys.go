@@ -29,17 +29,19 @@ const (
 
 // Environment/negative-test preconditions.
 const (
-	PrecondDeviceZonesFull            = "device_zones_full"
-	PrecondNoDevicesAdvertising       = "no_devices_advertising"
-	PrecondDeviceSRVPresent           = "device_srv_present"
-	PrecondDeviceAAAAMissing          = "device_aaaa_missing"
-	PrecondDeviceAddressValid         = "device_address_valid"
-	PrecondDevicePortClosed           = "device_port_closed"
-	PrecondDeviceWillAppearAfterDelay = "device_will_appear_after_delay"
-	PrecondFiveZonesConnected         = "five_zones_connected"
-	PrecondTwoZonesConnected          = "two_zones_connected"
-	PrecondDeviceInZone               = "device_in_zone"
-	PrecondDeviceInTwoZones           = "device_in_two_zones"
+	PrecondDeviceZonesFull              = "device_zones_full"
+	PrecondNoDevicesAdvertising         = "no_devices_advertising"
+	PrecondDeviceSRVPresent             = "device_srv_present"
+	PrecondDeviceAAAAMissing            = "device_aaaa_missing"
+	PrecondDeviceAddressValid           = "device_address_valid"
+	PrecondDevicePortClosed             = "device_port_closed"
+	PrecondDeviceWillAppearAfterDelay   = "device_will_appear_after_delay"
+	PrecondFiveZonesConnected           = "five_zones_connected"
+	PrecondTwoZonesConnected            = "two_zones_connected"
+	PrecondDeviceInZone                 = "device_in_zone"
+	PrecondDeviceInTwoZones             = "device_in_two_zones"
+	PrecondMultipleDevicesCommissioning = "multiple_devices_commissioning"
+	PrecondMultipleDevicesCommissioned  = "multiple_devices_commissioned"
 )
 
 // Connection/commissioning preconditions.
@@ -169,16 +171,17 @@ const (
 
 // Session/PASE output keys.
 const (
-	KeySessionEstablished = "session_established"
-	KeyCommissionSuccess  = "commission_success"
-	KeyKeyLength          = "key_length"
-	KeyKeyNotZero         = "key_not_zero"
-	KeyRequestSent        = "request_sent"
-	KeyPAGenerated        = "pA_generated"
-	KeyResponseReceived   = "response_received"
-	KeyPBReceived         = "pB_received"
-	KeyConfirmSent        = "confirm_sent"
-	KeyVerifyReceived     = "verify_received"
+	KeySessionEstablished        = "session_established"
+	KeyCommissionSuccess         = "commission_success"
+	KeyCorrectDeviceCommissioned = "correct_device_commissioned"
+	KeyKeyLength                 = "key_length"
+	KeyKeyNotZero                = "key_not_zero"
+	KeyRequestSent               = "request_sent"
+	KeyPAGenerated               = "pA_generated"
+	KeyResponseReceived          = "response_received"
+	KeyPBReceived                = "pB_received"
+	KeyConfirmSent               = "confirm_sent"
+	KeyVerifyReceived            = "verify_received"
 )
 
 // Protocol operation output keys.

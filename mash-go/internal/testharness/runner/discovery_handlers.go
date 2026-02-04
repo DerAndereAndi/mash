@@ -276,6 +276,79 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
+	// Simulate multiple commissionable devices.
+	if multiComm, _ := state.Get(PrecondMultipleDevicesCommissioning); multiComm == true {
+		ds.services = []discoveredService{
+			{
+				InstanceName:  "MASH-SIM-A",
+				ServiceType:   discovery.ServiceTypeCommissionable,
+				Host:          "device-a.local",
+				Port:          8443,
+				Addresses:     []string{"192.168.1.10"},
+				Discriminator: 1001,
+				TXTRecords:    map[string]string{"brand": "Test", "model": "A"},
+			},
+			{
+				InstanceName:  "MASH-SIM-B",
+				ServiceType:   discovery.ServiceTypeCommissionable,
+				Host:          "device-b.local",
+				Port:          8443,
+				Addresses:     []string{"192.168.1.11"},
+				Discriminator: 1002,
+				TXTRecords:    map[string]string{"brand": "Test", "model": "B"},
+			},
+		}
+		return r.buildBrowseOutput(ds)
+	}
+
+	// Simulate multiple commissioned (operational) devices.
+	if multiOp, _ := state.Get(PrecondMultipleDevicesCommissioned); multiOp == true {
+		serviceType, _ := params[KeyServiceType].(string)
+		switch serviceType {
+		case discovery.ServiceTypeOperational, ServiceAliasOperational:
+			ds.services = []discoveredService{
+				{
+					InstanceName: "a1b2c3d4-00112233",
+					ServiceType:  discovery.ServiceTypeOperational,
+					Host:         "device-a.local",
+					Port:         8443,
+					Addresses:    []string{"192.168.1.10"},
+					TXTRecords:   map[string]string{"ZI": "a1b2c3d4", "DI": "00112233"},
+				},
+				{
+					InstanceName: "a1b2c3d4-44556677",
+					ServiceType:  discovery.ServiceTypeOperational,
+					Host:         "device-b.local",
+					Port:         8443,
+					Addresses:    []string{"192.168.1.11"},
+					TXTRecords:   map[string]string{"ZI": "a1b2c3d4", "DI": "44556677"},
+				},
+			}
+		default:
+			ds.services = []discoveredService{
+				{
+					InstanceName:  "MASH-SIM-A",
+					ServiceType:   discovery.ServiceTypeCommissionable,
+					Host:          "device-a.local",
+					Port:          8443,
+					Addresses:     []string{"192.168.1.10"},
+					Discriminator: 1001,
+					TXTRecords:    map[string]string{"brand": "Test", "model": "A"},
+				},
+				{
+					InstanceName:  "MASH-SIM-B",
+					ServiceType:   discovery.ServiceTypeCommissionable,
+					Host:          "device-b.local",
+					Port:          8443,
+					Addresses:     []string{"192.168.1.11"},
+					Discriminator: 1002,
+					TXTRecords:    map[string]string{"brand": "Test", "model": "B"},
+				},
+			}
+		}
+		return r.buildBrowseOutput(ds)
+	}
+
 	// Simulate two devices with the same discriminator.
 	retries := 0
 	if twoDevs, _ := state.Get(PrecondTwoDevicesSameDiscriminator); twoDevs == true {

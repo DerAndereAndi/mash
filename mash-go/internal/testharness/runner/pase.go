@@ -171,6 +171,12 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		outputs[KeyDeviceID] = deviceID
 	}
 
+	// When resolving a discriminator collision, a successful PASE handshake
+	// confirms the correct device was commissioned (setup code matched).
+	if twoDevs, _ := state.Get(PrecondTwoDevicesSameDiscriminator); twoDevs == true {
+		outputs[KeyCorrectDeviceCommissioned] = true
+	}
+
 	return outputs, nil
 }
 
