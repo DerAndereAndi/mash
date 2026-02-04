@@ -270,12 +270,31 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
 
+	// Resolve command name to ID and wrap in InvokePayload (same as handleInvoke).
+	var payload any
+	if commandRaw, hasCommand := params["command"]; hasCommand {
+		commandID, cmdErr := r.resolver.ResolveCommand(params[KeyFeature], commandRaw)
+		if cmdErr != nil {
+			return nil, fmt.Errorf("resolving command: %w", cmdErr)
+		}
+		args, _ := params["args"]
+		if args == nil {
+			args, _ = params["params"]
+		}
+		payload = &wire.InvokePayload{
+			CommandID:  commandID,
+			Parameters: args,
+		}
+	} else {
+		payload = params["params"]
+	}
+
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
 		Operation:  wire.OpInvoke,
 		EndpointID: endpointID,
 		FeatureID:  featureID,
-		Payload:    params["params"],
+		Payload:    payload,
 	}
 	data, err := wire.EncodeRequest(req)
 	if err != nil {

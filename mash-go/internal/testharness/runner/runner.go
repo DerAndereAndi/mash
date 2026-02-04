@@ -791,12 +791,29 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 
 	attribute, _ := params["attribute"].(string)
 
+	// Resolve attribute name to numeric ID for filtered reads.
+	var attrID uint16
+	var hasAttr bool
+	if attribute != "" {
+		attrID, err = r.resolver.ResolveAttribute(params[KeyFeature], attribute)
+		if err != nil {
+			return nil, fmt.Errorf("resolving attribute: %w", err)
+		}
+		hasAttr = true
+	}
+
 	// Create read request
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
 		Operation:  wire.OpRead,
 		EndpointID: endpointID,
 		FeatureID:  featureID,
+	}
+
+	// When a specific attribute is requested, include it in the read payload
+	// so the device can return just that attribute.
+	if hasAttr {
+		req.Payload = &wire.ReadPayload{AttributeIDs: []uint16{attrID}}
 	}
 
 	data, err := wire.EncodeRequest(req)
@@ -816,12 +833,46 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		KeyStatus:      resp.Status,
 	}
 
-	// Add attribute-specific outputs
-	if attribute != "" {
+	// When a specific attribute was requested, extract its value from the
+	// response payload map. The payload is typically map[any]any with
+	// uint64 keys after CBOR decoding.
+	if hasAttr && resp.Payload != nil {
+		if extracted, ok := extractAttributeValue(resp.Payload, attrID); ok {
+			outputs[KeyValue] = extracted
+		}
 		outputs[attribute+"_present"] = resp.Payload != nil
 	}
 
 	return outputs, nil
+}
+
+// extractAttributeValue extracts a single attribute value from a read response
+// payload map. CBOR decoding may produce map[any]any with uint64 keys.
+func extractAttributeValue(payload any, attrID uint16) (any, bool) {
+	switch m := payload.(type) {
+	case map[any]any:
+		// CBOR-decoded map with integer keys (most common after wire round-trip)
+		if v, ok := m[uint64(attrID)]; ok {
+			return v, true
+		}
+		// Try other integer types that CBOR decoders may produce
+		if v, ok := m[int64(attrID)]; ok {
+			return v, true
+		}
+		if v, ok := m[int(attrID)]; ok {
+			return v, true
+		}
+	case map[uint16]any:
+		if v, ok := m[attrID]; ok {
+			return v, true
+		}
+	case map[string]any:
+		// String-keyed map (less common, but possible)
+		if v, ok := m[fmt.Sprintf("%d", attrID)]; ok {
+			return v, true
+		}
+	}
+	return nil, false
 }
 
 // handleWrite sends a write request.
@@ -846,12 +897,24 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 
 	value := params[KeyValue]
 
+	// Build the wire payload. When an attribute name is given, wrap the
+	// value in a WritePayload map (map[uint16]any{attrID: value}) so the
+	// device receives the correct CBOR-encoded structure.
+	var payload any = value
+	if attribute, ok := params["attribute"].(string); ok && attribute != "" {
+		attrID, attrErr := r.resolver.ResolveAttribute(params[KeyFeature], attribute)
+		if attrErr != nil {
+			return nil, fmt.Errorf("resolving attribute: %w", attrErr)
+		}
+		payload = wire.WritePayload{attrID: value}
+	}
+
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
 		Operation:  wire.OpWrite,
 		EndpointID: endpointID,
 		FeatureID:  featureID,
-		Payload:    value,
+		Payload:    payload,
 	}
 
 	data, err := wire.EncodeRequest(req)
@@ -908,10 +971,17 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 		return nil, err
 	}
 
-	// Extract subscription ID from the response payload.
+	// Extract subscription ID and priming data from the response payload.
 	// The subscribe response payload is {1: subscriptionId, 2: currentValues}
 	// (a SubscribeResponsePayload). The raw CBOR decodes as map[any]any.
 	subscriptionID := extractSubscriptionID(resp.Payload)
+	primingData := extractPrimingData(resp.Payload)
+
+	// Store priming data in state so wait_report can use it as an initial
+	// report if no subsequent notification frame arrives.
+	if primingData != nil {
+		state.Set("_priming_data", primingData)
+	}
 
 	return map[string]any{
 		KeySubscribeSuccess:       resp.IsSuccess(),
@@ -933,6 +1003,18 @@ func extractSubscriptionID(payload any) any {
 	}
 	// Fallback: return the payload itself (may be a simple ID).
 	return payload
+}
+
+// extractPrimingData extracts the current values (priming report) from a
+// subscribe response payload. Key 2 in the SubscribeResponsePayload.
+func extractPrimingData(payload any) any {
+	switch p := payload.(type) {
+	case map[any]any:
+		if vals, ok := p[uint64(2)]; ok {
+			return vals
+		}
+	}
+	return nil
 }
 
 // handleInvoke sends an invoke request.

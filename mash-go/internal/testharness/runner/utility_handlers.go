@@ -368,12 +368,30 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 }
 
 // handleWaitReport waits for a subscription priming report.
+// If the subscribe response already included priming data (current values),
+// that counts as a received report without waiting for a notification frame.
 func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
 	timeoutMs := 5000
 	if t, ok := params[KeyTimeoutMs].(float64); ok {
 		timeoutMs = int(t)
+	}
+	// Also accept "timeout" as a duration string (e.g., "5s").
+	if t, ok := params["timeout"].(string); ok {
+		if d, parseErr := time.ParseDuration(t); parseErr == nil {
+			timeoutMs = int(d.Milliseconds())
+		}
+	}
+
+	// Check if the subscribe response already contained priming data
+	// (current values in SubscribeResponsePayload key 2). If so, treat
+	// that as a received report without waiting for a wire notification.
+	if primingData, ok := state.Get("_priming_data"); ok && primingData != nil {
+		return map[string]any{
+			KeyReportReceived: true,
+			KeyReportData:     primingData,
+		}, nil
 	}
 
 	if r.conn == nil || !r.conn.connected {
