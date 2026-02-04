@@ -64,6 +64,10 @@ func (a *MDNSAdvertiser) serverOptions() []zeroconf.ServerOption {
 
 // AdvertiseCommissionable starts advertising a commissionable service.
 func (a *MDNSAdvertiser) AdvertiseCommissionable(ctx context.Context, info *CommissionableInfo) error {
+	if a.config.Quiet {
+		return nil
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -109,6 +113,10 @@ func (a *MDNSAdvertiser) AdvertiseCommissionable(ctx context.Context, info *Comm
 
 // StopCommissionable stops advertising the commissionable service.
 func (a *MDNSAdvertiser) StopCommissionable() error {
+	if a.config.Quiet {
+		return nil
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -121,6 +129,10 @@ func (a *MDNSAdvertiser) StopCommissionable() error {
 
 // AdvertiseOperational starts advertising an operational service for a zone.
 func (a *MDNSAdvertiser) AdvertiseOperational(ctx context.Context, info *OperationalInfo) error {
+	if a.config.Quiet {
+		return nil
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -169,6 +181,10 @@ func (a *MDNSAdvertiser) AdvertiseOperational(ctx context.Context, info *Operati
 
 // UpdateOperational updates TXT records for an operational service.
 func (a *MDNSAdvertiser) UpdateOperational(zoneID string, info *OperationalInfo) error {
+	if a.config.Quiet {
+		return nil
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -187,6 +203,10 @@ func (a *MDNSAdvertiser) UpdateOperational(zoneID string, info *OperationalInfo)
 
 // StopOperational stops advertising operational service for a specific zone.
 func (a *MDNSAdvertiser) StopOperational(zoneID string) error {
+	if a.config.Quiet {
+		return nil
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -202,6 +222,10 @@ func (a *MDNSAdvertiser) StopOperational(zoneID string) error {
 
 // AdvertiseCommissioner starts advertising a commissioner service.
 func (a *MDNSAdvertiser) AdvertiseCommissioner(ctx context.Context, info *CommissionerInfo) error {
+	if a.config.Quiet {
+		return nil
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -250,6 +274,10 @@ func (a *MDNSAdvertiser) AdvertiseCommissioner(ctx context.Context, info *Commis
 
 // UpdateCommissioner updates TXT records for a commissioner service.
 func (a *MDNSAdvertiser) UpdateCommissioner(zoneID string, info *CommissionerInfo) error {
+	if a.config.Quiet {
+		return nil
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -268,6 +296,10 @@ func (a *MDNSAdvertiser) UpdateCommissioner(zoneID string, info *CommissionerInf
 
 // StopCommissioner stops advertising commissioner service for a specific zone.
 func (a *MDNSAdvertiser) StopCommissioner(zoneID string) error {
+	if a.config.Quiet {
+		return nil
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -286,6 +318,10 @@ func (a *MDNSAdvertiser) StopCommissioner(zoneID string) error {
 func (a *MDNSAdvertiser) AnnouncePairingRequest(ctx context.Context, info *PairingRequestInfo) error {
 	if err := info.Validate(); err != nil {
 		return err
+	}
+
+	if a.config.Quiet {
+		return nil
 	}
 
 	a.mu.Lock()
@@ -330,6 +366,10 @@ func (a *MDNSAdvertiser) AnnouncePairingRequest(ctx context.Context, info *Pairi
 
 // StopPairingRequest stops advertising a pairing request for a discriminator.
 func (a *MDNSAdvertiser) StopPairingRequest(discriminator uint16) error {
+	if a.config.Quiet {
+		return nil
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -345,6 +385,10 @@ func (a *MDNSAdvertiser) StopPairingRequest(discriminator uint16) error {
 
 // StopAll stops all advertisements.
 func (a *MDNSAdvertiser) StopAll() {
+	if a.config.Quiet {
+		return
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

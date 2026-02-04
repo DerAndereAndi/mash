@@ -60,6 +60,14 @@ type AdvertiserConfig struct {
 	// Default: 120 seconds.
 	TTL time.Duration
 
+	// Quiet suppresses all mDNS network operations. When true, the
+	// advertiser methods return nil without sending any multicast
+	// traffic. The DiscoveryManager still tracks state correctly
+	// (commissioning mode, zones), so IsCommissioningMode() and other
+	// state queries work as expected. Use this in test mode where the
+	// test harness connects directly by address.
+	Quiet bool
+
 	// ConnectionFactory creates multicast connections.
 	// If nil, uses the default zeroconf connection factory.
 	// Set this in tests to inject mock connections.

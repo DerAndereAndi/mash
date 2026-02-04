@@ -300,7 +300,11 @@ func (s *DeviceService) Start(ctx context.Context) error {
 
 	// Initialize discovery advertiser if not already set (e.g., by tests)
 	if s.advertiser == nil {
-		advertiser, err := discovery.NewMDNSAdvertiser(discovery.DefaultAdvertiserConfig())
+		advConfig := discovery.DefaultAdvertiserConfig()
+		if s.config.TestMode {
+			advConfig.Quiet = true
+		}
+		advertiser, err := discovery.NewMDNSAdvertiser(advConfig)
 		if err != nil {
 			s.tlsListener.Close()
 			s.mu.Lock()
