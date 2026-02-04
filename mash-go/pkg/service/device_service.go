@@ -440,6 +440,12 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 	if inCommissioningMode && !peerHasCert {
 		s.debugLog("handleConnection: -> commissioning handler")
 		s.handleCommissioningConnection(tlsConn)
+	} else if !peerHasCert && s.isZonesFull() {
+		// Not in commissioning mode but zones are full: route through
+		// handleCommissioningConnection so acceptCommissioningConnection()
+		// sends a proper CommissioningError(ErrCodeBusy, RetryAfter=0).
+		s.debugLog("handleConnection: -> busy rejection (zones full, not commissioning)")
+		s.handleCommissioningConnection(tlsConn)
 	} else {
 		// Operational mode - handle reconnection from known zones.
 		// Also used when in commissioning mode but the peer presented
@@ -2196,6 +2202,13 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 	s.commissioningConnActive = true
 	s.lastCommissioningAttempt = time.Now()
 	return true, ""
+}
+
+// isZonesFull returns true when all zone slots are occupied.
+func (s *DeviceService) isZonesFull() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.connectedZones) >= s.config.MaxZones
 }
 
 // releaseCommissioningConnection marks the commissioning connection as complete.

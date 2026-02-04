@@ -488,6 +488,12 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 							time.Sleep(600 * time.Millisecond)
 						}
 					}
+					// Wait for device to stabilize after filling all zones.
+					// The device exits commissioning mode and (in test mode)
+					// schedules auto-reentry after 500ms. Give it time to settle.
+					r.debugf("device_zones_full: waiting 800ms for device to stabilize")
+					time.Sleep(800 * time.Millisecond)
+
 					r.commissionZoneType = 0
 					// Clear main connection state so the runner does not
 					// appear commissioned on a detached connection.

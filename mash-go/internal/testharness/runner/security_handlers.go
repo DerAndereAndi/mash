@@ -1118,40 +1118,74 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 	}
 
 	// Real device: connect, send PASERequest, read CommissioningError.
+	// Retry on transient errors (EOF, connection reset) that can occur when
+	// the device is transitioning between commissioning and operational modes.
+	const maxAttempts = 3
+	const retryDelay = 1 * time.Second
+
 	tlsConfig := transport.NewCommissioningTLSConfig()
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
-	if err != nil {
-		return map[string]any{
-			KeyConnectionEstablished: false,
-			KeyConnectionRejected:    true,
-			KeyRejectionAtTLSLevel:   true,
-			KeyError:                 err.Error(),
-		}, nil
-	}
-	defer conn.Close()
 
-	if err := sendPASERequestRaw(conn); err != nil {
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			r.debugf("handleBusyPASEExchange: retry %d/%d after transient error: %v", attempt, maxAttempts-1, lastErr)
+			time.Sleep(retryDelay)
+		}
+
+		conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		if err != nil {
+			if isTransientError(err) && attempt < maxAttempts-1 {
+				lastErr = err
+				continue
+			}
+			return map[string]any{
+				KeyConnectionEstablished: false,
+				KeyConnectionRejected:    true,
+				KeyRejectionAtTLSLevel:   true,
+				KeyError:                 err.Error(),
+			}, nil
+		}
+
+		if err := sendPASERequestRaw(conn); err != nil {
+			conn.Close()
+			if isTransientError(err) && attempt < maxAttempts-1 {
+				lastErr = err
+				continue
+			}
+			return map[string]any{
+				KeyConnectionEstablished: true,
+				KeyError:                 fmt.Sprintf("send PASERequest: %v", err),
+			}, nil
+		}
+
+		errMsg, err := readCommissioningErrorRaw(conn, 5*time.Second)
+		if err != nil {
+			conn.Close()
+			if isTransientError(err) && attempt < maxAttempts-1 {
+				lastErr = err
+				continue
+			}
+			return map[string]any{
+				KeyConnectionEstablished: true,
+				KeyError:                 fmt.Sprintf("read CommissioningError: %v", err),
+			}, nil
+		}
+
+		conn.Close()
 		return map[string]any{
 			KeyConnectionEstablished: true,
-			KeyError:                 fmt.Sprintf("send PASERequest: %v", err),
+			KeyBusyResponseReceived:  true,
+			KeyBusyErrorCode:         int(errMsg.ErrorCode),
+			KeyBusyRetryAfterValue:   int(errMsg.RetryAfter),
+			KeyBusyRetryAfterPresent: errMsg.RetryAfter > 0,
 		}, nil
 	}
 
-	errMsg, err := readCommissioningErrorRaw(conn, 5*time.Second)
-	if err != nil {
-		return map[string]any{
-			KeyConnectionEstablished: true,
-			KeyError:                 fmt.Sprintf("read CommissioningError: %v", err),
-		}, nil
-	}
-
+	// All retries exhausted -- return the last transient error.
 	return map[string]any{
-		KeyConnectionEstablished: true,
-		KeyBusyResponseReceived:  true,
-		KeyBusyErrorCode:         int(errMsg.ErrorCode),
-		KeyBusyRetryAfterValue:   int(errMsg.RetryAfter),
-		KeyBusyRetryAfterPresent: errMsg.RetryAfter > 0,
+		KeyConnectionEstablished: false,
+		KeyError:                 fmt.Sprintf("all %d attempts failed: %v", maxAttempts, lastErr),
 	}, nil
 }
 
