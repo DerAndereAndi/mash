@@ -40,7 +40,6 @@ func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
 	if r.paseState != nil && r.paseState.completed {
 		items["MASH.S.TRANS.PASE"] = true
 	}
-	items["MASH.S.ZONE.MAX"] = 1 // Conservative default.
 
 	// Device metadata for the PICS file header.
 	picsDevice := loader.PICSDevice{}
@@ -88,6 +87,57 @@ func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
 			}
 		}
 	}
+
+	// DEC-043/060: Detect test mode from TestControl feature on endpoint 0.
+	// Production MaxZones = 2 (GRID + LOCAL); test mode = 3 (+ TEST).
+	hasTestControl := false
+	for _, ep := range endpoints {
+		if ep.id == 0 {
+			for _, featID := range ep.features {
+				if featID == uint16(model.FeatureTestControl) {
+					hasTestControl = true
+					break
+				}
+			}
+			break
+		}
+	}
+
+	if hasTestControl {
+		items["MASH.S.ZONE.MAX"] = 3
+	} else {
+		items["MASH.S.ZONE.MAX"] = 2
+	}
+
+	// Protocol-level hardening PICS items (DEC-047, DEC-062, DEC-063, DEC-064).
+	// Values mirror DefaultDeviceConfig() for the reference implementation.
+	items["MASH.S.COMM.HARDENING"] = true
+	items["MASH.S.COMM.MAX_COMMISSIONING_CONN"] = 1
+	items["MASH.S.COMM.CONN_COOLDOWN"] = 500         // ms
+	items["MASH.S.COMM.HANDSHAKE_TIMEOUT"] = 85       // seconds
+	items["MASH.S.COMM.GENERIC_ERRORS"] = true
+	items["MASH.S.COMM.ERROR_DELAY_MIN"] = 100        // ms
+	items["MASH.S.COMM.ERROR_DELAY_MAX"] = 500        // ms
+	items["MASH.S.TRANS.CONN_CAP"] = true              // DEC-062
+	items["MASH.S.COMM.ERR_BUSY"] = true               // DEC-063
+	items["MASH.S.COMM.ERR_BUSY_RETRY_AFTER"] = true   // DEC-063
+	items["MASH.S.CONN.STALE_REAPER"] = true           // DEC-064
+	items["MASH.S.CONN.STALE_TIMEOUT"] = 90            // seconds
+	items["MASH.S.COMM.BACKOFF_ENABLED"] = true
+	items["MASH.S.COMM.BACKOFF_TIER1"] = 0
+	items["MASH.S.COMM.BACKOFF_TIER2"] = 1000
+	items["MASH.S.COMM.BACKOFF_TIER3"] = 3000
+	items["MASH.S.COMM.BACKOFF_TIER4"] = 10000
+	items["MASH.S.COMM.WINDOW_DEFAULT"] = 900          // seconds (15 min)
+	items["MASH.S.COMM.WINDOW_MIN"] = 180              // seconds (3 min)
+	items["MASH.S.COMM.WINDOW_MAX"] = 10800            // seconds (3 hours)
+	items["MASH.S.COMM.WINDOW_CONFIGURABLE"] = true
+	// Certificate management
+	items["MASH.S.CERT.EXCHANGE"] = true
+	items["MASH.S.CERT.DEVICE_ID_FROM_CN"] = true
+	items["MASH.S.CERT.RENEWAL"] = true
+	items["MASH.S.CERT.IN_SESSION_RENEWAL"] = true
+	items["MASH.S.CERT.NONCE_BINDING"] = true
 
 	// Parse use case declarations.
 	useCases := parseAutoPICSUseCases(deviceAttrs[features.DeviceInfoAttrUseCases])

@@ -331,6 +331,10 @@ const (
 	KeyDistributionsOverlap     = "distributions_overlap"
 	KeyPubkeyMeanMs             = "pubkey_mean_ms"
 	KeyPasswordMeanMs           = "password_mean_ms"
+	KeyBusyResponseReceived     = "busy_response_received"
+	KeyBusyErrorCode            = "busy_error_code"
+	KeyBusyRetryAfterPresent    = "busy_retry_after_present"
+	KeyBusyRetryAfterValue      = "busy_retry_after_value"
 )
 
 // Discovery handler output keys.

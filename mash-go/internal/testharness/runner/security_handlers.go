@@ -4,12 +4,16 @@ package runner
 import (
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
@@ -94,8 +98,14 @@ func getSecurityState(state *engine.ExecutionState) *securityState {
 
 // handleOpenCommissioningConnection opens a new commissioning TLS connection.
 func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	// Simulate rejection when device_zones_full is set.
+	// DEC-063: When zones are full and send_pase is requested, connect to the
+	// device, send a PASERequest, and read the CommissioningError busy response.
 	if zf, _ := state.Get(PrecondDeviceZonesFull); zf == true {
+		sendPASE, _ := step.Params["send_pase"].(bool)
+		if sendPASE {
+			return r.handleBusyPASEExchange(step)
+		}
+		// No PASE requested -- report rejection without connecting.
 		return map[string]any{
 			KeyConnectionEstablished: false,
 			KeyConnectionRejected:    true,
@@ -998,6 +1008,120 @@ func (r *Runner) checkMeanDifferenceMax(key string, expected interface{}, state 
 		Passed:   passed,
 		Message:  fmt.Sprintf("mean difference %dms <= %dms: %v", actualMs, expectedMs, passed),
 	}
+}
+
+// ============================================================================
+// Busy Response Helpers (DEC-063)
+// ============================================================================
+
+// handleBusyPASEExchange connects to the device, sends a PASERequest, and reads
+// the expected CommissioningError busy response. When no target is configured
+// (simulation mode), it returns canned busy response values.
+func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, error) {
+	target := r.config.Target
+	if t, ok := step.Params["target"].(string); ok && t != "" {
+		target = t
+	}
+
+	// Simulation mode: return expected busy values without connecting.
+	if target == "" {
+		return map[string]any{
+			KeyConnectionEstablished: false,
+			KeyBusyResponseReceived:  true,
+			KeyBusyErrorCode:         int(commissioning.ErrCodeBusy),
+			KeyBusyRetryAfterValue:   0,
+			KeyBusyRetryAfterPresent: false,
+		}, nil
+	}
+
+	// Real device: connect, send PASERequest, read CommissioningError.
+	tlsConfig := transport.NewCommissioningTLSConfig()
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+	if err != nil {
+		return map[string]any{
+			KeyConnectionEstablished: false,
+			KeyConnectionRejected:    true,
+			KeyRejectionAtTLSLevel:   true,
+			KeyError:                 err.Error(),
+		}, nil
+	}
+	defer conn.Close()
+
+	if err := sendPASERequestRaw(conn); err != nil {
+		return map[string]any{
+			KeyConnectionEstablished: true,
+			KeyError:                 fmt.Sprintf("send PASERequest: %v", err),
+		}, nil
+	}
+
+	errMsg, err := readCommissioningErrorRaw(conn, 5*time.Second)
+	if err != nil {
+		return map[string]any{
+			KeyConnectionEstablished: true,
+			KeyError:                 fmt.Sprintf("read CommissioningError: %v", err),
+		}, nil
+	}
+
+	return map[string]any{
+		KeyConnectionEstablished: true,
+		KeyBusyResponseReceived:  true,
+		KeyBusyErrorCode:         int(errMsg.ErrorCode),
+		KeyBusyRetryAfterValue:   int(errMsg.RetryAfter),
+		KeyBusyRetryAfterPresent: errMsg.RetryAfter > 0,
+	}, nil
+}
+
+// sendPASERequestRaw sends a dummy PASERequest over a length-prefixed CBOR connection.
+func sendPASERequestRaw(conn net.Conn) error {
+	req := &commissioning.PASERequest{
+		MsgType:        commissioning.MsgPASERequest,
+		PublicValue:    make([]byte, 65),
+		ClientIdentity: []byte("test-harness"),
+	}
+	data, err := cbor.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal PASERequest: %w", err)
+	}
+
+	length := make([]byte, 4)
+	binary.BigEndian.PutUint32(length, uint32(len(data)))
+	if _, err := conn.Write(length); err != nil {
+		return fmt.Errorf("write length: %w", err)
+	}
+	if _, err := conn.Write(data); err != nil {
+		return fmt.Errorf("write data: %w", err)
+	}
+	return nil
+}
+
+// readCommissioningErrorRaw reads a length-prefixed CBOR CommissioningError
+// from the connection within the given timeout.
+func readCommissioningErrorRaw(conn net.Conn, timeout time.Duration) (*commissioning.CommissioningError, error) {
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
+
+	lengthBuf := make([]byte, 4)
+	if _, err := io.ReadFull(conn, lengthBuf); err != nil {
+		return nil, fmt.Errorf("read length: %w", err)
+	}
+
+	msgLen := binary.BigEndian.Uint32(lengthBuf)
+	data := make([]byte, msgLen)
+	if _, err := io.ReadFull(conn, data); err != nil {
+		return nil, fmt.Errorf("read data: %w", err)
+	}
+
+	msg, err := commissioning.DecodePASEMessage(data)
+	if err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+
+	errMsg, ok := msg.(*commissioning.CommissioningError)
+	if !ok {
+		return nil, fmt.Errorf("expected CommissioningError, got %T", msg)
+	}
+	return errMsg, nil
 }
 
 // ============================================================================
