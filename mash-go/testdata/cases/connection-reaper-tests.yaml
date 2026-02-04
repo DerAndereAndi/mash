@@ -1,0 +1,138 @@
+# Test Cases: Stale Connection Reaper (DEC-064)
+# Verifies background reaper closes pre-operational connections
+
+---
+id: TC-CONN-REAP-001
+name: Idle Connection Reaped
+description: |
+  Verifies that a TLS connection that completes the handshake but sends
+  no application-layer messages is force-closed after the stale connection
+  timeout (default 90s).
+
+pics_requirements:
+  - MASH.S.CONN.STALE_REAPER
+  - MASH.S.CONN.STALE_TIMEOUT
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Open TLS connection and send no messages
+    action: open_commissioning_connection
+    params:
+      send_pase: false
+    expect:
+      connection_established: true
+
+  - name: Wait for stale timeout plus margin
+    action: wait
+    params:
+      duration_ms: "{{ stale_timeout_ms + 5000 }}"
+
+  - name: Verify connection was closed by device
+    action: check_connection_closed
+    params:
+      index: 0
+    expect:
+      connection_closed: true
+
+postconditions:
+  - active_connections: 0
+
+timeout: "120s"
+tags:
+  - connection
+  - reaper
+  - DEC-064
+
+---
+id: TC-CONN-REAP-002
+name: Active Session Not Reaped
+description: |
+  Verifies that a fully commissioned operational connection is NOT
+  closed by the stale connection reaper, even after the stale timeout.
+
+pics_requirements:
+  - MASH.S.CONN.STALE_REAPER
+  - MASH.S.CONN.STALE_TIMEOUT
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - device_has_available_zone_slot: true
+
+steps:
+  - name: Commission device successfully
+    action: commission
+    params:
+      setup_code: "{{ setup_code }}"
+    expect:
+      commission_success: true
+
+  - name: Wait past stale timeout
+    action: wait
+    params:
+      duration_ms: "{{ stale_timeout_ms + 5000 }}"
+
+  - name: Verify operational connection still active
+    action: send_ping
+    expect:
+      pong_received: true
+
+postconditions:
+  - operational_connection_active: true
+
+timeout: "120s"
+tags:
+  - connection
+  - reaper
+  - operational
+  - DEC-064
+
+---
+id: TC-CONN-REAP-003
+name: Reaper Frees Connection Slot
+description: |
+  Verifies that after the reaper closes a stale connection, the freed
+  slot allows a new connection to be accepted.
+
+pics_requirements:
+  - MASH.S.CONN.STALE_REAPER
+  - MASH.S.TRANS.CONN_CAP
+
+preconditions:
+  - device_in_commissioning_mode: true
+
+steps:
+  - name: Fill connection slots with idle TLS connections
+    action: open_connections
+    params:
+      count: "${MASH.S.ZONE.MAX + 1}"
+      send_pase: false
+    expect:
+      all_established: true
+
+  - name: Verify new connection is rejected (cap reached)
+    action: open_commissioning_connection
+    expect:
+      connection_rejected: true
+
+  - name: Wait for stale timeout to reap idle connections
+    action: wait
+    params:
+      duration_ms: "{{ stale_timeout_ms + 5000 }}"
+
+  - name: Verify new connection is now accepted
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+postconditions:
+  - connection_slot_freed: true
+
+timeout: "120s"
+tags:
+  - connection
+  - reaper
+  - connection-cap
+  - DEC-064
+  - DEC-062

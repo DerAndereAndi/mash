@@ -161,17 +161,26 @@ Connection limits are derived from zone capacity to ensure predictable resource 
 - 1 commissioning connection (when slot available)
 - Total: 3 connections maximum
 
-**Commissioning Rejection:**
+**Commissioning Rejection (DEC-063):**
 
-| Condition | Behavior |
-|-----------|----------|
-| All zone slots filled | Do not advertise CM=1; reject at TLS level |
-| Commissioning in progress | Reject new commissioning at TLS level |
-| Cooldown period active | Delay or reject at TLS level |
+When a commissioning connection is rejected after the PASERequest message has been received, the device MUST send a `CommissioningError` message with error code 5 (`DEVICE_BUSY`) and an appropriate `RetryAfter` hint before closing the connection.
+
+| Condition | RetryAfter | Rationale |
+|-----------|------------|-----------|
+| Commissioning in progress | HandshakeTimeout ms | Wait for current handshake to complete |
+| Cooldown period active | Remaining cooldown ms | Wait for cooldown to expire |
+| All zone slots filled | 0 | No point retrying until decommission |
+
+The `CommissioningError` message format (CBOR):
+```
+{ 1: 255, 2: 5, 3: "reason string", 4: retryAfterMs }
+```
+
+Key 4 (`RetryAfter`) is a uint32 in milliseconds with `omitempty` -- it is not serialized when 0. This is backward compatible: older implementations ignore unknown CBOR keys.
 
 **Behavior:**
 1. Device MUST track operational and commissioning connections separately
-2. When commissioning rejected, device SHOULD send TLS alert `user_canceled` (90)
+2. When commissioning rejected after PASERequest, device MUST send `CommissioningError(DEVICE_BUSY)` with `RetryAfter` hint (DEC-063)
 3. Device MUST NOT reveal current connection count or zone capacity
 4. Device MAY implement per-IP tracking for diagnostics
 5. Device MUST enforce the total connection cap at the transport level (DEC-062)
@@ -189,6 +198,22 @@ The total connection cap (max_zones + 1) MUST be enforced at TCP accept, before 
 | Scope | Counter covers ALL connection types (commissioning and operational) |
 
 The transport-level cap operates independently of the PASE-level commissioning lock (DEC-047) and the message-gated locking (DEC-061). A connection that is rejected at the transport level never reaches the TLS handshake or PASE exchange.
+
+**Stale Connection Reaper (DEC-064):**
+
+A device MUST implement a background reaper that periodically force-closes pre-operational connections exceeding a staleness threshold. This catches connections that pass the transport-level cap but stall before becoming operational.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| StaleConnectionTimeout | 90s | Maximum age for pre-operational connections. Set 0 to disable. |
+| ReaperInterval | 10s | How often the reaper scans for stale connections |
+
+**Rules:**
+1. Connections are tracked from TCP accept until they enter the operational message loop
+2. Connections MUST be deregistered from the tracker before entering the operational message loop
+3. The reaper MUST NOT close operational connections
+4. The default timeout (90s) is intentionally greater than HandshakeTimeout (85s) -- per-phase timeouts fire first for well-behaved connections; the reaper is a safety net for edge cases
+5. The reaper MUST exit cleanly when the service stops
 
 **Rationale:**
 - Limits derived from zone capacity are logically defensible

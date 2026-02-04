@@ -246,7 +246,39 @@ This document provides traceability between:
 | TC-CONN-004 | Graceful close |
 | TC-CONN-005 | Connection timeout |
 
-### 4.2 Error Handling
+### 4.2 Connection Busy Response (DEC-063)
+
+| Component | Reference |
+|-----------|-----------|
+| Spec | `docs/transport.md` Section 5.4, `docs/security.md` Section 11.8 |
+| Tests | `mash-go/testdata/cases/connection-busy-tests.yaml` |
+| Implementation | `mash-go/pkg/service/device_service.go`, `mash-go/pkg/commissioning/session.go` |
+
+**Test Cases (3):**
+
+| ID | Name | PICS Required |
+|----|------|---------------|
+| TC-CONN-BUSY-001 | Busy Response Contains RetryAfter | MASH.S.COMM.ERR_BUSY, MASH.S.COMM.ERR_BUSY_RETRY_AFTER |
+| TC-CONN-BUSY-002 | Busy Response During Cooldown | MASH.S.COMM.ERR_BUSY, MASH.S.COMM.CONN_COOLDOWN |
+| TC-CONN-BUSY-003 | Retry After Busy Succeeds | MASH.S.COMM.ERR_BUSY, MASH.S.COMM.ERR_BUSY_RETRY_AFTER |
+
+### 4.3 Connection Reaper (DEC-064)
+
+| Component | Reference |
+|-----------|-----------|
+| Spec | `docs/transport.md` Section 5.4, `docs/security.md` Section 11.9 |
+| Tests | `mash-go/testdata/cases/connection-reaper-tests.yaml` |
+| Implementation | `mash-go/pkg/service/conn_tracker.go`, `mash-go/pkg/service/device_service.go` |
+
+**Test Cases (3):**
+
+| ID | Name | PICS Required |
+|----|------|---------------|
+| TC-CONN-REAP-001 | Idle Connection Reaped | MASH.S.CONN.STALE_REAPER, MASH.S.CONN.STALE_TIMEOUT |
+| TC-CONN-REAP-002 | Active Session Not Reaped | MASH.S.CONN.STALE_REAPER, MASH.S.CONN.STALE_TIMEOUT |
+| TC-CONN-REAP-003 | Reaper Frees Connection Slot | MASH.S.CONN.STALE_REAPER, MASH.S.TRANS.CONN_CAP |
+
+### 4.4 Error Handling
 
 | Component | Reference |
 |-----------|-----------|
@@ -354,9 +386,11 @@ This document provides traceability between:
 | `status-tests.yaml` | 6 | Feature |
 | `error-handling-tests.yaml` | 6 | Error handling |
 | `connection-tests.yaml` | 5 | Connection |
-| **Total (new Phase 3)** | **97** | |
+| `connection-busy-tests.yaml` | 3 | Busy Response (DEC-063) |
+| `connection-reaper-tests.yaml` | 3 | Stale Reaper (DEC-064) |
+| **Total (new Phase 3)** | **103** | |
 | Existing tests | 13 | Discovery, commissioning, bidirectional, cert renewal |
-| **Grand Total** | **110** | |
+| **Grand Total** | **116** | |
 
 ---
 

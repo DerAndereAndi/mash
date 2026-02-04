@@ -404,9 +404,9 @@ The connection model is derived from zone capacity to ensure predictable resourc
 2. Device MUST track commissioning connection state (0 or 1)
 3. When all zone slots filled:
    - Device MUST NOT advertise as commissionable (CM=0 or no _mash-comm._tcp)
-   - Device MUST reject commissioning connections at TLS level
+   - Device MUST send `CommissioningError(DEVICE_BUSY)` after PASERequest (see Section 11.8)
 4. When commissioning already in progress:
-   - Device MUST reject additional commissioning connections at TLS level
+   - Device MUST send `CommissioningError(DEVICE_BUSY)` with RetryAfter hint (see Section 11.8)
 5. Operational connections from existing zones MUST be allowed during commissioning
 6. Device SHOULD implement connection cooldown (500ms) to prevent rapid reconnection
 
@@ -563,7 +563,7 @@ TLS connections from blocking commissioning.
 2. Device MUST wait for the first message after TLS handshake with a 5-second timeout
 3. If timeout expires before a valid PASERequest arrives, device MUST close the connection silently (no lock was held, no error response)
 4. Device MUST acquire the commissioning lock only after receiving a valid PASERequest
-5. If the lock cannot be acquired (another PASE in progress), device MUST close the connection
+5. If the lock cannot be acquired (another PASE in progress), device MUST send `CommissioningError(DEVICE_BUSY)` with RetryAfter hint (Section 11.8) and close the connection
 6. The overall handshake timer (Section 11.5) starts when PASERequest is received, not at TLS accept
 
 **Connection Lifecycle:**
@@ -571,7 +571,7 @@ TLS connections from blocking commissioning.
 ```
 TLS Accept ─── WaitForPASERequest (5s, no lock) ─── Acquire Lock ─── CompleteHandshake (85s) ─── Cert Exchange ─── Release Lock
      │                    │                                │
-     │                    ├─ Timeout: close silently        ├─ Lock busy: close
+     │                    ├─ Timeout: close silently        ├─ Lock busy: send DEVICE_BUSY + RetryAfter, close
      │                    └─ Invalid msg: close             └─ PASE fail: release lock, close
      │
      └─ TLS fail: close
@@ -581,3 +581,81 @@ TLS Accept ─── WaitForPASERequest (5s, no lock) ─── Acquire Lock ─
 - An idle TLS connection that never sends a PASERequest no longer holds the commissioning lock for 85 seconds
 - Multiple TLS connections can be accepted simultaneously; only the first to send a valid PASERequest acquires the lock
 - Aligns with Matter's approach of deferring resource commitment until the first application-layer message
+
+### 11.8 Busy Rejection Response (DEC-063)
+
+When a commissioning connection is rejected after PASERequest, the device MUST send
+a `CommissioningError` message with error code 5 (`DEVICE_BUSY`) and a `RetryAfter`
+hint before closing the connection. This replaces silent connection closure and gives
+controllers actionable retry guidance.
+
+**Error Code:**
+
+| Code | Name | Description |
+|------|------|-------------|
+| 5 | ErrCodeBusy (DEVICE_BUSY) | Device cannot accept commissioning; retry later |
+
+**CommissioningError Message Format (CBOR):**
+
+```cbor
+{
+  1: 255,                    ; MsgType (CommissioningError)
+  2: 5,                      ; ErrorCode (DEVICE_BUSY)
+  3: "reason string",        ; Human-readable reason
+  4: retryAfterMs            ; uint32, milliseconds (omitempty)
+}
+```
+
+Key 4 (`RetryAfter`) uses `omitempty` -- it is not serialized when 0. This is
+backward compatible: older implementations ignore unknown CBOR keys.
+
+**RetryAfter Computation:**
+
+| Condition | RetryAfter | Rationale |
+|-----------|------------|-----------|
+| Commissioning in progress | HandshakeTimeout ms | Wait for current handshake to complete |
+| Cooldown period active | Remaining cooldown ms | Wait for cooldown to expire |
+| All zone slots filled | 0 | No point retrying until decommission |
+
+**Security Properties:**
+1. Device MUST NOT reveal the specific reason for rejection beyond error code 5
+2. The human-readable reason string is for diagnostics only, not machine-parseable
+3. Device MUST NOT reveal current connection count or zone capacity
+4. RetryAfter = 0 indicates the condition is permanent (no retry will help)
+
+### 11.9 Stale Connection Reaper (DEC-064)
+
+A device MUST implement a background reaper that periodically force-closes
+pre-operational connections exceeding a staleness threshold. This is an anti-DoS
+mechanism that catches connections which pass the transport-level cap (DEC-062)
+but stall before becoming operational.
+
+**Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| StaleConnectionTimeout | 90s | Maximum age for pre-operational connections. Set 0 to disable. |
+| ReaperInterval | 10s | How often the reaper scans for stale connections |
+
+**Rules:**
+1. Connections are tracked from TCP accept until they enter the operational message loop
+2. Connections MUST be deregistered from the tracker before entering the operational message loop
+3. The reaper MUST NOT close operational connections
+4. The default timeout (90s) is intentionally greater than HandshakeTimeout (85s) -- per-phase timeouts fire first for well-behaved connections; the reaper is a safety net for edge cases
+5. The reaper MUST exit cleanly when the service stops
+
+**Defense-in-Depth Layers:**
+
+| Layer | Mechanism | What It Catches |
+|-------|-----------|-----------------|
+| Transport cap (DEC-062) | Atomic counter at TCP accept | Excess connections before TLS |
+| First-message timeout (DEC-061) | 5s timer after TLS | Idle TLS connections that never send PASE |
+| Per-phase timeouts (11.5) | Individual phase limits | Slow/stalled handshake phases |
+| **Stale reaper (DEC-064)** | **Periodic sweep** | **Any pre-operational connection that slips through other layers** |
+| Busy response (DEC-063) | Error message after PASERequest | Rejected commissioning with retry guidance |
+
+**Rationale:**
+- The reaper is the last line of defense for connection resource exhaustion
+- It handles edge cases where per-phase timeouts don't fire (e.g., connection accepted but handler goroutine delayed)
+- The 90-second default ensures it never interferes with legitimate commissioning (85s max)
+- Disabling via StaleConnectionTimeout=0 allows constrained deployments to opt out

@@ -91,6 +91,20 @@ items:
   # Note: Cap value = MASH.S.ZONE.MAX + 1 (derived, not independently configured)
 
   # ==========================================================================
+  # Busy Rejection Response (DEC-063)
+  # ==========================================================================
+
+  MASH.S.COMM.ERR_BUSY: true               # Device sends ErrCodeBusy (5) on rejection
+  MASH.S.COMM.ERR_BUSY_RETRY_AFTER: true   # Busy response includes RetryAfter hint
+
+  # ==========================================================================
+  # Stale Connection Reaper (DEC-064)
+  # ==========================================================================
+
+  MASH.S.CONN.STALE_REAPER: true           # Stale connection reaper enabled
+  MASH.S.CONN.STALE_TIMEOUT: 90            # Stale connection timeout (seconds)
+
+  # ==========================================================================
   # Commissioning Window Timing (DEC-048)
   # ==========================================================================
 
@@ -251,3 +265,36 @@ items:
 # TC-CONN-CAP-004 (Counter Decrement on Client Close):
 #   - MASH.S.TRANS.CONN_CAP: true
 #   - MASH.S.ZONE.MAX: 2
+#
+# =============================================================================
+# Connection Busy Response Tests (DEC-063)
+# =============================================================================
+#
+# TC-CONN-BUSY-001 (Busy Response Contains RetryAfter):
+#   - MASH.S.COMM.ERR_BUSY: true
+#   - MASH.S.COMM.ERR_BUSY_RETRY_AFTER: true
+#
+# TC-CONN-BUSY-002 (Busy Response During Cooldown):
+#   - MASH.S.COMM.ERR_BUSY: true
+#   - MASH.S.COMM.ERR_BUSY_RETRY_AFTER: true
+#   - MASH.S.COMM.CONN_COOLDOWN: 500
+#
+# TC-CONN-BUSY-003 (Retry After Busy Succeeds):
+#   - MASH.S.COMM.ERR_BUSY: true
+#   - MASH.S.COMM.ERR_BUSY_RETRY_AFTER: true
+#
+# =============================================================================
+# Stale Connection Reaper Tests (DEC-064)
+# =============================================================================
+#
+# TC-CONN-REAP-001 (Idle Connection Reaped):
+#   - MASH.S.CONN.STALE_REAPER: true
+#   - MASH.S.CONN.STALE_TIMEOUT: 90
+#
+# TC-CONN-REAP-002 (Active Session Not Reaped):
+#   - MASH.S.CONN.STALE_REAPER: true
+#   - MASH.S.CONN.STALE_TIMEOUT: 90
+#
+# TC-CONN-REAP-003 (Reaper Frees Connection Slot):
+#   - MASH.S.CONN.STALE_REAPER: true
+#   - MASH.S.TRANS.CONN_CAP: true

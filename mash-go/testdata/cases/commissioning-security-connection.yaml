@@ -6,26 +6,33 @@ id: TC-SEC-CONN-001
 name: Single Commissioning Connection Limit
 description: |
   Verifies device allows only one concurrent commissioning connection.
-  Second commissioning attempt should be rejected at TLS level.
+  Second commissioning attempt should receive a CommissioningError with
+  DEVICE_BUSY (error code 5) and RetryAfter hint (DEC-063).
 
 pics_requirements:
   - MASH.S.COMM.HARDENING
+  - MASH.S.COMM.ERR_BUSY
 
 preconditions:
   - device_in_commissioning_mode: true
   - device_has_available_zone_slot: true
 
 steps:
-  - name: Open first commissioning connection
+  - name: Open first commissioning connection and send PASERequest
     action: open_commissioning_connection
+    params:
+      send_pase: true
     expect:
       connection_established: true
 
   - name: Attempt second commissioning connection
     action: open_commissioning_connection
+    params:
+      send_pase: true
     expect:
-      connection_rejected: true
-      rejection_at_tls_level: true
+      busy_response_received: true
+      busy_error_code: 5
+      busy_retry_after_present: true
 
   - name: Close first connection
     action: close_connection
@@ -46,17 +53,21 @@ tags:
   - commissioning
   - connection
   - DEC-047
+  - DEC-063
 
 ---
 id: TC-SEC-CONN-002
 name: Commissioning Blocked When Zones Full
 description: |
   Verifies device rejects commissioning when all zone slots are filled.
-  Device should not advertise as commissionable and reject at TLS level.
+  Device should not advertise as commissionable and send a
+  CommissioningError with DEVICE_BUSY (error code 5) and RetryAfter=0
+  when a PASERequest is received (DEC-063).
 
 pics_requirements:
   - MASH.S.COMM.HARDENING
   - MASH.S.ZONE.MAX
+  - MASH.S.COMM.ERR_BUSY
 
 preconditions:
   - device_zones_full: true
@@ -69,8 +80,12 @@ steps:
 
   - name: Attempt commissioning connection anyway
     action: open_commissioning_connection
+    params:
+      send_pase: true
     expect:
-      connection_rejected: true
+      busy_response_received: true
+      busy_error_code: 5
+      busy_retry_after_value: 0
 
 postconditions:
   - commissioning_rejected: true
@@ -81,6 +96,7 @@ tags:
   - commissioning
   - zones
   - DEC-047
+  - DEC-063
 
 ---
 id: TC-SEC-CONN-003

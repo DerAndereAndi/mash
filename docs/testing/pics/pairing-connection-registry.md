@@ -105,6 +105,8 @@ This registry defines PICS codes for the pairing and connection layer of MASH. T
 | PICS Code | Description | Values | Conformance |
 |-----------|-------------|--------|-------------|
 | MASH.S.COMM.ERR_ZONE_TYPE_EXISTS | Supports error code 10 (zone type already exists) | 0, 1 | M |
+| MASH.S.COMM.ERR_BUSY | Supports error code 5 (device busy, retry later) | 0, 1 | M |
+| MASH.S.COMM.ERR_BUSY_RETRY_AFTER | Includes RetryAfter hint in busy response | 0, 1 | M |
 
 ---
 
@@ -179,6 +181,8 @@ This registry defines PICS codes for the pairing and connection layer of MASH. T
 | MASH.S.CONN | Connection lifecycle support | 1 | M |
 | MASH.S.CONN.GRACEFUL_CLOSE | Graceful close message support | 1 | M |
 | MASH.S.CONN.CLOSE_TIMEOUT | Close acknowledgment timeout (seconds) | 5 | M |
+| MASH.S.CONN.STALE_REAPER | Stale connection reaper enabled | 0, 1 | M |
+| MASH.S.CONN.STALE_TIMEOUT | Stale connection reaper timeout (seconds) | 90 | M |
 
 ### 6.2 Reconnection (Client-side)
 

@@ -106,6 +106,9 @@ type DeviceService struct {
 
 	// Transport-level connection cap (DEC-062)
 	activeConns atomic.Int32
+
+	// Stale connection reaper (DEC-064)
+	connTracker *connTracker
 }
 
 // generateConnectionID generates a random connection ID for logging.
@@ -130,6 +133,7 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 		zoneSessions:   make(map[string]*ZoneSession),
 		failsafeTimers: make(map[string]*failsafe.Timer),
 		zoneIndexMap:   make(map[string]uint8),
+		connTracker:    newConnTracker(),
 		logger:         config.Logger,
 		protocolLogger: config.ProtocolLogger,
 	}
@@ -302,6 +306,11 @@ func (s *DeviceService) Start(ctx context.Context) error {
 	// Start accepting connections in background
 	go s.acceptLoop()
 
+	// Start stale connection reaper if enabled (DEC-064)
+	if s.config.StaleConnectionTimeout > 0 {
+		go s.runStaleConnectionReaper()
+	}
+
 	// Initialize discovery advertiser if not already set (e.g., by tests)
 	if s.advertiser == nil {
 		advConfig := discovery.DefaultAdvertiserConfig()
@@ -384,6 +393,7 @@ func (s *DeviceService) acceptLoop() {
 			continue
 		}
 		s.activeConns.Add(1)
+		s.connTracker.Add(conn)
 
 		go s.handleConnection(conn)
 	}
@@ -391,7 +401,8 @@ func (s *DeviceService) acceptLoop() {
 
 // handleConnection handles an incoming connection.
 func (s *DeviceService) handleConnection(conn net.Conn) {
-	defer s.activeConns.Add(-1) // DEC-062: decrement on any exit path
+	defer s.activeConns.Add(-1)     // DEC-062: decrement on any exit path
+	defer s.connTracker.Remove(conn) // DEC-064: safety net removal
 
 	// TLS handshake
 	tlsConn := tls.Server(conn, s.tlsConfig)
@@ -527,6 +538,10 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 		ZoneID: targetZoneID,
 	})
 
+	// DEC-064: Remove from tracker before entering the operational message loop.
+	// Operational connections must not be reaped by the stale connection reaper.
+	s.connTracker.Remove(conn)
+
 	// Start message loop - blocks until connection closes
 	s.runZoneMessageLoop(targetZoneID, framedConn, zoneSession)
 
@@ -568,6 +583,8 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// Phase 2: PASERequest received -- now acquire the commissioning lock
 	if ok, reason := s.acceptCommissioningConnection(); !ok {
 		s.debugLog("handleCommissioningConnection: rejected after PASERequest", "reason", reason)
+		retryAfterMs := s.computeBusyRetryAfter()
+		_ = commissioning.WriteCommissioningError(conn, commissioning.ErrCodeBusy, reason, retryAfterMs)
 		conn.Close()
 		return
 	}
@@ -732,6 +749,10 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// complete; holding the guard during the operational message loop
 	// would block all subsequent commissioning attempts for other zones.
 	s.releaseCommissioningConnection()
+
+	// DEC-064: Remove from tracker before entering the operational message loop.
+	// Operational connections must not be reaped by the stale connection reaper.
+	s.connTracker.Remove(conn)
 
 	// Start message loop - blocks until connection closes
 	s.runZoneMessageLoop(zoneID, framedConn, zoneSession)
@@ -2191,6 +2212,52 @@ func (s *DeviceService) ResetPASETracker() {
 	if s.paseTracker != nil {
 		s.paseTracker.Reset()
 	}
+}
+
+// runStaleConnectionReaper periodically closes pre-operational connections that
+// have exceeded the StaleConnectionTimeout. This is a safety net for connections
+// that never complete commissioning (DEC-064).
+func (s *DeviceService) runStaleConnectionReaper() {
+	ticker := time.NewTicker(s.config.ReaperInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			if closed := s.connTracker.CloseStale(s.config.StaleConnectionTimeout); closed > 0 {
+				s.debugLog("staleConnectionReaper: closed connections", "count", closed)
+			}
+		}
+	}
+}
+
+// computeBusyRetryAfter returns the RetryAfter hint (in ms) for a busy rejection.
+// The value depends on the rejection reason:
+//   - Commissioning in progress: HandshakeTimeout ms (wait for current handshake to finish)
+//   - Cooldown active: remaining cooldown ms
+//   - Zones full: 0 (no point retrying until a zone is decommissioned)
+func (s *DeviceService) computeBusyRetryAfter() uint32 {
+	s.connectionMu.Lock()
+	defer s.connectionMu.Unlock()
+
+	// Check if cooldown is active
+	if s.config.ConnectionCooldown > 0 {
+		elapsed := time.Since(s.lastCommissioningAttempt)
+		remaining := s.config.ConnectionCooldown - elapsed
+		if remaining > 0 {
+			return uint32(remaining.Milliseconds())
+		}
+	}
+
+	// Check if commissioning is in progress
+	if s.commissioningConnActive {
+		return uint32(s.config.HandshakeTimeout.Milliseconds())
+	}
+
+	// Zones full or unknown reason -- no point retrying
+	return 0
 }
 
 // randomErrorDelay returns a random duration between ErrorDelayMin and ErrorDelayMax.

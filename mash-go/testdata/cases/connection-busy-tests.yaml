@@ -1,0 +1,150 @@
+# Test Cases: Connection Busy Response (DEC-063)
+# Verifies CommissioningError(DEVICE_BUSY) with RetryAfter hint
+
+---
+id: TC-CONN-BUSY-001
+name: Busy Response Contains RetryAfter
+description: |
+  Verifies that when a second commissioning connection sends a PASERequest
+  while commissioning is already in progress, the device sends a
+  CommissioningError with error code 5 (DEVICE_BUSY) and RetryAfter > 0.
+
+pics_requirements:
+  - MASH.S.COMM.ERR_BUSY
+  - MASH.S.COMM.ERR_BUSY_RETRY_AFTER
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - device_has_available_zone_slot: true
+
+steps:
+  - name: Open first commissioning connection and start PASE
+    action: open_commissioning_connection
+    params:
+      send_pase: true
+    expect:
+      connection_established: true
+
+  - name: Open second connection and send PASERequest
+    action: open_commissioning_connection
+    params:
+      send_pase: true
+    expect:
+      busy_response_received: true
+      busy_error_code: 5
+      busy_retry_after_present: true
+      busy_retry_after_gt: 0
+
+postconditions:
+  - first_connection_still_active: true
+
+timeout: "30s"
+tags:
+  - commissioning
+  - busy-response
+  - DEC-063
+
+---
+id: TC-CONN-BUSY-002
+name: Busy Response During Cooldown
+description: |
+  Verifies that when a commissioning connection is rejected during a
+  cooldown period, the device sends a CommissioningError with
+  RetryAfter approximately equal to the remaining cooldown time.
+
+pics_requirements:
+  - MASH.S.COMM.ERR_BUSY
+  - MASH.S.COMM.ERR_BUSY_RETRY_AFTER
+  - MASH.S.COMM.CONN_COOLDOWN
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - device_has_available_zone_slot: true
+
+steps:
+  - name: Trigger cooldown by failing commissioning
+    action: open_commissioning_connection
+    params:
+      send_pase: true
+      fail_pase: true
+    expect:
+      pase_failed: true
+
+  - name: Immediately attempt second connection during cooldown
+    action: open_commissioning_connection
+    params:
+      send_pase: true
+    expect:
+      busy_response_received: true
+      busy_error_code: 5
+      busy_retry_after_present: true
+      busy_retry_after_gt: 0
+
+postconditions:
+  - cooldown_active: true
+
+timeout: "15s"
+tags:
+  - commissioning
+  - busy-response
+  - cooldown
+  - DEC-063
+
+---
+id: TC-CONN-BUSY-003
+name: Retry After Busy Succeeds
+description: |
+  Verifies that a controller can successfully commission after waiting
+  the RetryAfter duration from a busy response.
+
+pics_requirements:
+  - MASH.S.COMM.ERR_BUSY
+  - MASH.S.COMM.ERR_BUSY_RETRY_AFTER
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - device_has_available_zone_slot: true
+
+steps:
+  - name: Open first commissioning connection and start PASE
+    action: open_commissioning_connection
+    params:
+      send_pase: true
+    expect:
+      connection_established: true
+
+  - name: Get busy response on second connection
+    action: open_commissioning_connection
+    params:
+      send_pase: true
+    expect:
+      busy_response_received: true
+      busy_error_code: 5
+      busy_retry_after_present: true
+
+  - name: Close first connection
+    action: close_connection
+    params:
+      index: 0
+
+  - name: Wait for RetryAfter duration
+    action: wait
+    params:
+      duration_ms: "{{ busy_retry_after + 100 }}"
+
+  - name: Commission successfully
+    action: commission
+    params:
+      setup_code: "{{ setup_code }}"
+    expect:
+      commission_success: true
+
+postconditions:
+  - device_commissioned: true
+
+timeout: "120s"
+tags:
+  - commissioning
+  - busy-response
+  - retry
+  - DEC-063

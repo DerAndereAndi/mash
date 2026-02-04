@@ -233,6 +233,19 @@ func UnmarshalVerifier(data []byte) (*Verifier, error) {
 	return &v, nil
 }
 
+// WriteCommissioningError sends a CommissioningError message over a connection.
+// This is used to inform the peer of rejection reasons (e.g., device busy)
+// before closing the connection. (DEC-063)
+func WriteCommissioningError(conn net.Conn, code uint8, message string, retryAfterMs uint32) error {
+	errMsg := &CommissioningError{
+		MsgType:    MsgCommissioningError,
+		ErrorCode:  code,
+		Message:    message,
+		RetryAfter: retryAfterMs,
+	}
+	return writeMessage(conn, errMsg)
+}
+
 // Wire protocol helpers
 
 // writeMessage writes a length-prefixed CBOR message to the connection.

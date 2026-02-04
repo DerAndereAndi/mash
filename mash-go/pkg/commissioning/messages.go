@@ -44,6 +44,7 @@ const (
 	ErrCodeConfirmFailed     uint8 = 2   // Deprecated: use ErrCodeAuthFailed
 	ErrCodeCSRFailed         uint8 = 3
 	ErrCodeCertInstallFailed uint8 = 4
+	ErrCodeBusy              uint8 = 5   // Device busy, retry later (DEC-063)
 	ErrCodeZoneTypeExists    uint8 = 10  // Device already has a zone of this type
 	ErrCodeInternalError     uint8 = 255
 
@@ -69,6 +70,8 @@ func ErrorCodeString(code uint8) string {
 		return "CSR generation failed"
 	case ErrCodeCertInstallFailed:
 		return "certificate installation failed"
+	case ErrCodeBusy:
+		return "device busy"
 	case ErrCodeZoneTypeExists:
 		return "zone type already exists"
 	case ErrCodeInternalError:
@@ -167,9 +170,10 @@ type CommissioningComplete struct {
 }
 
 // CommissioningError indicates a commissioning error.
-// CBOR: { 1: msgType, 2: errorCode, 3: message }
+// CBOR: { 1: msgType, 2: errorCode, 3: message, 4: retryAfter }
 type CommissioningError struct {
-	MsgType   uint8  `cbor:"1,keyasint"`
-	ErrorCode uint8  `cbor:"2,keyasint"`
-	Message   string `cbor:"3,keyasint,omitempty"`
+	MsgType    uint8  `cbor:"1,keyasint"`
+	ErrorCode  uint8  `cbor:"2,keyasint"`
+	Message    string `cbor:"3,keyasint,omitempty"`
+	RetryAfter uint32 `cbor:"4,keyasint,omitempty"` // Retry hint in milliseconds (DEC-063)
 }

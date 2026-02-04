@@ -349,6 +349,129 @@ func TestWaitForPASERequest_ConnectionClosed(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// WriteCommissioningError tests (DEC-063)
+// =============================================================================
+
+// TestWriteCommissioningError_SendsValidCBOR verifies WriteCommissioningError
+// sends a length-prefixed CBOR message that decodes to a CommissioningError.
+func TestWriteCommissioningError_SendsValidCBOR(t *testing.T) {
+	clientConn, serverConn := newMockConnPair()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	// Write a busy error with RetryAfter
+	done := make(chan error, 1)
+	go func() {
+		done <- commissioning.WriteCommissioningError(serverConn, commissioning.ErrCodeBusy, "device busy", 5000)
+	}()
+
+	// Read it back on the client side using the standard readMessage path
+	// (length-prefixed CBOR)
+	msg, err := readLengthPrefixedMessage(clientConn)
+	if err != nil {
+		t.Fatalf("Failed to read message: %v", err)
+	}
+
+	// Wait for write to complete
+	if writeErr := <-done; writeErr != nil {
+		t.Fatalf("WriteCommissioningError failed: %v", writeErr)
+	}
+
+	errMsg, ok := msg.(*commissioning.CommissioningError)
+	if !ok {
+		t.Fatalf("Expected *CommissioningError, got %T", msg)
+	}
+
+	if errMsg.MsgType != commissioning.MsgCommissioningError {
+		t.Errorf("MsgType: expected %d, got %d", commissioning.MsgCommissioningError, errMsg.MsgType)
+	}
+	if errMsg.ErrorCode != commissioning.ErrCodeBusy {
+		t.Errorf("ErrorCode: expected %d, got %d", commissioning.ErrCodeBusy, errMsg.ErrorCode)
+	}
+	if errMsg.Message != "device busy" {
+		t.Errorf("Message: expected 'device busy', got '%s'", errMsg.Message)
+	}
+	if errMsg.RetryAfter != 5000 {
+		t.Errorf("RetryAfter: expected 5000, got %d", errMsg.RetryAfter)
+	}
+}
+
+// TestWriteCommissioningError_ZeroRetryAfter verifies that RetryAfter=0
+// round-trips correctly.
+func TestWriteCommissioningError_ZeroRetryAfter(t *testing.T) {
+	clientConn, serverConn := newMockConnPair()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- commissioning.WriteCommissioningError(serverConn, commissioning.ErrCodeBusy, "zones full", 0)
+	}()
+
+	msg, err := readLengthPrefixedMessage(clientConn)
+	if err != nil {
+		t.Fatalf("Failed to read message: %v", err)
+	}
+
+	if writeErr := <-done; writeErr != nil {
+		t.Fatalf("WriteCommissioningError failed: %v", writeErr)
+	}
+
+	errMsg := msg.(*commissioning.CommissioningError)
+	if errMsg.RetryAfter != 0 {
+		t.Errorf("RetryAfter: expected 0, got %d", errMsg.RetryAfter)
+	}
+}
+
+// TestWriteCommissioningError_NonBusyCode verifies WriteCommissioningError
+// works with any error code, not just ErrCodeBusy.
+func TestWriteCommissioningError_NonBusyCode(t *testing.T) {
+	clientConn, serverConn := newMockConnPair()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- commissioning.WriteCommissioningError(serverConn, commissioning.ErrCodeAuthFailed, "auth failed", 0)
+	}()
+
+	msg, err := readLengthPrefixedMessage(clientConn)
+	if err != nil {
+		t.Fatalf("Failed to read message: %v", err)
+	}
+
+	if writeErr := <-done; writeErr != nil {
+		t.Fatalf("WriteCommissioningError failed: %v", writeErr)
+	}
+
+	errMsg := msg.(*commissioning.CommissioningError)
+	if errMsg.ErrorCode != commissioning.ErrCodeAuthFailed {
+		t.Errorf("ErrorCode: expected %d, got %d", commissioning.ErrCodeAuthFailed, errMsg.ErrorCode)
+	}
+	if errMsg.Message != "auth failed" {
+		t.Errorf("Message: expected 'auth failed', got '%s'", errMsg.Message)
+	}
+}
+
+// readLengthPrefixedMessage reads a length-prefixed CBOR message from a conn.
+// This mirrors the internal readMessage() wire format.
+func readLengthPrefixedMessage(conn net.Conn) (interface{}, error) {
+	// Read 4-byte length prefix
+	length := make([]byte, 4)
+	if _, err := io.ReadFull(conn, length); err != nil {
+		return nil, err
+	}
+
+	msgLen := uint32(length[0])<<24 | uint32(length[1])<<16 | uint32(length[2])<<8 | uint32(length[3])
+	data := make([]byte, msgLen)
+	if _, err := io.ReadFull(conn, data); err != nil {
+		return nil, err
+	}
+
+	return commissioning.DecodePASEMessage(data)
+}
+
 // TestVerifierPersistence verifies verifier can be serialized and restored.
 func TestVerifierPersistence(t *testing.T) {
 	setupCode := commissioning.MustParseSetupCode("12345678")

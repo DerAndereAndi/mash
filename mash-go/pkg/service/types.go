@@ -173,6 +173,17 @@ type DeviceConfig struct {
 	// Default: 500ms.
 	ErrorDelayMax time.Duration
 
+	// Stale Connection Reaper (DEC-064)
+
+	// StaleConnectionTimeout is the maximum age for pre-operational connections.
+	// Connections that have not completed commissioning within this time are
+	// force-closed by the reaper. Default: 90s. Set to 0 to disable.
+	StaleConnectionTimeout time.Duration
+
+	// ReaperInterval is how often the stale connection reaper runs.
+	// Default: 10s.
+	ReaperInterval time.Duration
+
 	// TestMode disables security hardening for test harness usage.
 	// When enabled: PASE backoff tracking is skipped, the commissioning window
 	// is extended to 24h (if at the default 15m), connection cooldown is skipped,
@@ -325,7 +336,10 @@ func DefaultDeviceConfig() DeviceConfig {
 			3000 * time.Millisecond,  // Tier 3: attempts 7-10, 3s delay
 			10000 * time.Millisecond, // Tier 4: attempts 11+, 10s delay
 		},
-		GenericErrors:  true,
+		// Stale Connection Reaper (DEC-064)
+		StaleConnectionTimeout: 90 * time.Second,
+		ReaperInterval:         10 * time.Second,
+		GenericErrors:          true,
 		ErrorDelayMin:  100 * time.Millisecond,
 		ErrorDelayMax:  500 * time.Millisecond,
 		SnapshotPolicy: DefaultSnapshotPolicy(),

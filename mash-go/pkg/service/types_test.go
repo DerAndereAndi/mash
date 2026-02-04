@@ -28,6 +28,20 @@ func TestDefaultDeviceConfigIncludesSnapshotPolicy(t *testing.T) {
 	}
 }
 
+func TestDefaultDeviceConfig_StaleConnectionTimeout(t *testing.T) {
+	cfg := DefaultDeviceConfig()
+	if cfg.StaleConnectionTimeout != 90*time.Second {
+		t.Errorf("StaleConnectionTimeout: got %v, want 90s", cfg.StaleConnectionTimeout)
+	}
+}
+
+func TestDefaultDeviceConfig_ReaperInterval(t *testing.T) {
+	cfg := DefaultDeviceConfig()
+	if cfg.ReaperInterval != 10*time.Second {
+		t.Errorf("ReaperInterval: got %v, want 10s", cfg.ReaperInterval)
+	}
+}
+
 func TestDefaultControllerConfigIncludesSnapshotPolicy(t *testing.T) {
 	cfg := DefaultControllerConfig()
 	expected := DefaultSnapshotPolicy()

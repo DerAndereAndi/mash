@@ -3587,6 +3587,67 @@ Add an `atomic.Int32` counter (`activeConns`) to `DeviceService` and enforce the
 
 ---
 
+### DEC-063: Busy Rejection Response
+
+**Date:** 2026-02-04
+**Status:** Accepted
+
+**Context:**
+When a commissioning connection is rejected (due to PASE lock contention, connection cooldown, or full zone slots), the device silently closes the TCP connection. The controller has no way to distinguish a busy device from a network failure, and no hint about when to retry.
+
+**Decision:**
+Send a `CommissioningError` message (MsgType 255) with error code 5 (`DEVICE_BUSY`) and a `RetryAfter` field before closing the connection:
+
+1. **New error code**: `ErrCodeBusy = 5` (between CertInstallFailed=4 and ZoneTypeExists=10)
+2. **New CBOR field**: `RetryAfter uint32` at key 4 with `omitempty` -- retry hint in milliseconds
+3. **Exported helper**: `WriteCommissioningError(conn, code, message, retryAfterMs)` wraps the unexported `writeMessage` function
+4. **RetryAfter values**:
+   - Commissioning in progress: HandshakeTimeout ms (wait for current handshake)
+   - Cooldown active: remaining cooldown ms
+   - Zones full: 0 (no point retrying until decommission)
+
+**Rationale:**
+- CBOR ignores unknown keys, so adding key 4 is backward compatible with older implementations
+- `omitempty` ensures RetryAfter is not serialized for non-busy errors, keeping messages compact
+- Error code 5 fits the existing numbering gap (4=CertInstallFailed, 10=ZoneTypeExists)
+- The exported `WriteCommissioningError` wrapper avoids exposing the internal `writeMessage` function
+
+**Related:** DEC-047 (security hardening), DEC-061 (message-gated locking), DEC-062 (connection cap)
+
+---
+
+### DEC-064: Stale Connection Reaper
+
+**Date:** 2026-02-04
+**Status:** Accepted
+
+**Context:**
+Pre-operational connections (TLS established, but no PASE or cert exchange completed) could remain open indefinitely. While DEC-061's `PASEFirstMessageTimeout` handles the case where no PASERequest arrives, and `HandshakeTimeout` bounds the PASE+cert exchange, there is no catch-all for connections that are accepted but stall at any point before becoming operational. On resource-constrained devices, these zombie connections consume memory and connection slots.
+
+**Decision:**
+Add a periodic background goroutine (the "reaper") that force-closes pre-operational connections exceeding a staleness threshold:
+
+1. **connTracker**: `map[net.Conn]time.Time` guarded by a mutex, tracking when each connection was accepted
+2. **Add**: register connections in `acceptLoop` after `activeConns.Add(1)`
+3. **Remove**: deregister connections explicitly before entering `runZoneMessageLoop` (not at close), ensuring operational connections are never visible to the reaper
+4. **Safety net**: `defer connTracker.Remove(conn)` in `handleConnection` for connections that fail before reaching the message loop
+5. **Reaper goroutine**: `runStaleConnectionReaper()` runs on a ticker, calling `connTracker.CloseStale(StaleConnectionTimeout)`. Exits cleanly on `ctx.Done()`
+6. **Config**: `StaleConnectionTimeout` (default 90s), `ReaperInterval` (default 10s). Set `StaleConnectionTimeout=0` to disable
+
+**Rationale:**
+- Default 90s > HandshakeTimeout 85s: per-phase timeouts (PASEFirstMessageTimeout, HandshakeTimeout) fire first for well-behaved connections. The reaper is a safety net for edge cases
+- Remove-before-message-loop (not remove-at-close) prevents the reaper from seeing operational connections, avoiding false positives
+- `map[net.Conn]time.Time` is sufficient for MaxZones+1 = 3 connections; no need for a more complex data structure
+- Ticker-based approach is simple and deterministic; no per-connection timers needed
+
+**Declined Alternatives:**
+- **Per-connection timers**: More precise but creates N timers for N connections. Not worth the complexity for <= 3 connections.
+- **Reap on accept only**: Would require scanning on each accept. Periodic reaping is simpler and catches stale connections even when no new connections arrive.
+
+**Related:** DEC-047 (security hardening), DEC-061 (message-gated locking), DEC-062 (connection cap), DEC-063 (busy response)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -3719,4 +3780,6 @@ Key learnings:
 | 2026-02-02 | Added DEC-058: Capability snapshots in protocol logs. Logging-layer mechanism to periodically emit device model snapshots with hybrid time/count trigger and MinMessages floor. Addresses discovery data loss on long-lived connections. |
 | 2026-02-02 | Added DEC-059: Auto re-enter commissioning on last zone removal. Device calls EnterCommissioningMode() when RemoveZone reduces zone count to 0. Test harness sends RemoveZone on backward precondition transitions. |
 | 2026-02-03 | Added DEC-060: TEST zone type for conformance testing. ZoneTypeTest=3, observer-only (excluded from limit/setpoint resolution), gated behind TestMode, MaxZones bumped to 3. Fixed zone type extraction from Zone CA certificate. |
+| 2026-02-04 | Added DEC-063: Busy rejection response. CommissioningError(5=DEVICE_BUSY) with RetryAfter field instead of silent close on commissioning rejection. |
+| 2026-02-04 | Added DEC-064: Stale connection reaper. Periodic background goroutine force-closes pre-operational connections exceeding 90s staleness threshold. |
 | 2026-02-04 | Added DEC-061: Message-gated commissioning locking. Moves commissioning lock from TLS accept to first PASERequest receipt. Splits PASEServerSession.Handshake into WaitForPASERequest (5s timeout, no lock) + CompleteHandshake (85s, with lock). Idle TLS connections no longer block commissioning. |
