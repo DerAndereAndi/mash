@@ -296,6 +296,7 @@ func (e *Engine) RunSuite(ctx context.Context, cases []*loader.TestCase) *SuiteR
 	}
 
 	startTime := time.Now()
+	defer func() { result.Duration = time.Since(startTime) }()
 
 	for _, tc := range cases {
 		// Check for context cancellation
@@ -325,7 +326,6 @@ func (e *Engine) RunSuite(ctx context.Context, cases []*loader.TestCase) *SuiteR
 		}
 	}
 
-	result.Duration = time.Since(startTime)
 	return result
 }
 
