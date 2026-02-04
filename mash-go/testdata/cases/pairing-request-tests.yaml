@@ -42,8 +42,8 @@ steps:
     action: announce_pairing_request
     params:
       service_type: "_mashp._udp"
-      discriminator: "${device_discriminator}"
-      controller_id: "${controller_id}"
+      discriminator: "{{ device_discriminator }}"
+      controller_id: "{{ controller_id }}"
     expect:
       announcement_sent: true
 
@@ -60,13 +60,13 @@ steps:
     expect:
       advertising: true
       txt_records:
-        id: "${device_id}"
-        disc: "${device_discriminator}"
+        id: "{{ device_id }}"
+        disc: "{{ device_discriminator }}"
 
   - name: Commission device successfully
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
       zone_type: "LOCAL"
     expect:
       commission_success: true
@@ -117,7 +117,7 @@ steps:
     params:
       service_type: "_mashp._udp"
       discriminator: "9999"          # Different from device's discriminator
-      controller_id: "${controller_id}"
+      controller_id: "{{ controller_id }}"
     expect:
       announcement_sent: true
 
@@ -163,7 +163,7 @@ pics_requirements:
 preconditions:
   - device_uncommissioned: true
   - commissioning_window_open: true
-  - window_opened_at: "${window_start_time}"
+  - window_opened_at: "{{ window_start_time }}"
 
 steps:
   - name: Verify device is advertising commissioning
@@ -186,8 +186,8 @@ steps:
     action: announce_pairing_request
     params:
       service_type: "_mashp._udp"
-      discriminator: "${device_discriminator}"
-      controller_id: "${controller_id}"
+      discriminator: "{{ device_discriminator }}"
+      controller_id: "{{ controller_id }}"
     expect:
       announcement_sent: true
 
@@ -202,7 +202,7 @@ steps:
       service_type: "_mashc._udp"
       key: "wexp"
     expect:
-      value: "${original_window_expiry}"    # Not extended
+      value: "{{ original_window_expiry }}"    # Not extended
 
 postconditions:
   - commissioning_window_unchanged: true
@@ -243,8 +243,8 @@ steps:
     action: announce_pairing_request
     params:
       service_type: "_mashp._udp"
-      discriminator: "${device_discriminator}"
-      controller_id: "${controller_id}"
+      discriminator: "{{ device_discriminator }}"
+      controller_id: "{{ controller_id }}"
       ttl: 3600                      # Persist for 1 hour
     expect:
       announcement_sent: true
@@ -252,7 +252,7 @@ steps:
   - name: Power on device
     action: power_on_device
     params:
-      device_id: "${device_id}"
+      device_id: "{{ device_id }}"
     expect:
       powered_on: true
 
@@ -273,7 +273,7 @@ steps:
   - name: Controller connects and commissions
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
       zone_type: "GRID"              # SMGW scenario
     expect:
       commission_success: true
@@ -284,8 +284,8 @@ steps:
     params:
       service_type: "_mashp._udp"
       filter:
-        controller_id: "${controller_id}"
-        discriminator: "${device_discriminator}"
+        controller_id: "{{ controller_id }}"
+        discriminator: "{{ device_discriminator }}"
     expect:
       not_advertising: true
 
@@ -333,7 +333,7 @@ steps:
     action: announce_pairing_request
     params:
       service_type: "_mashp._udp"
-      discriminator: "${device_discriminator}"
+      discriminator: "{{ device_discriminator }}"
       controller_id: "new-controller-id"
     expect:
       announcement_sent: true

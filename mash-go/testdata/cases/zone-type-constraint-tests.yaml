@@ -33,7 +33,7 @@ steps:
   - name: Commission with GRID zone type
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
       zone_type: "GRID"
       zone_id: "grid-zone-001"
     expect:
@@ -102,7 +102,7 @@ steps:
   - name: Commission with LOCAL zone type
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
       zone_type: "LOCAL"
       zone_id: "local-zone-001"
     expect:
@@ -169,7 +169,7 @@ steps:
   - name: Attempt to commission another GRID zone
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
       zone_type: "GRID"
       zone_id: "grid-zone-002"
     expect:
@@ -247,7 +247,7 @@ steps:
     action: announce_pairing_request
     params:
       service_type: "_mashp._udp"
-      discriminator: "${device_discriminator}"
+      discriminator: "{{ device_discriminator }}"
       controller_id: "new-controller"
     expect:
       announcement_sent: true
@@ -312,7 +312,7 @@ steps:
       feature: DeviceInfo
       command: RemoveZone
       args:
-        zoneId: "${local_zone_id}"
+        zoneId: "{{ local_zone_id }}"
     expect:
       invoke_success: true
       response:
@@ -334,7 +334,7 @@ steps:
     description: Connect as the remaining GRID zone to verify
     action: connect_as_zone
     params:
-      zone_id: "${grid_zone_id}"
+      zone_id: "{{ grid_zone_id }}"
     expect:
       connection_success: true
 
@@ -398,7 +398,7 @@ steps:
   - name: Attempt to commission another LOCAL zone
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
       zone_type: "LOCAL"
       zone_id: "local-zone-002"
     expect:
@@ -454,7 +454,7 @@ steps:
       feature: DeviceInfo
       command: RemoveZone
       args:
-        zoneId: "${grid_zone_id}"
+        zoneId: "{{ grid_zone_id }}"
     expect:
       invoke_success: true
       response:
@@ -468,7 +468,7 @@ steps:
   - name: Commission new GRID zone
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
       zone_type: "GRID"
       zone_id: "new-grid-zone"
     expect:

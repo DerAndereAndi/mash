@@ -123,8 +123,8 @@ steps:
     action: announce_pairing_request
     params:
       service_type: "_mashp._udp"
-      discriminator: "${device_discriminator}"
-      controller_id: "${controller_id}"
+      discriminator: "{{ device_discriminator }}"
+      controller_id: "{{ controller_id }}"
     expect:
       announcement_sent: true
 
@@ -141,7 +141,7 @@ steps:
     expect:
       advertising: true
       txt_records:
-        disc: "${device_discriminator}"
+        disc: "{{ device_discriminator }}"
 
 postconditions:
   - commissioning_window_reopened: true
@@ -271,7 +271,7 @@ steps:
   - name: Commission device successfully
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
       zone_type: "LOCAL"
     expect:
       commission_success: true

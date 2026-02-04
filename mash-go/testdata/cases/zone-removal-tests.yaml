@@ -30,7 +30,7 @@ steps:
       feature: DeviceInfo
       command: RemoveZone
       args:
-        zoneId: "${current_zone_id}"
+        zoneId: "{{ current_zone_id }}"
     expect:
       invoke_success: true
       response:
@@ -78,7 +78,7 @@ steps:
       feature: DeviceInfo
       command: RemoveZone
       args:
-        zoneId: "${current_zone_id}"
+        zoneId: "{{ current_zone_id }}"
     expect:
       invoke_success: true
       response:
@@ -87,7 +87,7 @@ steps:
   - name: Verify device can be recommissioned
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
     expect:
       commission_success: true
 
@@ -137,7 +137,7 @@ steps:
       feature: DeviceInfo
       command: RemoveZone
       args:
-        zoneId: "${current_zone_id}"
+        zoneId: "{{ current_zone_id }}"
     expect:
       invoke_success: true
       response:
@@ -154,10 +154,10 @@ steps:
     description: Connect from the other zone's perspective
     action: verify_other_zone
     params:
-      zone_id: "${other_zone_id}"
+      zone_id: "{{ other_zone_id }}"
     expect:
       other_zone_active: true
-      zone_count: "${initial_zone_count} - 1"
+      zone_count: "{{ initial_zone_count }} - 1"
 
 postconditions:
   - other_zones_unaffected: true
@@ -195,7 +195,7 @@ steps:
       feature: DeviceInfo
       command: RemoveZone
       args:
-        zoneId: "${other_zone_id}"   # Not the caller's zone
+        zoneId: "{{ other_zone_id }}"   # Not the caller's zone
     expect:
       invoke_success: false
       status: CONSTRAINT_ERROR        # Permission denied

@@ -101,7 +101,7 @@ steps:
   - name: Establish operational connection for Zone 1
     action: connect_operational
     params:
-      zone_id: "${zone1_id}"
+      zone_id: "{{ zone1_id }}"
     expect:
       connection_established: true
 
@@ -123,7 +123,7 @@ steps:
   - name: Simulate Zone 1 reconnection
     action: reconnect_operational
     params:
-      zone_id: "${zone1_id}"
+      zone_id: "{{ zone1_id }}"
     expect:
       reconnection_successful: true
 
@@ -211,7 +211,7 @@ steps:
   - name: Attempt legitimate commissioning
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
     expect:
       commissioning_succeeds: true
 
@@ -263,7 +263,7 @@ steps:
   - name: Open new connection and commission successfully
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
     expect:
       commissioning_succeeds: true
 

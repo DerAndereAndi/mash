@@ -658,7 +658,7 @@ steps:
   - name: Connect LOCAL zone (should succeed - different type)
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
       zone_type: LOCAL
       zone_id: "local-zone-1"
     expect:
@@ -680,7 +680,7 @@ steps:
   - name: Attempt to connect another GRID zone (should fail - same type)
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
       zone_type: GRID
       zone_id: "grid-zone-2"
     expect:
@@ -690,7 +690,7 @@ steps:
   - name: Attempt to connect another LOCAL zone (should fail - same type)
     action: commission
     params:
-      setup_code: "${setup_code}"
+      setup_code: "{{ setup_code }}"
       zone_type: LOCAL
       zone_id: "local-zone-2"
     expect:
