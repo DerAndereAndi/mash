@@ -206,6 +206,13 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		// itself succeeded and tests can check connection state separately.
 	}
 
+	// Clear commissioning state now that commissioning succeeded.
+	// The device is no longer in commissioning mode, so mDNS browse
+	// should no longer return synthetic commissionable services.
+	state.Set(StateCommissioningActive, false)
+	secState := getSecurityState(state)
+	secState.commissioningActive = false
+
 	// Clear pairing request state now that commissioning succeeded.
 	// If this was a deferred commissioning flow (TC-PAIR-004), the
 	// discriminator and powered_on flags drove the mDNS simulation;

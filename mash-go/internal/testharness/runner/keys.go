@@ -351,6 +351,7 @@ const (
 	KeyBusyErrorCode            = "busy_error_code"
 	KeyBusyRetryAfterPresent    = "busy_retry_after_present"
 	KeyBusyRetryAfterValue      = "busy_retry_after_value"
+	KeyPaseFailed               = "pase_failed"
 )
 
 // Discovery handler output keys.

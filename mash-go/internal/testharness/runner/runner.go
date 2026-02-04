@@ -982,7 +982,14 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 func (r *Runner) handleWait(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	durationMs, _ := step.Params["duration_ms"].(float64)
 	if durationMs <= 0 {
-		durationMs = 1000
+		// Also accept duration_seconds (used by commissioning window tests).
+		if sec, ok := step.Params["duration_seconds"].(float64); ok && sec > 0 {
+			durationMs = sec * 1000
+		} else if sec, ok := step.Params["duration_seconds"].(int); ok && sec > 0 {
+			durationMs = float64(sec) * 1000
+		} else {
+			durationMs = 1000
+		}
 	}
 
 	select {

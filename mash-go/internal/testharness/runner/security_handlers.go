@@ -98,10 +98,11 @@ func getSecurityState(state *engine.ExecutionState) *securityState {
 
 // handleOpenCommissioningConnection opens a new commissioning TLS connection.
 func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	sendPASE, _ := step.Params["send_pase"].(bool)
+
 	// DEC-063: When zones are full and send_pase is requested, connect to the
 	// device, send a PASERequest, and read the CommissioningError busy response.
 	if zf, _ := state.Get(PrecondDeviceZonesFull); zf == true {
-		sendPASE, _ := step.Params["send_pase"].(bool)
 		if sendPASE {
 			return r.handleBusyPASEExchange(step)
 		}
@@ -137,12 +138,7 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 		}, nil
 	}
 
-	// If there's already an active commissioning connection, the device
-	// may accept the TLS handshake but immediately close the connection
-	// at the application layer ("commissioning already in progress").
-	// Probe with a short read to detect this closure.
-	// Only count non-operational connections -- operational connections
-	// from existing zones should not block new commissioning.
+	// Check for existing non-operational (commissioning) connections.
 	secState.pool.mu.Lock()
 	hasExisting := false
 	for _, c := range secState.pool.connections {
@@ -153,13 +149,24 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	}
 	secState.pool.mu.Unlock()
 
+	// DEC-061: With message-gated locking, the device doesn't reject at TLS
+	// level -- it waits for a PASERequest before acquiring the commissioning
+	// lock. When there's already an active commissioning connection and
+	// send_pase is set, delegate to handleBusyPASEExchange which sends a
+	// PASERequest and reads the CommissioningError busy response.
+	if hasExisting && sendPASE {
+		conn.Close()
+		return r.handleBusyPASEExchange(step)
+	}
+
 	if hasExisting {
+		// Probe with a short read to detect TLS-level closure for cases
+		// where send_pase is not set (e.g., transport-level connection cap).
 		_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		buf := make([]byte, 1)
 		_, readErr := conn.Read(buf)
 		_ = conn.SetReadDeadline(time.Time{}) // clear deadline
 		if readErr != nil {
-			// Device closed the connection (EOF, reset, or similar).
 			conn.Close()
 			return map[string]any{
 				KeyConnectionEstablished: false,
@@ -168,6 +175,39 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 				KeyError:                 readErr.Error(),
 			}, nil
 		}
+	}
+
+	// DEC-047: When fail_pase is true, send a PASERequest with dummy values,
+	// wait for the device to reject (ErrCodeAuthFailed), and close the
+	// connection. This triggers the device's cooldown period without keeping
+	// the connection in the pool.
+	failPASE, _ := step.Params["fail_pase"].(bool)
+	if sendPASE && failPASE {
+		if err := sendPASERequestRaw(conn); err != nil {
+			conn.Close()
+			return map[string]any{
+				KeyConnectionEstablished: true,
+				KeyError:                 fmt.Sprintf("send PASERequest: %v", err),
+			}, nil
+		}
+		// Read the error response -- the device will send CommissioningError
+		// after the SPAKE2+ computation fails with dummy values.
+		_, readErr := readCommissioningErrorRaw(conn, 5*time.Second)
+		conn.Close()
+		// Wait for the device to fully release the lock and start cooldown.
+		time.Sleep(200 * time.Millisecond)
+		if readErr != nil {
+			// Device closed connection without sending an error (also
+			// indicates PASE failure -- the lock is released either way).
+			return map[string]any{
+				KeyConnectionEstablished: true,
+				KeyPaseFailed:            true,
+			}, nil
+		}
+		return map[string]any{
+			KeyConnectionEstablished: true,
+			KeyPaseFailed:            true,
+		}, nil
 	}
 
 	// Store in pool
@@ -184,6 +224,24 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	// Also set as main connection if not already connected
 	if !r.conn.connected {
 		r.conn = newConn
+	}
+
+	// DEC-061: When send_pase is true on a fresh connection (no existing
+	// commissioning), send a PASERequest to trigger device-side lock
+	// acquisition. The device will process the SPAKE2+ exchange and block
+	// waiting for the client's confirmation message, holding the
+	// commissioning lock until this connection is closed.
+	if sendPASE {
+		if err := sendPASERequestRaw(conn); err != nil {
+			return map[string]any{
+				KeyConnectionEstablished: true,
+				KeyConnectionIndex:       index,
+				KeyError:                 fmt.Sprintf("send PASERequest: %v", err),
+			}, nil
+		}
+		// Allow the device to process the PASERequest and acquire the lock
+		// before subsequent steps attempt concurrent commissioning.
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	return map[string]any{
