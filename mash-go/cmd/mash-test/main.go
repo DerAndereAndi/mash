@@ -23,15 +23,21 @@
 //	-server-identity string Server identity for PASE (default: test-device)
 //	-protocol-log string    File path for protocol event logging (CBOR format)
 //
+// PICS capability filtering is determined automatically:
+//   - If -pics is provided, the static PICS file is used.
+//   - If -setup-code is provided (and no -pics), PICS is auto-discovered from
+//     the device at startup via commissioning.
+//   - If neither is provided, all tests run without capability filtering.
+//
 // Examples:
 //
 //	# Test a device at localhost:8443
 //	mash-test -target localhost:8443 -mode device
 //
-//	# Test with PASE commissioning
+//	# Test with PASE commissioning (auto-discovers PICS)
 //	mash-test -target localhost:8443 -setup-code 12345678
 //
-//	# Test specific patterns with PICS file
+//	# Test specific patterns with static PICS file
 //	mash-test -target 192.168.1.100:8443 -pics device.pics -tests ./testdata/cases
 //
 //	# Run specific test pattern with verbose output
@@ -65,7 +71,6 @@ var (
 	serverIdentity = flag.String("server-identity", "", "Server identity for PASE (default: test-device)")
 	protocolLog    = flag.String("protocol-log", "", "File path for protocol event logging (CBOR format)")
 	enableKey      = flag.String("enable-key", "00112233445566778899aabbccddeeff", "128-bit hex key for TestControl triggers (32 hex chars)")
-	autoPICS       = flag.Bool("auto-pics", false, "Discover PICS from device at startup (requires -setup-code)")
 	debug          = flag.Bool("debug", false, "Enable debug logging (connection lifecycle, precondition transitions, state snapshots)")
 )
 
@@ -95,14 +100,12 @@ func run() int {
 		return 1
 	}
 
-	if *autoPICS && *setupCode == "" {
-		fmt.Fprintln(os.Stderr, "Error: --auto-pics requires -setup-code (commissioning needed to read device capabilities)")
-		flag.Usage()
-		return 1
-	}
+	// Derive auto-PICS: when setup-code is available but no static PICS
+	// file is given, automatically discover capabilities from the device.
+	autoPICS := *setupCode != "" && *pics == ""
 
-	if *autoPICS && *pics != "" {
-		log.Println("Warning: --auto-pics overrides -pics; static PICS file will be ignored")
+	if *setupCode == "" && *pics == "" {
+		log.Println("Warning: no PICS file or setup code provided; all tests will run without capability filtering")
 	}
 
 	// Determine output format
@@ -122,7 +125,7 @@ func run() int {
 		printBanner()
 		log.Printf("Target: %s", *target)
 		log.Printf("Mode: %s", *mode)
-		if *autoPICS {
+		if autoPICS {
 			log.Println("PICS: auto-discovery enabled")
 		} else if *pics != "" {
 			log.Printf("PICS: %s", *pics)
@@ -148,15 +151,10 @@ func run() int {
 	}
 
 	// Create runner configuration
-	picsFile := *pics
-	if *autoPICS {
-		picsFile = "" // Auto-PICS overrides static PICS file.
-	}
-
 	config := &runner.Config{
 		Target:             *target,
 		Mode:               *mode,
-		PICSFile:           picsFile,
+		PICSFile:           *pics,
 		TestDir:            *tests,
 		Pattern:            pattern,
 		Timeout:            *timeout,
@@ -168,7 +166,7 @@ func run() int {
 		ClientIdentity:     *clientIdentity,
 		ServerIdentity:     *serverIdentity,
 		EnableKey:          *enableKey,
-		AutoPICS:           *autoPICS,
+		AutoPICS:           autoPICS,
 		Debug:              *debug,
 	}
 	// Only set logger when non-nil to avoid typed-nil interface issue.
