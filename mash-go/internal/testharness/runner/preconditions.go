@@ -529,6 +529,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	case precondLevelCommissioning:
 		r.debugf("ensuring commissioning mode for %s", tc.ID)
 		r.ensureDisconnected()
+		state.Set(StateCommissioningActive, true)
 	}
 
 	// Post-setup: session_previously_connected disconnects but preserves

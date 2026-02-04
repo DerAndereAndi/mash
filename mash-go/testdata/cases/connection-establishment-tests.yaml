@@ -328,7 +328,7 @@ steps:
       event: operational_connection_established
       max_duration: "10s"
     expect:
-      within_deadline: true
+      within_limit: true
 
 postconditions:
   - reconnect_within_timeout: true
@@ -467,7 +467,7 @@ steps:
     params:
       action: zone_count
     expect:
-      result: 2
+      count: 2
 
 postconditions:
   - second_zone_commissioned: true

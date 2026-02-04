@@ -296,7 +296,16 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 	mutualTLS := false
 	if sameConn && r.conn.tlsConn != nil {
 		cs := r.conn.tlsConn.ConnectionState()
+		hasPeerCerts := len(cs.PeerCertificates) > 0
+		// Standard path: Go populated VerifiedChains.
 		mutualTLS = len(cs.VerifiedChains) > 0
+		// Custom verify path: operational TLS uses InsecureSkipVerify
+		// (for device-ID-based CN instead of DNS hostname), so Go never
+		// populates VerifiedChains. The connection being operational means
+		// our custom VerifyPeerCertificate callback already validated the chain.
+		if !mutualTLS && connOperational && hasPeerCerts && r.controllerCert != nil {
+			mutualTLS = true
+		}
 	}
 
 	// commissioning_connection_closed is true when we are NOT on a
