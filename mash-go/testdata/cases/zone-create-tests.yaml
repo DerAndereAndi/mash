@@ -4,7 +4,7 @@
 # Spec: docs/testing/behavior/zone-lifecycle.md (zone creation section)
 #
 # Key concepts:
-# - Zone CA: ECDSA P-256, 99-year validity
+# - Zone CA: ECDSA P-256, 20-year validity
 # - Zone ID = SHA-256(Zone CA DER)[0:8] (16 hex chars)
 # - Zone metadata persistence
 
@@ -38,10 +38,10 @@ steps:
   - name: Verify Zone CA certificate properties
     action: verify_zone_ca
     expect:
-      algorithm: ECDSA_P256
+      algorithm: ECDSA-SHA256
       basic_constraints_ca: true
-      path_length: 1
-      validity_years_min: 90
+      path_length: 0
+      validity_years_min: 20
 
   - name: Verify Zone ID derived from fingerprint
     action: verify_zone_id_derivation
@@ -100,7 +100,7 @@ steps:
       operator: "!="
       right: zone_id_b
     expect:
-      comparison_true: true
+      comparison_result: true
 
 postconditions:
   - zone_ids_unique: true

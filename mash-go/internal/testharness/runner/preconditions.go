@@ -64,6 +64,14 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondDeviceHasGridZone:          true,
 	PrecondDeviceHasLocalZone:         true,
 	PrecondSessionPreviouslyConnected: true,
+	// State-machine simulation.
+	PrecondControlState:          true,
+	PrecondInitialControlState:   true,
+	PrecondProcessState:          true,
+	PrecondProcessCapable:        true,
+	PrecondDeviceIsPausable:      true,
+	PrecondDeviceIsStoppable:     true,
+	PrecondFailsafeDurationShort: true,
 }
 
 var preconditionKeyLevels = map[string]int{
@@ -114,6 +122,15 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceHasGridZone:          precondLevelCommissioned,
 	PrecondDeviceHasLocalZone:         precondLevelCommissioned,
 	PrecondSessionPreviouslyConnected: precondLevelCommissioned,
+
+	// State-machine preconditions (require commissioned session).
+	PrecondControlState:          precondLevelCommissioned,
+	PrecondInitialControlState:   precondLevelCommissioned,
+	PrecondProcessState:          precondLevelCommissioned,
+	PrecondProcessCapable:        precondLevelCommissioned,
+	PrecondDeviceIsPausable:      precondLevelCommissioned,
+	PrecondDeviceIsStoppable:     precondLevelCommissioned,
+	PrecondFailsafeDurationShort: precondLevelCommissioned,
 }
 
 // preconditionLevelFor determines the highest setup level needed for the given conditions.
@@ -121,10 +138,12 @@ func preconditionLevelFor(conditions []loader.Condition) int {
 	level := precondLevelNone
 	for _, cond := range conditions {
 		for key, val := range cond {
-			// Only consider conditions set to true.
-			if b, ok := val.(bool); !ok || !b {
+			// Skip conditions explicitly set to false.
+			if b, ok := val.(bool); ok && !b {
 				continue
 			}
+			// Accept boolean true and non-boolean values (e.g., string
+			// enum values like control_state: FAILSAFE).
 			if l, ok := preconditionKeyLevels[key]; ok && l > level {
 				level = l
 			}
@@ -250,9 +269,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	for _, cond := range tc.Preconditions {
 		for key, val := range cond {
 			if simulationPreconditionKeys[key] {
-				if b, ok := val.(bool); ok {
-					state.Set(key, b)
-				}
+				state.Set(key, val)
 			}
 		}
 	}

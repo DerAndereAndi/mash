@@ -70,6 +70,9 @@ func (r *Runner) handleControllerAction(ctx context.Context, step *loader.Step, 
 	case "get_zone_ca_fingerprint":
 		result, err = r.handleGetZoneCAFingerprint(ctx, subStep, state)
 
+	case "get_zone_metadata":
+		result, err = r.handleGetZoneMetadata(ctx, subStep, state)
+
 	// Cert sub-actions.
 	case "get_cert_fingerprint":
 		result, err = r.handleGetCertFingerprint(ctx, subStep, state)

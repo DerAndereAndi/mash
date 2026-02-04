@@ -204,7 +204,7 @@ steps:
       operator: "!="
       right: y_value_2
     expect:
-      comparison_true: true
+      comparison_result: true
 
 postconditions:
   - y_values_fresh: true

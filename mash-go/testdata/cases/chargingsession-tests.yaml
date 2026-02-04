@@ -527,7 +527,7 @@ steps:
       operator: ">="
       right: initial_energy
     expect:
-      comparison_true: true
+      comparison_result: true
 
 postconditions:
   - energy_tracked: true

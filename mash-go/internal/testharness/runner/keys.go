@@ -28,6 +28,17 @@ const (
 	PrecondSessionPreviouslyConnected = "session_previously_connected"
 )
 
+// State-machine simulation preconditions (require commissioned session).
+const (
+	PrecondControlState        = "control_state"
+	PrecondInitialControlState = "initial_control_state"
+	PrecondProcessState        = "process_state"
+	PrecondProcessCapable      = "process_capable"
+	PrecondDeviceIsPausable    = "device_is_pausable"
+	PrecondDeviceIsStoppable   = "device_is_stoppable"
+	PrecondFailsafeDurationShort = "failsafe_duration_short"
+)
+
 // Controller preconditions.
 const (
 	PrecondZoneCreated              = "zone_created"

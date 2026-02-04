@@ -308,7 +308,7 @@ steps:
       operator: "<="
       right: max_consumption
     expect:
-      comparison_true: true
+      comparison_result: true
 
 postconditions:
   - power_ratings_valid: true

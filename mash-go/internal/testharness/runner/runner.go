@@ -217,6 +217,11 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 		return nil, fmt.Errorf("failed to load tests: %w", err)
 	}
 
+	// Filter by mode (device/controller) to skip tests for the wrong role.
+	if r.config.Mode != "" {
+		cases = filterByMode(cases, r.config.Mode)
+	}
+
 	// Filter by pattern if provided
 	if r.config.Pattern != "" {
 		cases = filterByPattern(cases, r.config.Pattern)
@@ -872,6 +877,36 @@ func filterByPattern(cases []*loader.TestCase, pattern string) []*loader.TestCas
 	var filtered []*loader.TestCase
 	for _, tc := range cases {
 		if matchPattern(tc.ID, pattern) || matchPattern(tc.Name, pattern) {
+			filtered = append(filtered, tc)
+		}
+	}
+	return filtered
+}
+
+// filterByMode filters test cases based on the runner mode (device/controller).
+// In device mode, tests requiring controller-only PICS codes (MASH.C.*) are skipped.
+// In controller mode, tests requiring device-only PICS codes (MASH.S.*) are skipped.
+func filterByMode(cases []*loader.TestCase, mode string) []*loader.TestCase {
+	var skipPrefix string
+	switch mode {
+	case "device":
+		skipPrefix = "MASH.C."
+	case "controller":
+		skipPrefix = "MASH.S."
+	default:
+		return cases
+	}
+
+	var filtered []*loader.TestCase
+	for _, tc := range cases {
+		skip := false
+		for _, req := range tc.PICSRequirements {
+			if strings.HasPrefix(req, skipPrefix) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
 			filtered = append(filtered, tc)
 		}
 	}

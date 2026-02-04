@@ -148,7 +148,7 @@ steps:
       operator: ">="
       right: delay_1
     expect:
-      comparison_true: true
+      comparison_result: true
 
 postconditions:
   - backoff_applied: true

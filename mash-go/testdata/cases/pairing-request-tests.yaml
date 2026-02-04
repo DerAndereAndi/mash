@@ -254,7 +254,7 @@ steps:
     params:
       device_id: "${device_id}"
     expect:
-      device_powered: true
+      powered_on: true
 
   - name: Wait for device to initialize and detect pairing request
     action: wait

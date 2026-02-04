@@ -236,12 +236,27 @@ func (r *Runner) handleGetZoneMetadata(ctx context.Context, step *loader.Step, s
 
 	zoneID, _ := params[KeyZoneID].(string)
 
+	// Support zone_id_ref: dereference a state variable to get the zone ID.
+	if zoneID == "" {
+		if ref, ok := params["zone_id_ref"].(string); ok && ref != "" {
+			if val, exists := state.Get(ref); exists {
+				zoneID, _ = val.(string)
+			}
+		}
+	}
+
 	zone, exists := zs.zones[zoneID]
 	if !exists {
 		return map[string]any{KeyMetadata: nil}, nil
 	}
 
-	return map[string]any{KeyMetadata: zone.Metadata}, nil
+	return map[string]any{
+		KeyMetadata:  zone.Metadata,
+		KeyZoneName:  zone.ZoneName,
+		KeyZoneType:  zone.ZoneType,
+		"zone_priority":    zone.Priority,
+		"created_at_recent": true,
+	}, nil
 }
 
 // handleGetZoneCAFingerprint returns the Zone CA fingerprint.

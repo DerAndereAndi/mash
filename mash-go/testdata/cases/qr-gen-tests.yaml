@@ -95,7 +95,7 @@ steps:
       operator: "!="
       right: new_qr
     expect:
-      comparison_true: true
+      comparison_result: true
 
 postconditions:
   - qr_regenerated: true
@@ -144,7 +144,7 @@ steps:
       operator: "!="
       right: qr_device_2
     expect:
-      comparison_true: true
+      comparison_result: true
 
 postconditions:
   - qr_unique: true
