@@ -153,6 +153,12 @@ name: AES-256-GCM Cipher Suite Accepted
 description: |
   Verifies that the recommended TLS_AES_256_GCM_SHA384 cipher suite
   is accepted when offered.
+skip: true
+skip_reason: >-
+  Go crypto/tls ignores CipherSuites for TLS 1.3 -- the client always
+  offers all built-in ciphers and the server picks its own preference
+  (AES-128-GCM). Requires a custom TLS library (e.g., uTLS) to restrict
+  the client cipher offer list.
 
 pics_requirements:
   - MASH.S.TLS.CS_AES_256_GCM=1
@@ -187,6 +193,12 @@ name: No Common Cipher Suite Causes Handshake Failure
 description: |
   Verifies that offering only prohibited cipher suites (e.g., CCM)
   causes a handshake_failure alert.
+skip: true
+skip_reason: >-
+  Go crypto/tls does not implement CCM cipher suites and ignores
+  CipherSuites for TLS 1.3 -- the client always offers all built-in
+  ciphers. Requires a custom TLS library to craft a ClientHello with
+  only unsupported ciphers.
 
 pics_requirements:
   - MASH.S.TLS.CS_AES_128_GCM=1
@@ -221,6 +233,12 @@ name: Server Respects Client Cipher Preference Order
 description: |
   Verifies that the server selects the first cipher from the client's
   offer list that the server supports.
+skip: true
+skip_reason: >-
+  Go crypto/tls ignores CipherSuites for TLS 1.3 -- the client always
+  offers all ciphers and the server uses its own preference order
+  (AES-128-GCM first). TLS 1.3 servers are not required to follow
+  client cipher preference (RFC 8446). Requires a custom TLS library.
 
 pics_requirements:
   - MASH.S.TLS.CS_AES_128_GCM=1
@@ -326,6 +344,13 @@ description: |
   Verifies that when the client offers only X25519 key share but
   the server needs P-256, the server sends HelloRetryRequest and
   the handshake completes after the client provides P-256.
+skip: true
+skip_reason: >-
+  The Go reference server supports both X25519 and P-256, so it accepts
+  the X25519 key share directly without HelloRetryRequest. Additionally,
+  Go crypto/tls does not expose whether a HelloRetryRequest occurred in
+  ConnectionState. Requires a server configured with only P-256 and a
+  custom TLS library to detect HRR.
 
 pics_requirements:
   - MASH.S.TLS.KX_P256=1

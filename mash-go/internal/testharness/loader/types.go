@@ -32,6 +32,12 @@ type TestCase struct {
 
 	// Tags for categorizing tests.
 	Tags []string `yaml:"tags,omitempty"`
+
+	// Skip indicates this test should be skipped.
+	Skip bool `yaml:"skip,omitempty"`
+
+	// SkipReason explains why the test is skipped.
+	SkipReason string `yaml:"skip_reason,omitempty"`
 }
 
 // PICSRequirementList is a list of PICS requirement strings that supports

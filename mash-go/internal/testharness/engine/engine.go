@@ -61,6 +61,18 @@ func (e *Engine) Run(ctx context.Context, tc *loader.TestCase) *TestResult {
 		StartTime: time.Now(),
 	}
 
+	// Check explicit skip flag from YAML.
+	if tc.Skip {
+		result.Skipped = true
+		result.SkipReason = tc.SkipReason
+		if result.SkipReason == "" {
+			result.SkipReason = "skipped by test definition"
+		}
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		return result
+	}
+
 	// Check PICS requirements
 	if e.config.PICS != nil {
 		if !loader.CheckPICSRequirements(e.config.PICS, tc.PICSRequirements) {

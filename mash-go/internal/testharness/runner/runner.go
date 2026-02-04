@@ -320,6 +320,9 @@ func (r *Runner) operationalTLSConfig() *tls.Config {
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS13,
 		NextProtos: []string{transport.ALPNProtocol},
+		// Explicit curve preferences to match the MASH spec and avoid
+		// Go 1.24+ defaulting to post-quantum X25519MLKEM768.
+		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256},
 	}
 
 	if r.zoneCAPool != nil {
@@ -513,6 +516,59 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			MinVersion:         tls.VersionTLS13,
 			InsecureSkipVerify: skipVerify,
 			NextProtos:         []string{transport.ALPNProtocol},
+			CurvePreferences:   []tls.CurveID{tls.X25519, tls.CurveP256},
+		}
+	}
+
+	// Apply TLS version constraints from params.
+	if v, ok := step.Params["tls_version"].(string); ok {
+		switch v {
+		case "1.2":
+			tlsConfig.MinVersion = tls.VersionTLS12
+			tlsConfig.MaxVersion = tls.VersionTLS12
+		case "1.3":
+			tlsConfig.MinVersion = tls.VersionTLS13
+			tlsConfig.MaxVersion = tls.VersionTLS13
+		case "1.2,1.3":
+			tlsConfig.MinVersion = tls.VersionTLS12
+			tlsConfig.MaxVersion = tls.VersionTLS13
+		}
+	}
+
+	// Apply key exchange group constraints from params.
+	if groups, ok := step.Params["key_exchange_groups"].([]any); ok && len(groups) > 0 {
+		var curvePrefs []tls.CurveID
+		for _, g := range groups {
+			if name, ok := g.(string); ok {
+				if id, found := parseCurveID(name); found {
+					curvePrefs = append(curvePrefs, id)
+				}
+			}
+		}
+		if len(curvePrefs) > 0 {
+			tlsConfig.CurvePreferences = curvePrefs
+		}
+	}
+
+	// Apply ALPN override from params.
+	if alpn, ok := step.Params["alpn"].(string); ok && alpn != "" {
+		tlsConfig.NextProtos = []string{alpn}
+	}
+
+	// Apply cipher suite constraints from params.
+	// Note: Go's TLS 1.3 implementation ignores CipherSuites -- all built-in
+	// TLS 1.3 ciphers are always offered. This only affects TLS 1.2 connections.
+	if suites, ok := step.Params["cipher_suites"].([]any); ok && len(suites) > 0 {
+		var cipherIDs []uint16
+		for _, s := range suites {
+			if name, ok := s.(string); ok {
+				if id, found := parseCipherSuite(name); found {
+					cipherIDs = append(cipherIDs, id)
+				}
+			}
+		}
+		if len(cipherIDs) > 0 {
+			tlsConfig.CipherSuites = cipherIDs
 		}
 	}
 
@@ -609,27 +665,27 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}
 
 	return map[string]any{
-		KeyConnectionEstablished: true,
-		KeyConnected:             true,
-		KeyTLSHandshakeSuccess:   true,
-		KeyTarget:                target,
-		KeyTLSVersion:            tlsVersionName(cs.Version),
-		KeyNegotiatedVersion:     tlsVersionName(cs.Version),
-		KeyNegotiatedCipher:      tls.CipherSuiteName(cs.CipherSuite),
-		KeyNegotiatedGroup:       curveIDName(cs.CurveID),
-		KeyNegotiatedProtocol:    cs.NegotiatedProtocol,
-		KeyNegotiatedALPN:        cs.NegotiatedProtocol,
-		KeyMutualAuth:              mutualAuth,
-		KeyControllerCertVerified:  presentedClientCert && chainValidated,
-		KeyChainValidated:          chainValidated,
-		KeySelfSignedAccepted:      serverCertSelfSigned && hasPeerCerts,
-		KeyServerCertCNPrefix:      serverCertCNPrefix,
-		KeyServerCertSelfSigned:    serverCertSelfSigned,
-		KeyHasPeerCerts:            hasPeerCerts,
-		KeyCNMismatchWarning:     cnMismatchWarning,
-		KeyFullHandshake:         !cs.DidResume,
-		KeyPSKUsed:               cs.DidResume,
-		KeyEarlyDataAccepted:     false, // Go does not support TLS 1.3 0-RTT
+		KeyConnectionEstablished:  true,
+		KeyConnected:              true,
+		KeyTLSHandshakeSuccess:    true,
+		KeyTarget:                 target,
+		KeyTLSVersion:             tlsVersionName(cs.Version),
+		KeyNegotiatedVersion:      tlsVersionName(cs.Version),
+		KeyNegotiatedCipher:       tls.CipherSuiteName(cs.CipherSuite),
+		KeyNegotiatedGroup:        curveIDName(cs.CurveID),
+		KeyNegotiatedProtocol:     cs.NegotiatedProtocol,
+		KeyNegotiatedALPN:         cs.NegotiatedProtocol,
+		KeyMutualAuth:             mutualAuth,
+		KeyControllerCertVerified: presentedClientCert && chainValidated,
+		KeyChainValidated:         chainValidated,
+		KeySelfSignedAccepted:     serverCertSelfSigned && hasPeerCerts,
+		KeyServerCertCNPrefix:     serverCertCNPrefix,
+		KeyServerCertSelfSigned:   serverCertSelfSigned,
+		KeyHasPeerCerts:           hasPeerCerts,
+		KeyCNMismatchWarning:      cnMismatchWarning,
+		KeyFullHandshake:          !cs.DidResume,
+		KeyPSKUsed:                cs.DidResume,
+		KeyEarlyDataAccepted:      false, // Go does not support TLS 1.3 0-RTT
 	}, nil
 }
 
@@ -815,10 +871,10 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 	subscriptionID := extractSubscriptionID(resp.Payload)
 
 	return map[string]any{
-		KeySubscribeSuccess:      resp.IsSuccess(),
-		KeySubscriptionID:        subscriptionID,
+		KeySubscribeSuccess:       resp.IsSuccess(),
+		KeySubscriptionID:         subscriptionID,
 		KeySubscriptionIDReturned: subscriptionID != nil,
-		KeyStatus:                resp.Status,
+		KeyStatus:                 resp.Status,
 	}, nil
 }
 
@@ -1068,19 +1124,52 @@ func tlsVersionName(version uint16) string {
 	}
 }
 
-// curveIDName returns a human-readable name for a TLS curve ID.
+// curveIDName returns a human-readable name for a TLS curve ID,
+// using names that match the YAML test expectations.
 func curveIDName(id tls.CurveID) string {
 	switch id {
 	case tls.CurveP256:
-		return "P-256"
+		return "secp256r1"
 	case tls.CurveP384:
-		return "P-384"
+		return "secp384r1"
 	case tls.CurveP521:
-		return "P-521"
+		return "secp521r1"
 	case tls.X25519:
-		return "X25519"
+		return "x25519"
+	case 4588: // X25519MLKEM768 -- post-quantum hybrid (Go 1.24+ default)
+		return "X25519MLKEM768"
 	default:
 		return fmt.Sprintf("unknown (%d)", id)
+	}
+}
+
+// parseCurveID maps a curve name string (from YAML) to a tls.CurveID.
+func parseCurveID(name string) (tls.CurveID, bool) {
+	switch strings.ToLower(name) {
+	case "secp256r1", "p-256", "p256":
+		return tls.CurveP256, true
+	case "secp384r1", "p-384", "p384":
+		return tls.CurveP384, true
+	case "secp521r1", "p-521", "p521":
+		return tls.CurveP521, true
+	case "x25519":
+		return tls.X25519, true
+	default:
+		return 0, false
+	}
+}
+
+// parseCipherSuite maps a cipher suite name string (from YAML) to its TLS ID.
+func parseCipherSuite(name string) (uint16, bool) {
+	switch name {
+	case "TLS_AES_128_GCM_SHA256":
+		return tls.TLS_AES_128_GCM_SHA256, true
+	case "TLS_AES_256_GCM_SHA384":
+		return tls.TLS_AES_256_GCM_SHA384, true
+	case "TLS_CHACHA20_POLY1305_SHA256":
+		return tls.TLS_CHACHA20_POLY1305_SHA256, true
+	default:
+		return 0, false
 	}
 }
 
