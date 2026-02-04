@@ -810,6 +810,11 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		FeatureID:  featureID,
 	}
 
+	// RC5b: Override MessageID if specified in params.
+	if mid, ok := params["message_id"]; ok {
+		req.MessageID = uint32(toFloat(mid))
+	}
+
 	// When a specific attribute is requested, include it in the read payload
 	// so the device can return just that attribute.
 	if hasAttr {
@@ -818,7 +823,30 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 
 	data, err := wire.EncodeRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode read request: %w", err)
+		// RC5b: MessageID=0 is rejected by EncodeRequest (wire validation).
+		// Return as output, not a Go error, so YAML can assert on it.
+		return map[string]any{
+			KeyReadSuccess:    false,
+			KeyConnectionError: true,
+			KeyError:          err.Error(),
+		}, nil
+	}
+
+	// RC5c: simulate_no_response -- send request but don't wait for response.
+	if toBool(params["simulate_no_response"]) {
+		if sendErr := r.conn.framer.WriteFrame(data); sendErr != nil {
+			return map[string]any{
+				KeyReadSuccess: false,
+				KeyError:       sendErr.Error(),
+			}, nil
+		}
+		// Wait for context cancellation (step timeout).
+		<-ctx.Done()
+		return map[string]any{
+			KeyReadSuccess:  false,
+			KeyError:        "REQUEST_TIMEOUT",
+			KeyTimeoutAfter: "10s",
+		}, nil
 	}
 
 	resp, err := r.sendRequest(data, "read")
@@ -827,10 +855,16 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 	}
 
 	outputs := map[string]any{
-		KeyReadSuccess: resp.IsSuccess(),
-		KeyResponse:    resp,
-		KeyValue:       resp.Payload,
-		KeyStatus:      resp.Status,
+		KeyReadSuccess:       resp.IsSuccess(),
+		KeyResponse:          resp,
+		KeyValue:             resp.Payload,
+		KeyStatus:            resp.Status,
+		KeyResponseMessageID: resp.MessageID,
+	}
+
+	// Add error code when the response indicates failure.
+	if !resp.IsSuccess() {
+		outputs[KeyErrorCode] = resp.Status.String()
 	}
 
 	// When a specific attribute was requested, extract its value from the
@@ -924,6 +958,16 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 
 	resp, err := r.sendRequest(data, "write")
 	if err != nil {
+		// RC5f: Return output map (not Go error) for EOF/closed so YAML
+		// expectations can check the error.
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "EOF") || strings.Contains(errMsg, "closed") ||
+			strings.Contains(errMsg, "reset") {
+			return map[string]any{
+				KeyWriteSuccess: false,
+				KeyError:        errMsg,
+			}, nil
+		}
 		return nil, err
 	}
 

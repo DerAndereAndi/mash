@@ -267,6 +267,17 @@ const (
 	KeyVersionMatches      = "version_matches"
 )
 
+// Raw wire extended output keys.
+const (
+	KeyResponseMessageID      = "response_message_id"
+	KeyConnectionOpen         = "connection_open"
+	KeyConnectionError        = "connection_error"
+	KeyAllResponsesReceived   = "all_responses_received"
+	KeyAllCorrelationsCorrect = "all_correlations_correct"
+	KeyErrorMessageContains   = "error_message_contains"
+	KeyTimeoutAfter           = "timeout_after"
+)
+
 // Connection handler output keys.
 const (
 	KeyConnectDurationMs       = "connect_duration_ms"

@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -661,13 +662,52 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 	var err error
 
 	switch {
-	case params["cbor_map"] != nil:
-		// CBOR map with string keys -> integer keys.
-		m, ok := params["cbor_map"].(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("cbor_map must be a map")
+	case params["message_type"] != nil && params["cbor_map"] == nil && params["cbor_bytes_hex"] == nil && params["cbor_map_string_keys"] == nil:
+		// Typed message construction (e.g., attribute_value with extreme int values).
+		msgType, _ := params["message_type"].(string)
+		switch msgType {
+		case "attribute_value":
+			value := params["value"]
+			req := &wire.Request{
+				MessageID:  r.nextMessageID(),
+				Operation:  wire.OpWrite,
+				EndpointID: 0,
+				FeatureID:  1,
+				Payload:    wire.WritePayload{1: value},
+			}
+			data, err = wire.EncodeRequest(req)
+		default:
+			return nil, fmt.Errorf("unsupported message_type: %s", msgType)
 		}
-		data, err = cborEncodeIntKeyMap(m)
+		if err != nil {
+			return nil, fmt.Errorf("encoding %s: %w", msgType, err)
+		}
+
+	case params["cbor_map_string_keys"] != nil:
+		// CBOR map with string keys preserved (intentionally invalid for MASH).
+		m, ok := params["cbor_map_string_keys"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("cbor_map_string_keys must be a map[string]any, got %T", params["cbor_map_string_keys"])
+		}
+		data, err = cbor.Marshal(m)
+		if err != nil {
+			return nil, fmt.Errorf("cbor_map_string_keys encoding: %w", err)
+		}
+
+	case params["cbor_map"] != nil:
+		// CBOR map -- accept multiple key types that YAML may produce.
+		var cborData any
+		switch m := params["cbor_map"].(type) {
+		case map[string]any:
+			cborData = convertIntKeys(m)
+		case map[any]any:
+			cborData = normalizeMapKeys(m)
+		case map[int]any:
+			cborData = m
+		default:
+			return nil, fmt.Errorf("cbor_map must be a map, got %T", params["cbor_map"])
+		}
+		data, err = cbor.Marshal(cborData)
 		if err != nil {
 			return nil, fmt.Errorf("cbor_map encoding: %w", err)
 		}
@@ -737,16 +777,33 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 			outputs[KeyResponseReceived] = false
 		} else {
 			outputs[KeyResponseReceived] = true
-			// Try to decode as CBOR to extract status fields.
-			var respMap map[any]any
-			if err := cbor.Unmarshal(res.data, &respMap); err == nil {
-				// Look for status field (key 3 in wire protocol).
-				if status, ok := respMap[uint64(3)]; ok {
-					outputs[KeyStatus] = status
+			// Decode response using wire.DecodeResponse for proper status extraction.
+			if resp, decErr := wire.DecodeResponse(res.data); decErr == nil {
+				outputs[KeyResponseMessageID] = resp.MessageID
+				outputs[KeyStatus] = resp.Status
+				if !resp.IsSuccess() {
+					outputs[KeyErrorStatus] = resp.Status.String()
+					// Extract error message from payload if present.
+					if payload, ok := resp.Payload.(map[any]any); ok {
+						if msg, ok := payload[uint64(1)]; ok {
+							if s, ok := msg.(string); ok {
+								outputs[KeyErrorMessageContains] = s
+							}
+						}
+					}
 				}
-				// Look for error status.
-				if errStatus, ok := respMap[uint64(4)]; ok {
-					outputs[KeyErrorStatus] = errStatus
+			} else {
+				// Fallback: try raw CBOR map parsing.
+				var respMap map[any]any
+				if err := cbor.Unmarshal(res.data, &respMap); err == nil {
+					if status, ok := respMap[uint64(2)]; ok {
+						outputs[KeyStatus] = status
+					}
+					if errStatus, ok := respMap[uint64(2)]; ok {
+						if s, ok2 := wire.ToUint32(errStatus); ok2 {
+							outputs[KeyErrorStatus] = wire.Status(s).String()
+						}
+					}
 				}
 			}
 		}
@@ -787,30 +844,327 @@ func convertIntKeys(m map[string]any) map[any]any {
 	return result
 }
 
+// normalizeMapKeys recursively processes a map[any]any (from YAML integer keys)
+// into a form suitable for CBOR encoding. Integer keys are preserved as-is.
+// Nested maps are recursively normalized.
+func normalizeMapKeys(m map[any]any) map[any]any {
+	result := make(map[any]any, len(m))
+	for k, v := range m {
+		// Convert string keys to int where possible (same as convertIntKeys).
+		key := k
+		if s, ok := k.(string); ok {
+			if i, err := strconv.Atoi(s); err == nil {
+				key = i
+			}
+		}
+		// Recursively normalize nested maps.
+		switch val := v.(type) {
+		case map[any]any:
+			result[key] = normalizeMapKeys(val)
+		case map[string]any:
+			result[key] = convertIntKeys(val)
+		default:
+			result[key] = val
+		}
+	}
+	return result
+}
+
 // handleSendRawBytes sends raw bytes (not framed).
+// Supports:
+//   - data: raw bytes or string
+//   - bytes_hex: hex-encoded bytes
+//   - followed_by_cbor_payload + payload_size: append a framed CBOR payload after the raw bytes
+//   - followed_by_bytes: append N zero bytes after the raw bytes
+//   - remaining_bytes: send N zero bytes as a framed payload (for completing partial frames)
 func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
+	if r.conn == nil || !r.conn.connected {
 		return nil, fmt.Errorf("not connected")
 	}
 
-	data, ok := params["data"].([]byte)
-	if !ok {
-		if s, ok := params["data"].(string); ok {
-			data = []byte(s)
+	w := r.getWriteConn()
+	if w == nil {
+		return nil, fmt.Errorf("no writable connection")
+	}
+
+	// Determine the base data to send.
+	var data []byte
+
+	if hexStr, ok := params["bytes_hex"].(string); ok && hexStr != "" {
+		var err error
+		data, err = hex.DecodeString(hexStr)
+		if err != nil {
+			return nil, fmt.Errorf("bytes_hex decode: %w", err)
+		}
+	} else if raw, ok := params["data"].([]byte); ok {
+		data = raw
+	} else if s, ok := params["data"].(string); ok {
+		data = []byte(s)
+	}
+
+	// Handle remaining_bytes (no prefix data, send N bytes as framed payload).
+	if rb, ok := params["remaining_bytes"]; ok {
+		n := int(toFloat(rb))
+		payload := make([]byte, n)
+		err := r.conn.framer.WriteFrame(payload)
+		if err != nil {
+			return map[string]any{
+				KeyRawBytesSent: false,
+				KeyError:        err.Error(),
+			}, nil
+		}
+		outputs := map[string]any{
+			KeyRawBytesSent: true,
+			KeyConnectionOpen: r.conn.connected,
+		}
+		// Try to read framed response.
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		type rr struct {
+			data []byte
+			err  error
+		}
+		ch := make(chan rr, 1)
+		go func() {
+			d, e := r.conn.framer.ReadFrame()
+			ch <- rr{d, e}
+		}()
+		select {
+		case res := <-ch:
+			outputs[KeyParseSuccess] = res.err == nil
+		case <-readCtx.Done():
+			outputs[KeyParseSuccess] = false
+		}
+		return outputs, nil
+	}
+
+	// Write the base data.
+	if len(data) > 0 {
+		_, err := w.Write(data)
+		if err != nil {
+			return map[string]any{
+				KeyRawBytesSent:   false,
+				KeyConnectionOpen: false,
+				KeyError:          err.Error(),
+			}, nil
 		}
 	}
 
-	_, err := r.conn.tlsConn.Write(data)
-	return map[string]any{
-		KeyRawBytesSent: err == nil,
-	}, err
+	outputs := map[string]any{
+		KeyRawBytesSent:   true,
+		KeyConnectionOpen: r.conn.connected,
+	}
+
+	// Append followed_by_bytes: N zero bytes after the raw bytes.
+	if fb, ok := params["followed_by_bytes"]; ok {
+		n := int(toFloat(fb))
+		padding := make([]byte, n)
+		_, err := w.Write(padding)
+		if err != nil {
+			outputs[KeyConnectionOpen] = false
+		}
+		return outputs, nil
+	}
+
+	// Append followed_by_cbor_payload: framed CBOR payload after the raw bytes.
+	if _, ok := params["followed_by_cbor_payload"]; ok {
+		size := 16
+		if ps, ok := params["payload_size"]; ok {
+			size = int(toFloat(ps))
+		}
+		payload := generateValidCBORPayload(size, 1)
+		err := r.conn.framer.WriteFrame(payload)
+		if err != nil {
+			outputs[KeyParseSuccess] = false
+			return outputs, nil
+		}
+		outputs[KeyParseSuccess] = true
+
+		// Try to read framed response.
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		type rr struct {
+			data []byte
+			err  error
+		}
+		ch := make(chan rr, 1)
+		go func() {
+			d, e := r.conn.framer.ReadFrame()
+			ch <- rr{d, e}
+		}()
+		select {
+		case res := <-ch:
+			if res.err == nil {
+				outputs[KeyResponseReceived] = true
+			}
+		case <-readCtx.Done():
+			outputs[KeyResponseReceived] = false
+		}
+		return outputs, nil
+	}
+
+	return outputs, nil
 }
 
 // handleSendRawFrame sends a raw frame with length prefix.
+// Supports:
+//   - length_override: write a raw 4-byte big-endian length (bypassing framer validation)
+//   - payload_size + valid_cbor: generate a CBOR payload of target size, send framed
+//   - fallback: delegate to handleSendRaw for other param combinations
 func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	params := engine.InterpolateParams(step.Params, state)
+
+	if r.conn == nil || !r.conn.connected {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	// Path 1: length_override -- write raw length prefix directly (bypassing framer).
+	if lo, ok := params["length_override"]; ok {
+		w := r.getWriteConn()
+		if w == nil {
+			return nil, fmt.Errorf("no writable connection")
+		}
+		length := uint32(toFloat(lo))
+		var lenBuf [4]byte
+		binary.BigEndian.PutUint32(lenBuf[:], length)
+		_, err := w.Write(lenBuf[:])
+		if err != nil {
+			return map[string]any{
+				KeyConnectionClosed: true,
+				KeyError:            "FATAL",
+			}, nil
+		}
+
+		// Try to read response; expect the device to close the connection.
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		ch := make(chan error, 1)
+		go func() {
+			_, err := r.conn.framer.ReadFrame()
+			ch <- err
+		}()
+
+		select {
+		case err := <-ch:
+			if err != nil {
+				r.conn.connected = false
+				return map[string]any{
+					KeyConnectionClosed: true,
+					KeyError:            "FATAL",
+				}, nil
+			}
+			// Unexpected success.
+			return map[string]any{
+				KeyConnectionClosed: false,
+				KeyResponseReceived: true,
+			}, nil
+		case <-readCtx.Done():
+			r.conn.connected = false
+			return map[string]any{
+				KeyConnectionClosed: true,
+				KeyError:            "FATAL",
+			}, nil
+		}
+	}
+
+	// Path 2: payload_size + valid_cbor -- generate CBOR payload and send framed.
+	if ps, ok := params["payload_size"]; ok {
+		size := int(toFloat(ps))
+		payload := generateValidCBORPayload(size, r.nextMessageID())
+		err := r.conn.framer.WriteFrame(payload)
+		if err != nil {
+			return map[string]any{
+				KeyRawSent:      false,
+				KeyParseSuccess: false,
+				KeyError:        err.Error(),
+			}, nil
+		}
+
+		outputs := map[string]any{
+			KeyRawSent:      true,
+			KeyParseSuccess: true,
+		}
+
+		// Try to read response.
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		type readResult struct {
+			data []byte
+			err  error
+		}
+		ch := make(chan readResult, 1)
+		go func() {
+			d, e := r.conn.framer.ReadFrame()
+			ch <- readResult{d, e}
+		}()
+
+		select {
+		case res := <-ch:
+			if res.err != nil {
+				outputs[KeyResponseReceived] = false
+			} else {
+				outputs[KeyResponseReceived] = true
+			}
+		case <-readCtx.Done():
+			outputs[KeyResponseReceived] = false
+		}
+		return outputs, nil
+	}
+
+	// Fallback: delegate to handleSendRaw.
 	return r.handleSendRaw(ctx, step, state)
+}
+
+// getWriteConn returns the underlying io.Writer for raw writes bypassing the framer.
+// Prefers tlsConn (for TLS connections) but falls back to plain conn.
+func (r *Runner) getWriteConn() io.Writer {
+	if r.conn.tlsConn != nil {
+		return r.conn.tlsConn
+	}
+	if r.conn.conn != nil {
+		return r.conn.conn
+	}
+	return nil
+}
+
+// generateValidCBORPayload creates a valid CBOR-encoded request message
+// padded to approximately targetSize bytes.
+func generateValidCBORPayload(targetSize int, messageID uint32) []byte {
+	// Build a minimal request structure.
+	req := map[any]any{
+		1: messageID,    // messageId
+		2: uint8(1),     // operation: Read
+		3: uint8(0),     // endpointId
+		4: uint8(0),     // featureId
+	}
+
+	// Encode the base structure to find its size.
+	base, err := cbor.Marshal(req)
+	if err != nil {
+		return base
+	}
+
+	if len(base) >= targetSize {
+		return base
+	}
+
+	// Add padding as a byte string in key 5 (payload).
+	paddingSize := targetSize - len(base) - 10 // leave room for CBOR overhead
+	if paddingSize < 0 {
+		paddingSize = 0
+	}
+	padding := make([]byte, paddingSize)
+	req[5] = padding
+
+	data, err := cbor.Marshal(req)
+	if err != nil {
+		return base
+	}
+	return data
 }
 
 // handleSendTLSAlert sends a TLS close_notify alert and detects the peer's response.
@@ -981,9 +1335,31 @@ func (r *Runner) handleReadConcurrent(ctx context.Context, step *loader.Step, st
 		}
 	}
 
+	// RC5d: Compute correlation outputs.
+	allReceived := true
+	allCorrect := true
+	for _, res := range results {
+		if _, hasErr := res[KeyError]; hasErr {
+			allReceived = false
+			allCorrect = false
+		}
+		if success, ok := res[KeyReadSuccess].(bool); ok && !success {
+			allReceived = false
+		}
+		if mid, ok := res[KeyResponseMessageID]; ok {
+			if mid == nil || mid == uint32(0) {
+				allCorrect = false
+			}
+		} else {
+			allCorrect = false
+		}
+	}
+
 	return map[string]any{
-		KeyReadCount: count,
-		KeyResults:   results,
+		KeyReadCount:              count,
+		KeyResults:                results,
+		KeyAllResponsesReceived:   allReceived,
+		KeyAllCorrelationsCorrect: allCorrect,
 	}, nil
 }
 

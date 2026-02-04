@@ -2,11 +2,17 @@ package runner
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/transport"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 func TestHandleQueueCommand(t *testing.T) {
@@ -601,3 +607,786 @@ func TestSubscribeMultiple_NeitherParam(t *testing.T) {
 		t.Error("expected error when neither features nor subscriptions provided")
 	}
 }
+
+// ============================================================================
+// Helper: set up a Runner with a net.Pipe-backed framer for raw wire tests.
+// Returns the runner and the server-side of the pipe (for reading/writing).
+// ============================================================================
+
+func newPipedRunner() (*Runner, net.Conn) {
+	client, server := net.Pipe()
+	r := newTestRunner()
+	r.conn = &Connection{
+		conn:      client,
+		framer:    transport.NewFramer(client),
+		connected: true,
+	}
+	return r, server
+}
+
+// serverEchoResponse reads one frame from the server side, decodes the request
+// messageID, and writes back a success response with the same messageID.
+func serverEchoResponse(server net.Conn) {
+	framer := transport.NewFramer(server)
+	reqData, err := framer.ReadFrame()
+	if err != nil {
+		return
+	}
+	// Decode messageID from raw CBOR (key 1).
+	var raw map[any]any
+	if err := cbor.Unmarshal(reqData, &raw); err != nil {
+		return
+	}
+	var msgID uint32
+	for k, v := range raw {
+		if ki, ok := wire.ToUint32(k); ok && ki == 1 {
+			if vi, ok := wire.ToUint32(v); ok {
+				msgID = vi
+			}
+		}
+	}
+	resp := &wire.Response{MessageID: msgID, Status: wire.StatusSuccess}
+	respData, _ := wire.EncodeResponse(resp)
+	_ = framer.WriteFrame(respData)
+}
+
+// ============================================================================
+// Phase 1 (RC1): YAML integer keys in cbor_map
+// ============================================================================
+
+func TestHandleSendRaw_CborMapIntegerKeys(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go serverEchoResponse(server)
+
+	// map[any]any with int keys -- what yaml.v3 produces for {1: 1, 2: 1, 3: 0, 4: 1}.
+	step := &loader.Step{Params: map[string]any{
+		"cbor_map": map[any]any{1: 1, 2: 1, 3: 0, 4: 1},
+	}}
+	out, err := r.handleSendRaw(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyRawSent] != true {
+		t.Errorf("expected raw_sent=true, got %v", out[KeyRawSent])
+	}
+	if out[KeyParseSuccess] != true {
+		t.Errorf("expected parse_success=true, got %v", out[KeyParseSuccess])
+	}
+}
+
+func TestHandleSendRaw_CborMapIntKeys(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go serverEchoResponse(server)
+
+	// map[int]any -- alternate type.
+	step := &loader.Step{Params: map[string]any{
+		"cbor_map": map[int]any{1: 1, 2: 1, 3: 0, 4: 1},
+	}}
+	out, err := r.handleSendRaw(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyRawSent] != true {
+		t.Errorf("expected raw_sent=true, got %v", out[KeyRawSent])
+	}
+	if out[KeyParseSuccess] != true {
+		t.Errorf("expected parse_success=true, got %v", out[KeyParseSuccess])
+	}
+}
+
+func TestHandleSendRaw_CborMapMixedNestedKeys(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go serverEchoResponse(server)
+
+	// map[any]any with extra unknown key (TC-CBOR-004 scenario).
+	step := &loader.Step{Params: map[string]any{
+		"cbor_map": map[any]any{1: 1, 2: 1, 3: 0, 4: 1, 99: "future"},
+	}}
+	out, err := r.handleSendRaw(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyRawSent] != true {
+		t.Errorf("expected raw_sent=true, got %v", out[KeyRawSent])
+	}
+}
+
+// ============================================================================
+// Phase 2 (RC4): message_type + value params in send_raw
+// ============================================================================
+
+func TestHandleSendRaw_AttributeValueMaxInt64(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{
+		"message_type": "attribute_value",
+		"value":        int64(9223372036854775807),
+	}}
+	out, err := r.handleSendRaw(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyParseSuccess] != true {
+		t.Errorf("expected parse_success=true, got %v", out[KeyParseSuccess])
+	}
+	if out[KeyRawSent] != true {
+		t.Errorf("expected raw_sent=true, got %v", out[KeyRawSent])
+	}
+}
+
+func TestHandleSendRaw_AttributeValueNegativeInt64(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{
+		"message_type": "attribute_value",
+		"value":        int64(-9223372036854775808),
+	}}
+	out, err := r.handleSendRaw(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyParseSuccess] != true {
+		t.Errorf("expected parse_success=true, got %v", out[KeyParseSuccess])
+	}
+	if out[KeyRawSent] != true {
+		t.Errorf("expected raw_sent=true, got %v", out[KeyRawSent])
+	}
+}
+
+// ============================================================================
+// Phase 3 (RC2): send_raw_frame tests
+// ============================================================================
+
+func TestHandleSendRawFrame_ValidSmallPayload(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go func() {
+		framer := transport.NewFramer(server)
+		data, err := framer.ReadFrame()
+		if err != nil {
+			return
+		}
+		if len(data) < 200 {
+			t.Errorf("expected payload >= 200 bytes, got %d", len(data))
+		}
+		// Send success response.
+		resp := &wire.Response{MessageID: 1, Status: wire.StatusSuccess}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = framer.WriteFrame(respData)
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"payload_size": float64(256),
+		"valid_cbor":   true,
+	}}
+	out, err := r.handleSendRawFrame(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyParseSuccess] != true {
+		t.Errorf("expected parse_success=true, got %v", out[KeyParseSuccess])
+	}
+	if out[KeyResponseReceived] != true {
+		t.Errorf("expected response_received=true, got %v", out[KeyResponseReceived])
+	}
+}
+
+func TestHandleSendRawFrame_MaxSizePayload(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go func() {
+		framer := transport.NewFramerWithMaxSize(server, 70000)
+		_, err := framer.ReadFrame()
+		if err != nil {
+			return
+		}
+		resp := &wire.Response{MessageID: 1, Status: wire.StatusSuccess}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = framer.WriteFrame(respData)
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"payload_size": float64(65536),
+		"valid_cbor":   true,
+	}}
+	out, err := r.handleSendRawFrame(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyParseSuccess] != true {
+		t.Errorf("expected parse_success=true, got %v", out[KeyParseSuccess])
+	}
+}
+
+func TestHandleSendRawFrame_OversizedLength(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go func() {
+		// Read the raw 4-byte length prefix.
+		var lenBuf [4]byte
+		if _, err := io.ReadFull(server, lenBuf[:]); err != nil {
+			return
+		}
+		length := binary.BigEndian.Uint32(lenBuf[:])
+		if length != 65537 {
+			t.Errorf("expected length_override=65537, got %d", length)
+		}
+		// Close connection to signal rejection.
+		server.Close()
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"length_override": float64(65537),
+		"payload_size":    float64(0),
+	}}
+	out, err := r.handleSendRawFrame(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyConnectionClosed] != true {
+		t.Errorf("expected connection_closed=true, got %v", out[KeyConnectionClosed])
+	}
+}
+
+func TestHandleSendRawFrame_ZeroLength(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go func() {
+		var lenBuf [4]byte
+		if _, err := io.ReadFull(server, lenBuf[:]); err != nil {
+			return
+		}
+		length := binary.BigEndian.Uint32(lenBuf[:])
+		if length != 0 {
+			t.Errorf("expected length_override=0, got %d", length)
+		}
+		server.Close()
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"length_override": float64(0),
+	}}
+	out, err := r.handleSendRawFrame(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyConnectionClosed] != true {
+		t.Errorf("expected connection_closed=true, got %v", out[KeyConnectionClosed])
+	}
+}
+
+// ============================================================================
+// Phase 4 (RC3): send_raw_bytes tests
+// ============================================================================
+
+func TestHandleSendRawBytes_BytesHex(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	r.conn.tlsConn = nil // raw bytes uses getWriteConn which falls back to conn
+	state := newTestState()
+
+	go func() {
+		buf := make([]byte, 3)
+		_, _ = io.ReadFull(server, buf)
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"bytes_hex": "000001",
+	}}
+	out, err := r.handleSendRawBytes(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyRawBytesSent] != true {
+		t.Errorf("expected raw_bytes_sent=true, got %v", out[KeyRawBytesSent])
+	}
+	if out[KeyConnectionOpen] != true {
+		t.Errorf("expected connection_open=true, got %v", out[KeyConnectionOpen])
+	}
+}
+
+func TestHandleSendRawBytes_FollowedByCborPayload(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	r.conn.tlsConn = nil
+	state := newTestState()
+
+	go func() {
+		// Read the raw byte prefix.
+		buf := make([]byte, 1)
+		_, _ = io.ReadFull(server, buf)
+		// Then read the framed CBOR payload.
+		framer := transport.NewFramer(server)
+		data, err := framer.ReadFrame()
+		if err != nil {
+			return
+		}
+		_ = data
+		// Write back a success response.
+		resp := &wire.Response{MessageID: 1, Status: wire.StatusSuccess}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = framer.WriteFrame(respData)
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"bytes_hex":                "05",
+		"followed_by_cbor_payload": true,
+		"payload_size":             float64(5),
+	}}
+	out, err := r.handleSendRawBytes(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyRawBytesSent] != true {
+		t.Errorf("expected raw_bytes_sent=true, got %v", out[KeyRawBytesSent])
+	}
+	if out[KeyParseSuccess] != true {
+		t.Errorf("expected parse_success=true, got %v", out[KeyParseSuccess])
+	}
+}
+
+func TestHandleSendRawBytes_FollowedByBytes(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	r.conn.tlsConn = nil
+	state := newTestState()
+
+	go func() {
+		// Read the 4-byte length prefix + 5 bytes of padding.
+		buf := make([]byte, 4+5)
+		_, _ = io.ReadFull(server, buf)
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"bytes_hex":        "00000010",
+		"followed_by_bytes": float64(5),
+	}}
+	out, err := r.handleSendRawBytes(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyRawBytesSent] != true {
+		t.Errorf("expected raw_bytes_sent=true, got %v", out[KeyRawBytesSent])
+	}
+	if out[KeyConnectionOpen] != true {
+		t.Errorf("expected connection_open=true, got %v", out[KeyConnectionOpen])
+	}
+}
+
+func TestHandleSendRawBytes_RemainingBytes(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	r.conn.tlsConn = nil
+	state := newTestState()
+
+	go func() {
+		// Read the framed payload (length prefix + remaining bytes).
+		framer := transport.NewFramer(server)
+		_, err := framer.ReadFrame()
+		if err != nil {
+			return
+		}
+		// Write back a success response.
+		resp := &wire.Response{MessageID: 1, Status: wire.StatusSuccess}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = framer.WriteFrame(respData)
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"remaining_bytes": float64(11),
+	}}
+	out, err := r.handleSendRawBytes(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyRawBytesSent] != true {
+		t.Errorf("expected raw_bytes_sent=true, got %v", out[KeyRawBytesSent])
+	}
+	if out[KeyParseSuccess] != true {
+		t.Errorf("expected parse_success=true, got %v", out[KeyParseSuccess])
+	}
+}
+
+// ============================================================================
+// Phase 5 (RC5): Missing output keys
+// ============================================================================
+
+// RC5a: response_message_id in handleRead.
+func TestHandleRead_ResponseMessageID(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	r.resolver = NewResolver()
+	state := newTestState()
+
+	go func() {
+		framer := transport.NewFramer(server)
+		reqData, err := framer.ReadFrame()
+		if err != nil {
+			return
+		}
+		req, err := wire.DecodeRequest(reqData)
+		if err != nil {
+			return
+		}
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+			Payload:   map[uint16]any{1: "test-vendor"},
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = framer.WriteFrame(respData)
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"endpoint":  float64(0),
+		"feature":   "DeviceInfo",
+		"attribute": "vendorName",
+	}}
+	out, err := r.handleRead(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyReadSuccess] != true {
+		t.Errorf("expected read_success=true, got %v", out[KeyReadSuccess])
+	}
+	if out[KeyResponseMessageID] == nil {
+		t.Error("expected response_message_id to be present")
+	}
+}
+
+// RC5a: error response preserves message ID (TC-MSG-005).
+func TestHandleRead_ErrorResponsePreservesMessageID(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	r.resolver = NewResolver()
+	state := newTestState()
+
+	go func() {
+		framer := transport.NewFramer(server)
+		reqData, err := framer.ReadFrame()
+		if err != nil {
+			return
+		}
+		req, err := wire.DecodeRequest(reqData)
+		if err != nil {
+			return
+		}
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusInvalidEndpoint,
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = framer.WriteFrame(respData)
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"endpoint": float64(255),
+		"feature":  "DeviceInfo",
+	}}
+	out, err := r.handleRead(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyResponseMessageID] == nil {
+		t.Error("expected response_message_id on error response")
+	}
+	if out[KeyReadSuccess] != false {
+		t.Errorf("expected read_success=false for invalid endpoint, got %v", out[KeyReadSuccess])
+	}
+	if out[KeyErrorCode] == nil {
+		t.Error("expected error_code for error response")
+	}
+}
+
+// RC5b: MessageID=0 should result in connection_error.
+func TestHandleRead_MessageIDZeroRejected(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	r.resolver = NewResolver()
+	state := newTestState()
+
+	// Server just reads and closes -- test expects local rejection.
+	go func() {
+		framer := transport.NewFramer(server)
+		_, _ = framer.ReadFrame()
+		server.Close()
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"message_id": float64(0),
+		"endpoint":   float64(0),
+		"feature":    "DeviceInfo",
+		"attribute":  "vendorName",
+	}}
+	out, err := r.handleRead(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyConnectionError] != true {
+		t.Errorf("expected connection_error=true for MessageID=0, got %v", out[KeyConnectionError])
+	}
+}
+
+// RC5c: simulate_no_response causes timeout.
+func TestHandleRead_SimulateNoResponse(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	r.resolver = NewResolver()
+	state := newTestState()
+
+	// Server reads the request but never responds.
+	// Closing server in defer will unblock the read.
+	go func() {
+		framer := transport.NewFramer(server)
+		_, _ = framer.ReadFrame()
+		// Don't respond -- let context timeout trigger.
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	step := &loader.Step{Params: map[string]any{
+		"simulate_no_response": true,
+		"endpoint":             float64(0),
+		"feature":              "DeviceInfo",
+		"attribute":            "vendorName",
+	}}
+	out, err := r.handleRead(ctx, step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyReadSuccess] != false {
+		t.Errorf("expected read_success=false, got %v", out[KeyReadSuccess])
+	}
+	errVal, _ := out[KeyError].(string)
+	if errVal != "REQUEST_TIMEOUT" {
+		t.Errorf("expected error=REQUEST_TIMEOUT, got %v", out[KeyError])
+	}
+	if out[KeyTimeoutAfter] == nil {
+		t.Error("expected timeout_after to be present")
+	}
+}
+
+// RC5d: handleReadConcurrent outputs correlation keys.
+func TestHandleReadConcurrent_CorrelationOutputs(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	r.resolver = NewResolver()
+	state := newTestState()
+
+	// Server echoes matching MessageIDs for 3 sequential requests.
+	go func() {
+		framer := transport.NewFramer(server)
+		for i := 0; i < 3; i++ {
+			reqData, err := framer.ReadFrame()
+			if err != nil {
+				return
+			}
+			req, err := wire.DecodeRequest(reqData)
+			if err != nil {
+				return
+			}
+			resp := &wire.Response{
+				MessageID: req.MessageID,
+				Status:    wire.StatusSuccess,
+				Payload:   map[uint16]any{1: "test"},
+			}
+			respData, _ := wire.EncodeResponse(resp)
+			_ = framer.WriteFrame(respData)
+		}
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"count":    float64(3),
+		"endpoint": float64(0),
+		"feature":  "DeviceInfo",
+	}}
+	out, err := r.handleReadConcurrent(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyAllResponsesReceived] != true {
+		t.Errorf("expected all_responses_received=true, got %v", out[KeyAllResponsesReceived])
+	}
+	if out[KeyAllCorrelationsCorrect] != true {
+		t.Errorf("expected all_correlations_correct=true, got %v", out[KeyAllCorrelationsCorrect])
+	}
+}
+
+// RC5e: error status extraction in handleSendRaw.
+func TestHandleSendRaw_ErrorStatusExtraction(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go func() {
+		framer := transport.NewFramer(server)
+		reqData, err := framer.ReadFrame()
+		if err != nil {
+			return
+		}
+		_ = reqData
+		// Send error response.
+		resp := &wire.Response{MessageID: 1, Status: wire.StatusInvalidParameter}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = framer.WriteFrame(respData)
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"cbor_map": map[string]any{"1": 1, "2": 1, "3": 0, "4": 1},
+	}}
+	out, err := r.handleSendRaw(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyResponseReceived] != true {
+		t.Errorf("expected response_received=true, got %v", out[KeyResponseReceived])
+	}
+	if out[KeyErrorStatus] == nil {
+		t.Error("expected error_status to be present")
+	}
+}
+
+// RC5e: connection closed during send_raw response read.
+func TestHandleSendRaw_NoResponseConnectionClosed(t *testing.T) {
+	r, server := newPipedRunner()
+	state := newTestState()
+
+	go func() {
+		framer := transport.NewFramer(server)
+		_, _ = framer.ReadFrame()
+		// Close immediately without responding.
+		server.Close()
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"cbor_map": map[string]any{"1": 1, "2": 1, "3": 0, "4": 1},
+	}}
+	out, err := r.handleSendRaw(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyResponseReceived] != false {
+		t.Errorf("expected response_received=false, got %v", out[KeyResponseReceived])
+	}
+}
+
+// RC5e: cbor_map_string_keys sends string-keyed CBOR (intentionally invalid).
+func TestHandleSendRaw_CborMapStringKeys(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go func() {
+		framer := transport.NewFramer(server)
+		_, _ = framer.ReadFrame()
+		resp := &wire.Response{MessageID: 1, Status: wire.StatusInvalidParameter}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = framer.WriteFrame(respData)
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"cbor_map_string_keys": map[string]any{"messageId": 1, "operation": 1},
+	}}
+	out, err := r.handleSendRaw(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyRawSent] != true {
+		t.Errorf("expected raw_sent=true, got %v", out[KeyRawSent])
+	}
+}
+
+// RC5f: handleWrite with nil value.
+func TestHandleWrite_NullValue(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	r.resolver = NewResolver()
+	state := newTestState()
+
+	go func() {
+		framer := transport.NewFramer(server)
+		reqData, err := framer.ReadFrame()
+		if err != nil {
+			return
+		}
+		req, err := wire.DecodeRequest(reqData)
+		if err != nil {
+			return
+		}
+		resp := &wire.Response{MessageID: req.MessageID, Status: wire.StatusSuccess}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = framer.WriteFrame(respData)
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"endpoint":  float64(1),
+		"feature":   "EnergyControl",
+		"attribute": "myConsumptionLimit",
+		"value":     nil,
+	}}
+	out, err := r.handleWrite(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyWriteSuccess] != true {
+		t.Errorf("expected write_success=true, got %v", out[KeyWriteSuccess])
+	}
+}
+
+// RC5f: handleWrite returns output map (not Go error) on EOF.
+func TestHandleWrite_EOF(t *testing.T) {
+	r, server := newPipedRunner()
+	r.resolver = NewResolver()
+	state := newTestState()
+
+	go func() {
+		framer := transport.NewFramer(server)
+		_, _ = framer.ReadFrame()
+		server.Close()
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"endpoint":  float64(1),
+		"feature":   "EnergyControl",
+		"attribute": "myConsumptionLimit",
+		"value":     float64(1000),
+	}}
+	out, err := r.handleWrite(context.Background(), step, state)
+	// Should return output map, not a Go error.
+	if err != nil {
+		t.Fatalf("expected nil error (output map for EOF), got: %v", err)
+	}
+	if out[KeyWriteSuccess] != false {
+		t.Errorf("expected write_success=false on EOF, got %v", out[KeyWriteSuccess])
+	}
+	if errStr, ok := out[KeyError].(string); !ok || errStr == "" {
+		t.Error("expected error key with EOF description")
+	}
+}
+
