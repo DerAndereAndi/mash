@@ -285,6 +285,7 @@ const (
 	KeyErrorStatus             = "error_status"
 	KeyRawBytesSent            = "raw_bytes_sent"
 	KeyAlertSent               = "alert_sent"
+	KeyPeerCloseNotify         = "peer_close_notify"
 	KeyCommandQueued           = "command_queued"
 	KeyQueueLength             = "queue_length"
 	KeyResultReceived          = "result_received"

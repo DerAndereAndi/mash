@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -791,17 +794,65 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 	return r.handleSendRaw(ctx, step, state)
 }
 
-// handleSendTLSAlert sends a TLS alert.
+// handleSendTLSAlert sends a TLS close_notify alert and detects the peer's response.
+//
+// For close_notify: uses CloseWrite() to send the alert while keeping the read
+// side open, then attempts a short read to detect the peer's close_notify. An
+// io.EOF on read indicates the peer responded with close_notify before closing.
 func (r *Runner) handleSendTLSAlert(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
-	// Close the TLS connection which sends a close_notify alert.
-	err := r.conn.Close()
+	// Send close_notify via CloseWrite (keeps read side open).
+	err := r.conn.tlsConn.CloseWrite()
+	if err != nil {
+		// CloseWrite failed -- close fully and report.
+		_ = r.conn.Close()
+		return map[string]any{
+			KeyAlertSent:       false,
+			KeyPeerCloseNotify: false,
+			KeyConnectionClosed: true,
+		}, nil
+	}
+
+	// Try to detect peer's close_notify by reading with a short deadline.
+	// When the peer sends close_notify, Go's TLS returns io.EOF.
+	_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1)
+	_, readErr := r.conn.tlsConn.Read(buf)
+
+	// io.EOF means the peer sent close_notify and closed gracefully.
+	// A net timeout means the peer didn't respond within the deadline.
+	peerCloseNotify := isEOFOrCloseNotify(readErr)
+
+	// Clean up connection state.
+	_ = r.conn.tlsConn.Close()
+	r.conn.connected = false
+	r.conn.tlsConn = nil
+	r.conn.conn = nil
+	r.conn.framer = nil
+
 	return map[string]any{
-		KeyAlertSent: err == nil,
+		KeyAlertSent:        true,
+		KeyPeerCloseNotify:  peerCloseNotify,
+		KeyConnectionClosed: true,
 	}, nil
+}
+
+// isEOFOrCloseNotify returns true if the error indicates the peer sent
+// close_notify (which Go surfaces as io.EOF) or the connection was closed.
+func isEOFOrCloseNotify(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	// Go's TLS layer may wrap close_notify as a generic error containing
+	// "use of closed" or "close notify" in the message.
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "close notify") || strings.Contains(msg, "use of closed")
 }
 
 // ============================================================================

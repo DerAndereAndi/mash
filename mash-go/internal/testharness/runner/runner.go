@@ -551,8 +551,15 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}
 
 	// Apply ALPN override from params.
-	if alpn, ok := step.Params["alpn"].(string); ok && alpn != "" {
-		tlsConfig.NextProtos = []string{alpn}
+	// When alpn is a non-empty string, use it. When the key is present but
+	// null or empty (alpn: null in YAML), clear NextProtos so no ALPN
+	// extension is sent. When the key is absent, keep the default.
+	if val, hasALPN := step.Params["alpn"]; hasALPN {
+		if alpn, ok := val.(string); ok && alpn != "" {
+			tlsConfig.NextProtos = []string{alpn}
+		} else {
+			tlsConfig.NextProtos = nil
+		}
 	}
 
 	// Apply cipher suite constraints from params.
@@ -573,7 +580,20 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}
 
 	// Override client certificate if specified in params.
-	if clientCertType, ok := step.Params["client_cert"].(string); ok && clientCertType != "" {
+	// cert_chain and client_cert are mutually exclusive; cert_chain takes priority.
+	if chainSpec, ok := step.Params["cert_chain"].([]any); ok && len(chainSpec) > 0 {
+		var specs []string
+		for _, s := range chainSpec {
+			if name, ok := s.(string); ok {
+				specs = append(specs, name)
+			}
+		}
+		certChain, chainErr := buildCertChain(specs, r.controllerCert, r.zoneCA)
+		if chainErr != nil {
+			return nil, fmt.Errorf("building cert chain: %w", chainErr)
+		}
+		tlsConfig.Certificates = []tls.Certificate{certChain}
+	} else if clientCertType, ok := step.Params["client_cert"].(string); ok && clientCertType != "" {
 		switch clientCertType {
 		case "controller_operational":
 			// Use default r.controllerCert -- already set by operationalTLSConfig.
