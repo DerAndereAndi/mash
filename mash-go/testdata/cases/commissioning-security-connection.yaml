@@ -168,6 +168,7 @@ steps:
 
   - name: Continue slow exchange past timeout
     action: continue_slow_exchange
+    timeout: "120s"
     params:
       total_duration_ms: 90000
     expect:

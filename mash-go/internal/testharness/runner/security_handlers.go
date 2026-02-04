@@ -46,6 +46,7 @@ func (r *Runner) registerSecurityHandlers() {
 	r.engine.RegisterHandler("open_commissioning_connection", r.handleOpenCommissioningConnection)
 	r.engine.RegisterHandler("close_connection", r.handleCloseConnection)
 	r.engine.RegisterHandler("flood_connections", r.handleFloodConnections)
+	r.engine.RegisterHandler("check_connection_closed", r.handleCheckConnectionClosed)
 	r.engine.RegisterHandler("check_mdns_advertisement", r.handleCheckMDNSAdvertisement)
 	r.engine.RegisterHandler("connect_operational", r.handleConnectOperational)
 	r.engine.RegisterHandler("enter_commissioning_mode", r.handleEnterCommissioningMode)
@@ -207,6 +208,50 @@ func (r *Runner) handleCloseConnection(ctx context.Context, step *loader.Step, s
 	}, nil
 }
 
+// handleCheckConnectionClosed checks whether a pooled connection has been closed
+// by the remote side (e.g. the device). It probes with a short read deadline to
+// detect EOF or reset, which is the expected signal from DEC-061's
+// PASEFirstMessageTimeout.
+func (r *Runner) handleCheckConnectionClosed(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	secState := getSecurityState(state)
+
+	index := 0
+	if idx, ok := step.Params["index"].(float64); ok {
+		index = int(idx)
+	}
+
+	secState.pool.mu.Lock()
+	if index < 0 || index >= len(secState.pool.connections) {
+		secState.pool.mu.Unlock()
+		return nil, fmt.Errorf("connection index %d out of range (pool size %d)", index, len(secState.pool.connections))
+	}
+	conn := secState.pool.connections[index]
+	secState.pool.mu.Unlock()
+
+	if !conn.connected || conn.tlsConn == nil {
+		return map[string]any{
+			KeyConnectionClosed: true,
+			KeyIndex:            index,
+		}, nil
+	}
+
+	// Probe with a short read deadline to detect remote close.
+	_ = conn.tlsConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	buf := make([]byte, 1)
+	_, err := conn.tlsConn.Read(buf)
+	_ = conn.tlsConn.SetReadDeadline(time.Time{})
+
+	closed := err != nil // EOF, reset, or timeout all indicate closure
+	if closed {
+		conn.connected = false
+	}
+
+	return map[string]any{
+		KeyConnectionClosed: closed,
+		KeyIndex:            index,
+	}, nil
+}
+
 // handleFloodConnections attempts many rapid connections to test flood resistance.
 func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
@@ -245,11 +290,13 @@ func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, 
 		select {
 		case <-floodCtx.Done():
 			wg.Wait()
+			acc := int(atomic.LoadInt32(&accepted))
 			return map[string]any{
-				KeyFloodCompleted:        true,
+				KeyFloodCompleted:          true,
 				KeyDeviceRemainsResponsive: true, // If we get here, device survived
-				KeyAcceptedConnections:   int(atomic.LoadInt32(&accepted)),
-				KeyRejectedConnections:   int(atomic.LoadInt32(&rejected)),
+				KeyAcceptedConnections:     acc,
+				KeyMaxAcceptedConnections:  acc,
+				KeyRejectedConnections:     int(atomic.LoadInt32(&rejected)),
 			}, nil
 		case <-ticker.C:
 			wg.Add(1)
@@ -492,6 +539,8 @@ func (r *Runner) handlePASERequestSlow(ctx context.Context, step *loader.Step, s
 }
 
 // handleContinueSlowExchange continues a slow exchange until timeout or device closes.
+// It probes the connection every second via a short read deadline to detect
+// remote closure (e.g. the device's HandshakeTimeout or PASEFirstMessageTimeout).
 func (r *Runner) handleContinueSlowExchange(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
 
@@ -501,35 +550,48 @@ func (r *Runner) handleContinueSlowExchange(ctx context.Context, step *loader.St
 	}
 
 	startTime, _ := state.Get(StateSlowExchangeStart)
-	delayMs, _ := state.Get(StateSlowExchangeDelayMs)
 
 	start := startTime.(time.Time)
-	delay := time.Duration(delayMs.(int)) * time.Millisecond
 	totalDuration := time.Duration(totalDurationMs) * time.Millisecond
 
-	// Keep sending periodic keepalives with delays
-	ticker := time.NewTicker(delay)
+	// Probe every second with a short read deadline so we detect remote
+	// closure promptly, regardless of the slow-exchange delay interval.
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	timeout := time.After(totalDuration)
+	deadline := time.After(totalDuration)
 
 	for {
 		select {
-		case <-timeout:
+		case <-deadline:
 			// Timeout reached without device closing
 			return map[string]any{
 				KeyConnectionClosedByDevice: false,
 				KeyTotalDurationMs:          time.Since(start).Milliseconds(),
 			}, nil
 		case <-ticker.C:
-			// Check if connection still alive
-			if r.conn == nil || !r.conn.connected {
+			if r.conn == nil || r.conn.tlsConn == nil {
 				return map[string]any{
 					KeyConnectionClosedByDevice: true,
 					KeyTotalDurationMs:          time.Since(start).Milliseconds(),
 				}, nil
 			}
-			// In a real implementation, we'd send a minimal message
+			// Probe: attempt a read with a short deadline.
+			_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			buf := make([]byte, 1)
+			_, err := r.conn.tlsConn.Read(buf)
+			_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+			if err != nil {
+				// Distinguish timeout (connection alive, no data) from EOF/reset (closed).
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue // read timed out -- connection still alive
+				}
+				r.conn.connected = false
+				return map[string]any{
+					KeyConnectionClosedByDevice: true,
+					KeyTotalDurationMs:          time.Since(start).Milliseconds(),
+				}, nil
+			}
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}

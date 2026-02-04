@@ -303,6 +303,7 @@ const (
 	KeyFloodCompleted           = "flood_completed"
 	KeyDeviceRemainsResponsive  = "device_remains_responsive"
 	KeyAcceptedConnections      = "accepted_connections"
+	KeyMaxAcceptedConnections   = "max_accepted_connections"
 	KeyRejectedConnections      = "rejected_connections"
 	KeyCommissionable           = "commissionable"
 	KeyAdvertisementFound       = "advertisement_found"
