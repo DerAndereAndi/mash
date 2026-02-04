@@ -159,6 +159,14 @@ func (e *Engine) executeStep(ctx context.Context, step *loader.Step, index int, 
 		}
 	}
 
+	// For steps with an explicit duration (wait actions), ensure the step
+	// timeout is at least as long as the requested duration plus a buffer.
+	if dur := stepDurationFromParams(step.Params); dur > 0 {
+		if needed := dur + 10*time.Second; needed > timeout {
+			timeout = needed
+		}
+	}
+
 	// Create context with step timeout
 	stepCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -319,6 +327,33 @@ func (e *Engine) RunSuite(ctx context.Context, cases []*loader.TestCase) *SuiteR
 
 	result.Duration = time.Since(startTime)
 	return result
+}
+
+// stepDurationFromParams extracts an explicit wait duration from step parameters.
+// It checks duration_seconds and duration_ms, returning the longer of the two.
+func stepDurationFromParams(params map[string]interface{}) time.Duration {
+	var d time.Duration
+	if sec, ok := params["duration_seconds"]; ok {
+		switch v := sec.(type) {
+		case float64:
+			d = time.Duration(v * float64(time.Second))
+		case int:
+			d = time.Duration(v) * time.Second
+		}
+	}
+	if ms, ok := params["duration_ms"]; ok {
+		var md time.Duration
+		switch v := ms.(type) {
+		case float64:
+			md = time.Duration(v * float64(time.Millisecond))
+		case int:
+			md = time.Duration(v) * time.Millisecond
+		}
+		if md > d {
+			d = md
+		}
+	}
+	return d
 }
 
 // FilterAndRun filters test cases by PICS and runs matching tests.
