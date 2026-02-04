@@ -66,6 +66,7 @@ var (
 	protocolLog    = flag.String("protocol-log", "", "File path for protocol event logging (CBOR format)")
 	enableKey      = flag.String("enable-key", "00112233445566778899aabbccddeeff", "128-bit hex key for TestControl triggers (32 hex chars)")
 	autoPICS       = flag.Bool("auto-pics", false, "Discover PICS from device at startup (requires -setup-code)")
+	debug          = flag.Bool("debug", false, "Enable debug logging (connection lifecycle, precondition transitions, state snapshots)")
 )
 
 func main() {
@@ -111,7 +112,7 @@ func main() {
 	// Setup logging for text output
 	if outputFormat == "text" {
 		log.SetFlags(log.Ltime)
-		if *verbose {
+		if *verbose || *debug {
 			log.SetFlags(log.Ltime | log.Lmicroseconds)
 		}
 		printBanner()
@@ -164,6 +165,7 @@ func main() {
 		ServerIdentity:     *serverIdentity,
 		EnableKey:          *enableKey,
 		AutoPICS:           *autoPICS,
+		Debug:              *debug,
 	}
 	// Only set logger when non-nil to avoid typed-nil interface issue.
 	if protocolLogger != nil {

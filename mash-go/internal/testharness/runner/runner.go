@@ -92,6 +92,11 @@ type Config struct {
 	// Verbose enables verbose output.
 	Verbose bool
 
+	// Debug enables detailed debug logging of connection lifecycle,
+	// precondition transitions, zone management, and PASE attempts.
+	// Output includes timestamped runner state snapshots.
+	Debug bool
+
 	// Output is where to write results.
 	Output io.Writer
 
@@ -267,14 +272,18 @@ func (r *Runner) runAutoPICS(ctx context.Context) error {
 	// Without the trigger, the stale zones keep the device in operational
 	// mode, causing PASE failures in subsequent tests.
 	if r.config.EnableKey != "" {
+		r.debugf("auto-PICS: sending TriggerEnterCommissioningMode on live zone session")
 		_, _ = r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
 	}
 
 	// Send RemoveZone so the device drops our auto-PICS zone, then
 	// disconnect. The trigger above ensures commissioning mode persists
 	// even if stale zones remain after our zone is removed.
+	r.debugf("auto-PICS: sending RemoveZone and disconnecting")
+	r.debugSnapshot("auto-PICS BEFORE cleanup")
 	r.sendRemoveZone()
 	r.ensureDisconnected()
+	r.debugSnapshot("auto-PICS AFTER cleanup")
 	return nil
 }
 
