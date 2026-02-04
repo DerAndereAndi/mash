@@ -521,8 +521,8 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 // operational certificate from the controller's Zone CA.
 func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// DEC-047: Connection protection
-	if !s.acceptCommissioningConnection() {
-		s.debugLog("handleCommissioningConnection: rejected - connection limit or cooldown")
+	if ok, reason := s.acceptCommissioningConnection(); !ok {
+		s.debugLog("handleCommissioningConnection: rejected", "reason", reason)
 		conn.Close()
 		return
 	}
@@ -2095,24 +2095,26 @@ func (s *DeviceService) updatePairingRequestListening() {
 
 // acceptCommissioningConnection checks if a new commissioning connection should be accepted.
 // Returns true if the connection can proceed, false if it should be rejected.
+// The rejection reason is returned as a string for diagnostic logging.
 //
 // Connection protection rules:
 // 1. Only one commissioning connection at a time
 // 2. Connection cooldown (500ms default) between attempts
 // 3. All zone slots must not be full (commissioning would fail anyway)
-func (s *DeviceService) acceptCommissioningConnection() bool {
+func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 	s.connectionMu.Lock()
 	defer s.connectionMu.Unlock()
 
 	// Check 1: Is commissioning already in progress?
 	if s.commissioningConnActive {
-		return false
+		return false, "commissioning already in progress"
 	}
 
 	// Check 2: Connection cooldown (skip in test mode)
 	if s.config.ConnectionCooldown > 0 && !s.config.TestMode {
-		if time.Since(s.lastCommissioningAttempt) < s.config.ConnectionCooldown {
-			return false
+		elapsed := time.Since(s.lastCommissioningAttempt)
+		if elapsed < s.config.ConnectionCooldown {
+			return false, fmt.Sprintf("cooldown active (%s remaining)", s.config.ConnectionCooldown-elapsed)
 		}
 	}
 
@@ -2123,13 +2125,13 @@ func (s *DeviceService) acceptCommissioningConnection() bool {
 	s.mu.RUnlock()
 
 	if zoneCount >= maxZones {
-		return false
+		return false, fmt.Sprintf("zone slots full (%d/%d)", zoneCount, maxZones)
 	}
 
 	// Accept the connection
 	s.commissioningConnActive = true
 	s.lastCommissioningAttempt = time.Now()
-	return true
+	return true, ""
 }
 
 // releaseCommissioningConnection marks the commissioning connection as complete.

@@ -366,10 +366,15 @@ func (r *Runner) verifyPeerCertAgainstZoneCA(rawCerts [][]byte, _ [][]*x509.Cert
 	return nil
 }
 
-// Close cleans up runner resources.
+// Close cleans up runner resources. It sends RemoveZone on the main
+// connection before closing so the device can re-enter commissioning
+// mode for the next test run.
 func (r *Runner) Close() error {
 	r.closeActiveZoneConns()
-	if r.conn != nil && r.conn.connected {
+	if r.conn != nil {
+		if r.conn.connected {
+			r.sendRemoveZone()
+		}
 		return r.conn.Close()
 	}
 	return nil

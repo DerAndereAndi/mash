@@ -70,6 +70,10 @@ var (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	flag.Parse()
 
 	// Get optional test pattern
@@ -82,19 +86,19 @@ func main() {
 	if *target == "" {
 		fmt.Fprintln(os.Stderr, "Error: target address is required (-target)")
 		flag.Usage()
-		os.Exit(1)
+		return 1
 	}
 
 	if *mode != "device" && *mode != "controller" {
 		fmt.Fprintf(os.Stderr, "Error: mode must be 'device' or 'controller', got '%s'\n", *mode)
 		flag.Usage()
-		os.Exit(1)
+		return 1
 	}
 
 	if *autoPICS && *setupCode == "" {
 		fmt.Fprintln(os.Stderr, "Error: --auto-pics requires -setup-code (commissioning needed to read device capabilities)")
 		flag.Usage()
-		os.Exit(1)
+		return 1
 	}
 
 	if *autoPICS && *pics != "" {
@@ -136,7 +140,7 @@ func main() {
 		protocolLogger, err = mashlog.NewFileLogger(*protocolLog)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: failed to create protocol logger: %v\n", err)
-			os.Exit(1)
+			return 1
 		}
 		if outputFormat == "text" {
 			log.Printf("Protocol logging to: %s", *protocolLog)
@@ -172,7 +176,11 @@ func main() {
 		config.ProtocolLogger = protocolLogger
 	}
 
-	// Create and run test runner
+	// Create and run test runner. Using a separate run() function ensures
+	// deferred cleanup (Runner.Close, RemoveZone) always executes, even
+	// when tests fail. Previously os.Exit(1) in main() skipped defers,
+	// leaving stale zones on the device that prevented commissioning mode
+	// in the next test run.
 	r := runner.New(config)
 	defer func() {
 		r.Close()
@@ -192,13 +200,14 @@ func main() {
 			// For JSON/JUnit, error is written to stderr
 			log.Printf("Error: %v", err)
 		}
-		os.Exit(1)
+		return 1
 	}
 
 	// Exit with appropriate code
 	if result.FailCount > 0 {
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 func printBanner() {

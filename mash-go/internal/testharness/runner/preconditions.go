@@ -302,6 +302,15 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 					r.debugf("two_zones_connected: commissioning zone %s (type=%d)", z.name, z.zt)
 					r.debugSnapshot("two_zones_connected BEFORE commission " + z.name)
 
+					// Send RemoveZone before closing so the device can
+					// synchronously process zone removal and re-enter
+					// commissioning mode. Without this, the device relies
+					// on async TCP disconnect detection which is slower.
+					if r.conn != nil && r.conn.connected && r.paseState != nil && r.paseState.completed {
+						r.debugf("two_zones_connected: sending RemoveZone before disconnect (zone %d)", i)
+						r.sendRemoveZone()
+					}
+
 					// Reset connection and PASE state for fresh commission.
 					// Save and restore the accumulated zone CA pool so
 					// that earlier zones' CAs survive across commissions.
