@@ -167,25 +167,30 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	// was powered on. Simulate the device advertising commissionable service.
 	// This covers TC-PAIR-004 where the device detects the pairing request
 	// and opens its commissioning window.
-	if disc, _ := state.Get(StatePairingRequestDiscriminator); disc != nil {
-		if powered, _ := state.Get(KeyPoweredOn); powered == true {
-			d := uint16(0)
-			if dv, ok := disc.(int); ok {
-				d = uint16(dv)
+	// Only apply when browsing for commissionable services (not pairing requests
+	// or other service types).
+	requestedType, _ := params[KeyServiceType].(string)
+	if requestedType == "" || requestedType == discovery.ServiceTypeCommissionable || requestedType == ServiceAliasCommissionable {
+		if disc, _ := state.Get(StatePairingRequestDiscriminator); disc != nil {
+			if powered, _ := state.Get(KeyPoweredOn); powered == true {
+				d := uint16(0)
+				if dv, ok := disc.(int); ok {
+					d = uint16(dv)
+				}
+				ds.services = []discoveredService{{
+					InstanceName:  fmt.Sprintf("MASH-%d", d),
+					ServiceType:   discovery.ServiceTypeCommissionable,
+					Host:          "device.local",
+					Port:          8443,
+					Addresses:     []string{"192.168.1.10"},
+					Discriminator: d,
+					TXTRecords: map[string]string{
+						"brand": "Test",
+						"model": "Sim",
+					},
+				}}
+				return r.buildBrowseOutput(ds)
 			}
-			ds.services = []discoveredService{{
-				InstanceName:  fmt.Sprintf("MASH-%d", d),
-				ServiceType:   discovery.ServiceTypeCommissionable,
-				Host:          "device.local",
-				Port:          8443,
-				Addresses:     []string{"192.168.1.10"},
-				Discriminator: d,
-				TXTRecords: map[string]string{
-					"brand": "Test",
-					"model": "Sim",
-				},
-			}}
-			return r.buildBrowseOutput(ds)
 		}
 	}
 

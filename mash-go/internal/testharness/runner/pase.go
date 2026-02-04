@@ -176,6 +176,13 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
+	// Clear pairing request state now that commissioning succeeded.
+	// If this was a deferred commissioning flow (TC-PAIR-004), the
+	// discriminator and powered_on flags drove the mDNS simulation;
+	// leaving them set would make subsequent browse calls still report
+	// the device as advertising.
+	state.Set(StatePairingRequestDiscriminator, nil)
+
 	// Also store in execution state for test assertions
 	state.Set(KeySessionEstablished, true)
 	state.Set(StateSessionKey, sessionKey)
