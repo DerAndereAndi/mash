@@ -218,6 +218,39 @@ func TestResolveEndpointNumeric(t *testing.T) {
 	}
 }
 
+// TestResolveCommand tests command name to ID resolution.
+func TestResolveCommand(t *testing.T) {
+	resolver := runner.NewResolver()
+
+	tests := []struct {
+		name    string
+		feature interface{}
+		command interface{}
+		wantID  uint8
+		wantErr bool
+	}{
+		{"Tariff SetTariff", "Tariff", "SetTariff", 1, false},
+		{"Signals ClearSignals", "Signals", "ClearSignals", 4, false},
+		{"EnergyControl Stop", "EnergyControl", "Stop", 11, false},
+		{"numeric feature and command", float64(0x08), float64(1), 1, false},
+		{"uint8 command passthrough", "Tariff", uint8(1), 1, false},
+		{"unknown command", "Tariff", "NonExistent", 0, true},
+		{"unknown feature", "UnknownFeature", "SetTariff", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, err := resolver.ResolveCommand(tt.feature, tt.command)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ResolveCommand(%v, %v) error = %v, wantErr %v", tt.feature, tt.command, err, tt.wantErr)
+			}
+			if !tt.wantErr && id != tt.wantID {
+				t.Errorf("ResolveCommand(%v, %v) = %d, want %d", tt.feature, tt.command, id, tt.wantID)
+			}
+		})
+	}
+}
+
 // TestResolveGlobalAttributes tests global attributes available on all features.
 func TestResolveGlobalAttributes(t *testing.T) {
 	resolver := runner.NewResolver()

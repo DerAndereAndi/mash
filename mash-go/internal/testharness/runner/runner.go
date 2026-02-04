@@ -516,6 +516,25 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		}
 	}
 
+	// Override client certificate if specified in params.
+	if clientCertType, ok := step.Params["client_cert"].(string); ok && clientCertType != "" {
+		switch clientCertType {
+		case "controller_operational":
+			// Use default r.controllerCert -- already set by operationalTLSConfig.
+		case "none":
+			tlsConfig.Certificates = nil
+		default:
+			if r.zoneCA == nil {
+				return nil, fmt.Errorf("client_cert %q requires a zone CA (commission first)", clientCertType)
+			}
+			testCert, certErr := generateTestClientCert(clientCertType, r.zoneCA)
+			if certErr != nil {
+				return nil, fmt.Errorf("generating test client cert %q: %w", clientCertType, certErr)
+			}
+			tlsConfig.Certificates = []tls.Certificate{testCert}
+		}
+	}
+
 	// Record start time for verify_timing.
 	startTime := time.Now()
 	state.Set("start_time", startTime)
@@ -598,6 +617,9 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		KeyServerCertSelfSigned:  serverCertSelfSigned,
 		KeyHasPeerCerts:          hasPeerCerts,
 		KeyCNMismatchWarning:     cnMismatchWarning,
+		KeyFullHandshake:         !cs.DidResume,
+		KeyPSKUsed:               cs.DidResume,
+		KeyEarlyDataAccepted:     false, // Go does not support TLS 1.3 0-RTT
 	}, nil
 }
 
@@ -804,14 +826,33 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
 
-	invokeParams := params["params"]
+	// Resolve command name to ID and wrap in InvokePayload.
+	var payload any
+	if commandRaw, hasCommand := params["command"]; hasCommand {
+		commandID, cmdErr := r.resolver.ResolveCommand(params[KeyFeature], commandRaw)
+		if cmdErr != nil {
+			return nil, fmt.Errorf("resolving command: %w", cmdErr)
+		}
+		// Read args (primary) or params (fallback) for command parameters.
+		args, _ := params["args"]
+		if args == nil {
+			args, _ = params["params"]
+		}
+		payload = &wire.InvokePayload{
+			CommandID:  commandID,
+			Parameters: args,
+		}
+	} else {
+		// Legacy: raw payload passthrough (no command field).
+		payload = params["params"]
+	}
 
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
 		Operation:  wire.OpInvoke,
 		EndpointID: endpointID,
 		FeatureID:  featureID,
-		Payload:    invokeParams,
+		Payload:    payload,
 	}
 
 	data, err := wire.EncodeRequest(req)

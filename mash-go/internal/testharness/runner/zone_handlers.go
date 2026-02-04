@@ -482,10 +482,11 @@ func (r *Runner) handleVerifyTLSState(ctx context.Context, step *loader.Step, st
 	}
 
 	return map[string]any{
-		KeyTLSActive:          true,
-		KeyTLSVersion:         int(tlsState.Version),
-		KeyNegotiatedProtocol: tlsState.NegotiatedProtocol,
-		KeyVersionMatches:     versionMatch,
+		KeyTLSActive:             true,
+		KeyTLSVersion:            int(tlsState.Version),
+		KeyNegotiatedProtocol:    tlsState.NegotiatedProtocol,
+		KeyVersionMatches:        versionMatch,
+		KeySessionTicketReceived: false, // MASH prohibits session resumption
 	}, nil
 }
 

@@ -38,6 +38,9 @@ var (
 
 	// attributeNames maps attribute names to IDs, keyed by feature ID.
 	attributeNames = map[uint8]map[string]uint16{}
+
+	// commandNames maps command names to IDs, keyed by feature ID.
+	commandNames = map[uint8]map[string]uint8{}
 )
 
 // initNameTables initializes the attribute name tables.
@@ -182,6 +185,43 @@ func initNameTables() {
 		testControlAttrs[k] = v
 	}
 	attributeNames[uint8(model.FeatureTestControl)] = testControlAttrs
+
+	// Command name tables
+	commandNames[uint8(model.FeatureTariff)] = map[string]uint8{
+		"settariff": features.TariffCmdSetTariff,
+	}
+	commandNames[uint8(model.FeatureSignals)] = map[string]uint8{
+		"sendpricesignal":      features.SignalsCmdSendPriceSignal,
+		"sendconstraintsignal": features.SignalsCmdSendConstraintSignal,
+		"sendforecastsignal":   features.SignalsCmdSendForecastSignal,
+		"clearsignals":         features.SignalsCmdClearSignals,
+	}
+	commandNames[uint8(model.FeatureEnergyControl)] = map[string]uint8{
+		"setlimit":              features.EnergyControlCmdSetLimit,
+		"clearlimit":            features.EnergyControlCmdClearLimit,
+		"setcurrentlimits":      features.EnergyControlCmdSetCurrentLimits,
+		"clearcurrentlimits":    features.EnergyControlCmdClearCurrentLimits,
+		"setsetpoint":           features.EnergyControlCmdSetSetpoint,
+		"clearsetpoint":         features.EnergyControlCmdClearSetpoint,
+		"setcurrentsetpoints":   features.EnergyControlCmdSetCurrentSetpoints,
+		"clearcurrentsetpoints": features.EnergyControlCmdClearCurrentSetpoints,
+		"pause":                 features.EnergyControlCmdPause,
+		"resume":                features.EnergyControlCmdResume,
+		"stop":                  features.EnergyControlCmdStop,
+	}
+	commandNames[uint8(model.FeaturePlan)] = map[string]uint8{
+		"requestplan": features.PlanCmdRequestPlan,
+		"acceptplan":  features.PlanCmdAcceptPlan,
+	}
+	commandNames[uint8(model.FeatureChargingSession)] = map[string]uint8{
+		"setchargingmode": features.ChargingSessionCmdSetChargingMode,
+	}
+	commandNames[uint8(model.FeatureDeviceInfo)] = map[string]uint8{
+		"removezone": features.DeviceInfoCmdRemoveZone,
+	}
+	commandNames[uint8(model.FeatureTestControl)] = map[string]uint8{
+		"triggertestevent": features.TestControlCmdTriggerTestEvent,
+	}
 }
 
 func init() {
@@ -231,5 +271,26 @@ func GetAttributeName(featureID uint8, attrID uint16) string {
 		}
 	}
 	// Return numeric if not found
+	return ""
+}
+
+// ResolveCommandName resolves a command name to its ID for a given feature.
+func ResolveCommandName(featureID uint8, name string) (uint8, bool) {
+	if cmdNames, ok := commandNames[featureID]; ok {
+		id, found := cmdNames[name]
+		return id, found
+	}
+	return 0, false
+}
+
+// GetCommandName returns the name for a command ID within a feature.
+func GetCommandName(featureID uint8, cmdID uint8) string {
+	if cmdNames, ok := commandNames[featureID]; ok {
+		for name, id := range cmdNames {
+			if id == cmdID {
+				return name
+			}
+		}
+	}
 	return ""
 }

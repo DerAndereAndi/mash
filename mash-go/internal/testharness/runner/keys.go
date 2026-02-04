@@ -191,6 +191,14 @@ const (
 	KeyState                 = "state"
 )
 
+// TLS introspection output keys.
+const (
+	KeyFullHandshake         = "full_handshake"
+	KeyPSKUsed               = "psk_used"
+	KeyEarlyDataAccepted     = "early_data_accepted"
+	KeySessionTicketReceived = "session_ticket_received"
+)
+
 // Session/PASE output keys.
 const (
 	KeySessionEstablished        = "session_established"

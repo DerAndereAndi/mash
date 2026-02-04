@@ -131,3 +131,47 @@ func (r *Resolver) ResolveEndpoint(nameOrID interface{}) (uint8, error) {
 		return 0, fmt.Errorf("invalid endpoint type: %T (expected string or number)", nameOrID)
 	}
 }
+
+// ResolveCommand resolves a command name or ID to its numeric ID.
+// Accepts:
+//   - string: command name (case-insensitive), e.g., "SetTariff", "settariff"
+//   - float64: numeric ID (from YAML), e.g., 1.0
+//   - int/uint8: numeric ID, e.g., 1
+//
+// The feature parameter is used to resolve feature-specific commands.
+func (r *Resolver) ResolveCommand(feature interface{}, nameOrID interface{}) (uint8, error) {
+	// First resolve the feature to get its ID
+	featureID, err := r.ResolveFeature(feature)
+	if err != nil {
+		return 0, fmt.Errorf("resolving feature: %w", err)
+	}
+
+	switch v := nameOrID.(type) {
+	case string:
+		// Case-insensitive lookup
+		id, ok := inspect.ResolveCommandName(featureID, strings.ToLower(v))
+		if !ok {
+			return 0, fmt.Errorf("unknown command %q for feature 0x%02x", v, featureID)
+		}
+		return id, nil
+
+	case float64:
+		// YAML parses numbers as float64
+		if v < 0 || v > 255 {
+			return 0, fmt.Errorf("command ID %v out of range [0-255]", v)
+		}
+		return uint8(v), nil
+
+	case int:
+		if v < 0 || v > 255 {
+			return 0, fmt.Errorf("command ID %d out of range [0-255]", v)
+		}
+		return uint8(v), nil
+
+	case uint8:
+		return v, nil
+
+	default:
+		return 0, fmt.Errorf("invalid command type: %T (expected string or number)", nameOrID)
+	}
+}
