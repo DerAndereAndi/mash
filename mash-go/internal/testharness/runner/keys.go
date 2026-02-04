@@ -187,8 +187,9 @@ const (
 	KeySelfSignedAccepted    = "self_signed_accepted"
 	KeyServerCertCNPrefix    = "server_cert_cn_prefix"
 	KeyServerCertSelfSigned  = "server_cert_self_signed"
-	KeyHasPeerCerts          = "has_peer_certs"
-	KeyState                 = "state"
+	KeyHasPeerCerts            = "has_peer_certs"
+	KeyControllerCertVerified  = "controller_cert_verified"
+	KeyState                   = "state"
 )
 
 // TLS introspection output keys.

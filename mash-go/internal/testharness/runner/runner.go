@@ -578,8 +578,17 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	// Extract TLS connection details.
 	cs := conn.ConnectionState()
 	hasPeerCerts := len(cs.PeerCertificates) > 0
-	mutualAuth := hasPeerCerts && len(cs.VerifiedChains) > 0
-	chainValidated := len(cs.VerifiedChains) > 0
+
+	// Chain validation: either Go's standard path populated VerifiedChains,
+	// or our custom VerifyPeerCertificate callback validated the chain
+	// (when InsecureSkipVerify is true, Go doesn't populate VerifiedChains).
+	chainValidated := len(cs.VerifiedChains) > 0 || (hasPeerCerts && tlsConfig.InsecureSkipVerify && tlsConfig.VerifyPeerCertificate != nil)
+
+	// Mutual auth: we presented a client cert and the connection succeeded.
+	// If the device requires client auth (RequireAndVerifyClientCert), a
+	// rejected client cert would have caused a handshake failure above.
+	presentedClientCert := len(tlsConfig.Certificates) > 0
+	mutualAuth := presentedClientCert && hasPeerCerts
 
 	// Server cert details.
 	serverCertCNPrefix := ""
@@ -610,12 +619,13 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		KeyNegotiatedGroup:       curveIDName(cs.CurveID),
 		KeyNegotiatedProtocol:    cs.NegotiatedProtocol,
 		KeyNegotiatedALPN:        cs.NegotiatedProtocol,
-		KeyMutualAuth:            mutualAuth,
-		KeyChainValidated:        chainValidated,
-		KeySelfSignedAccepted:    serverCertSelfSigned && hasPeerCerts,
-		KeyServerCertCNPrefix:    serverCertCNPrefix,
-		KeyServerCertSelfSigned:  serverCertSelfSigned,
-		KeyHasPeerCerts:          hasPeerCerts,
+		KeyMutualAuth:              mutualAuth,
+		KeyControllerCertVerified:  presentedClientCert && chainValidated,
+		KeyChainValidated:          chainValidated,
+		KeySelfSignedAccepted:      serverCertSelfSigned && hasPeerCerts,
+		KeyServerCertCNPrefix:      serverCertCNPrefix,
+		KeyServerCertSelfSigned:    serverCertSelfSigned,
+		KeyHasPeerCerts:            hasPeerCerts,
 		KeyCNMismatchWarning:     cnMismatchWarning,
 		KeyFullHandshake:         !cs.DidResume,
 		KeyPSKUsed:               cs.DidResume,
