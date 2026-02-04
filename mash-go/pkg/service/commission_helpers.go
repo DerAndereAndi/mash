@@ -46,7 +46,9 @@ func deriveClientID(controllerName string) []byte {
 // generateSelfSignedCert generates a self-signed TLS certificate for commissioning.
 // During commissioning, devices use self-signed certificates. The actual security
 // comes from the SPAKE2+ (PASE) handshake, not from certificate verification.
-func generateSelfSignedCert() (tls.Certificate, error) {
+// The CN is set to "MASH-<discriminator>" so controllers can correlate the cert
+// with the discovered mDNS advertisement.
+func generateSelfSignedCert(discriminator uint16) (tls.Certificate, error) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("generate key: %w", err)
@@ -61,7 +63,7 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			CommonName:   "MASH Device (Commissioning)",
+			CommonName:   fmt.Sprintf("MASH-%d", discriminator),
 			Organization: []string{"MASH"},
 		},
 		NotBefore:             now,

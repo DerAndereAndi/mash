@@ -452,7 +452,7 @@ func TestDeriveDeviceID(t *testing.T) {
 
 // TestGenerateSelfSignedCert verifies self-signed certificate generation.
 func TestGenerateSelfSignedCert(t *testing.T) {
-	cert, err := generateSelfSignedCert()
+	cert, err := generateSelfSignedCert(1234)
 	if err != nil {
 		t.Fatalf("generateSelfSignedCert failed: %v", err)
 	}

@@ -176,6 +176,33 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
+	// After successful cert exchange, close the commissioning connection
+	// and reconnect with operational TLS (mutual auth, zone CA verified).
+	// This implements the PASE-to-operational transition required by the spec.
+	if certErr == nil {
+		_ = r.conn.Close()
+		// Brief wait for device to process the close and switch to operational mode.
+		time.Sleep(100 * time.Millisecond)
+
+		target := r.config.Target
+		if t, ok := params[KeyTarget].(string); ok && t != "" {
+			target = t
+		}
+
+		tlsConfig := r.operationalTLSConfig()
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		opConn, opErr := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		if opErr == nil {
+			r.conn.tlsConn = opConn
+			r.conn.framer = transport.NewFramer(opConn)
+			r.conn.connected = true
+			r.conn.operational = true
+			state.Set(StateConnection, r.conn)
+		}
+		// If operational reconnect fails, proceed anyway -- the commission
+		// itself succeeded and tests can check connection state separately.
+	}
+
 	// Clear pairing request state now that commissioning succeeded.
 	// If this was a deferred commissioning flow (TC-PAIR-004), the
 	// discriminator and powered_on flags drove the mDNS simulation;

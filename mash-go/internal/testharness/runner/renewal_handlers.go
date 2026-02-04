@@ -287,10 +287,10 @@ func (r *Runner) handleVerifySubscriptionActive(ctx context.Context, step *loade
 
 // handleVerifyConnectionState verifies the connection state.
 func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	// Check if we're still on the same connection
 	sameConn := r.conn != nil && r.conn.connected
 	pasePerformed := r.paseState != nil && r.paseState.completed
-	operationalActive := sameConn && pasePerformed
+	connOperational := r.conn != nil && r.conn.operational
+	operationalActive := sameConn && pasePerformed && connOperational
 
 	// Check mutual TLS (verified chains present).
 	mutualTLS := false
@@ -299,13 +299,18 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 		mutualTLS = len(cs.VerifiedChains) > 0
 	}
 
+	// commissioning_connection_closed is true when we are NOT on a
+	// commissioning connection: either disconnected, no PASE was done,
+	// or we have already transitioned to an operational connection.
+	commClosed := !sameConn || !pasePerformed || connOperational
+
 	return map[string]any{
 		KeySameConnection:                sameConn,
 		KeyNoReconnectionRequired:        sameConn,
 		KeyOperationalConnectionActive:   operationalActive,
 		KeyMutualTLS:                     mutualTLS,
 		KeyPasePerformed:                 pasePerformed,
-		KeyCommissioningConnectionClosed: !sameConn || !pasePerformed,
+		KeyCommissioningConnectionClosed: commClosed,
 	}, nil
 }
 

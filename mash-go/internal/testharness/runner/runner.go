@@ -136,6 +136,10 @@ type Connection struct {
 	framer    *transport.Framer
 	connected bool
 
+	// operational indicates this connection was established with operational
+	// TLS (zone CA-verified, mutual auth) after commissioning completed.
+	operational bool
+
 	// pendingNotifications buffers notifications that were read while
 	// waiting for an invoke response (e.g. during sendTriggerViaZone).
 	// handleWaitForNotificationAsZone drains this before reading the wire.
@@ -567,6 +571,15 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		serverCertSelfSigned = cert.IsCA || cert.Issuer.CommonName == cert.Subject.CommonName
 	}
 
+	// Check for CN/discriminator mismatch when expected_discriminator is provided.
+	cnMismatchWarning := false
+	if expectedDisc, ok := step.Params["expected_discriminator"]; ok && hasPeerCerts {
+		expectedCN := fmt.Sprintf("MASH-%d", int(toFloat(expectedDisc)))
+		if serverCertCNPrefix != expectedCN {
+			cnMismatchWarning = true
+		}
+	}
+
 	return map[string]any{
 		KeyConnectionEstablished: true,
 		KeyConnected:             true,
@@ -584,6 +597,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		KeyServerCertCNPrefix:    serverCertCNPrefix,
 		KeyServerCertSelfSigned:  serverCertSelfSigned,
 		KeyHasPeerCerts:          hasPeerCerts,
+		KeyCNMismatchWarning:     cnMismatchWarning,
 	}, nil
 }
 

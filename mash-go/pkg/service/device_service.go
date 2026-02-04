@@ -264,7 +264,7 @@ func (s *DeviceService) Start(ctx context.Context) error {
 		// This cert is only used for TLS during PASE commissioning.
 		// The device ID will be assigned during cert exchange after PASE.
 		var err error
-		s.tlsCert, err = generateSelfSignedCert()
+		s.tlsCert, err = generateSelfSignedCert(s.config.Discriminator)
 		if err != nil {
 			s.mu.Lock()
 			s.state = StateIdle
