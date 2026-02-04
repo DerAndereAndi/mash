@@ -42,33 +42,29 @@ MASH devices can belong to multiple controller zones simultaneously. Each zone o
 
 ## 2. Zone Types and Priority
 
-Zone types define the purpose and priority of a controller. Higher priority (lower number) takes precedence in conflict resolution.
+Zone types define the purpose and priority of a controller. Higher priority (lower number) takes precedence in conflict resolution. Each device supports at most one zone per type.
 
 | Zone Type | Priority | Typical Owner | Purpose |
 |-----------|----------|---------------|---------|
-| GRID_OPERATOR | 1 (highest) | DSO, SMGW, utility | Regulatory/grid control |
-| BUILDING_MANAGER | 2 | Building EMS | Commercial building management |
-| HOME_MANAGER | 3 | Residential EMS | Home energy optimization |
-| USER_APP | 4 (lowest) | Phone apps | User preferences, monitoring |
+| GRID | 1 (highest) | DSO, SMGW, grid operator | Regulatory/grid control |
+| LOCAL | 2 | Residential/building EMS | Local energy management |
+| TEST | 3 (lowest) | Test tools, observer | Testing, monitoring (DEC-060) |
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                      Device (EVSE)                            │
-├──────────────────────────────────────────────────────────────┤
-│  Zone 1: GRID_OPERATOR (priority 1)                           │
-│    └── Operational Cert from SMGW                             │
-│    └── Grid limits, regulatory constraints                    │
-│                                                               │
-│  Zone 2: HOME_MANAGER (priority 3)                            │
-│    └── Operational Cert from EMS                              │
-│    └── Self-consumption optimization, local limits            │
-│                                                               │
-│  Zone 3: USER_APP (priority 4)                                │
-│    └── Operational Cert from Phone App zone                   │
-│    └── Monitoring, user preferences                           │
-│                                                               │
-│  Remaining slots: 2 (max_zones = 5)                           │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                      Device (EVSE)                       │
+├──────────────────────────────────────────────────────────┤
+│  Zone 1: GRID (priority 1)                               │
+│    └── Operational Cert from SMGW                        │
+│    └── Grid limits, regulatory constraints               │
+│                                                          │
+│  Zone 2: LOCAL (priority 2)                              │
+│    └── Operational Cert from EMS                         │
+│    └── Self-consumption optimization, local limits       │
+│                                                          │
+│  Max zones per type: 1 (DEC-043)                         │
+│  Attempting same-type commission → ZONE_TYPE_EXISTS (10)  │
+└──────────────────────────────────────────────────────────┘
 ```
 
 Priority is **per-feature**, not global. The SMGW has priority for power limits but does not override the EMS's charging mode preference.

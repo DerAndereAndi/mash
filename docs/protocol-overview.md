@@ -450,23 +450,22 @@ A device can be controlled by multiple controllers simultaneously through the zo
 
 | Zone Type | Priority | Typical Owner |
 |-----------|----------|---------------|
-| GRID_OPERATOR | 1 (highest) | DSO, SMGW, utility |
-| BUILDING_MANAGER | 2 | Building EMS |
-| HOME_MANAGER | 3 | Residential EMS |
-| USER_APP | 4 (lowest) | Phone apps |
+| GRID | 1 (highest) | DSO, SMGW, grid operator |
+| LOCAL | 2 | Residential/building EMS |
+| TEST | 3 (lowest) | Test tools, observer |
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Device (EVSE)                           │
-├─────────────────────────────────────────────────────────────┤
-│  Zone 1: GRID_OPERATOR                                       │
-│    └── Operational Cert from SMGW (priority 1)               │
-│                                                              │
-│  Zone 2: HOME_MANAGER                                        │
-│    └── Operational Cert from EMS (priority 3)                │
-│                                                              │
-│  Max Zones: 5                                                │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│                   Device (EVSE)                      │
+├─────────────────────────────────────────────────────┤
+│  Zone 1: GRID                                        │
+│    └── Operational Cert from SMGW (priority 1)       │
+│                                                      │
+│  Zone 2: LOCAL                                       │
+│    └── Operational Cert from EMS (priority 2)        │
+│                                                      │
+│  Max 1 zone per type (DEC-043)                       │
+└─────────────────────────────────────────────────────┘
 ```
 
 ### 9.2 Zone Roles

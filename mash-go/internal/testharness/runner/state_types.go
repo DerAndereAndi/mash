@@ -58,8 +58,8 @@ type zoneInfo struct {
 
 // zonePriority maps zone types to their priority (higher number = higher priority).
 var zonePriority = map[string]int{
-	ZoneTypeGridOperator: 2,
-	ZoneTypeHomeManager:  1,
+	ZoneTypeGrid:  2,
+	ZoneTypeLocal: 1,
 	ZoneTypeTest:         0, // Lowest priority -- observer only (DEC-060)
 }
 

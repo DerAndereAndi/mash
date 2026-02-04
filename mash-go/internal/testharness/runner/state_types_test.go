@@ -49,7 +49,7 @@ func TestGetZoneState(t *testing.T) {
 	}
 
 	// Mutate and verify persistence.
-	zs.zones["test-zone"] = &zoneInfo{ZoneID: "test-zone", ZoneType: ZoneTypeHomeManager}
+	zs.zones["test-zone"] = &zoneInfo{ZoneID: "test-zone", ZoneType: ZoneTypeLocal}
 	zs2 := getZoneState(state)
 	if _, ok := zs2.zones["test-zone"]; !ok {
 		t.Error("expected zone to persist")
@@ -135,10 +135,10 @@ func TestGetControllerState(t *testing.T) {
 }
 
 func TestZonePriority(t *testing.T) {
-	if zonePriority[ZoneTypeGridOperator] <= zonePriority[ZoneTypeHomeManager] {
-		t.Error("GRID_OPERATOR should have higher priority than HOME_MANAGER")
+	if zonePriority[ZoneTypeGrid] <= zonePriority[ZoneTypeLocal] {
+		t.Error("GRID should have higher priority than LOCAL")
 	}
-	if zonePriority[ZoneTypeHomeManager] <= zonePriority[ZoneTypeTest] {
-		t.Error("HOME_MANAGER should have higher priority than TEST")
+	if zonePriority[ZoneTypeLocal] <= zonePriority[ZoneTypeTest] {
+		t.Error("LOCAL should have higher priority than TEST")
 	}
 }

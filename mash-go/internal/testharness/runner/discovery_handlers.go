@@ -128,6 +128,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 			KeyServiceCount:       0,
 			KeyInstancesForDevice: 0,
 			KeyErrorCode:          ErrCodeNoDevicesFound,
+			KeyError:              "browse_timeout",
 		}, nil
 	}
 	if srvPresent, _ := state.Get(PrecondDeviceSRVPresent); srvPresent == true {
@@ -349,6 +350,29 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		return r.buildBrowseOutput(ds)
 	}
 
+	// Simulate multiple controllers running (commissioner services).
+	if multiCtrl, _ := state.Get(PrecondMultipleControllersRunning); multiCtrl == true {
+		ds.services = []discoveredService{
+			{
+				InstanceName: "Controller-A",
+				ServiceType:  discovery.ServiceTypeCommissioner,
+				Host:         "controller-a.local",
+				Port:         8443,
+				Addresses:    []string{"192.168.1.1"},
+				TXTRecords:   map[string]string{"ZN": "Grid Zone", "ZI": "a1b2c3d4e5f6a7b8"},
+			},
+			{
+				InstanceName: "Controller-B",
+				ServiceType:  discovery.ServiceTypeCommissioner,
+				Host:         "controller-b.local",
+				Port:         8443,
+				Addresses:    []string{"192.168.1.2"},
+				TXTRecords:   map[string]string{"ZN": "Home Zone", "ZI": "c3d4e5f6a7b8a1b2"},
+			},
+		}
+		return r.buildBrowseOutput(ds)
+	}
+
 	// Simulate two devices with the same discriminator.
 	retries := 0
 	if twoDevs, _ := state.Get(PrecondTwoDevicesSameDiscriminator); twoDevs == true {
@@ -462,6 +486,18 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		}
 	}
 
+	// Check if all results belong to the same zone (for zone_id_filter assertion).
+	allInZone := true
+	zoneIDs := make(map[string]bool)
+	for _, svc := range ds.services {
+		if zi, ok := svc.TXTRecords["ZI"]; ok {
+			zoneIDs[strings.ToLower(zi)] = true
+		}
+	}
+	if len(zoneIDs) != 1 || len(ds.services) == 0 {
+		allInZone = false
+	}
+
 	outputs := map[string]any{
 		KeyDeviceFound:              len(ds.services) > 0,
 		KeyServiceCount:             len(ds.services),
@@ -476,6 +512,7 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		KeyRetriesPerformedMin:      0,
 		KeyInstanceConflictResolved: !instanceConflict,
 		KeyInstancesForDevice:       len(ds.services),
+		KeyAllResultsInZone:         allInZone,
 	}
 
 	// Add first-service details for easy assertion.
@@ -690,9 +727,35 @@ func (r *Runner) handleGetQRPayload(ctx context.Context, step *loader.Step, stat
 		}, nil
 	}
 
+	// Auto-generate: return cached payload or generate a new one.
+	if ds.qrPayload != "" {
+		qr, err := discovery.ParseQRCode(ds.qrPayload)
+		if err == nil {
+			return map[string]any{
+				KeyQRPayload:     ds.qrPayload,
+				KeyDiscriminator: int(qr.Discriminator),
+				KeySetupCode:     qr.SetupCode,
+				KeyVersion:       int(qr.Version),
+				KeyValid:         true,
+			}, nil
+		}
+	}
+
+	// Generate a fresh QR code (simulates factory provisioning at boot).
+	qr, err := discovery.GenerateQRCode()
+	if err != nil {
+		return map[string]any{
+			KeyValid: false,
+			KeyError: fmt.Sprintf("failed to generate QR: %v", err),
+		}, nil
+	}
+	ds.qrPayload = qr.String()
 	return map[string]any{
-		KeyValid: false,
-		KeyError: "no QR payload available",
+		KeyQRPayload:     ds.qrPayload,
+		KeyDiscriminator: int(qr.Discriminator),
+		KeySetupCode:     qr.SetupCode,
+		KeyVersion:       int(qr.Version),
+		KeyValid:         true,
 	}, nil
 }
 
@@ -713,6 +776,7 @@ func (r *Runner) handleAnnouncePairingRequest(ctx context.Context, step *loader.
 
 	return map[string]any{
 		KeyPairingRequestAnnounced: true,
+		KeyAnnouncementSent:        true,
 		KeyDiscriminator:           int(discriminator),
 		KeyZoneID:                  zoneID,
 		KeyZoneName:                zoneName,

@@ -155,6 +155,7 @@ func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step,
 			payload, _ := result[KeyQRPayload].(string)
 			result[KeyQRPresent] = payload != ""
 			result[KeyFormatValid] = len(payload) > 0
+			result[KeyQRDisplayed] = payload != ""
 			if disc, ok := result[KeyDiscriminator].(int); ok {
 				result[KeyDiscriminatorLength] = len(fmt.Sprintf("%d", disc))
 			}
@@ -244,7 +245,8 @@ func (r *Runner) handleConfigureDevice(ctx context.Context, step *loader.Step, s
 	}
 
 	return map[string]any{
-		KeyDeviceConfigured: true,
+		KeyDeviceConfigured:     true,
+		KeyConfigurationSuccess: true,
 	}, nil
 }
 

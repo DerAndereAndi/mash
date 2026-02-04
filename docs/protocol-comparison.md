@@ -308,7 +308,7 @@ EEBUS:   SKI-based (manufacturer-specific QR content)
 | Aspect | MASH | Matter 1.5 | EEBUS |
 |--------|------|------------|-------|
 | Concept | Multi-zone (up to 5 zones) | Multi-fabric (up to 5 fabrics typical) | Multi-connection (no explicit limit) |
-| Priority model | Zone types with fixed priority (GRID_OPERATOR > BUILDING_MANAGER > HOME_MANAGER > USER_APP) | No built-in priority; ACL per fabric | No built-in priority; application-level |
+| Priority model | Zone types with fixed priority (GRID > LOCAL > TEST) | No built-in priority; ACL per fabric | No built-in priority; application-level |
 | Conflict resolution | Per-feature: limits = most restrictive wins, setpoints = highest priority wins | Application-level (no framework) | Not defined in spec |
 | Independent certificates | Yes (separate Zone CA per zone) | Yes (separate RCAC per fabric) | Yes (separate SKI per connection) |
 | Connections per device | Up to max_zones + 1 | Multiple sessions (fabric-limited) | Implementation-defined |
@@ -319,7 +319,7 @@ MASH is the only protocol of the three with built-in priority-based conflict res
 
 ```
 Zone Priority:
-  GRID_OPERATOR (1) > BUILDING_MANAGER (2) > HOME_MANAGER (3) > USER_APP (4)
+  GRID (1) > LOCAL (2) > TEST (3)
 
 Resolution Rules:
   LIMITS:    min(all zone limits)          -- most restrictive wins
@@ -375,7 +375,7 @@ Matter and EEBUS leave conflict resolution to application-level implementation.
 - No built-in multi-controller priority resolution
 - No explicit state machine for control states (AUTONOMOUS, CONTROLLED, LIMITED, FAILSAFE)
 - More complex commissioning (multi-step PASE+CASE vs 5 steps)
-- No domain-specific zone types (GRID_OPERATOR, BUILDING_MANAGER, etc.)
+- No domain-specific zone types (GRID, LOCAL, TEST)
 
 **Matter 1.5 gaps vs EEBUS:**
 - No phase-specific current limits (EEBUS OPEV supports independent per-phase current limits for circuit overload protection)

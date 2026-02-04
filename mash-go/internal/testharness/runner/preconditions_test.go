@@ -779,3 +779,162 @@ func TestEnsureDisconnected_ClearsZoneCA(t *testing.T) {
 		t.Error("expected zoneCAPool to be nil after ensureDisconnected")
 	}
 }
+
+func TestPreconditionLevel_DeviceStateKeys(t *testing.T) {
+	r := newTestRunner()
+
+	tests := []struct {
+		name      string
+		key       string
+		wantLevel int
+	}{
+		{"device_reset", PrecondDeviceReset, precondLevelCommissioned},
+		{"device_has_grid_zone", PrecondDeviceHasGridZone, precondLevelCommissioned},
+		{"device_has_local_zone", PrecondDeviceHasLocalZone, precondLevelCommissioned},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conditions := []loader.Condition{{tt.key: true}}
+			got := r.preconditionLevel(conditions)
+			if got != tt.wantLevel {
+				t.Errorf("preconditionLevel(%s) = %d, want %d", tt.key, got, tt.wantLevel)
+			}
+		})
+	}
+}
+
+func TestSetupPreconditions_DeviceHasGridZone(t *testing.T) {
+	r := newTestRunner()
+	r.conn.connected = true
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-ZONE-010",
+		Preconditions: []loader.Condition{
+			{PrecondDeviceHasGridZone: true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify a GRID zone was created in zone state.
+	zs := getZoneState(state)
+	found := false
+	for _, z := range zs.zones {
+		if z.ZoneType == ZoneTypeGrid {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected a GRID zone to be created")
+	}
+
+	// Simulation key should be in state.
+	v, ok := state.Get(PrecondDeviceHasGridZone)
+	if !ok || v != true {
+		t.Error("expected device_has_grid_zone=true in state")
+	}
+}
+
+func TestSetupPreconditions_DeviceHasBothZones(t *testing.T) {
+	r := newTestRunner()
+	r.conn.connected = true
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-ZTYPE-004",
+		Preconditions: []loader.Condition{
+			{PrecondDeviceHasGridZone: true},
+			{PrecondDeviceHasLocalZone: true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	zs := getZoneState(state)
+	if len(zs.zones) != 2 {
+		t.Fatalf("expected 2 zones, got %d", len(zs.zones))
+	}
+
+	hasGrid, hasLocal := false, false
+	for _, z := range zs.zones {
+		switch z.ZoneType {
+		case ZoneTypeGrid:
+			hasGrid = true
+		case ZoneTypeLocal:
+			hasLocal = true
+		}
+	}
+	if !hasGrid {
+		t.Error("expected GRID zone")
+	}
+	if !hasLocal {
+		t.Error("expected LOCAL zone")
+	}
+}
+
+func TestPreconditionLevel_SessionPreviouslyConnected(t *testing.T) {
+	r := newTestRunner()
+	conditions := []loader.Condition{
+		{PrecondSessionPreviouslyConnected: true},
+	}
+	got := r.preconditionLevel(conditions)
+	if got != precondLevelCommissioned {
+		t.Errorf("preconditionLevel(session_previously_connected) = %d, want %d", got, precondLevelCommissioned)
+	}
+}
+
+func TestSetupPreconditions_SessionPreviouslyConnected(t *testing.T) {
+	r := newTestRunner()
+	r.conn.connected = true
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3, 4}}
+
+	// Set up zone crypto state (simulates what PASE would produce).
+	r.zoneCA = &cert.ZoneCA{}
+	r.controllerCert = &cert.OperationalCert{}
+	r.zoneCAPool = x509.NewCertPool()
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-SUB-010",
+		Preconditions: []loader.Condition{
+			{PrecondSessionPreviouslyConnected: true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Connection should be closed (simulating disconnect).
+	if r.conn.connected {
+		t.Error("expected connection to be closed after session_previously_connected setup")
+	}
+
+	// Zone crypto state should be preserved for reconnection.
+	if r.zoneCAPool == nil {
+		t.Error("expected zoneCAPool to be preserved")
+	}
+	if r.zoneCA == nil {
+		t.Error("expected zoneCA to be preserved")
+	}
+	if r.controllerCert == nil {
+		t.Error("expected controllerCert to be preserved")
+	}
+
+	// PASE state should be cleared (session is over).
+	if r.paseState != nil {
+		t.Error("expected paseState to be nil")
+	}
+}

@@ -118,8 +118,8 @@ See [docs/features/README.md](docs/features/README.md) for the full registry, nu
 | Tariff / Signals / Plan | Price/forecast input/output | See feature specs |
 
 ### Multi-Zone Architecture
-- Devices support up to 5 zones (controllers)
-- Zone types: GRID_OPERATOR > BUILDING_MANAGER > HOME_MANAGER > USER_APP
+- Devices support max 1 zone per type (max 1 GRID + max 1 LOCAL = 2 zones, DEC-043)
+- Zone types: GRID > LOCAL > TEST
 - Limits: Most restrictive wins (safety)
 - Setpoints: Highest priority wins
 - Details: [docs/multi-zone.md](docs/multi-zone.md)

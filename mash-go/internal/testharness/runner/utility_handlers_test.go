@@ -37,6 +37,10 @@ func TestHandleCompare(t *testing.T) {
 		{"gte equal", float64(5), float64(5), "gte", true},
 		{"lte equal", float64(5), float64(5), "lte", true},
 		{"ne true", float64(1), float64(2), "ne", true},
+		{"!= true", float64(1), float64(2), "!=", true},
+		{"!= false", float64(1), float64(1), "!=", false},
+		{"== true", float64(5), float64(5), "==", true},
+		{"== false", float64(5), float64(6), "==", false},
 		{"equal strings", "hello", "hello", "equal", true},
 		{"default op is equal", float64(7), float64(7), "", true},
 	}

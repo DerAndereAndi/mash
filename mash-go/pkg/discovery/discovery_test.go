@@ -114,6 +114,31 @@ func TestNewQRCodeInvalid(t *testing.T) {
 	}
 }
 
+func TestGenerateQRCode(t *testing.T) {
+	qr, err := GenerateQRCode()
+	if err != nil {
+		t.Fatalf("GenerateQRCode() error = %v", err)
+	}
+	if qr.Version != QRVersion {
+		t.Errorf("Version = %d, want %d", qr.Version, QRVersion)
+	}
+	if qr.Discriminator > MaxDiscriminator {
+		t.Errorf("Discriminator = %d, exceeds max %d", qr.Discriminator, MaxDiscriminator)
+	}
+	if len(qr.SetupCode) != SetupCodeLength {
+		t.Errorf("SetupCode length = %d, want %d", len(qr.SetupCode), SetupCodeLength)
+	}
+
+	// Verify the output is parseable.
+	parsed, err := ParseQRCode(qr.String())
+	if err != nil {
+		t.Fatalf("ParseQRCode(GenerateQRCode().String()) error = %v", err)
+	}
+	if parsed.Discriminator != qr.Discriminator {
+		t.Errorf("round-trip discriminator mismatch: %d vs %d", parsed.Discriminator, qr.Discriminator)
+	}
+}
+
 func TestFormatSetupCode(t *testing.T) {
 	tests := []struct {
 		code uint32

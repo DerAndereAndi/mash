@@ -1,6 +1,8 @@
 package discovery
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"strconv"
 	"strings"
@@ -83,6 +85,17 @@ func NewQRCode(discriminator uint16, setupCode string) (*QRCode, error) {
 		Discriminator: discriminator,
 		SetupCode:     setupCode,
 	}, nil
+}
+
+// GenerateQRCode creates a new QR code with a random discriminator and setup code.
+func GenerateQRCode() (*QRCode, error) {
+	var buf [6]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return nil, fmt.Errorf("generate random: %w", err)
+	}
+	discriminator := binary.BigEndian.Uint16(buf[:2]) % (MaxDiscriminator + 1)
+	code := binary.BigEndian.Uint32(buf[2:]) % 100_000_000
+	return NewQRCode(discriminator, FormatSetupCode(code))
 }
 
 // FormatSetupCode converts a numeric setup code to the 8-digit string format.

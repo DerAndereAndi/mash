@@ -66,6 +66,88 @@ func TestHandleCommissionWithAdmin(t *testing.T) {
 	}
 }
 
+func TestHandleCommissionWithAdmin_TokenValidation(t *testing.T) {
+	tests := []struct {
+		name              string
+		token             string
+		expectSuccess     bool
+		expectError       string
+		expectDeviceAdded bool
+	}{
+		{
+			name:              "valid token succeeds",
+			token:             "valid",
+			expectSuccess:     true,
+			expectDeviceAdded: true,
+		},
+		{
+			name:          "expired token rejected",
+			token:         "expired",
+			expectSuccess: false,
+			expectError:   "INVALID_CERT",
+		},
+		{
+			name:          "invalid_signature token rejected",
+			token:         "invalid_signature",
+			expectSuccess: false,
+			expectError:   "INVALID_CERT",
+		},
+		{
+			name:          "wrong_permissions token rejected",
+			token:         "wrong_permissions",
+			expectSuccess: false,
+			expectError:   "INVALID_CERT",
+		},
+		{
+			name:              "arbitrary token string accepted",
+			token:             "some-real-token-abc",
+			expectSuccess:     true,
+			expectDeviceAdded: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newTestRunner()
+			state := newTestState()
+
+			step := &loader.Step{
+				Params: map[string]any{
+					"admin_token": tt.token,
+					KeyDeviceID:   "dev-001",
+					KeyZoneID:     "zone-abc",
+				},
+			}
+			out, err := r.handleCommissionWithAdmin(context.Background(), step, state)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if out[KeyCommissionSuccess] != tt.expectSuccess {
+				t.Errorf("commission_success: got %v, want %v", out[KeyCommissionSuccess], tt.expectSuccess)
+			}
+
+			if tt.expectError != "" {
+				if out[KeyError] != tt.expectError {
+					t.Errorf("error: got %v, want %q", out[KeyError], tt.expectError)
+				}
+			}
+
+			if tt.expectDeviceAdded {
+				cs := getControllerState(state)
+				if cs.devices["dev-001"] != "zone-abc" {
+					t.Error("expected device to be tracked")
+				}
+			} else {
+				cs := getControllerState(state)
+				if _, exists := cs.devices["dev-001"]; exists {
+					t.Error("device should not be tracked for rejected token")
+				}
+			}
+		})
+	}
+}
+
 func TestHandleCommissioningWindowDuration(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()

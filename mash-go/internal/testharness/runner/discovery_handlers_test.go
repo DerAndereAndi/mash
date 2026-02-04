@@ -191,6 +191,51 @@ func TestHandleGetQRPayload(t *testing.T) {
 	}
 }
 
+func TestHandleGetQRPayload_AutoGenerate(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// No params -- should auto-generate a valid QR payload.
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleGetQRPayload(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyValid] != true {
+		t.Errorf("expected valid=true, got %v", out[KeyValid])
+	}
+	payload, ok := out[KeyQRPayload].(string)
+	if !ok || payload == "" {
+		t.Fatal("expected non-empty qr_payload")
+	}
+
+	// Verify the generated payload is parseable.
+	qr, err := discovery.ParseQRCode(payload)
+	if err != nil {
+		t.Fatalf("generated payload not parseable: %v", err)
+	}
+	if qr.Version != discovery.QRVersion {
+		t.Errorf("expected version=%d, got %d", discovery.QRVersion, qr.Version)
+	}
+	if len(qr.SetupCode) != discovery.SetupCodeLength {
+		t.Errorf("expected setup_code_length=%d, got %d", discovery.SetupCodeLength, len(qr.SetupCode))
+	}
+
+	// Verify discriminator and setup_code are in output.
+	if out[KeyDiscriminator] == nil {
+		t.Error("expected discriminator in output")
+	}
+	if out[KeySetupCode] == nil {
+		t.Error("expected setup_code in output")
+	}
+
+	// Subsequent call should return the same payload (cached in discovery state).
+	out2, _ := r.handleGetQRPayload(context.Background(), step, state)
+	if out2[KeyQRPayload] != payload {
+		t.Error("expected same payload on second call")
+	}
+}
+
 func TestHandleAnnouncePairingRequest(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
@@ -217,6 +262,26 @@ func TestHandleAnnouncePairingRequest(t *testing.T) {
 	disc, _ := state.Get("pairing_request_discriminator")
 	if disc != 1234 {
 		t.Error("expected discriminator stored in state")
+	}
+}
+
+func TestHandleAnnouncePairingRequest_AnnouncementSent(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	step := &loader.Step{
+		Params: map[string]any{
+			"discriminator": float64(5678),
+			KeyZoneID:       "zone-id-123",
+			"zone_name":     "Test Zone",
+		},
+	}
+	out, err := r.handleAnnouncePairingRequest(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyAnnouncementSent] != true {
+		t.Errorf("expected announcement_sent=true, got %v", out[KeyAnnouncementSent])
 	}
 }
 
@@ -571,7 +636,7 @@ func TestBrowseMDNS_CommissionerSimulation(t *testing.T) {
 	zoneID := "test-zone-id"
 	zs.zones[zoneID] = &zoneInfo{
 		ZoneID:   zoneID,
-		ZoneType: ZoneTypeHomeManager,
+		ZoneType: ZoneTypeLocal,
 		Metadata: map[string]any{},
 	}
 	zs.zoneOrder = append(zs.zoneOrder, zoneID)
@@ -810,5 +875,79 @@ func TestBrowseMDNS_InstancesForDevice_AlwaysSet(t *testing.T) {
 	}
 	if v != 0 {
 		t.Errorf("expected instances_for_device=0, got %v", v)
+	}
+}
+
+func TestHandleBrowseMDNS_NoDevices_BrowseTimeout(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Set the "no devices" precondition.
+	state.Set(PrecondNoDevicesAdvertising, true)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasCommissionable,
+			"timeout":      "10s",
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if out[KeyDeviceFound] != false {
+		t.Error("expected device_found=false")
+	}
+	if out[KeyError] != "browse_timeout" {
+		t.Errorf("expected error=browse_timeout, got %v", out[KeyError])
+	}
+}
+
+func TestHandleBrowseMDNS_MultipleControllersRunning(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	state.Set(PrecondMultipleControllersRunning, true)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType: discovery.ServiceTypeCommissioner,
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	controllersMin, ok := out[KeyControllersFoundMin].(int)
+	if !ok {
+		t.Fatalf("expected controllers_found_min to be int, got %T", out[KeyControllersFoundMin])
+	}
+	if controllersMin < 2 {
+		t.Errorf("expected controllers_found_min >= 2, got %d", controllersMin)
+	}
+}
+
+func TestHandleBrowseMDNS_AllResultsInZone(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// multiple_devices_commissioned gives us operational services with ZI TXT fields.
+	state.Set(PrecondMultipleDevicesCommissioned, true)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			KeyServiceType:   ServiceAliasOperational,
+			"zone_id_filter": "a1b2c3d4",
+		},
+	}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if out[KeyAllResultsInZone] != true {
+		t.Errorf("expected all_results_in_zone=true, got %v", out[KeyAllResultsInZone])
 	}
 }

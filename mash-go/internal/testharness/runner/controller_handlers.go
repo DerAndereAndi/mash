@@ -89,6 +89,9 @@ func (r *Runner) handleControllerAction(ctx context.Context, step *loader.Step, 
 }
 
 // handleCommissionWithAdmin commissions using an admin token.
+// Token validation: sentinel values "expired", "invalid_signature", and
+// "wrong_permissions" simulate rejection with INVALID_CERT. All other
+// non-empty tokens are treated as valid.
 func (r *Runner) handleCommissionWithAdmin(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 	cs := getControllerState(state)
@@ -101,12 +104,23 @@ func (r *Runner) handleCommissionWithAdmin(ctx context.Context, step *loader.Ste
 		return nil, fmt.Errorf("admin_token required")
 	}
 
+	// Simulate token validation: known-bad sentinels are rejected.
+	switch token {
+	case "expired", "invalid_signature", "wrong_permissions":
+		return map[string]any{
+			KeyCommissionSuccess: false,
+			KeyCommissioned:      false,
+			KeyError:             "INVALID_CERT",
+		}, nil
+	}
+
 	cs.devices[deviceID] = zoneID
 
 	return map[string]any{
-		KeyCommissioned: true,
-		KeyDeviceID:     deviceID,
-		KeyZoneID:       zoneID,
+		KeyCommissionSuccess: true,
+		KeyCommissioned:      true,
+		KeyDeviceID:          deviceID,
+		KeyZoneID:            zoneID,
 	}, nil
 }
 

@@ -822,8 +822,8 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     subgraph Zones["Connected Zones (max 5)"]
-        Z1["GRID_OPERATOR<br/>Priority: Highest<br/>ConsLimit: 6 kW"]
-        Z2["HOME_MANAGER<br/>Priority: Lower<br/>ConsLimit: 5 kW"]
+        Z1["GRID<br/>Priority: Highest<br/>ConsLimit: 6 kW"]
+        Z2["LOCAL<br/>Priority: Lower<br/>ConsLimit: 5 kW"]
     end
 
     subgraph Resolution["Limit Resolution"]
@@ -831,7 +831,7 @@ flowchart TD
     end
 
     subgraph Result["Effective Values"]
-        EFF["effectiveConsumptionLimit = 5 kW<br/>(HOME_MANAGER wins, more restrictive)<br/>controlState = LIMITED"]
+        EFF["effectiveConsumptionLimit = 5 kW<br/>(LOCAL wins, more restrictive)<br/>controlState = LIMITED"]
     end
 
     Z1 --> RES
@@ -853,7 +853,7 @@ flowchart TD
 
 **Setpoints: Highest Priority Wins**
 - Zone with lowest priority number wins
-- GRID_OPERATOR > BUILDING_MANAGER > HOME_MANAGER > USER_APP
+- GRID > LOCAL > TEST
 
 ### 10.3 Per-Zone Attribute Pattern
 

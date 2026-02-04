@@ -58,6 +58,12 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondZoneCreated:                  true,
 	PrecondMultipleDevicesCommissioning: true,
 	PrecondMultipleDevicesCommissioned:  true,
+	PrecondMultipleControllersRunning:   true,
+	// Device state simulation.
+	PrecondDeviceReset:                true,
+	PrecondDeviceHasGridZone:          true,
+	PrecondDeviceHasLocalZone:         true,
+	PrecondSessionPreviouslyConnected: true,
 }
 
 var preconditionKeyLevels = map[string]int{
@@ -92,6 +98,7 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceInTwoZones:             precondLevelNone,
 	PrecondMultipleDevicesCommissioning: precondLevelNone,
 	PrecondMultipleDevicesCommissioned:  precondLevelNone,
+	PrecondMultipleControllersRunning:   precondLevelNone,
 
 	PrecondDeviceInCommissioningMode: precondLevelCommissioning,
 	PrecondDeviceUncommissioned:      precondLevelCommissioning,
@@ -101,6 +108,12 @@ var preconditionKeyLevels = map[string]int{
 	PrecondConnectionEstablished:     precondLevelConnected,
 	PrecondDeviceCommissioned:        precondLevelCommissioned,
 	PrecondSessionEstablished:        precondLevelCommissioned,
+
+	// Device state preconditions (require commissioned session for read/write).
+	PrecondDeviceReset:                precondLevelCommissioned,
+	PrecondDeviceHasGridZone:          precondLevelCommissioned,
+	PrecondDeviceHasLocalZone:         precondLevelCommissioned,
+	PrecondSessionPreviouslyConnected: precondLevelCommissioned,
 }
 
 // preconditionLevelFor determines the highest setup level needed for the given conditions.
@@ -258,6 +271,18 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 					step := &loader.Step{Params: map[string]any{KeyZoneType: "LOCAL"}}
 					_, _ = r.handleCreateZone(ctx, step, state)
 				}
+			case PrecondDeviceHasGridZone:
+				zs := getZoneState(state)
+				if !hasZoneOfType(zs, ZoneTypeGrid) {
+					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeGrid, KeyZoneID: "GRID"}}
+					_, _ = r.handleCreateZone(ctx, step, state)
+				}
+			case PrecondDeviceHasLocalZone:
+				zs := getZoneState(state)
+				if !hasZoneOfType(zs, ZoneTypeLocal) {
+					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeLocal, KeyZoneID: "LOCAL"}}
+					_, _ = r.handleCreateZone(ctx, step, state)
+				}
 			case PrecondControllerCertNearExpiry:
 				state.Set(StateCertDaysUntilExpiry, 29)
 			case PrecondFiveZonesConnected:
@@ -375,14 +400,15 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 
 	r.debugSnapshot("setupPreconditions AFTER " + tc.ID)
 
+	var setupErr error
 	switch needed {
 	case precondLevelCommissioned:
 		r.debugf("ensuring commissioned for %s", tc.ID)
-		err := r.ensureCommissioned(ctx, state)
-		if err != nil {
-			r.debugf("ensureCommissioned FAILED for %s: %v", tc.ID, err)
+		setupErr = r.ensureCommissioned(ctx, state)
+		if setupErr != nil {
+			r.debugf("ensureCommissioned FAILED for %s: %v", tc.ID, setupErr)
+			return setupErr
 		}
-		return err
 	case precondLevelConnected:
 		// If currently commissioned but only a connection is needed,
 		// disconnect and reconnect for a clean TLS session.
@@ -391,14 +417,34 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 			r.ensureDisconnected()
 		}
 		r.debugf("ensuring connected for %s", tc.ID)
-		return r.ensureConnected(ctx, state)
+		setupErr = r.ensureConnected(ctx, state)
+		if setupErr != nil {
+			return setupErr
+		}
 	case precondLevelCommissioning:
 		r.debugf("ensuring commissioning mode for %s", tc.ID)
 		r.ensureDisconnected()
-		return nil
-	default:
-		return nil
 	}
+
+	// Post-setup: session_previously_connected disconnects but preserves
+	// zone crypto state so the test's connect step can reconnect with
+	// operational TLS using the zone CA pool.
+	if hasPrecondition(tc.Preconditions, PrecondSessionPreviouslyConnected) {
+		r.debugf("session_previously_connected: disconnecting but preserving zone state")
+		savedCA := r.zoneCA
+		savedCert := r.controllerCert
+		savedPool := r.zoneCAPool
+		if r.conn != nil {
+			_ = r.conn.Close()
+		}
+		r.conn = &Connection{}
+		r.paseState = nil
+		r.zoneCA = savedCA
+		r.controllerCert = savedCert
+		r.zoneCAPool = savedPool
+	}
+
+	return nil
 }
 
 // ensureConnected checks if already connected; if not, establishes a commissioning TLS connection.
@@ -632,6 +678,16 @@ func (r *Runner) sendRemoveZoneOnConn(conn *Connection, zoneID string) {
 		conn.tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	}
 	_, _ = conn.framer.ReadFrame()
+}
+
+// hasZoneOfType checks if a zone of the given type exists in zone state.
+func hasZoneOfType(zs *zoneState, zoneType string) bool {
+	for _, z := range zs.zones {
+		if z.ZoneType == zoneType {
+			return true
+		}
+	}
+	return false
 }
 
 // deriveZoneIDFromSecret derives a zone ID from a PASE shared secret

@@ -20,6 +20,14 @@ const (
 	PrecondTwoDevicesSameDiscriminator = "two_devices_same_discriminator"
 )
 
+// Device state preconditions.
+const (
+	PrecondDeviceReset                = "device_reset"
+	PrecondDeviceHasGridZone          = "device_has_grid_zone"
+	PrecondDeviceHasLocalZone         = "device_has_local_zone"
+	PrecondSessionPreviouslyConnected = "session_previously_connected"
+)
+
 // Controller preconditions.
 const (
 	PrecondZoneCreated              = "zone_created"
@@ -42,6 +50,7 @@ const (
 	PrecondDeviceInTwoZones             = "device_in_two_zones"
 	PrecondMultipleDevicesCommissioning = "multiple_devices_commissioning"
 	PrecondMultipleDevicesCommissioned  = "multiple_devices_commissioned"
+	PrecondMultipleControllersRunning   = "multiple_controllers_running"
 )
 
 // Connection/commissioning preconditions.
@@ -346,11 +355,13 @@ const (
 	KeyDiscriminator            = "discriminator"
 	KeySetupCode                = "setup_code"
 	KeyPairingRequestAnnounced  = "pairing_request_announced"
+	KeyAnnouncementSent         = "announcement_sent"
 	KeyZoneName                 = "zone_name"
 	KeyDiscoveryStarted         = "discovery_started"
 	KeyDiscoveryStopped         = "discovery_stopped"
 	KeyDeviceHasTXTRecords      = "device_has_txt_records"
 	KeyTXTValid                 = "txt_valid"
+	KeyAllResultsInZone         = "all_results_in_zone"
 )
 
 // Renewal handler output keys.
@@ -442,6 +453,7 @@ const (
 	KeyRapid                   = "rapid"
 	KeyTriggered               = "triggered"
 	KeyDeviceConfigured        = "device_configured"
+	KeyConfigurationSuccess    = "configuration_success"
 	KeyExposedDeviceConfigured = "exposed_device_configured"
 	KeyAttributeUpdated        = "attribute_updated"
 	KeyStateChanged            = "state_changed"
@@ -551,9 +563,9 @@ const (
 
 // Zone type string values -- protocol-defined zone types for multi-zone architecture.
 const (
-	ZoneTypeGridOperator = "GRID_OPERATOR"
-	ZoneTypeHomeManager  = "HOME_MANAGER"
-	ZoneTypeTest         = "TEST"
+	ZoneTypeGrid  = "GRID"
+	ZoneTypeLocal = "LOCAL"
+	ZoneTypeTest  = "TEST"
 )
 
 // OperatingStateEnum values.

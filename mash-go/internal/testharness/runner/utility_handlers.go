@@ -43,9 +43,9 @@ func (r *Runner) handleCompare(ctx context.Context, step *loader.Step, state *en
 
 	var result bool
 	switch op {
-	case "equal", "eq":
+	case "equal", "eq", "==":
 		result = fmt.Sprintf("%v", left) == fmt.Sprintf("%v", right)
-	case "not_equal", "ne":
+	case "not_equal", "ne", "!=":
 		result = fmt.Sprintf("%v", left) != fmt.Sprintf("%v", right)
 	case "greater_than", "gt":
 		result = leftF > rightF

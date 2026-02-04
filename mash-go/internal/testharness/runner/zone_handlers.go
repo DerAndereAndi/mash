@@ -15,6 +15,9 @@ import (
 
 // registerZoneHandlers registers all zone management action handlers.
 func (r *Runner) registerZoneHandlers() {
+	// Custom checker: save_zone_id saves the zone ID under a target key name.
+	r.engine.RegisterChecker(KeySaveZoneID, r.checkSaveZoneID)
+
 	r.engine.RegisterHandler("create_zone", r.handleCreateZone)
 	r.engine.RegisterHandler("add_zone", r.handleAddZone)
 	r.engine.RegisterHandler("delete_zone", r.handleDeleteZone)
@@ -44,7 +47,7 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 
 	zoneType, _ := params[KeyZoneType].(string)
 	if zoneType == "" {
-		zoneType = ZoneTypeHomeManager
+		zoneType = ZoneTypeLocal
 	}
 
 	zoneName, _ := params[KeyZoneName].(string)
@@ -86,9 +89,9 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 	// verify_controller_cert and cert fingerprint handlers work with
 	// actual cryptographic material.
 	zt := cert.ZoneTypeLocal
-	if zoneType == "GRID" || zoneType == ZoneTypeGridOperator {
+	if zoneType == ZoneTypeGrid {
 		zt = cert.ZoneTypeGrid
-	} else if zoneType == "TEST" || zoneType == ZoneTypeTest {
+	} else if zoneType == ZoneTypeTest {
 		zt = cert.ZoneTypeTest
 	}
 	if zoneCA, err := cert.GenerateZoneCA(zoneID, zt); err == nil {
@@ -267,6 +270,11 @@ func (r *Runner) handleVerifyZoneCA(ctx context.Context, step *loader.Step, stat
 	zs := getZoneState(state)
 
 	zoneID, _ := params[KeyZoneID].(string)
+
+	// Fall back to most recently created zone when no zone_id is provided.
+	if zoneID == "" && len(zs.zoneOrder) > 0 {
+		zoneID = zs.zoneOrder[len(zs.zoneOrder)-1]
+	}
 
 	zone, exists := zs.zones[zoneID]
 	if !exists {
@@ -487,6 +495,39 @@ func isHex(s string) bool {
 		}
 	}
 	return len(s) > 0
+}
+
+// checkSaveZoneID is a custom checker that saves the zone ID under a target key.
+// Used by YAML expectations like: save_zone_id: zone_id_a
+func (r *Runner) checkSaveZoneID(key string, expected interface{}, state *engine.ExecutionState) *engine.ExpectResult {
+	targetKey, ok := expected.(string)
+	if !ok {
+		return &engine.ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Passed:   false,
+			Message:  fmt.Sprintf("save_zone_id target must be a string, got %T", expected),
+		}
+	}
+
+	zoneID, exists := state.Get(key)
+	if !exists {
+		return &engine.ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Passed:   false,
+			Message:  fmt.Sprintf("key %q not found in state", key),
+		}
+	}
+
+	state.Set(targetKey, zoneID)
+	return &engine.ExpectResult{
+		Key:      key,
+		Expected: expected,
+		Actual:   zoneID,
+		Passed:   true,
+		Message:  fmt.Sprintf("saved zone_id %v as %q", zoneID, targetKey),
+	}
 }
 
 // sortedZonesByPriority returns zones sorted by priority (highest first).
