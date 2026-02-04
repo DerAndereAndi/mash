@@ -9,8 +9,8 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 )
 
-// variablePattern matches {{ variable }} templates for state variables.
-var variablePattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
+// variablePattern matches {{ variable }} or {{ variable + N }} templates for state variables.
+var variablePattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)(?:\s*([+\-])\s*(\d+))?\s*\}\}`)
 
 // picsPattern matches ${PICS_ITEM} or ${PICS_ITEM + N} templates for PICS values.
 // Examples: ${MASH.S.COMM.BACKOFF_TIER2}, ${MASH.S.ZONE.MAX + 1}
@@ -25,7 +25,7 @@ func Interpolate(template string, state *ExecutionState) string {
 	}
 
 	return variablePattern.ReplaceAllStringFunc(template, func(match string) string {
-		// Extract variable name from {{ name }}
+		// Extract variable name and optional arithmetic from {{ name [+/- N] }}
 		submatches := variablePattern.FindStringSubmatch(match)
 		if len(submatches) < 2 {
 			return match
@@ -36,6 +36,19 @@ func Interpolate(template string, state *ExecutionState) string {
 		value, exists := state.Outputs[varName]
 		if !exists {
 			return match // Leave undefined variables as-is
+		}
+
+		// Apply arithmetic if present
+		if len(submatches) >= 4 && submatches[2] != "" {
+			operator := submatches[2]
+			operand, _ := strconv.Atoi(submatches[3])
+			numValue := toNumeric(value)
+			switch operator {
+			case "+":
+				return valueToString(numValue + int64(operand))
+			case "-":
+				return valueToString(numValue - int64(operand))
+			}
 		}
 
 		// Convert value to string
@@ -97,18 +110,31 @@ func interpolateValue(value interface{}, state *ExecutionState) interface{} {
 }
 
 // interpolateString handles string interpolation with type preservation.
-// If the string is purely a single variable reference "{{ var }}", returns the actual value type.
+// If the string is purely a single variable reference "{{ var }}" or "{{ var + N }}",
+// returns the actual value type (with arithmetic applied if present).
 // If it contains text mixed with variables, returns interpolated string.
 func interpolateString(s string, state *ExecutionState) interface{} {
 	trimmed := strings.TrimSpace(s)
 
-	// Check if this is a pure variable reference (exactly "{{ var }}")
+	// Check if this is a pure variable reference (exactly "{{ var }}" or "{{ var + N }}")
 	if isPureVariableRef(trimmed) {
-		// Extract variable name
+		// Extract variable name and optional arithmetic
 		submatches := variablePattern.FindStringSubmatch(trimmed)
 		if len(submatches) >= 2 {
 			varName := submatches[1]
 			if value, exists := state.Outputs[varName]; exists {
+				// Apply arithmetic if present
+				if len(submatches) >= 4 && submatches[2] != "" {
+					operator := submatches[2]
+					operand, _ := strconv.Atoi(submatches[3])
+					numValue := toNumeric(value)
+					switch operator {
+					case "+":
+						return numValue + int64(operand)
+					case "-":
+						return numValue - int64(operand)
+					}
+				}
 				return value // Return actual type, not string
 			}
 		}
@@ -226,6 +252,18 @@ func interpolateStringWithPICS(s string, state *ExecutionState, pics *loader.PIC
 		if len(submatches) >= 2 {
 			varName := submatches[1]
 			if value, exists := state.Outputs[varName]; exists {
+				// Apply arithmetic if present
+				if len(submatches) >= 4 && submatches[2] != "" {
+					operator := submatches[2]
+					operand, _ := strconv.Atoi(submatches[3])
+					numValue := toNumeric(value)
+					switch operator {
+					case "+":
+						return numValue + int64(operand)
+					case "-":
+						return numValue - int64(operand)
+					}
+				}
 				return value
 			}
 		}

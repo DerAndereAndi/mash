@@ -351,9 +351,11 @@ const (
 	KeyBusyErrorCode            = "busy_error_code"
 	KeyBusyRetryAfterPresent    = "busy_retry_after_present"
 	KeyBusyRetryAfterValue      = "busy_retry_after_value"
+	KeyBusyRetryAfter           = "busy_retry_after"
 	KeyPaseFailed               = "pase_failed"
 	KeyTLSHandshakeFailed       = "tls_handshake_failed"
 	KeyActiveConnections        = "active_connections"
+	KeyConnectionsOpened        = "connections_opened"
 )
 
 // Discovery handler output keys.
@@ -654,4 +656,5 @@ const (
 	CheckerMinDelayMs            = "min_delay_ms"
 	CheckerMeanDifferenceMsMax   = "mean_difference_ms_max"
 	CheckerValidityDaysMin       = "validity_days_min"
+	CheckerBusyRetryAfterGT      = "busy_retry_after_gt"
 )

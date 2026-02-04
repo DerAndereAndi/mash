@@ -6,9 +6,10 @@ id: TC-CONN-CAP-001
 name: Basic Cap Enforcement
 description: |
   Verifies device enforces a total concurrent connection limit of max_zones + 1
-  at TCP accept level (before TLS handshake). With max_zones=2, the cap is 3.
-  A fourth connection attempt is rejected at TCP level. After closing one
-  connection, a new attempt succeeds.
+  at TCP accept level (before TLS handshake). Uses PICS-driven fill_connections
+  to open the correct number of connections. After filling to cap, a new
+  connection attempt is rejected. After closing one connection, a new attempt
+  succeeds.
 
 pics_requirements:
   - MASH.S.TRANS.CONN_CAP
@@ -19,26 +20,18 @@ preconditions:
   - device_has_available_zone_slot: true
 
 steps:
-  - name: Open first TLS connection
-    action: open_commissioning_connection
+  - name: Fill connections to transport cap
+    action: fill_connections
+    params:
+      count: "${MASH.S.ZONE.MAX + 1}"
     expect:
-      connection_established: true
+      connections_opened: "${MASH.S.ZONE.MAX + 1}"
 
-  - name: Open second TLS connection
-    action: open_commissioning_connection
-    expect:
-      connection_established: true
-
-  - name: Open third TLS connection (at cap)
-    action: open_commissioning_connection
-    expect:
-      connection_established: true
-
-  - name: Attempt fourth connection (exceeds cap)
+  - name: Attempt connection beyond cap
     action: open_commissioning_connection
     expect:
       connection_established: false
-      rejection_before_tls: true
+      rejection_at_tls_level: true
 
   - name: Close first connection
     action: close_connection

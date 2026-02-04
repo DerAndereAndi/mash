@@ -2180,8 +2180,8 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 		return false, "commissioning already in progress"
 	}
 
-	// Check 2: Connection cooldown (skip in test mode)
-	if s.config.ConnectionCooldown > 0 && !s.config.TestMode {
+	// Check 2: Connection cooldown
+	if s.config.ConnectionCooldown > 0 {
 		elapsed := time.Since(s.lastCommissioningAttempt)
 		if elapsed < s.config.ConnectionCooldown {
 			return false, fmt.Sprintf("cooldown active (%s remaining)", s.config.ConnectionCooldown-elapsed)

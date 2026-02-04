@@ -71,12 +71,16 @@ func (r *Runner) registerSecurityHandlers() {
 	r.engine.RegisterHandler("measure_error_timing", r.handleMeasureErrorTiming)
 	r.engine.RegisterHandler("compare_timing_distributions", r.handleCompareTimingDistributions)
 
+	// Connection fill handler for PICS-driven cap tests
+	r.engine.RegisterHandler("fill_connections", r.handleFillConnections)
+
 	// Register security-specific checkers
 	r.engine.RegisterChecker(CheckerResponseDelayMsMin, r.checkResponseDelayMin)
 	r.engine.RegisterChecker(CheckerResponseDelayMsMax, r.checkResponseDelayMax)
 	r.engine.RegisterChecker(CheckerMaxDelayMs, r.checkMaxDelay)
 	r.engine.RegisterChecker(CheckerMinDelayMs, r.checkMinDelay)
 	r.engine.RegisterChecker(CheckerMeanDifferenceMsMax, r.checkMeanDifferenceMax)
+	r.engine.RegisterChecker(CheckerBusyRetryAfterGT, r.checkBusyRetryAfterGT)
 }
 
 // getSecurityState retrieves or creates security state from execution state.
@@ -227,9 +231,33 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 				KeyError:                 fmt.Sprintf("send PASERequest: %v", err),
 			}, nil
 		}
-		// Allow the device to process the PASERequest and acquire the lock
-		// before subsequent steps attempt concurrent commissioning.
-		time.Sleep(100 * time.Millisecond)
+		// Read the device's response with a short deadline to distinguish:
+		// - CommissioningError(BUSY) -> device rejected, return busy output
+		// - PASEResponse -> device is proceeding, lock is held
+		// - Timeout -> device is still processing, lock is held
+		resp, err := readPASEMessageRaw(conn, 2*time.Second)
+		if err == nil {
+			if errMsg, ok := resp.(*commissioning.CommissioningError); ok && errMsg.ErrorCode == commissioning.ErrCodeBusy {
+				// Device is busy -- close this connection and return busy output.
+				conn.Close()
+				secState.pool.mu.Lock()
+				if index < len(secState.pool.connections) {
+					secState.pool.connections[index].connected = false
+				}
+				secState.pool.mu.Unlock()
+				return map[string]any{
+					KeyConnectionEstablished: true,
+					KeyBusyResponseReceived:  true,
+					KeyBusyErrorCode:         int(errMsg.ErrorCode),
+					KeyBusyRetryAfterValue:   int(errMsg.RetryAfter),
+					KeyBusyRetryAfter:        int(errMsg.RetryAfter),
+					KeyBusyRetryAfterPresent: errMsg.RetryAfter > 0,
+				}, nil
+			}
+			// PASEResponse or other message -- device is proceeding with the
+			// handshake and holding the commissioning lock.
+		}
+		// Timeout or read error -- device is still processing, lock is held.
 	}
 
 	return map[string]any{
@@ -1093,6 +1121,96 @@ func (r *Runner) checkMeanDifferenceMax(key string, expected interface{}, state 
 	}
 }
 
+// handleFillConnections opens `count` commissioning TLS connections, storing
+// each in the pool. Used by PICS-driven cap tests where the count is
+// interpolated from PICS values like ${MASH.S.ZONE.MAX + 1}.
+func (r *Runner) handleFillConnections(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
+
+	count := 0
+	if c, ok := params[KeyCount].(float64); ok {
+		count = int(c)
+	} else if c, ok := params[KeyCount].(int64); ok {
+		count = int(c)
+	} else if c, ok := params[KeyCount].(int); ok {
+		count = c
+	}
+
+	if count <= 0 {
+		return nil, fmt.Errorf("fill_connections: count must be > 0, got %v", params[KeyCount])
+	}
+
+	secState := getSecurityState(state)
+	target := r.config.Target
+
+	opened := 0
+	for i := 0; i < count; i++ {
+		tlsConfig := transport.NewCommissioningTLSConfig()
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		if err != nil {
+			// Connection rejected -- stop filling.
+			break
+		}
+
+		secState.pool.mu.Lock()
+		newConn := &Connection{
+			tlsConn:   conn,
+			framer:    transport.NewFramer(conn),
+			connected: true,
+		}
+		secState.pool.connections = append(secState.pool.connections, newConn)
+		secState.pool.mu.Unlock()
+
+		if !r.conn.connected {
+			r.conn = newConn
+		}
+		opened++
+	}
+
+	return map[string]any{
+		KeyConnectionsOpened: opened,
+	}, nil
+}
+
+// checkBusyRetryAfterGT checks if busy_retry_after_value is strictly greater
+// than the expected value. Used in YAML as: busy_retry_after_gt: 0
+func (r *Runner) checkBusyRetryAfterGT(key string, expected interface{}, state *engine.ExecutionState) *engine.ExpectResult {
+	actual, exists := state.Get(KeyBusyRetryAfterValue)
+	if !exists {
+		actual, exists = state.Get(KeyBusyRetryAfter)
+	}
+	if !exists {
+		return &engine.ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Passed:   false,
+			Message:  "busy_retry_after_value not found in outputs",
+		}
+	}
+
+	actualNum, ok1 := engine.ToFloat64(actual)
+	expectedNum, ok2 := engine.ToFloat64(expected)
+	if !ok1 || !ok2 {
+		return &engine.ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Actual:   actual,
+			Passed:   false,
+			Message:  fmt.Sprintf("cannot compare non-numeric values: %T and %T", actual, expected),
+		}
+	}
+
+	passed := actualNum > expectedNum
+	return &engine.ExpectResult{
+		Key:      key,
+		Expected: expected,
+		Actual:   actual,
+		Passed:   passed,
+		Message:  fmt.Sprintf("busy_retry_after %v > %v = %v", actualNum, expectedNum, passed),
+	}
+}
+
 // ============================================================================
 // Busy Response Helpers (DEC-063)
 // ============================================================================
@@ -1113,6 +1231,7 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 			KeyBusyResponseReceived:  true,
 			KeyBusyErrorCode:         int(commissioning.ErrCodeBusy),
 			KeyBusyRetryAfterValue:   0,
+			KeyBusyRetryAfter:        0,
 			KeyBusyRetryAfterPresent: false,
 		}, nil
 	}
@@ -1178,6 +1297,7 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 			KeyBusyResponseReceived:  true,
 			KeyBusyErrorCode:         int(errMsg.ErrorCode),
 			KeyBusyRetryAfterValue:   int(errMsg.RetryAfter),
+			KeyBusyRetryAfter:        int(errMsg.RetryAfter),
 			KeyBusyRetryAfterPresent: errMsg.RetryAfter > 0,
 		}, nil
 	}
@@ -1189,11 +1309,24 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 	}, nil
 }
 
-// sendPASERequestRaw sends a dummy PASERequest over a length-prefixed CBOR connection.
+// sendPASERequestRaw sends a PASERequest with a valid SPAKE2+ public value over
+// a length-prefixed CBOR connection. The setup code doesn't need to match the
+// device -- any valid P-256 point passes ProcessClientValue. The device then
+// proceeds to send PASEResponse and blocks waiting for PASEConfirm, keeping the
+// commissioning lock held.
 func sendPASERequestRaw(conn net.Conn) error {
+	spakeClient, err := commissioning.NewSPAKE2PlusClient(
+		commissioning.SetupCode(12345678),
+		[]byte("test-harness"),
+		[]byte("mash-device"),
+	)
+	if err != nil {
+		return fmt.Errorf("create SPAKE2+ client: %w", err)
+	}
+
 	req := &commissioning.PASERequest{
 		MsgType:        commissioning.MsgPASERequest,
-		PublicValue:    make([]byte, 65),
+		PublicValue:    spakeClient.PublicValue(),
 		ClientIdentity: []byte("test-harness"),
 	}
 	data, err := cbor.Marshal(req)
@@ -1210,6 +1343,26 @@ func sendPASERequestRaw(conn net.Conn) error {
 		return fmt.Errorf("write data: %w", err)
 	}
 	return nil
+}
+
+// readPASEMessageRaw reads a length-prefixed CBOR message from the connection
+// within the given timeout and decodes it to the appropriate PASE message type.
+func readPASEMessageRaw(conn net.Conn, timeout time.Duration) (interface{}, error) {
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
+
+	lengthBuf := make([]byte, 4)
+	if _, err := io.ReadFull(conn, lengthBuf); err != nil {
+		return nil, fmt.Errorf("read length: %w", err)
+	}
+
+	msgLen := binary.BigEndian.Uint32(lengthBuf)
+	data := make([]byte, msgLen)
+	if _, err := io.ReadFull(conn, data); err != nil {
+		return nil, fmt.Errorf("read data: %w", err)
+	}
+
+	return commissioning.DecodePASEMessage(data)
 }
 
 // readCommissioningErrorRaw reads a length-prefixed CBOR CommissioningError
