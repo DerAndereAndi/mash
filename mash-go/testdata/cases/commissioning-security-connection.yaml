@@ -224,3 +224,55 @@ tags:
   - commissioning
   - stress
   - DEC-047
+
+---
+id: TC-SEC-CONN-006
+name: Message-Gated Commissioning Locking
+description: |
+  Verifies that an idle TLS connection (no PASE message) does not hold the
+  commissioning lock and is closed after PASEFirstMessageTimeout (DEC-061).
+  A subsequent connection should be able to commission successfully.
+
+pics_requirements:
+  - MASH.S.COMM.HARDENING
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - device_has_available_zone_slot: true
+
+steps:
+  - name: Open idle commissioning TLS connection (no PASE message)
+    action: open_commissioning_connection
+    params:
+      send_pase: false
+    expect:
+      connection_established: true
+
+  - name: Wait for first-message timeout plus margin
+    action: wait
+    params:
+      duration_ms: 6000
+
+  - name: Verify idle connection was closed by device
+    action: check_connection_closed
+    params:
+      index: 0
+    expect:
+      connection_closed: true
+
+  - name: Open new connection and commission successfully
+    action: commission
+    params:
+      setup_code: "${setup_code}"
+    expect:
+      commissioning_succeeds: true
+
+postconditions:
+  - device_commissioned: true
+  - idle_connection_never_held_lock: true
+
+timeout: "30s"
+tags:
+  - security
+  - commissioning
+  - DEC-061

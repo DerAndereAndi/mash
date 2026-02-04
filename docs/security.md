@@ -495,17 +495,19 @@ To prevent information leakage about authentication progress:
 | Phase | Individual Timeout | Cumulative Max |
 |-------|-------------------|----------------|
 | TLS Handshake | 10s | 10s |
-| PASE Exchange | 30s | 40s |
-| CSR Generation | 10s | 50s |
-| Cert Exchange | 30s | 80s |
-| Cert Install | 5s | 85s |
-| **Total** | - | **85s** |
+| First PASE Message | 5s (DEC-061) | 15s |
+| PASE Exchange | 30s | 45s |
+| CSR Generation | 10s | 55s |
+| Cert Exchange | 30s | 85s |
+| Cert Install | 5s | 90s |
+| **Total** | - | **90s** |
 
 **Device Behavior:**
-1. Device MUST start overall timer when TLS connection accepted
-2. If timer expires before CERT_ACK, device MUST close connection
-3. Timer does not reset on message receipt
-4. Individual phase timeouts still apply
+1. Device MUST start the first-message timer when TLS connection accepted (DEC-061)
+2. Device MUST start the overall handshake timer when first PASERequest is received (DEC-061)
+3. If timer expires before CERT_ACK, device MUST close connection
+4. Timer does not reset on message receipt
+5. Individual phase timeouts still apply
 
 ### 11.6 Commissioning Window Duration (DEC-048)
 
@@ -543,3 +545,39 @@ discriminator (12-bit value from QR code). This provides:
 2. Device MUST close commissioning window after default duration expires
 3. Device SHOULD allow pairing request to re-trigger window
 4. Device SHOULD implement minimum interval between window re-triggers (60s)
+
+### 11.7 Message-Gated Commissioning Locking (DEC-061)
+
+The commissioning lock (single concurrent commissioning connection) MUST NOT be
+acquired until the first valid PASERequest message arrives. This prevents idle
+TLS connections from blocking commissioning.
+
+**First-Message Timeout:**
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| PASEFirstMessageTimeout | 5s | Max time from TLS accept to first PASE message |
+
+**Device Behavior:**
+1. Device MUST accept TLS commissioning connections without acquiring the commissioning lock
+2. Device MUST wait for the first message after TLS handshake with a 5-second timeout
+3. If timeout expires before a valid PASERequest arrives, device MUST close the connection silently (no lock was held, no error response)
+4. Device MUST acquire the commissioning lock only after receiving a valid PASERequest
+5. If the lock cannot be acquired (another PASE in progress), device MUST close the connection
+6. The overall handshake timer (Section 11.5) starts when PASERequest is received, not at TLS accept
+
+**Connection Lifecycle:**
+
+```
+TLS Accept ─── WaitForPASERequest (5s, no lock) ─── Acquire Lock ─── CompleteHandshake (85s) ─── Cert Exchange ─── Release Lock
+     │                    │                                │
+     │                    ├─ Timeout: close silently        ├─ Lock busy: close
+     │                    └─ Invalid msg: close             └─ PASE fail: release lock, close
+     │
+     └─ TLS fail: close
+```
+
+**Rationale:**
+- An idle TLS connection that never sends a PASERequest no longer holds the commissioning lock for 85 seconds
+- Multiple TLS connections can be accepted simultaneously; only the first to send a valid PASERequest acquires the lock
+- Aligns with Matter's approach of deferring resource commitment until the first application-layer message

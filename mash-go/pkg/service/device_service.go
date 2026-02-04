@@ -523,28 +523,48 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 // handleCommissioningConnection handles PASE commissioning over TLS.
 // After PASE succeeds, it performs the certificate exchange to receive an
 // operational certificate from the controller's Zone CA.
+//
+// DEC-061: The commissioning lock is NOT acquired until the first PASERequest
+// message arrives. This prevents idle TLS connections from blocking commissioning.
+// Flow: Create PASE -> WaitForPASERequest (no lock) -> Acquire lock -> CompleteHandshake -> Cert exchange -> Release lock.
 func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
-	// DEC-047: Connection protection
+	// Phase 1: Create PASE session and wait for first message (no lock held)
+	paseSession, err := commissioning.NewPASEServerSession(s.verifier, s.serverID)
+	if err != nil {
+		conn.Close()
+		return
+	}
+
+	// DEC-061: Wait for PASERequest with short timeout (no lock held)
+	firstMsgCtx := s.ctx
+	if s.config.PASEFirstMessageTimeout > 0 {
+		var cancel context.CancelFunc
+		firstMsgCtx, cancel = context.WithTimeout(s.ctx, s.config.PASEFirstMessageTimeout)
+		defer cancel()
+	}
+
+	req, err := paseSession.WaitForPASERequest(firstMsgCtx, conn)
+	if err != nil {
+		// Timeout or connection closed before PASERequest -- no lock was held
+		s.debugLog("handleCommissioningConnection: WaitForPASERequest failed (no lock held)", "error", err)
+		conn.Close()
+		return
+	}
+
+	// Phase 2: PASERequest received -- now acquire the commissioning lock
 	if ok, reason := s.acceptCommissioningConnection(); !ok {
-		s.debugLog("handleCommissioningConnection: rejected", "reason", reason)
+		s.debugLog("handleCommissioningConnection: rejected after PASERequest", "reason", reason)
 		conn.Close()
 		return
 	}
 	defer s.releaseCommissioningConnection()
 
-	// DEC-047: Overall handshake timeout
+	// DEC-047: Overall handshake timeout (starts at PASERequest, not TLS accept)
 	handshakeCtx := s.ctx
 	if s.config.HandshakeTimeout > 0 {
 		var cancel context.CancelFunc
 		handshakeCtx, cancel = context.WithTimeout(s.ctx, s.config.HandshakeTimeout)
 		defer cancel()
-	}
-
-	// Create PASE server session
-	paseSession, err := commissioning.NewPASEServerSession(s.verifier, s.serverID)
-	if err != nil {
-		conn.Close()
-		return
 	}
 
 	// DEC-047: Apply PASE backoff delay before processing
@@ -561,8 +581,8 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 		}
 	}
 
-	// Perform PASE handshake
-	sharedSecret, err := paseSession.Handshake(handshakeCtx, conn)
+	// Phase 3: Complete PASE handshake (lock held)
+	sharedSecret, err := paseSession.CompleteHandshake(handshakeCtx, conn, req)
 	if err != nil {
 		// PASE failed - wrong setup code or protocol error
 		// DEC-047: Record failure for backoff

@@ -143,8 +143,13 @@ type DeviceConfig struct {
 	// Default: 500ms. Set to 0 to disable cooldown.
 	ConnectionCooldown time.Duration
 
+	// PASEFirstMessageTimeout is the timeout for receiving the first PASE message
+	// after TLS handshake completes. No commissioning lock is held during this wait.
+	// Default: 5s. (DEC-061)
+	PASEFirstMessageTimeout time.Duration
+
 	// HandshakeTimeout is the overall timeout for commissioning handshake.
-	// Default: 85s. This is an absolute limit across all phases.
+	// Default: 85s. This is an absolute limit across all phases (starting from PASERequest).
 	HandshakeTimeout time.Duration
 
 	// PASEBackoffEnabled enables exponential backoff on failed PASE attempts.
@@ -309,9 +314,10 @@ func DefaultDeviceConfig() DeviceConfig {
 			Multiplier:      2.0,
 			MaxRetries:      0, // Unlimited
 		},
-		// Security Hardening (DEC-047)
-		ConnectionCooldown: 500 * time.Millisecond,
-		HandshakeTimeout:   85 * time.Second,
+		// Security Hardening (DEC-047, DEC-061)
+		ConnectionCooldown:      500 * time.Millisecond,
+		PASEFirstMessageTimeout: 5 * time.Second,
+		HandshakeTimeout:        85 * time.Second,
 		PASEBackoffEnabled: true,
 		PASEBackoffTiers: [4]time.Duration{
 			0,                        // Tier 1: attempts 1-3, no delay

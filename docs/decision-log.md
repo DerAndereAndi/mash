@@ -3524,6 +3524,39 @@ The hybrid trigger with MinMessages floor ensures:
 
 ---
 
+### DEC-061: Message-Gated Commissioning Locking
+
+**Date:** 2026-02-04
+**Status:** Accepted
+
+**Context:** The DEC-047 commissioning lock (`commissioningConnActive`) is acquired at TLS accept time -- before any PASE message arrives. An idle TLS connection that never sends a PASERequest holds the lock for the full handshake timeout (85s), blocking all commissioning. Matter acquires the commissioning lock only when the first PASE message is received.
+
+**Options Evaluated:**
+1. Keep lock at TLS accept, reduce handshake timeout
+2. Move lock to first PASE message receipt (Matter-inspired)
+3. Add a pre-lock connection counter (`MaxPreLockConnections`)
+
+**Decision:** Move lock acquisition to first PASE message receipt. Split `PASEServerSession.Handshake` into two phases:
+
+1. **`WaitForPASERequest(ctx, conn)`** -- reads the first message (must be PASERequest), no lock held, governed by a 5-second first-message timeout.
+2. **`CompleteHandshake(ctx, conn, req)`** -- processes the remaining PASE exchange with the commissioning lock held, governed by the existing 85-second handshake timeout.
+
+The original `Handshake()` method is preserved as a wrapper calling both methods for backward compatibility.
+
+**Rationale:**
+- Idle TLS connections can no longer starve commissioning (5s timeout vs 85s)
+- The commissioning lock scope is reduced from TLS-accept-to-cert-exchange to PASERequest-to-cert-exchange
+- Two simultaneous TLS connections are both accepted; the second is rejected at PASERequest (lock check), not at TLS
+- Aligns with Matter's approach of deferring resource commitment until the first application-layer message
+
+**Declined Alternatives:**
+- **Reduce handshake timeout:** Only reduces the window, doesn't eliminate the problem. 85s is needed for legitimate slow handshakes (backoff delays, slow MCU crypto).
+- **MaxPreLockConnections counter:** Adds complexity. Can be added later if MCU resource exhaustion from idle TLS connections is observed.
+
+**Related:** DEC-047 (commissioning security hardening)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -3656,3 +3689,4 @@ Key learnings:
 | 2026-02-02 | Added DEC-058: Capability snapshots in protocol logs. Logging-layer mechanism to periodically emit device model snapshots with hybrid time/count trigger and MinMessages floor. Addresses discovery data loss on long-lived connections. |
 | 2026-02-02 | Added DEC-059: Auto re-enter commissioning on last zone removal. Device calls EnterCommissioningMode() when RemoveZone reduces zone count to 0. Test harness sends RemoveZone on backward precondition transitions. |
 | 2026-02-03 | Added DEC-060: TEST zone type for conformance testing. ZoneTypeTest=3, observer-only (excluded from limit/setpoint resolution), gated behind TestMode, MaxZones bumped to 3. Fixed zone type extraction from Zone CA certificate. |
+| 2026-02-04 | Added DEC-061: Message-gated commissioning locking. Moves commissioning lock from TLS accept to first PASERequest receipt. Splits PASEServerSession.Handshake into WaitForPASERequest (5s timeout, no lock) + CompleteHandshake (85s, with lock). Idle TLS connections no longer block commissioning. |

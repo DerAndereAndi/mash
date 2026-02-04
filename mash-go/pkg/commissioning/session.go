@@ -127,9 +127,11 @@ func NewPASEServerSession(verifier *Verifier, serverIdentity []byte) (*PASEServe
 	}, nil
 }
 
-// Handshake performs the PASE handshake and returns the derived session key.
-func (s *PASEServerSession) Handshake(ctx context.Context, conn net.Conn) ([]byte, error) {
-	// Step 1: Read PASERequest
+// WaitForPASERequest reads the first message from the connection and validates
+// that it is a PASERequest. This method does not acquire any lock and is
+// intended to be called before the commissioning lock is held (DEC-061).
+// The returned *PASERequest should be passed to CompleteHandshake.
+func (s *PASEServerSession) WaitForPASERequest(ctx context.Context, conn net.Conn) (*PASERequest, error) {
 	msg, err := readMessageWithContext(ctx, conn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read PASE request: %w", err)
@@ -140,6 +142,14 @@ func (s *PASEServerSession) Handshake(ctx context.Context, conn net.Conn) ([]byt
 		return nil, fmt.Errorf("unexpected message type: expected PASERequest, got %T", msg)
 	}
 
+	return req, nil
+}
+
+// CompleteHandshake processes the PASE exchange after the initial PASERequest
+// has been received. It performs steps 2-6 of the PASE protocol and returns
+// the derived shared secret. This method should be called with the
+// commissioning lock held (DEC-061).
+func (s *PASEServerSession) CompleteHandshake(ctx context.Context, conn net.Conn, req *PASERequest) ([]byte, error) {
 	// Step 2: Process client's public value
 	if err := s.spake.ProcessClientValue(req.PublicValue); err != nil {
 		// Send error response
@@ -163,7 +173,7 @@ func (s *PASEServerSession) Handshake(ctx context.Context, conn net.Conn) ([]byt
 	}
 
 	// Step 4: Read PASEConfirm
-	msg, err = readMessageWithContext(ctx, conn)
+	msg, err := readMessageWithContext(ctx, conn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read PASE confirm: %w", err)
 	}
@@ -195,6 +205,18 @@ func (s *PASEServerSession) Handshake(ctx context.Context, conn net.Conn) ([]byt
 	}
 
 	return s.spake.SharedSecret(), nil
+}
+
+// Handshake performs the PASE handshake and returns the derived session key.
+// This is a convenience wrapper that calls WaitForPASERequest followed by
+// CompleteHandshake. For message-gated locking (DEC-061), use the split
+// methods directly.
+func (s *PASEServerSession) Handshake(ctx context.Context, conn net.Conn) ([]byte, error) {
+	req, err := s.WaitForPASERequest(ctx, conn)
+	if err != nil {
+		return nil, err
+	}
+	return s.CompleteHandshake(ctx, conn, req)
 }
 
 // MarshalVerifier serializes a verifier to CBOR bytes for storage.

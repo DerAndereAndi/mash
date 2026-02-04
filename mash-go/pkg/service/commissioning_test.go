@@ -519,5 +519,202 @@ func assertEventWithTimeout(t *testing.T, condition func() bool, timeout time.Du
 	t.Errorf("Timeout waiting for condition: %s", msg)
 }
 
+// TestMessageGatedLocking_IdleConnectionDoesNotBlock verifies that an idle TLS
+// connection (no PASE message) does not hold the commissioning lock, allowing a
+// second connection to commission successfully (DEC-061).
+func TestMessageGatedLocking_IdleConnectionDoesNotBlock(t *testing.T) {
+	device := model.NewDevice("test-device-gated-001", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	config.ListenAddress = "localhost:0"
+	config.SetupCode = "12345678"
+	config.PASEFirstMessageTimeout = 500 * time.Millisecond
+	config.ConnectionCooldown = 0 // Disable cooldown for test
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	if err := svc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	addr := svc.TLSAddr()
+	if addr == nil {
+		t.Fatal("TLS server address is nil")
+	}
+
+	// Step 1: Open an idle TLS connection (never send a PASE message)
+	tlsConfig := transport.NewCommissioningTLSConfig()
+	idleConn, err := tls.Dial("tcp", addr.String(), tlsConfig)
+	if err != nil {
+		t.Fatalf("Failed to open idle connection: %v", err)
+	}
+	defer idleConn.Close()
+
+	// Step 2: Wait for the idle connection to be processed (give the device
+	// time to accept TLS and start WaitForPASERequest)
+	time.Sleep(200 * time.Millisecond)
+
+	// Step 3: Open second connection and perform full PASE handshake
+	conn2, err := tls.Dial("tcp", addr.String(), tlsConfig)
+	if err != nil {
+		t.Fatalf("Failed to open second connection: %v", err)
+	}
+	defer conn2.Close()
+
+	clientIdentity := []byte("mash-controller")
+	serverIdentity := []byte("mash-device")
+	session, err := commissioning.NewPASEClientSession(
+		commissioning.SetupCode(12345678),
+		clientIdentity,
+		serverIdentity,
+	)
+	if err != nil {
+		t.Fatalf("NewPASEClientSession failed: %v", err)
+	}
+
+	sharedSecret, err := session.Handshake(ctx, conn2)
+	if err != nil {
+		t.Fatalf("PASE handshake on second connection failed (idle conn should not block): %v", err)
+	}
+
+	if len(sharedSecret) == 0 {
+		t.Error("Shared secret should not be empty")
+	}
+}
+
+// TestMessageGatedLocking_FirstMessageTimeout verifies that a device closes an
+// idle commissioning connection after PASEFirstMessageTimeout expires (DEC-061).
+func TestMessageGatedLocking_FirstMessageTimeout(t *testing.T) {
+	device := model.NewDevice("test-device-gated-002", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	config.ListenAddress = "localhost:0"
+	config.SetupCode = "12345678"
+	config.PASEFirstMessageTimeout = 200 * time.Millisecond
+	config.ConnectionCooldown = 0
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	if err := svc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	addr := svc.TLSAddr()
+	if addr == nil {
+		t.Fatal("TLS server address is nil")
+	}
+
+	// Open TLS connection but send nothing
+	tlsConfig := transport.NewCommissioningTLSConfig()
+	conn, err := tls.Dial("tcp", addr.String(), tlsConfig)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	// Wait for timeout + margin
+	time.Sleep(400 * time.Millisecond)
+
+	// Attempt to read -- should fail because device closed the connection
+	buf := make([]byte, 1)
+	conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	_, err = conn.Read(buf)
+	if err == nil {
+		t.Error("Expected connection to be closed by device after first-message timeout")
+	}
+}
+
+// TestMessageGatedLocking_BackwardCompat verifies the existing PASE handshake
+// still works (client immediately sends PASERequest, no idle period).
+// This is effectively a regression check for the DEC-061 restructure.
+func TestMessageGatedLocking_BackwardCompat(t *testing.T) {
+	device := model.NewDevice("test-device-gated-003", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	config.ListenAddress = "localhost:0"
+	config.SetupCode = "12345678"
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	if err := svc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	addr := svc.TLSAddr()
+	if addr == nil {
+		t.Fatal("TLS server address is nil")
+	}
+
+	tlsConfig := transport.NewCommissioningTLSConfig()
+	conn, err := tls.Dial("tcp", addr.String(), tlsConfig)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	clientIdentity := []byte("mash-controller")
+	serverIdentity := []byte("mash-device")
+	session, err := commissioning.NewPASEClientSession(
+		commissioning.SetupCode(12345678),
+		clientIdentity,
+		serverIdentity,
+	)
+	if err != nil {
+		t.Fatalf("NewPASEClientSession failed: %v", err)
+	}
+
+	sharedSecret, err := session.Handshake(ctx, conn)
+	if err != nil {
+		t.Fatalf("PASE handshake failed (backward compat): %v", err)
+	}
+
+	if len(sharedSecret) == 0 {
+		t.Error("Shared secret should not be empty")
+	}
+}
+
 // Suppress unused import warning for fmt
 var _ = fmt.Sprintf

@@ -3,6 +3,7 @@ package commissioning_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -209,6 +210,142 @@ func TestPASEClientIdentity(t *testing.T) {
 
 	if !bytes.Equal(clientSession.ClientIdentity(), clientIdentity) {
 		t.Error("Client identity not preserved")
+	}
+}
+
+// TestPASEServerSplitHandshake verifies the split handshake API:
+// server uses WaitForPASERequest + CompleteHandshake, client uses Handshake.
+// Both sides should derive the same shared secret.
+func TestPASEServerSplitHandshake(t *testing.T) {
+	setupCode := commissioning.MustParseSetupCode("12345678")
+	clientIdentity := []byte("controller-001")
+	serverIdentity := []byte("device-001")
+
+	verifier, err := commissioning.GenerateVerifier(setupCode, clientIdentity, serverIdentity)
+	if err != nil {
+		t.Fatalf("Failed to generate verifier: %v", err)
+	}
+
+	clientConn, serverConn := newMockConnPair()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	clientSession, err := commissioning.NewPASEClientSession(setupCode, clientIdentity, serverIdentity)
+	if err != nil {
+		t.Fatalf("Failed to create client session: %v", err)
+	}
+
+	serverSession, err := commissioning.NewPASEServerSession(verifier, serverIdentity)
+	if err != nil {
+		t.Fatalf("Failed to create server session: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	var clientErr, serverErr error
+	var clientKey, serverKey []byte
+
+	wg.Add(2)
+
+	// Client side uses normal Handshake
+	go func() {
+		defer wg.Done()
+		clientKey, clientErr = clientSession.Handshake(ctx, clientConn)
+	}()
+
+	// Server side uses split API
+	go func() {
+		defer wg.Done()
+		req, err := serverSession.WaitForPASERequest(ctx, serverConn)
+		if err != nil {
+			serverErr = err
+			return
+		}
+		serverKey, serverErr = serverSession.CompleteHandshake(ctx, serverConn, req)
+	}()
+
+	wg.Wait()
+
+	if clientErr != nil {
+		t.Fatalf("Client handshake failed: %v", clientErr)
+	}
+	if serverErr != nil {
+		t.Fatalf("Server split handshake failed: %v", serverErr)
+	}
+
+	if !bytes.Equal(clientKey, serverKey) {
+		t.Error("Client and server derived different session keys")
+	}
+
+	if len(clientKey) != commissioning.SharedSecretSize {
+		t.Errorf("Session key wrong size: expected %d, got %d", commissioning.SharedSecretSize, len(clientKey))
+	}
+}
+
+// TestWaitForPASERequest_Timeout verifies WaitForPASERequest returns
+// context.DeadlineExceeded when no message arrives within the timeout.
+func TestWaitForPASERequest_Timeout(t *testing.T) {
+	setupCode := commissioning.MustParseSetupCode("12345678")
+	clientIdentity := []byte("controller-001")
+	serverIdentity := []byte("device-001")
+
+	verifier, err := commissioning.GenerateVerifier(setupCode, clientIdentity, serverIdentity)
+	if err != nil {
+		t.Fatalf("Failed to generate verifier: %v", err)
+	}
+
+	_, serverConn := newMockConnPair()
+	defer serverConn.Close()
+
+	serverSession, err := commissioning.NewPASEServerSession(verifier, serverIdentity)
+	if err != nil {
+		t.Fatalf("Failed to create server session: %v", err)
+	}
+
+	// Very short timeout -- no client will send anything
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err = serverSession.WaitForPASERequest(ctx, serverConn)
+	if err == nil {
+		t.Fatal("Expected error from WaitForPASERequest with no client message")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Expected context.DeadlineExceeded, got: %v", err)
+	}
+}
+
+// TestWaitForPASERequest_ConnectionClosed verifies WaitForPASERequest returns
+// an error when the client closes the connection immediately.
+func TestWaitForPASERequest_ConnectionClosed(t *testing.T) {
+	setupCode := commissioning.MustParseSetupCode("12345678")
+	clientIdentity := []byte("controller-001")
+	serverIdentity := []byte("device-001")
+
+	verifier, err := commissioning.GenerateVerifier(setupCode, clientIdentity, serverIdentity)
+	if err != nil {
+		t.Fatalf("Failed to generate verifier: %v", err)
+	}
+
+	clientConn, serverConn := newMockConnPair()
+	defer serverConn.Close()
+
+	serverSession, err := commissioning.NewPASEServerSession(verifier, serverIdentity)
+	if err != nil {
+		t.Fatalf("Failed to create server session: %v", err)
+	}
+
+	// Close client side immediately
+	clientConn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err = serverSession.WaitForPASERequest(ctx, serverConn)
+	if err == nil {
+		t.Fatal("Expected error when client closes connection")
 	}
 }
 
