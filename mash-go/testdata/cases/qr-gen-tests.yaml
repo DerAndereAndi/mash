@@ -33,7 +33,6 @@ steps:
       qr_present: true
       format_valid: true           # MASH:<ver>:<D>:<code>
       version: 1
-      discriminator_length: 4
       setup_code_length: 8
 
 postconditions:
