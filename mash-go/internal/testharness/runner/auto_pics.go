@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
@@ -14,15 +15,29 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
-// buildAutoPICS connects to the device, reads its capabilities over the wire,
-// and constructs a PICSFile dynamically. The runner must have an active
-// connection (commissioned) before calling this.
+// basePICSFilename is the YAML file containing protocol-level PICS items
+// that are true for any conformant device. Located in testdata/pics/ as a
+// sibling of the test cases directory.
+const basePICSFilename = "protocol-common.yaml"
+
+// buildAutoPICS loads the base protocol PICS from YAML, then discovers
+// device-specific capabilities over the wire and merges them on top.
+// The runner must have an active connection (commissioned) before calling this.
 func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
 	if !r.conn.connected {
 		return nil, fmt.Errorf("auto-PICS requires an active connection")
 	}
 
-	items := make(map[string]any)
+	// Load base protocol PICS from YAML (single source of truth for
+	// protocol-level items). Located as a sibling of the test cases dir.
+	basePath := filepath.Join(filepath.Dir(r.config.TestDir), "pics", basePICSFilename)
+	basePICS, err := loader.LoadPICS(basePath)
+	if err != nil {
+		return nil, fmt.Errorf("auto-PICS: failed to load base PICS from %s: %w", basePath, err)
+	}
+
+	// Start with base items; device-specific discoveries override/extend.
+	items := basePICS.Items
 
 	// Read DeviceInfo from endpoint 0, feature 0x01.
 	deviceAttrs, err := r.readAttributes(ctx, 0, uint8(model.FeatureDeviceInfo))
@@ -31,14 +46,8 @@ func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
 	}
 
 	// Device-level PICS items.
-	items["MASH.S"] = 1
 	if v, ok := deviceAttrs[features.DeviceInfoAttrSpecVersion].(string); ok {
 		items["MASH.S.VERSION"] = v
-	}
-	items["MASH.S.TRANS.SC"] = true
-	items["MASH.S.TRANS.TLS13"] = true
-	if r.paseState != nil && r.paseState.completed {
-		items["MASH.S.TRANS.PASE"] = true
 	}
 
 	// Device metadata for the PICS file header.
@@ -50,7 +59,7 @@ func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
 		picsDevice.Product = v
 	}
 
-	// Parse endpoints.
+	// Parse endpoints and discover features.
 	endpoints := parseAutoPICSEndpoints(deviceAttrs[features.DeviceInfoAttrEndpoints])
 
 	for _, ep := range endpoints {
@@ -65,6 +74,11 @@ func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
 			featKey := fmt.Sprintf("%s.%s", epCode, picsCode)
 			items[featKey] = true
 
+			// Also emit endpoint-free feature key (MASH.S.CTRL alongside
+			// MASH.S.E01.CTRL) so tests can reference features without
+			// knowing which endpoint they're on.
+			items[fmt.Sprintf("MASH.S.%s", picsCode)] = true
+
 			// Read global attributes for this feature.
 			attrList, cmdList, featMap, gErr := r.readFeatureGlobals(ctx, ep.id, uint8(featID))
 			if gErr != nil {
@@ -76,13 +90,17 @@ func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
 
 			for _, attrID := range attrList {
 				items[fmt.Sprintf("%s.A%02X", featKey, attrID)] = true
+				// Endpoint-free attribute key.
+				items[fmt.Sprintf("MASH.S.%s.A%02X", picsCode, attrID)] = true
 			}
 			for _, cmdID := range cmdList {
 				items[fmt.Sprintf("%s.C%02X.Rsp", featKey, cmdID)] = true
+				items[fmt.Sprintf("MASH.S.%s.C%02X.Rsp", picsCode, cmdID)] = true
 			}
 			for bit := 0; bit < 32; bit++ {
 				if featMap&(1<<bit) != 0 {
 					items[fmt.Sprintf("%s.F%02X", featKey, bit)] = true
+					items[fmt.Sprintf("MASH.S.%s.F%02X", picsCode, bit)] = true
 				}
 			}
 		}
@@ -102,42 +120,11 @@ func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
 			break
 		}
 	}
-
 	if hasTestControl {
 		items["MASH.S.ZONE.MAX"] = 3
 	} else {
 		items["MASH.S.ZONE.MAX"] = 2
 	}
-
-	// Protocol-level hardening PICS items (DEC-047, DEC-062, DEC-063, DEC-064).
-	// Values mirror DefaultDeviceConfig() for the reference implementation.
-	items["MASH.S.COMM.HARDENING"] = true
-	items["MASH.S.COMM.MAX_COMMISSIONING_CONN"] = 1
-	items["MASH.S.COMM.CONN_COOLDOWN"] = 500         // ms
-	items["MASH.S.COMM.HANDSHAKE_TIMEOUT"] = 85       // seconds
-	items["MASH.S.COMM.GENERIC_ERRORS"] = true
-	items["MASH.S.COMM.ERROR_DELAY_MIN"] = 100        // ms
-	items["MASH.S.COMM.ERROR_DELAY_MAX"] = 500        // ms
-	items["MASH.S.TRANS.CONN_CAP"] = true              // DEC-062
-	items["MASH.S.COMM.ERR_BUSY"] = true               // DEC-063
-	items["MASH.S.COMM.ERR_BUSY_RETRY_AFTER"] = true   // DEC-063
-	items["MASH.S.CONN.STALE_REAPER"] = true           // DEC-064
-	items["MASH.S.CONN.STALE_TIMEOUT"] = 90            // seconds
-	items["MASH.S.COMM.BACKOFF_ENABLED"] = true
-	items["MASH.S.COMM.BACKOFF_TIER1"] = 0
-	items["MASH.S.COMM.BACKOFF_TIER2"] = 1000
-	items["MASH.S.COMM.BACKOFF_TIER3"] = 3000
-	items["MASH.S.COMM.BACKOFF_TIER4"] = 10000
-	items["MASH.S.COMM.WINDOW_DEFAULT"] = 900          // seconds (15 min)
-	items["MASH.S.COMM.WINDOW_MIN"] = 180              // seconds (3 min)
-	items["MASH.S.COMM.WINDOW_MAX"] = 10800            // seconds (3 hours)
-	items["MASH.S.COMM.WINDOW_CONFIGURABLE"] = true
-	// Certificate management
-	items["MASH.S.CERT.EXCHANGE"] = true
-	items["MASH.S.CERT.DEVICE_ID_FROM_CN"] = true
-	items["MASH.S.CERT.RENEWAL"] = true
-	items["MASH.S.CERT.IN_SESSION_RENEWAL"] = true
-	items["MASH.S.CERT.NONCE_BINDING"] = true
 
 	// Parse use case declarations.
 	useCases := parseAutoPICSUseCases(deviceAttrs[features.DeviceInfoAttrUseCases])

@@ -1,11 +1,15 @@
 # PICS (Protocol Implementation Conformance Statement)
 # Common Protocol Capabilities
 #
-# This file describes protocol-level capabilities that are not
-# specific to any device type. Device profiles (like ev-charger.yaml)
-# describe device-specific features; this file covers the protocol layer.
+# This file is the single source of truth for protocol-level PICS items that
+# are true for any conformant MASH implementation. Auto-PICS loads this as its
+# base and merges device-specific discovered items (endpoints, features,
+# attributes, use cases) on top.
+#
+# Device profiles (like ev-charger.yaml) describe device-specific features;
+# this file covers the protocol layer.
 
-# Device Identification
+# Device Identification (overridden by auto-PICS when present)
 device:
   vendor: "Reference"
   product: "Protocol Common"
@@ -19,282 +23,258 @@ items:
   MASH.C: 1
 
   # ==========================================================================
-  # Certificate Management (Device-Side)
+  # Core Features (always present)
   # ==========================================================================
 
-  MASH.S.CERT.EXCHANGE: true          # Device supports cert exchange after PASE
-  MASH.S.CERT.DEVICE_ID_FROM_CN: true # Device extracts device ID from cert CommonName
-  MASH.S.CERT.RENEWAL: true           # Device supports certificate renewal
-  MASH.S.CERT.IN_SESSION_RENEWAL: true # Renewal without TLS reconnection
-  MASH.S.CERT.EXPIRY_HANDLING: true   # Proper handling of expired certificates
-  MASH.S.CERT.GRACE_PERIOD: 7         # Days to accept connections after expiry
-  MASH.S.EVENT.CERT_EXPIRING: true    # Sends notification when cert near expiry
+  MASH.S.INFO: true                         # DeviceInfo feature on endpoint 0
+  MASH.S.COMM: true                         # Device supports commissioning
 
   # ==========================================================================
-  # Certificate Management (Controller-Side)
+  # Transport Layer
   # ==========================================================================
 
-  MASH.C.CERT.ZONE_CA: true           # Controller has Zone CA for signing
-  MASH.C.CERT.RENEWAL_INITIATE: true  # Controller can initiate renewal
-  MASH.C.CERT.AUTO_RENEWAL: false     # Automatic renewal (optional)
+  MASH.S.TRANS.SC: true                     # Secure connection
+  MASH.S.TRANS.TLS13: true                  # TLS 1.3
+  MASH.S.TRANS.PASE: true                   # PASE commissioning
+  MASH.S.TRANS.MAX_CONNECTIONS: 5           # Max simultaneous connections
+  MASH.S.TRANS.B_MULTI_ZONE_CONN: 1        # Multi-zone connection support
+  MASH.S.TRANS.B_QUEUE_ON_RECONNECT: 1     # Queue messages on reconnect
+  MASH.S.TRANS.B_SUBSCRIPTION_LOST: 1      # Subscription lost notification
+  MASH.S.TRANS.PING_INTERVAL: 30           # Ping interval (seconds)
+  MASH.S.TRANS.PONG_TIMEOUT: 5             # Pong timeout (seconds)
+  MASH.S.TRANS.MISSED_PONGS_CLOSE: 3       # Close after N missed pongs
+  MASH.S.TRANS.CLOSE_ACK_TIMEOUT: 5        # Close ack timeout (seconds)
+  MASH.S.TRANS.CLOSE_PENDING_TIMEOUT: 10   # Close pending timeout (seconds)
+  MASH.S.TRANS.RECONNECT_AFTER_COMM: 1     # Reconnect after commissioning
 
   # ==========================================================================
-  # Pairing Request Mechanism (DEC-042)
+  # TLS Configuration
   # ==========================================================================
 
-  MASH.S.DISC.PAIRING_REQUEST: true    # Device listens for pairing requests (_mashp._udp)
-  MASH.S.COMM.PAIRING_REQUEST: true    # Device opens window on matching pairing request
-  MASH.S.DISC.PAIRING_DISCRIMINATOR: true  # Device matches by discriminator
+  MASH.S.TLS.VERSION: 1.3                  # TLS version
+  MASH.S.TLS.ALPN: mash/1                  # ALPN protocol
+  MASH.S.TLS.CS_AES_128_GCM: 1            # AES-128-GCM cipher suite
+  MASH.S.TLS.CS_AES_256_GCM: 1            # AES-256-GCM cipher suite
+  MASH.S.TLS.KX_X25519: 1                 # X25519 key exchange
+  MASH.S.TLS.KX_P256: 1                   # P-256 key exchange
+  MASH.S.TLS.EXT_ALPN: 1                  # ALPN extension
+  MASH.S.TLS.EXT_EARLY_DATA: 0            # No early data (0-RTT)
+  MASH.S.TLS.EXT_SESSION_TICKET: 0        # No session tickets
+  MASH.S.TLS.FALLBACK_DISABLED: 1         # No fallback to older TLS
+  MASH.S.TLS.MUTUAL_AUTH: 1               # Mutual TLS authentication
+  MASH.S.TLS.MUTUAL_AUTH_OPERATIONAL: 1   # Mutual auth for operational
+  MASH.S.TLS.SELF_SIGNED_COMM: 1          # Self-signed for commissioning
+  MASH.S.TLS.SELF_SIGNED_COMMISSIONING: 1 # (alias)
+  MASH.S.TLS.CERT_CHAIN_MAX_DEPTH: 2      # Max cert chain depth
 
   # ==========================================================================
-  # Controller Pairing Request
+  # Discovery (mDNS)
   # ==========================================================================
 
-  MASH.C.DISC.PAIRING_REQUEST: true    # Controller can announce pairing requests
+  MASH.S.DISC.SVC_COMMISSION: _mashc._udp     # Commissioning service type
+  MASH.S.DISC.SVC_OPERATIONAL: _mash._tcp      # Operational service type
+  MASH.S.DISC.SVC_COMMISSIONER: _mashd._udp    # Commissioner service type
+  MASH.S.DISC.BROWSE_TIMEOUT: 10               # Browse timeout (seconds)
+  MASH.S.DISC.COMMISSION_WINDOW: 120           # Commission window (seconds)
+  MASH.S.DISC.DISCRIMINATOR_BITS: 12           # Discriminator bit length
+  MASH.S.DISC.QR_VERSION: 1                    # QR code version
+  MASH.S.DISC.COMM_TXT_D: 1                    # Commissionable TXT: discriminator
+  MASH.S.DISC.COMM_TXT_CAT: 1                  # Commissionable TXT: category
+  MASH.S.DISC.COMM_TXT_BRAND: 1                # Commissionable TXT: brand
+  MASH.S.DISC.COMM_TXT_MODEL: 1                # Commissionable TXT: model
+  MASH.S.DISC.COMM_TXT_SERIAL: 1               # Commissionable TXT: serial
+  MASH.S.DISC.OPER_TXT_DI: 1                   # Operational TXT: device ID
+  MASH.S.DISC.OPER_TXT_ZI: 1                   # Operational TXT: zone ID
+  MASH.S.DISC.PAIRING_REQUEST: true             # Device listens for pairing requests
+  MASH.S.DISC.PAIRING_DISCRIMINATOR: true       # Device matches by discriminator
 
   # ==========================================================================
-  # Security Hardening (DEC-047)
+  # Framing
   # ==========================================================================
 
+  MASH.S.FRAME.LENGTH_BYTES: 4             # Frame length field size
+  MASH.S.FRAME.MAX_SIZE: 65536             # Max frame size (bytes)
+
+  # ==========================================================================
+  # CBOR Serialization
+  # ==========================================================================
+
+  MASH.S.CBOR.DUPLICATE_KEYS_ERROR: 1      # Reject duplicate CBOR keys
+  MASH.S.CBOR.FLOAT64_ONLY: 1              # Only float64 (no float16/32)
+  MASH.S.CBOR.IGNORE_UNKNOWN_KEYS: 1       # Ignore unknown CBOR keys
+  MASH.S.CBOR.KEY_ORDER_REQUIRED: 0        # Key ordering not required
+
+  # ==========================================================================
+  # Protocol Behaviors
+  # ==========================================================================
+
+  MASH.S.PROTO.AUTO_PONG: true             # Automatic pong response
+  MASH.S.PROTO.CORRELATION: true           # Message correlation (request/response)
+  MASH.S.PROTO.KEEPALIVE: true             # Keepalive ping/pong
+  MASH.S.PROTO.PRIMING: true               # Initial state priming after subscribe
+  MASH.S.PROTO.REQUEST_TIMEOUT: true       # Request timeout enforcement
+  MASH.S.PROTO.SUBSCRIPTION: true          # Subscription support
+
+  # ==========================================================================
+  # Integer Handling
+  # ==========================================================================
+
+  MASH.S.INT.MAX_INT64: 1                  # Support int64 values
+
+  # ==========================================================================
+  # IPv6
+  # ==========================================================================
+
+  MASH.S.IPV6.LINK_LOCAL_INTERFACE: 1      # Link-local interface support
+  MASH.S.IPV6.ADDRESS_CHANGE: 1            # Address change handling
+
+  # ==========================================================================
+  # mDNS Infrastructure
+  # ==========================================================================
+
+  MASH.S.MDNS.LINK_LOCAL: 1               # mDNS on link-local
+  MASH.S.MDNS.SRV_RECORD: 1               # SRV record support
+  MASH.S.MDNS.AAAA_RECORD: 1              # AAAA record support
+  MASH.S.MDNS.GLOBAL_ADDR: 1              # Global address in mDNS
+
+  # ==========================================================================
+  # Multi-Interface
+  # ==========================================================================
+
+  MASH.S.MULTIIF.SUPPORTED: 1             # Multi-interface support
+  MASH.S.MULTIIF.PUBLISH_ALL: 1           # Publish on all interfaces
+  MASH.S.MULTIIF.DEBOUNCE_MS: 2000        # Address change debounce (ms)
+
+  # ==========================================================================
+  # Subscriptions
+  # ==========================================================================
+
+  MASH.S.SUB: true                         # Subscription support
+  MASH.S.SUB.B_COALESCE: true             # Coalesced notifications
+  MASH.S.SUB.B_HEARTBEAT_CONTENT: true    # Heartbeat with content
+
+  # ==========================================================================
+  # Commissioning
+  # ==========================================================================
+
+  MASH.S.COMM.PAIRING_REQUEST: true        # Device opens window on pairing request
   MASH.S.COMM.HARDENING: true              # Device implements DEC-047 hardening
-
-  # Connection Model (derived from zone capacity)
   MASH.S.COMM.MAX_COMMISSIONING_CONN: 1    # Max concurrent commissioning (always 1)
   MASH.S.COMM.CONN_COOLDOWN: 500           # Milliseconds between connections
   MASH.S.COMM.HANDSHAKE_TIMEOUT: 85        # Overall handshake timeout (seconds)
-  # Note: Max operational connections = MASH.S.ZONE.MAX (one per zone)
-  # Total max connections = MASH.S.ZONE.MAX + 1
-
-  # PASE Backoff
   MASH.S.COMM.BACKOFF_ENABLED: true        # PASE attempt backoff enabled
   MASH.S.COMM.BACKOFF_TIER1: 0             # Delay for attempts 1-3 (ms)
   MASH.S.COMM.BACKOFF_TIER2: 1000          # Delay for attempts 4-6 (ms)
   MASH.S.COMM.BACKOFF_TIER3: 3000          # Delay for attempts 7-10 (ms)
   MASH.S.COMM.BACKOFF_TIER4: 10000         # Delay for attempts 11+ (ms)
-
-  # Certificate Renewal
-  MASH.S.CERT.NONCE_BINDING: true          # Nonce-to-CSR binding enforced
-
-  # Error Handling
   MASH.S.COMM.GENERIC_ERRORS: true         # Generic error responses (DEC-047)
   MASH.S.COMM.ERROR_DELAY_MIN: 100         # Minimum error delay (ms)
   MASH.S.COMM.ERROR_DELAY_MAX: 500         # Maximum error delay (ms)
-
-  # Zone configuration (existing, but needed for connection model)
-  MASH.S.ZONE.MAX: 3                       # Maximum zones (GRID + LOCAL + TEST in test mode, DEC-060)
-
-  # ==========================================================================
-  # Transport-Level Connection Cap (DEC-062)
-  # ==========================================================================
-
-  MASH.S.TRANS.CONN_CAP: true              # Device enforces transport-level connection cap
-  # Note: Cap value = MASH.S.ZONE.MAX + 1 (derived, not independently configured)
+  MASH.S.COMM.WINDOW_DEFAULT: 900          # Default window duration (seconds) - 15 min
+  MASH.S.COMM.WINDOW_MIN: 180              # Minimum window (seconds) - 3 min
+  MASH.S.COMM.WINDOW_MAX: 10800            # Maximum window (seconds) - 3 hours
+  MASH.S.COMM.WINDOW_CONFIGURABLE: true    # Device supports configurable window
 
   # ==========================================================================
-  # Busy Rejection Response (DEC-063)
+  # Certificate Management (Device-Side)
   # ==========================================================================
 
-  MASH.S.COMM.ERR_BUSY: true               # Device sends ErrCodeBusy (5) on rejection
-  MASH.S.COMM.ERR_BUSY_RETRY_AFTER: true   # Busy response includes RetryAfter hint
+  MASH.S.CERT.EXCHANGE: true               # Device supports cert exchange after PASE
+  MASH.S.CERT.DEVICE_ID_FROM_CN: true      # Device extracts device ID from cert CN
+  MASH.S.CERT.RENEWAL: true                # Device supports certificate renewal
+  MASH.S.CERT.IN_SESSION_RENEWAL: true     # Renewal without TLS reconnection
+  MASH.S.CERT.NONCE_BINDING: true          # Nonce-to-CSR binding enforced
+  MASH.S.CERT.EXPIRY_HANDLING: true        # Proper handling of expired certificates
+  MASH.S.CERT.GRACE_PERIOD: 7             # Days to accept connections after expiry
+  MASH.S.EVENT.CERT_EXPIRING: true         # Sends notification when cert near expiry
 
   # ==========================================================================
-  # Stale Connection Reaper (DEC-064)
+  # Certificate Management (Controller-Side)
   # ==========================================================================
 
-  MASH.S.CONN.STALE_REAPER: true           # Stale connection reaper enabled
-  MASH.S.CONN.STALE_TIMEOUT: 90            # Stale connection timeout (seconds)
+  MASH.C.CERT.ZONE_CA: true               # Controller has Zone CA for signing
+  MASH.C.CERT.RENEWAL_INITIATE: true       # Controller can initiate renewal
+  MASH.C.CERT.AUTO_RENEWAL: false          # Automatic renewal (optional)
 
   # ==========================================================================
-  # Commissioning Window Timing (DEC-048)
+  # Connection Management
   # ==========================================================================
 
-  MASH.S.COMM.WINDOW_DEFAULT: 900          # Default window duration (seconds) - 15 minutes
-  MASH.S.COMM.WINDOW_MIN: 180              # Minimum configurable window (seconds) - 3 minutes
-  MASH.S.COMM.WINDOW_MAX: 10800            # Maximum configurable window (seconds) - 3 hours
-  MASH.S.COMM.WINDOW_CONFIGURABLE: true    # Device supports configurable window duration
+  MASH.S.TRANS.CONN_CAP: true              # Transport-level connection cap (DEC-062)
+  MASH.S.COMM.ERR_BUSY: true              # Busy rejection (DEC-063)
+  MASH.S.COMM.ERR_BUSY_RETRY_AFTER: true  # Busy response includes RetryAfter
+  MASH.S.CONN.STALE_REAPER: true          # Stale connection reaper (DEC-064)
+  MASH.S.CONN.STALE_TIMEOUT: 90           # Stale timeout (seconds)
 
-# =============================================================================
-# Test Case to PICS Mapping
-# =============================================================================
-#
-# TC-CERT-RENEW-1 (Normal Renewal):
-#   - MASH.S.CERT.RENEWAL: true
-#   - MASH.C.CERT.ZONE_CA: true
-#
-# TC-CERT-RENEW-2 (Session Continuity):
-#   - MASH.S.CERT.IN_SESSION_RENEWAL: true
-#
-# TC-CERT-RENEW-3 (Expiry Warning):
-#   - MASH.S.EVENT.CERT_EXPIRING: true
-#
-# TC-CERT-RENEW-4 (Expired Certificate):
-#   - MASH.S.CERT.EXPIRY_HANDLING: true
-#   - MASH.S.CERT.GRACE_PERIOD: 0
-#
-# TC-CERT-RENEW-5 (Grace Period):
-#   - MASH.S.CERT.GRACE_PERIOD: > 0
-#
-# =============================================================================
-# Pairing Request Tests (DEC-042)
-# =============================================================================
-#
-# TC-PAIR-001 (Device Opens Window on Pairing Request):
-#   - MASH.S.DISC.PAIRING_REQUEST: true
-#   - MASH.S.COMM.PAIRING_REQUEST: true
-#
-# TC-PAIR-002 (Device Ignores Mismatched Discriminator):
-#   - MASH.S.DISC.PAIRING_REQUEST: true
-#   - MASH.S.DISC.PAIRING_DISCRIMINATOR: true
-#
-# TC-PAIR-003 (Rate Limiting - Window Already Open):
-#   - MASH.S.DISC.PAIRING_REQUEST: true
-#   - MASH.S.COMM.PAIRING_REQUEST: true
-#
-# TC-PAIR-004 (Deferred Commissioning Flow):
-#   - MASH.S.DISC.PAIRING_REQUEST: true
-#   - MASH.S.COMM.PAIRING_REQUEST: true
-#   - MASH.S.TRANS.PASE: true
-#
-# TC-PAIR-005 (Commissioned Device Ignores Pairing Requests):
-#   - MASH.S.DISC.PAIRING_REQUEST: true
-#   - MASH.S.ZONE.MAX: 2
-#
-# =============================================================================
-# Commissioning Certificate Exchange Tests
-# =============================================================================
-#
-# TC-COMM-002 (Certificate Exchange After PASE):
-#   - MASH.S.CERT.EXCHANGE: true
-#   - MASH.S.CERT.DEVICE_ID_FROM_CN: true
-#   - MASH.C.CERT.ZONE_CA: true
-#
-# TC-COMM-003 (Device ID Consistency):
-#   - MASH.S.CERT.DEVICE_ID_FROM_CN: true
-#   - MASH.S.DISC.OP: true
-#
-# TC-COMM-004 (Multi-Zone Different Device IDs):
-#   - MASH.S.CERT.EXCHANGE: true
-#   - MASH.S.ZONE.MAX: 2
-#
-# =============================================================================
-# Security Hardening Tests (DEC-047)
-# =============================================================================
-#
-# TC-SEC-CONN-001 (Single Commissioning Connection Limit):
-#   - MASH.S.COMM.HARDENING: true
-#
-# TC-SEC-CONN-002 (Commissioning Blocked When Zones Full):
-#   - MASH.S.COMM.HARDENING: true
-#   - MASH.S.ZONE.MAX: 2
-#
-# TC-SEC-CONN-003 (Operational Connections During Commissioning):
-#   - MASH.S.COMM.HARDENING: true
-#   - MASH.S.ZONE.MAX: 2
-#
-# TC-SEC-CONN-004 (Overall Handshake Timeout):
-#   - MASH.S.COMM.HARDENING: true
-#   - MASH.S.COMM.HANDSHAKE_TIMEOUT: 85
-#
-# TC-SEC-CONN-005 (Flood Resistance):
-#   - MASH.S.COMM.HARDENING: true
-#   - MASH.S.TRANS.CONN_CAP: true
-#   - MASH.S.ZONE.MAX: 2
-#
-# TC-SEC-BACKOFF-001 (PASE Backoff Tier Enforcement):
-#   - MASH.S.COMM.BACKOFF_ENABLED: true
-#   - MASH.S.COMM.BACKOFF_TIER2: 1000
-#   - MASH.S.COMM.BACKOFF_TIER3: 3000
-#
-# TC-SEC-BACKOFF-002 (Backoff Reset on Window Close):
-#   - MASH.S.COMM.BACKOFF_ENABLED: true
-#
-# TC-SEC-BACKOFF-003 (Backoff Reset on Success):
-#   - MASH.S.COMM.BACKOFF_ENABLED: true
-#   - MASH.S.ZONE.MAX: 2
-#
-# TC-SEC-NONCE-001 (Nonce Binding in CSR):
-#   - MASH.S.CERT.NONCE_BINDING: true
-#   - MASH.S.CERT.IN_SESSION_RENEWAL: true
-#
-# TC-SEC-NONCE-002 (Nonce Mismatch Rejection):
-#   - MASH.S.CERT.NONCE_BINDING: true
-#   - MASH.S.CERT.IN_SESSION_RENEWAL: true
-#
-# TC-SEC-ERR-001 (Generic Error Response):
-#   - MASH.S.COMM.GENERIC_ERRORS: true
-#
-# TC-SEC-ERR-002 (Error Response Timing Consistency):
-#   - MASH.S.COMM.GENERIC_ERRORS: true
-#   - MASH.S.COMM.ERROR_DELAY_MIN: 100
-#   - MASH.S.COMM.ERROR_DELAY_MAX: 500
-#
-# =============================================================================
-# Commissioning Window Timing Tests (DEC-048)
-# =============================================================================
-#
-# TC-COMM-WINDOW-001 (Default Commissioning Window Duration):
-#   - MASH.S.COMM: true
-#   - MASH.S.COMM.WINDOW_DEFAULT: 900
-#
-# TC-COMM-WINDOW-002 (Pairing Request Re-triggers Window):
-#   - MASH.S.COMM: true
-#   - MASH.S.COMM.PAIRING_REQUEST: true
-#   - MASH.S.COMM.WINDOW_DEFAULT: 900
-#
-# TC-COMM-WINDOW-003 (Minimum Window Duration Enforcement):
-#   - MASH.S.COMM: true
-#   - MASH.S.COMM.WINDOW_CONFIGURABLE: true
-#   - MASH.S.COMM.WINDOW_MIN: 180
-#
-# =============================================================================
-# Transport-Level Connection Cap Tests (DEC-062)
-# =============================================================================
-#
-# TC-CONN-CAP-001 (Basic Cap Enforcement):
-#   - MASH.S.TRANS.CONN_CAP: true
-#   - MASH.S.ZONE.MAX: 2
-#
-# TC-CONN-CAP-002 (Flood Resistance with Transport Cap):
-#   - MASH.S.TRANS.CONN_CAP: true
-#   - MASH.S.ZONE.MAX: 2
-#
-# TC-CONN-CAP-003 (Counter Decrement on TLS Failure):
-#   - MASH.S.TRANS.CONN_CAP: true
-#   - MASH.S.ZONE.MAX: 2
-#
-# TC-CONN-CAP-004 (Counter Decrement on Client Close):
-#   - MASH.S.TRANS.CONN_CAP: true
-#   - MASH.S.ZONE.MAX: 2
-#
-# =============================================================================
-# Connection Busy Response Tests (DEC-063)
-# =============================================================================
-#
-# TC-CONN-BUSY-001 (Busy Response Contains RetryAfter):
-#   - MASH.S.COMM.ERR_BUSY: true
-#   - MASH.S.COMM.ERR_BUSY_RETRY_AFTER: true
-#
-# TC-CONN-BUSY-002 (Busy Response During Cooldown):
-#   - MASH.S.COMM.ERR_BUSY: true
-#   - MASH.S.COMM.ERR_BUSY_RETRY_AFTER: true
-#   - MASH.S.COMM.CONN_COOLDOWN: 500
-#
-# TC-CONN-BUSY-003 (Retry After Busy Succeeds):
-#   - MASH.S.COMM.ERR_BUSY: true
-#   - MASH.S.COMM.ERR_BUSY_RETRY_AFTER: true
-#
-# =============================================================================
-# Stale Connection Reaper Tests (DEC-064)
-# =============================================================================
-#
-# TC-CONN-REAP-001 (Idle Connection Reaped):
-#   - MASH.S.CONN.STALE_REAPER: true
-#   - MASH.S.CONN.STALE_TIMEOUT: 90
-#
-# TC-CONN-REAP-002 (Active Session Not Reaped):
-#   - MASH.S.CONN.STALE_REAPER: true
-#   - MASH.S.CONN.STALE_TIMEOUT: 90
-#
-# TC-CONN-REAP-003 (Reaper Frees Connection Slot):
-#   - MASH.S.CONN.STALE_REAPER: true
-#   - MASH.S.TRANS.CONN_CAP: true
+  # ==========================================================================
+  # Zone Management
+  # ==========================================================================
+
+  MASH.S.ZONE: true                        # Zone support
+  MASH.S.ZONE.MAX: 3                       # Max zones (GRID + LOCAL + TEST, DEC-060)
+  MASH.S.ZONE.MULTI: true                  # Multiple zone support
+  MASH.S.ZONE.ADD: true                    # Zone addition
+  MASH.S.ZONE.CONNECT: true               # Zone connection
+  MASH.S.ZONE.REMOVE: true                # Zone removal
+  MASH.S.ZONE.GRID: true                  # GRID zone type
+  MASH.S.ZONE.LOCAL: true                 # LOCAL zone type
+  MASH.S.ZONE.B_PRIORITY: true            # Zone priority
+  MASH.S.ZONE.B_RECOMM: true              # Zone recommissioning
+  MASH.S.ZONE.B_RESTRICT: true            # Most-restrictive-wins for limits
+  MASH.S.ZONE.LAST_SEEN: true             # Zone last-seen tracking
+
+  # ==========================================================================
+  # Controller Capabilities
+  # ==========================================================================
+
+  MASH.C.DISC.PAIRING_REQUEST: true        # Controller can announce pairing requests
+  MASH.C.DISC.COMMR_TXT_DC: 1             # Commissioner TXT: discriminator
+  MASH.C.DISC.COMMR_TXT_ZI: 1             # Commissioner TXT: zone ID
+  MASH.C.DISC.COMMR_TXT_ZN: 1             # Commissioner TXT: zone name
+  MASH.C.ZONE.CREATE: true                # Controller can create zones
+  MASH.C.PROTO.RECONNECT: true            # Controller reconnection support
+  MASH.C.CERT.AUTO: true                  # Auto certificate management
+  MASH.C.CERT.PERSIST: true               # Certificate persistence
+  MASH.C.CERT.RENEW: true                 # Certificate renewal
+  MASH.C.TRANS.BACKOFF_INITIAL: 1          # Initial backoff (seconds)
+  MASH.C.TRANS.BACKOFF_MAX: 60            # Max backoff (seconds)
+  MASH.C.TRANS.BACKOFF_JITTER: 10         # Backoff jitter (percent)
+  MASH.C.MULTIIF.TRY_ALL: 1              # Try all interfaces
+  MASH.C.MULTIIF.TIMEOUT_PER_ADDR: 5000  # Timeout per address (ms)
+  MASH.C.MULTIIF.CACHE_LAST_GOOD: 1      # Cache last good address
+
+  # ==========================================================================
+  # Device Capability Flags (D.* prefix)
+  # Inferred from protocol conformance -- true for any conformant device.
+  # ==========================================================================
+
+  D.COMM.PASE: true                        # Device supports PASE
+  D.COMM.SC: true                          # Device supports secure connection
+  D.COMM.TLS13: true                       # Device supports TLS 1.3
+  D.COMM.QR: true                          # Device supports QR code provisioning
+  D.COMM.DISPLAY: true                     # Device supports display (QR/setup code)
+  D.COMM.ADMIN: true                       # Device supports admin commissioning
+  D.DISC.MDNS: true                        # Device supports mDNS discovery
+  D.DISC.COMM: true                        # Device supports commissionable discovery
+  D.DISC.OP: true                          # Device supports operational discovery
+  D.INFO.BASIC: true                       # Device supports basic device info
+  D.CERT.EXCHANGE: true                    # Device supports cert exchange
+  D.CERT.CHAIN: true                       # Device supports cert chain
+  D.CERT.MUTUAL: true                      # Device supports mutual TLS
+  D.CERT.RENEWAL: true                     # Device supports cert renewal
+  D.CERT.IN_SESSION_RENEWAL: true          # Device supports in-session renewal
+  D.CERT.D2D: true                         # Device supports device-to-device
+  D.CERT.EXPIRY_HANDLING: true             # Device enforces cert expiry
+  D.CERT.GRACE_PERIOD: true               # Device supports grace period
+  D.EVENT.CERT_EXPIRING: true              # Device sends cert expiry events
+  D.ZONE.MULTI: true                       # Device supports multiple zones
+  D.BIDIR.READ: true                       # Device supports reading from controller
+  D.BIDIR.SUBSCRIBE: true                  # Device supports subscribing to controller
+  C.BIDIR.EXPOSE: true                     # Controller supports exposing features
+  C.CERT.ZONE_CA: true                    # Controller has Zone CA capability
+
+  # ==========================================================================
+  # Status Feature (always available as protocol-level)
+  # ==========================================================================
+
+  MASH.S.STATUS.STATE_DETAIL: true         # Status state detail support

@@ -326,9 +326,14 @@ func TestLoaderCheckPICS(t *testing.T) {
 	pf := &loader.PICSFile{
 		Name: "test",
 		Items: map[string]interface{}{
-			"MASH.S.TRANS.SC":     true,
-			"MASH.S.ELEC.PHASES":  3,
-			"MASH.S.ELEC.ENABLED": false,
+			"MASH.S.TRANS.SC":          true,
+			"MASH.S.ELEC.PHASES":       3,
+			"MASH.S.ELEC.ENABLED":      false,
+			"MASH.S.COMM.WINDOW_MIN":   180,
+			"MASH.S.COMM.WINDOW_MAX":   10800,
+			"MASH.S.DISC.BROWSE_TIMEOUT": 10,
+			"MASH.S.TLS.VERSION":       "1.3",
+			"MASH.S.TLS.ALPN":          "mash/1",
 		},
 	}
 
@@ -366,6 +371,64 @@ func TestLoaderCheckPICS(t *testing.T) {
 			name:         "empty requirements",
 			requirements: []string{},
 			shouldMatch:  true,
+		},
+		// Key-value format: "KEY: VALUE" (from YAML map entries)
+		{
+			name:         "colon format - int match",
+			requirements: []string{"MASH.S.COMM.WINDOW_MIN: 180"},
+			shouldMatch:  true,
+		},
+		{
+			name:         "colon format - int mismatch",
+			requirements: []string{"MASH.S.COMM.WINDOW_MIN: 999"},
+			shouldMatch:  false,
+		},
+		{
+			name:         "colon format - string match",
+			requirements: []string{"MASH.S.TLS.ALPN: mash/1"},
+			shouldMatch:  true,
+		},
+		{
+			name:         "colon format - string mismatch",
+			requirements: []string{"MASH.S.TLS.ALPN: wrong"},
+			shouldMatch:  false,
+		},
+		{
+			name:         "colon format - missing key",
+			requirements: []string{"MASH.S.NONEXISTENT: 42"},
+			shouldMatch:  false,
+		},
+		// Key-value format: "KEY=VALUE" (inline format)
+		{
+			name:         "equals format - int match",
+			requirements: []string{"MASH.S.DISC.BROWSE_TIMEOUT=10"},
+			shouldMatch:  true,
+		},
+		{
+			name:         "equals format - int mismatch",
+			requirements: []string{"MASH.S.DISC.BROWSE_TIMEOUT=99"},
+			shouldMatch:  false,
+		},
+		{
+			name:         "equals format - string match",
+			requirements: []string{"MASH.S.TLS.VERSION=1.3"},
+			shouldMatch:  true,
+		},
+		{
+			name:         "equals format - missing key",
+			requirements: []string{"MASH.S.NONEXISTENT=1"},
+			shouldMatch:  false,
+		},
+		// Mixed requirements
+		{
+			name:         "mixed bool and key-value - all pass",
+			requirements: []string{"MASH.S.TRANS.SC", "MASH.S.COMM.WINDOW_MIN: 180", "MASH.S.DISC.BROWSE_TIMEOUT=10"},
+			shouldMatch:  true,
+		},
+		{
+			name:         "mixed bool and key-value - value fails",
+			requirements: []string{"MASH.S.TRANS.SC", "MASH.S.COMM.WINDOW_MIN: 999"},
+			shouldMatch:  false,
 		},
 	}
 

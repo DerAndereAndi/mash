@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/mash-protocol/mash-go/pkg/pics"
@@ -256,21 +257,72 @@ func picsToFile(p *pics.PICS) *PICSFile {
 
 // CheckPICSRequirements checks if a PICS file satisfies the given requirements.
 // Returns true if all requirements are met.
+//
+// Requirements can be in three forms:
+//   - Simple key:   "MASH.S.COMM"                  -- item must exist and be truthy
+//   - Colon value:  "MASH.S.COMM.WINDOW_MIN: 180"  -- item must exist and match value
+//   - Equals value: "MASH.S.DISC.BROWSE_TIMEOUT=10" -- item must exist and match value
 func CheckPICSRequirements(pf *PICSFile, requirements []string) bool {
 	for _, req := range requirements {
-		value, exists := pf.Items[req]
+		key, wantVal, hasValue := parseRequirement(req)
+
+		value, exists := pf.Items[key]
 		if !exists {
 			return false
 		}
 
-		// For boolean items, must be true
-		if b, ok := value.(bool); ok && !b {
-			return false
+		if hasValue {
+			if !matchRequirementValue(value, wantVal) {
+				return false
+			}
+		} else {
+			// For boolean items, must be true
+			if b, ok := value.(bool); ok && !b {
+				return false
+			}
 		}
-
-		// For non-boolean items, existence is sufficient
 	}
 	return true
+}
+
+// parseRequirement splits a PICS requirement string into key, value, and
+// whether a value was specified. Supports "KEY: VALUE" and "KEY=VALUE" forms.
+func parseRequirement(req string) (key, val string, hasValue bool) {
+	// Try ": " separator first (from YAML map entries).
+	if idx := strings.Index(req, ": "); idx >= 0 {
+		return req[:idx], req[idx+2:], true
+	}
+	// Try "=" separator (inline format).
+	if idx := strings.IndexByte(req, '='); idx >= 0 {
+		return req[:idx], req[idx+1:], true
+	}
+	return req, "", false
+}
+
+// matchRequirementValue checks whether a PICS item value matches the expected
+// string from a requirement. Handles int, bool, and string comparisons.
+func matchRequirementValue(got any, want string) bool {
+	switch v := got.(type) {
+	case int:
+		if n, err := strconv.Atoi(want); err == nil {
+			return v == n
+		}
+	case int64:
+		if n, err := strconv.ParseInt(want, 10, 64); err == nil {
+			return v == n
+		}
+	case float64:
+		if n, err := strconv.ParseFloat(want, 64); err == nil {
+			return v == n
+		}
+	case bool:
+		return want == "true" && v || want == "false" && !v ||
+			want == "1" && v || want == "0" && !v
+	case string:
+		return v == want
+	}
+	// Fallback: stringify both sides.
+	return fmt.Sprintf("%v", got) == want
 }
 
 // FilterTestCases returns test cases that match the given PICS file.

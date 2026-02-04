@@ -120,7 +120,17 @@ func (p *Parser) parseYAMLCode(key string) (Code, error) {
 	if strings.HasPrefix(key, "MASH.") {
 		return p.parseCode(key)
 	}
-	return Code{}, fmt.Errorf("invalid PICS code format: %s (expected MASH.*)", key)
+
+	// Accept device-capability (D.*) and controller-capability (C.*) codes.
+	// These are shorthand flags used in PICS requirements (e.g., D.COMM.PASE,
+	// C.BIDIR.EXPOSE) and are stored as-is without full MASH code parsing.
+	if strings.HasPrefix(key, "D.") || strings.HasPrefix(key, "C.") {
+		return Code{
+			Raw: key,
+		}, nil
+	}
+
+	return Code{}, fmt.Errorf("invalid PICS code format: %s (expected MASH.*, D.*, or C.*)", key)
 }
 
 // parseYAMLValue converts a YAML value to a PICS Value.

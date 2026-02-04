@@ -104,6 +104,11 @@ func (c Code) String() string {
 		return c.Raw
 	}
 
+	// Non-MASH codes (D.*, C.*) are stored as-is in Raw.
+	if c.Raw != "" && c.Side == "" {
+		return c.Raw
+	}
+
 	var sb strings.Builder
 	sb.WriteString("MASH.")
 	sb.WriteString(string(c.Side))

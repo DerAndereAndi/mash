@@ -202,18 +202,26 @@ items:
 	}
 }
 
-func TestParseYAML_LegacyDFormatRejected(t *testing.T) {
-	// D.* legacy format is no longer supported
+func TestParseYAML_DeviceCapabilityCodes(t *testing.T) {
+	// D.* and C.* codes are device/controller capability shorthand flags.
 	input := `
 device:
   vendor: "Test Corp"
 items:
   D.COMM.SC: true
+  D.ZONE.MULTI: true
+  C.BIDIR.EXPOSE: true
 `
 	parser := NewParser()
-	_, err := parser.parseYAML([]byte(input))
-	if err == nil {
-		t.Error("expected error for D.* legacy format")
+	pics, err := parser.parseYAML([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pics.ByCode["D.COMM.SC"] == (Entry{}) {
+		t.Error("D.COMM.SC should be parsed")
+	}
+	if pics.ByCode["C.BIDIR.EXPOSE"] == (Entry{}) {
+		t.Error("C.BIDIR.EXPOSE should be parsed")
 	}
 }
 

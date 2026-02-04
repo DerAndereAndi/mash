@@ -247,14 +247,21 @@ func TestLoadPICS_YAMLFile(t *testing.T) {
 	}
 }
 
-// TestParsePICS_LegacyDFormatRejected tests that D.* legacy format is rejected.
-func TestParsePICS_LegacyDFormatRejected(t *testing.T) {
-	yaml := `
+// TestParsePICS_DeviceCapabilityCodes tests that D.* and C.* codes are accepted.
+func TestParsePICS_DeviceCapabilityCodes(t *testing.T) {
+	yamlData := `
 items:
   D.COMM.SC: true
+  C.BIDIR.EXPOSE: true
 `
-	_, err := loader.ParsePICS([]byte(yaml))
-	if err == nil {
-		t.Error("Expected error for D.* legacy format, got nil")
+	pf, err := loader.ParsePICS([]byte(yamlData))
+	if err != nil {
+		t.Fatalf("Unexpected error for D.*/C.* codes: %v", err)
+	}
+	if v, ok := pf.Items["D.COMM.SC"]; !ok || v != true {
+		t.Errorf("D.COMM.SC should be true, got %v", pf.Items["D.COMM.SC"])
+	}
+	if v, ok := pf.Items["C.BIDIR.EXPOSE"]; !ok || v != true {
+		t.Errorf("C.BIDIR.EXPOSE should be true, got %v", pf.Items["C.BIDIR.EXPOSE"])
 	}
 }

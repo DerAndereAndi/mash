@@ -1157,15 +1157,15 @@ func filterByPattern(cases []*loader.TestCase, pattern string) []*loader.TestCas
 }
 
 // filterByMode filters test cases based on the runner mode (device/controller).
-// In device mode, tests requiring controller-only PICS codes (MASH.C.*) are skipped.
-// In controller mode, tests requiring device-only PICS codes (MASH.S.*) are skipped.
+// In device mode, tests requiring controller-only PICS codes (MASH.C.* or C.*) are skipped.
+// In controller mode, tests requiring device-only PICS codes (MASH.S.* or D.*) are skipped.
 func filterByMode(cases []*loader.TestCase, mode string) []*loader.TestCase {
-	var skipPrefix string
+	var skipPrefixes []string
 	switch mode {
 	case "device":
-		skipPrefix = "MASH.C."
+		skipPrefixes = []string{"MASH.C.", "C."}
 	case "controller":
-		skipPrefix = "MASH.S."
+		skipPrefixes = []string{"MASH.S.", "D."}
 	default:
 		return cases
 	}
@@ -1174,8 +1174,13 @@ func filterByMode(cases []*loader.TestCase, mode string) []*loader.TestCase {
 	for _, tc := range cases {
 		skip := false
 		for _, req := range tc.PICSRequirements {
-			if strings.HasPrefix(req, skipPrefix) {
-				skip = true
+			for _, prefix := range skipPrefixes {
+				if strings.HasPrefix(req, prefix) {
+					skip = true
+					break
+				}
+			}
+			if skip {
 				break
 			}
 		}
