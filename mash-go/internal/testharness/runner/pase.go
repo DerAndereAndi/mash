@@ -176,10 +176,13 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
-	// After successful cert exchange, close the commissioning connection
-	// and reconnect with operational TLS (mutual auth, zone CA verified).
-	// This implements the PASE-to-operational transition required by the spec.
-	if certErr == nil {
+	// Optionally close the commissioning connection and reconnect with
+	// operational TLS (mutual auth, zone CA verified). This implements
+	// the PASE-to-operational transition required by the spec.
+	// Opt-in via transition_to_operational param because multi-zone
+	// preconditions need the commissioning connection to stay open.
+	doTransition, _ := params["transition_to_operational"].(bool)
+	if certErr == nil && doTransition {
 		_ = r.conn.Close()
 		// Brief wait for device to process the close and switch to operational mode.
 		time.Sleep(100 * time.Millisecond)

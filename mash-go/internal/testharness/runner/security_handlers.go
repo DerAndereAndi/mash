@@ -131,10 +131,12 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	// may accept the TLS handshake but immediately close the connection
 	// at the application layer ("commissioning already in progress").
 	// Probe with a short read to detect this closure.
+	// Only count non-operational connections -- operational connections
+	// from existing zones should not block new commissioning.
 	secState.pool.mu.Lock()
 	hasExisting := false
 	for _, c := range secState.pool.connections {
-		if c.connected {
+		if c.connected && !c.operational {
 			hasExisting = true
 			break
 		}
@@ -378,9 +380,10 @@ func (r *Runner) handleConnectOperational(ctx context.Context, step *loader.Step
 	secState := getSecurityState(state)
 	secState.pool.mu.Lock()
 	newConn := &Connection{
-		tlsConn:   conn,
-		framer:    transport.NewFramer(conn),
-		connected: true,
+		tlsConn:     conn,
+		framer:      transport.NewFramer(conn),
+		connected:   true,
+		operational: true,
 	}
 	secState.pool.connections = append(secState.pool.connections, newConn)
 	secState.pool.mu.Unlock()
