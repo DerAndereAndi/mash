@@ -348,10 +348,13 @@ func (r *Runner) handleSubscribeAsZone(ctx context.Context, step *loader.Step, s
 		return nil, fmt.Errorf("decode: %w", err)
 	}
 
+	subscriptionID := extractSubscriptionID(resp.Payload)
+
 	return map[string]any{
-		KeySubscribeSuccess: resp.IsSuccess(),
-		KeySubscriptionID:   resp.Payload,
-		KeyStatus:           resp.Status,
+		KeySubscribeSuccess:       resp.IsSuccess(),
+		KeySubscriptionID:         subscriptionID,
+		KeySubscriptionIDReturned: subscriptionID != nil,
+		KeyStatus:                 resp.Status,
 	}, nil
 }
 
@@ -968,6 +971,7 @@ func (r *Runner) handleSubscribeMultiple(ctx context.Context, step *loader.Step,
 	}
 
 	subscriptions := make([]any, 0, len(targets))
+	allSucceed := true
 	for _, t := range targets {
 		featureStep := &loader.Step{
 			Params: map[string]any{
@@ -979,12 +983,30 @@ func (r *Runner) handleSubscribeMultiple(ctx context.Context, step *loader.Step,
 		if err != nil {
 			return nil, fmt.Errorf("subscribe to %v: %w", t.feature, err)
 		}
+		if success, _ := out[KeySubscribeSuccess].(bool); !success {
+			allSucceed = false
+		}
 		subscriptions = append(subscriptions, out[KeySubscriptionID])
 	}
 
+	// Check uniqueness: all subscription IDs must be distinct.
+	seen := make(map[string]bool, len(subscriptions))
+	unique := true
+	for _, id := range subscriptions {
+		key := fmt.Sprintf("%v", id)
+		if seen[key] {
+			unique = false
+			break
+		}
+		seen[key] = true
+	}
+
 	return map[string]any{
-		KeySubscribeCount: len(subscriptions),
-		KeySubscriptions:  subscriptions,
+		KeySubscribeCount:        len(subscriptions),
+		KeySubscriptionCount:     len(subscriptions),
+		KeySubscriptions:         subscriptions,
+		KeyAllSucceed:            allSucceed,
+		KeySubscriptionIDsUnique: unique,
 	}, nil
 }
 

@@ -809,11 +809,31 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 		return nil, err
 	}
 
+	// Extract subscription ID from the response payload.
+	// The subscribe response payload is {1: subscriptionId, 2: currentValues}
+	// (a SubscribeResponsePayload). The raw CBOR decodes as map[any]any.
+	subscriptionID := extractSubscriptionID(resp.Payload)
+
 	return map[string]any{
-		KeySubscribeSuccess: resp.IsSuccess(),
-		KeySubscriptionID:   resp.Payload,
-		KeyStatus:           resp.Status,
+		KeySubscribeSuccess:      resp.IsSuccess(),
+		KeySubscriptionID:        subscriptionID,
+		KeySubscriptionIDReturned: subscriptionID != nil,
+		KeyStatus:                resp.Status,
 	}, nil
+}
+
+// extractSubscriptionID extracts the subscription ID from a subscribe response
+// payload. The payload is typically a map {1: subscriptionId, 2: currentValues}
+// decoded from CBOR as map[any]any.
+func extractSubscriptionID(payload any) any {
+	switch p := payload.(type) {
+	case map[any]any:
+		if id, ok := p[uint64(1)]; ok {
+			return id
+		}
+	}
+	// Fallback: return the payload itself (may be a simple ID).
+	return payload
 }
 
 // handleInvoke sends an invoke request.

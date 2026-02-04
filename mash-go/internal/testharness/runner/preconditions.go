@@ -243,6 +243,10 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	if r.conn != nil && !r.conn.connected && (r.conn.tlsConn != nil || r.conn.conn != nil) {
 		r.debugf("closing phantom main socket (connected=false but socket open)")
 		_ = r.conn.Close()
+		// Reset PASE state so ensureCommissioned performs a fresh PASE
+		// handshake on the new connection instead of assuming the old
+		// session is still valid.
+		r.paseState = nil
 		if r.config.Target != "" {
 			r.lastDeviceConnClose = time.Now()
 		}

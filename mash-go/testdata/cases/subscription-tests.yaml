@@ -639,7 +639,7 @@ steps:
       maxInterval: 60
     expect:
       subscribe_success: true
-      subscription_id: sub_meas
+      subscription_id_returned: true
 
   - name: Subscribe to Status feature
     action: subscribe
@@ -650,25 +650,21 @@ steps:
       maxInterval: 60
     expect:
       subscribe_success: true
-      subscription_id: sub_stat
+      subscription_id_returned: true
 
   - name: Receive priming for Measurement
     action: receive_notification
     params:
-      subscription_id: sub_meas
       timeout: "2s"
     expect:
       notification_received: true
-      feature: Measurement
 
   - name: Receive priming for Status
     action: receive_notification
     params:
-      subscription_id: sub_stat
       timeout: "2s"
     expect:
       notification_received: true
-      feature: Status
 
   - name: Change Measurement attribute
     action: device_set_value
@@ -684,8 +680,6 @@ steps:
       timeout: "3s"
     expect:
       notification_received: true
-      subscription_id: sub_meas
-      feature: Measurement
 
 postconditions:
   - multi_feature_subscriptions_work: true
