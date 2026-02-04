@@ -160,7 +160,7 @@ items:
   MASH.S.COMM.PAIRING_REQUEST: true        # Device opens window on pairing request
   MASH.S.COMM.HARDENING: true              # Device implements DEC-047 hardening
   MASH.S.COMM.MAX_COMMISSIONING_CONN: 1    # Max concurrent commissioning (always 1)
-  MASH.S.COMM.CONN_COOLDOWN: 500           # Milliseconds between connections
+  MASH.S.COMM.CONN_COOLDOWN: 500           # Milliseconds between completed attempts (DEC-065: starts at release)
   MASH.S.COMM.HANDSHAKE_TIMEOUT: 85        # Overall handshake timeout (seconds)
   MASH.S.COMM.BACKOFF_ENABLED: true        # PASE attempt backoff enabled
   MASH.S.COMM.BACKOFF_TIER1: 0             # Delay for attempts 1-3 (ms)

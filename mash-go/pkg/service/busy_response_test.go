@@ -125,12 +125,12 @@ func TestBusyResponse_CooldownActive(t *testing.T) {
 	svc.config.TestMode = false
 
 	// First controller: TLS connect + send PASERequest to trigger cooldown.
-	// The PASE won't succeed (wrong public key) but cooldown starts when
-	// acceptCommissioningConnection is called.
+	// The PASE won't succeed (wrong public key). Cooldown starts when the
+	// commissioning connection is released after PASE failure.
 	conn1 := dialCommissioning(t, addr)
 	sendPASERequest(t, conn1)
 	// Wait for the server to process and release the commissioning lock
-	// (PASE will fail, releasing the lock and setting lastCommissioningAttempt).
+	// (PASE will fail, releasing the lock and starting cooldown).
 	time.Sleep(200 * time.Millisecond)
 	conn1.Close()
 

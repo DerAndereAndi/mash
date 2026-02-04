@@ -294,6 +294,14 @@ func (r *Runner) runAutoPICS(ctx context.Context) error {
 	r.sendRemoveZone()
 	r.ensureDisconnected()
 	r.debugSnapshot("auto-PICS AFTER cleanup")
+
+	// DEC-065: The auto-PICS commissioning triggers a connection cooldown
+	// (500ms) on the device. Wait for it to expire so subsequent test steps
+	// that attempt commissioning don't hit a stale cooldown rejection.
+	const autoPICSCooldownWait = 550 * time.Millisecond
+	r.debugf("auto-PICS: waiting %s for connection cooldown to expire", autoPICSCooldownWait)
+	time.Sleep(autoPICSCooldownWait)
+
 	return nil
 }
 

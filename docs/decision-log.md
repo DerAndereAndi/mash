@@ -2710,7 +2710,7 @@ commissioning window when the device is most vulnerable.
 - Nonce binding for certificate renewal
 - Generic error responses to prevent information leakage
 - Explicit handshake timeouts (85s overall)
-- Connection cooldown (500ms between attempts)
+- Connection cooldown (500ms between completed attempts, starts at release)
 
 **Rationale:**
 - Connection limits derived from zone capacity are logically defensible
@@ -3648,6 +3648,36 @@ Add a periodic background goroutine (the "reaper") that force-closes pre-operati
 
 ---
 
+### DEC-065: Connection Cooldown Starts at Release
+
+**Date:** 2026-02-04
+**Status:** Accepted
+
+**Context:**
+The DEC-047 connection cooldown (500ms) was originally set when a commissioning connection was **accepted** (`acceptCommissioningConnection`). This blocked legitimate follow-up attempts: after multiple rapid PASE attempts (e.g., backoff testing), the cooldown timer was set on each acceptance, so the next attempt -- even with the correct setup code -- was rejected before PASE could proceed.
+
+**Decision:**
+Move the cooldown timestamp from connection acceptance to connection **release** (`releaseCommissioningConnection`):
+
+1. `acceptCommissioningConnection()` no longer sets `lastCommissioningAttempt`
+2. `releaseCommissioningConnection()` sets `lastCommissioningAttempt = time.Now()` when the connection finishes (success or failure)
+3. The cooldown check in `acceptCommissioningConnection()` is unchanged -- it still compares `time.Since(lastCommissioningAttempt)` against `ConnectionCooldown`
+
+**Effect:**
+- The cooldown window starts **after** a commissioning attempt completes, not when it begins
+- A long-running PASE exchange does not extend the cooldown into the next attempt's acceptance window
+- Rapid sequential attempts after a completed attempt are still blocked (the 500ms gap is enforced between release and next acceptance)
+- DEC-062 (transport-level cap) and DEC-047 (PASE backoff) continue to protect against connection floods and brute-force independently
+
+**Rationale:**
+- Cooldown-at-acceptance conflicted with backoff testing: 5 rapid PASE failures left the cooldown active for the subsequent legitimate commission step
+- Cooldown-at-release preserves the anti-rapid-reconnection intent while allowing legitimate sequential commissioning (e.g., commission, exit, re-enter, commission second zone)
+- Aligns with the principle that cooldown prevents rapid **re-attempts**, not rapid **in-progress** connections (the single-connection lock already prevents concurrent commissioning)
+
+**Related:** DEC-047 (security hardening), DEC-061 (message-gated locking)
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -3783,3 +3813,4 @@ Key learnings:
 | 2026-02-04 | Added DEC-063: Busy rejection response. CommissioningError(5=DEVICE_BUSY) with RetryAfter field instead of silent close on commissioning rejection. |
 | 2026-02-04 | Added DEC-064: Stale connection reaper. Periodic background goroutine force-closes pre-operational connections exceeding 90s staleness threshold. |
 | 2026-02-04 | Added DEC-061: Message-gated commissioning locking. Moves commissioning lock from TLS accept to first PASERequest receipt. Splits PASEServerSession.Handshake into WaitForPASERequest (5s timeout, no lock) + CompleteHandshake (85s, with lock). Idle TLS connections no longer block commissioning. |
+| 2026-02-04 | Added DEC-065: Connection cooldown starts at release. Moves lastCommissioningAttempt timestamp from acceptCommissioningConnection to releaseCommissioningConnection so cooldown prevents rapid re-attempts after completion, not during in-progress connections. |

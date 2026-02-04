@@ -1245,6 +1245,8 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 	tlsConfig := transport.NewCommissioningTLSConfig()
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 
+	r.debugf("handleBusyPASEExchange: connecting to %s (max %d attempts)", target, maxAttempts)
+
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
@@ -1254,6 +1256,7 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 
 		conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 		if err != nil {
+			r.debugf("handleBusyPASEExchange: TLS connect failed (attempt %d): %v (transient=%v)", attempt, err, isTransientError(err))
 			if isTransientError(err) && attempt < maxAttempts-1 {
 				lastErr = err
 				continue
@@ -1266,7 +1269,9 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 			}, nil
 		}
 
+		r.debugf("handleBusyPASEExchange: TLS connected, sending PASERequest (attempt %d)", attempt)
 		if err := sendPASERequestRaw(conn); err != nil {
+			r.debugf("handleBusyPASEExchange: send PASERequest failed: %v (transient=%v)", err, isTransientError(err))
 			conn.Close()
 			if isTransientError(err) && attempt < maxAttempts-1 {
 				lastErr = err
@@ -1278,8 +1283,10 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 			}, nil
 		}
 
+		r.debugf("handleBusyPASEExchange: reading CommissioningError response (attempt %d)", attempt)
 		errMsg, err := readCommissioningErrorRaw(conn, 5*time.Second)
 		if err != nil {
+			r.debugf("handleBusyPASEExchange: read CommissioningError failed: %v (transient=%v)", err, isTransientError(err))
 			conn.Close()
 			if isTransientError(err) && attempt < maxAttempts-1 {
 				lastErr = err
@@ -1291,6 +1298,7 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 			}, nil
 		}
 
+		r.debugf("handleBusyPASEExchange: received CommissioningError (code=%d, retryAfter=%d)", errMsg.ErrorCode, errMsg.RetryAfter)
 		conn.Close()
 		return map[string]any{
 			KeyConnectionEstablished: true,
@@ -1303,6 +1311,7 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 	}
 
 	// All retries exhausted -- return the last transient error.
+	r.debugf("handleBusyPASEExchange: all %d attempts failed: %v", maxAttempts, lastErr)
 	return map[string]any{
 		KeyConnectionEstablished: false,
 		KeyError:                 fmt.Sprintf("all %d attempts failed: %v", maxAttempts, lastErr),

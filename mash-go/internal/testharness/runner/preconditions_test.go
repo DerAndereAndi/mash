@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"crypto/x509"
+	"fmt"
 	"testing"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -936,5 +937,30 @@ func TestSetupPreconditions_SessionPreviouslyConnected(t *testing.T) {
 	// PASE state should be cleared (session is over).
 	if r.paseState != nil {
 		t.Error("expected paseState to be nil")
+	}
+}
+
+func TestCooldownRemaining(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool // whether a positive duration is expected
+	}{
+		{"nil error", nil, false},
+		{"unrelated error", fmt.Errorf("connection refused"), false},
+		{"cooldown error", fmt.Errorf("PASE handshake failed: server error: cooldown active (460.930083ms remaining) (code 5)"), true},
+		{"short cooldown", fmt.Errorf("cooldown active (10ms remaining)"), true},
+		{"malformed", fmt.Errorf("cooldown active (badvalue remaining)"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := cooldownRemaining(tt.err)
+			if tt.want && d <= 0 {
+				t.Errorf("expected positive duration, got %v", d)
+			}
+			if !tt.want && d != 0 {
+				t.Errorf("expected 0, got %v", d)
+			}
+		})
 	}
 }

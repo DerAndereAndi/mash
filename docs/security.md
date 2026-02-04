@@ -408,7 +408,7 @@ The connection model is derived from zone capacity to ensure predictable resourc
 4. When commissioning already in progress:
    - Device MUST send `CommissioningError(DEVICE_BUSY)` with RetryAfter hint (see Section 11.8)
 5. Operational connections from existing zones MUST be allowed during commissioning
-6. Device SHOULD implement connection cooldown (500ms) to prevent rapid reconnection
+6. Device SHOULD implement connection cooldown (500ms) between completed commissioning attempts to prevent rapid reconnection. The cooldown timer starts when a commissioning connection is released (success or failure), not when it is accepted
 
 **Rationale:** This model ensures:
 - Resource usage is bounded and predictable (critical for 256KB MCUs)
@@ -569,13 +569,17 @@ TLS connections from blocking commissioning.
 **Connection Lifecycle:**
 
 ```
-TLS Accept ─── WaitForPASERequest (5s, no lock) ─── Acquire Lock ─── CompleteHandshake (85s) ─── Cert Exchange ─── Release Lock
-     │                    │                                │
-     │                    ├─ Timeout: close silently        ├─ Lock busy: send DEVICE_BUSY + RetryAfter, close
-     │                    └─ Invalid msg: close             └─ PASE fail: release lock, close
+TLS Accept ─── WaitForPASERequest (5s, no lock) ─── Acquire Lock ─── CompleteHandshake (85s) ─── Cert Exchange ─── Release Lock ─── Start Cooldown
+     │                    │                                │                                                              │
+     │                    ├─ Timeout: close silently        ├─ Lock busy: send DEVICE_BUSY + RetryAfter, close             └─ PASE fail: release lock, start cooldown, close
+     │                    └─ Invalid msg: close             └─ Cooldown active: send DEVICE_BUSY + RetryAfter, close
      │
      └─ TLS fail: close
 ```
+
+The cooldown timer starts when a commissioning connection is **released** (success or failure),
+not when it is accepted. This ensures that legitimate follow-up commissioning attempts are not
+blocked by the cooldown of a still-in-progress connection.
 
 **Rationale:**
 - An idle TLS connection that never sends a PASERequest no longer holds the commissioning lock for 85 seconds

@@ -2169,8 +2169,12 @@ func (s *DeviceService) updatePairingRequestListening() {
 //
 // Connection protection rules:
 // 1. Only one commissioning connection at a time
-// 2. Connection cooldown (500ms default) between attempts
+// 2. Connection cooldown (500ms default) between completed attempts
 // 3. All zone slots must not be full (commissioning would fail anyway)
+//
+// The cooldown timer starts when a connection is released (success or failure),
+// not when it is accepted. This prevents legitimate follow-up attempts from
+// being blocked by the cooldown of a still-in-progress connection.
 func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 	s.connectionMu.Lock()
 	defer s.connectionMu.Unlock()
@@ -2180,7 +2184,7 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 		return false, "commissioning already in progress"
 	}
 
-	// Check 2: Connection cooldown
+	// Check 2: Connection cooldown (starts at release, not acceptance)
 	if s.config.ConnectionCooldown > 0 {
 		elapsed := time.Since(s.lastCommissioningAttempt)
 		if elapsed < s.config.ConnectionCooldown {
@@ -2198,9 +2202,8 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 		return false, fmt.Sprintf("zone slots full (%d/%d)", zoneCount, maxZones)
 	}
 
-	// Accept the connection
+	// Accept the connection (cooldown timestamp is set on release, not here)
 	s.commissioningConnActive = true
-	s.lastCommissioningAttempt = time.Now()
 	return true, ""
 }
 
@@ -2211,12 +2214,14 @@ func (s *DeviceService) isZonesFull() bool {
 	return len(s.connectedZones) >= s.config.MaxZones
 }
 
-// releaseCommissioningConnection marks the commissioning connection as complete.
-// Call this when commissioning finishes (success or failure).
+// releaseCommissioningConnection marks the commissioning connection as complete
+// and starts the cooldown timer. Call this when commissioning finishes (success
+// or failure). The cooldown prevents rapid reconnection after a completed attempt.
 func (s *DeviceService) releaseCommissioningConnection() {
 	s.connectionMu.Lock()
 	defer s.connectionMu.Unlock()
 	s.commissioningConnActive = false
+	s.lastCommissioningAttempt = time.Now()
 }
 
 // ResetPASETracker resets the PASE attempt tracker.

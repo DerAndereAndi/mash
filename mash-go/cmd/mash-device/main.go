@@ -219,6 +219,11 @@ func main() {
 	svcConfig.TestEnableKey = config.EnableKey
 	svcConfig.Logger = logger
 
+	// In test mode, allow TEST zones (DEC-043/DEC-060): GRID + LOCAL + TEST = 3.
+	if config.TestMode {
+		svcConfig.MaxZones = 3
+	}
+
 	// In test mode, add TestControl feature to root endpoint.
 	var testControl *features.TestControl
 	if config.TestMode {

@@ -129,6 +129,44 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// Perform the full SPAKE2+ handshake
 	sessionKey, err := session.Handshake(ctx, conn)
 	if err != nil {
+		// DEC-065: If the device rejected with a cooldown error, wait for it
+		// to expire and retry with a fresh connection. This handles tests
+		// where a prior step (e.g., pase_attempts) triggered a cooldown.
+		if wait := cooldownRemaining(err); wait > 0 {
+			r.debugf("handleCommission: cooldown active, waiting %s and retrying", wait.Round(time.Millisecond))
+			r.conn.connected = false
+			_ = r.conn.Close()
+			time.Sleep(wait)
+
+			// Reconnect and retry PASE.
+			target := r.config.Target
+			if t, ok := params[KeyTarget].(string); ok && t != "" {
+				target = t
+			}
+			tlsConfig := transport.NewCommissioningTLSConfig()
+			dialer := &net.Dialer{Timeout: 10 * time.Second}
+			tlsConn, retryErr := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+			if retryErr != nil {
+				return nil, fmt.Errorf("cooldown retry connect failed: %w", retryErr)
+			}
+			r.conn.tlsConn = tlsConn
+			r.conn.framer = transport.NewFramer(tlsConn)
+			r.conn.connected = true
+			conn = tlsConn
+
+			retrySession, retryErr := commissioning.NewPASEClientSession(
+				setupCode,
+				[]byte(clientIdentity),
+				[]byte(serverIdentity),
+			)
+			if retryErr != nil {
+				return nil, fmt.Errorf("cooldown retry PASE session failed: %w", retryErr)
+			}
+			session = retrySession
+			sessionKey, err = session.Handshake(ctx, conn)
+		}
+	}
+	if err != nil {
 		// Store failed state for debugging
 		r.paseState = &PASEState{
 			session:   session,

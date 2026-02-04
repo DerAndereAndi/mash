@@ -440,12 +440,15 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 						}
 					}
 
+					// In test mode the device allows 3 zones (GRID + LOCAL + TEST,
+					// DEC-043/DEC-060), so we must fill all three slots.
 					zones := []struct {
 						name string
 						zt   cert.ZoneType
 					}{
 						{"GRID", cert.ZoneTypeGrid},
 						{"LOCAL", cert.ZoneTypeLocal},
+						{"TEST", cert.ZoneTypeTest},
 					}
 
 					for i, z := range zones {
@@ -612,6 +615,24 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 
 	_, err := r.handleCommission(ctx, step, state)
 	if err != nil {
+		// DEC-065: If the device rejects with a cooldown error, wait for the
+		// remaining cooldown and retry once. This handles transitions between
+		// auto-PICS discovery and test execution where the cooldown from the
+		// previous commissioning is still active.
+		if wait := cooldownRemaining(err); wait > 0 {
+			r.debugf("ensureCommissioned: cooldown active, waiting %s", wait.Round(time.Millisecond))
+			time.Sleep(wait)
+			r.ensureDisconnected()
+			if connErr := r.ensureConnected(ctx, state); connErr != nil {
+				return fmt.Errorf("precondition commission cooldown retry connect failed: %w", connErr)
+			}
+			_, err = r.handleCommission(ctx, step, state)
+			if err == nil {
+				return nil
+			}
+			return fmt.Errorf("precondition commission failed after cooldown wait: %w", err)
+		}
+
 		// On transient errors (EOF, connection reset, broken pipe), retry
 		// up to 2 times after a short delay. The device may still be
 		// cycling its commissioning window in test mode, especially after
@@ -638,6 +659,32 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 	}
 
 	return nil
+}
+
+// cooldownRemaining extracts the remaining cooldown duration from a PASE
+// handshake error. Returns 0 if the error is not a cooldown rejection.
+// Error format: "...cooldown active (123.456ms remaining)..."
+func cooldownRemaining(err error) time.Duration {
+	if err == nil {
+		return 0
+	}
+	msg := err.Error()
+	const marker = "cooldown active ("
+	idx := strings.Index(msg, marker)
+	if idx < 0 {
+		return 0
+	}
+	rest := msg[idx+len(marker):]
+	endIdx := strings.Index(rest, " remaining)")
+	if endIdx < 0 {
+		return 0
+	}
+	d, parseErr := time.ParseDuration(rest[:endIdx])
+	if parseErr != nil {
+		return 0
+	}
+	// Add a small buffer so we don't race with the cooldown expiry.
+	return d + 50*time.Millisecond
 }
 
 // isTransientError returns true for IO-level errors that may resolve on retry.
