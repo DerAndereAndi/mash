@@ -171,6 +171,8 @@ func (m *DiscoveryManager) SetCommissionableInfo(info *CommissionableInfo) {
 
 // EnterCommissioningMode starts advertising the commissionable service.
 // The service will be automatically stopped after the commissioning window expires.
+// This method is idempotent: if already in commissioning mode, it resets the
+// commissioning window timer without re-registering the mDNS service.
 func (m *DiscoveryManager) EnterCommissioningMode(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -179,16 +181,29 @@ func (m *DiscoveryManager) EnterCommissioningMode(ctx context.Context) error {
 		return ErrMissingRequired
 	}
 
-	// Start advertising
-	if err := m.advertiser.AdvertiseCommissionable(ctx, m.commissionableInfo); err != nil {
-		return err
-	}
-
 	// Set up commissioning window timer
 	// Use configured duration or default to CommissioningWindowDuration
 	windowDuration := m.commissioningWindowDuration
 	if windowDuration <= 0 {
 		windowDuration = CommissioningWindowDuration
+	}
+
+	// If already advertising commissionable, just reset the timer.
+	// This avoids redundant mDNS Shutdown+Register cycles that produce
+	// network traffic spikes during rapid test-mode zone transitions.
+	if m.state == StateCommissioningOpen || m.state == StateOperationalCommissioning {
+		if m.commissioningTimer != nil {
+			m.commissioningTimer.Stop()
+		}
+		m.commissioningTimer = time.AfterFunc(windowDuration, func() {
+			m.exitCommissioningModeInternal(false)
+		})
+		return nil
+	}
+
+	// Start advertising
+	if err := m.advertiser.AdvertiseCommissionable(ctx, m.commissionableInfo); err != nil {
+		return err
 	}
 
 	// Stop any existing timer to prevent a leaked goroutine from firing
