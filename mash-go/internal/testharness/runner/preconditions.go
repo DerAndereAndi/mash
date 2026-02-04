@@ -111,6 +111,7 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceInCommissioningMode: precondLevelCommissioning,
 	PrecondDeviceUncommissioned:      precondLevelCommissioning,
 	PrecondCommissioningWindowOpen:   precondLevelCommissioning,
+	PrecondCommissioningWindowClosed: precondLevelCommissioning,
 	PrecondDeviceConnected:           precondLevelConnected,
 	PrecondTLSConnectionEstablished:  precondLevelConnected,
 	PrecondConnectionEstablished:     precondLevelConnected,
@@ -300,6 +301,11 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeLocal, KeyZoneID: "LOCAL"}}
 					_, _ = r.handleCreateZone(ctx, step, state)
 				}
+			case PrecondCommissioningWindowClosed:
+				// Ensure commissioning state is cleared so the test starts
+				// with the window closed. This prevents a previous test's
+				// stub-mode commissioning from leaking into this test.
+				state.Set(StateCommissioningActive, false)
 			case PrecondControllerCertNearExpiry:
 				state.Set(StateCertDaysUntilExpiry, 29)
 			case PrecondFiveZonesConnected:

@@ -424,9 +424,12 @@ func (r *Runner) handleConnectOperational(ctx context.Context, step *loader.Step
 
 // handleEnterCommissioningMode signals device to enter commissioning mode.
 // When connected, sends a TriggerEnterCommissioningMode via TestControl.
+// In stub mode (no connection), sets StateCommissioningActive so that
+// handleBrowseMDNS returns a synthetic commissionable service.
 func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	secState := getSecurityState(state)
 	secState.commissioningActive = true
+	state.Set(StateCommissioningActive, true)
 
 	// Send trigger if connected.
 	if r.conn != nil && r.conn.connected && r.config.EnableKey != "" {
@@ -445,9 +448,12 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 
 // handleExitCommissioningMode signals device to exit commissioning mode.
 // When connected, sends a TriggerExitCommissioningMode via TestControl.
+// In stub mode, clears StateCommissioningActive so that handleBrowseMDNS
+// no longer returns a synthetic commissionable service.
 func (r *Runner) handleExitCommissioningMode(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	secState := getSecurityState(state)
 	secState.commissioningActive = false
+	state.Set(StateCommissioningActive, false)
 
 	// Send trigger if connected.
 	if r.conn != nil && r.conn.connected && r.config.EnableKey != "" {

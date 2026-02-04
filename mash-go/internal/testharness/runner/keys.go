@@ -69,6 +69,7 @@ const (
 	PrecondDeviceInCommissioningMode = "device_in_commissioning_mode"
 	PrecondDeviceUncommissioned      = "device_uncommissioned"
 	PrecondCommissioningWindowOpen   = "commissioning_window_open"
+	PrecondCommissioningWindowClosed = "commissioning_window_closed"
 	PrecondDeviceConnected           = "device_connected"
 	PrecondTLSConnectionEstablished  = "tls_connection_established"
 	PrecondConnectionEstablished     = "connection_established"
@@ -148,6 +149,7 @@ const (
 	StatePairingRequestDiscriminator = "pairing_request_discriminator"
 	StatePairingRequestZoneID        = "pairing_request_zone_id"
 	StateDeviceWasRemoved            = "device_was_removed"
+	StateCommissioningActive         = "commissioning_active"
 
 	// Cert handler state.
 	StateExtractedDeviceID = "extracted_device_id"

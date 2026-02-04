@@ -404,6 +404,25 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		return r.buildBrowseOutput(ds)
 	}
 
+	// Stub mode: enter_commissioning_mode was called without a device
+	// connection. Return a synthetic commissionable service so that
+	// verify_mdns_advertising sees advertising=true.
+	if active, _ := state.Get(StateCommissioningActive); active == true {
+		requestedType, _ := params[KeyServiceType].(string)
+		if requestedType == "" || requestedType == discovery.ServiceTypeCommissionable || requestedType == ServiceAliasCommissionable {
+			ds.services = []discoveredService{{
+				InstanceName:  "MASH-SIM-COMM",
+				ServiceType:   discovery.ServiceTypeCommissionable,
+				Host:          "device.local",
+				Port:          8443,
+				Addresses:     []string{"192.168.1.10"},
+				Discriminator: 1234,
+				TXTRecords:    map[string]string{"brand": "Test", "model": "Sim"},
+			}}
+			return r.buildBrowseOutput(ds)
+		}
+	}
+
 	// Simulate two devices with the same discriminator.
 	retries := 0
 	if twoDevs, _ := state.Get(PrecondTwoDevicesSameDiscriminator); twoDevs == true {
