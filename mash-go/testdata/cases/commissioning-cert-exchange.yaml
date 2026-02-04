@@ -120,7 +120,6 @@ steps:
         - "{{ mdns_device_id }}"
     expect:
       all_equal: true
-      description: "Device ID must be consistent across cert, state, and mDNS"
 
 postconditions:
   - device_id_consistent: true
@@ -182,7 +181,6 @@ steps:
         - "{{ device_id_zone2 }}"
     expect:
       all_different: true
-      description: "Same device should have different IDs in different zones"
 
 postconditions:
   - device_in_two_zones: true
