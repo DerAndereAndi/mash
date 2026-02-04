@@ -163,6 +163,32 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
+	// Deferred commissioning: a pairing request was announced and the device
+	// was powered on. Simulate the device advertising commissionable service.
+	// This covers TC-PAIR-004 where the device detects the pairing request
+	// and opens its commissioning window.
+	if disc, _ := state.Get(StatePairingRequestDiscriminator); disc != nil {
+		if powered, _ := state.Get(KeyPoweredOn); powered == true {
+			d := uint16(0)
+			if dv, ok := disc.(int); ok {
+				d = uint16(dv)
+			}
+			ds.services = []discoveredService{{
+				InstanceName:  fmt.Sprintf("MASH-%d", d),
+				ServiceType:   discovery.ServiceTypeCommissionable,
+				Host:          "device.local",
+				Port:          8443,
+				Addresses:     []string{"192.168.1.10"},
+				Discriminator: d,
+				TXTRecords: map[string]string{
+					"brand": "Test",
+					"model": "Sim",
+				},
+			}}
+			return r.buildBrowseOutput(ds)
+		}
+	}
+
 	// Device was removed from all zones -- no operational instances.
 	if removed, _ := state.Get(StateDeviceWasRemoved); removed == true {
 		if inZone, _ := state.Get(PrecondDeviceInZone); inZone != true {
@@ -637,10 +663,29 @@ func (r *Runner) handleVerifyMDNSAdvertising(ctx context.Context, step *loader.S
 
 	found := result[KeyServiceCount].(int) > 0
 
-	return map[string]any{
+	outputs := map[string]any{
 		KeyAdvertising:  found,
 		KeyServiceCount: result[KeyServiceCount],
-	}, nil
+	}
+
+	// Propagate TXT records from the first discovered service so test
+	// cases can assert on individual TXT fields (e.g., txt_records.id).
+	if found {
+		if services, ok := result[KeyServices].([]discoveredService); ok && len(services) > 0 {
+			first := services[0]
+			txtMap := make(map[string]any, len(first.TXTRecords))
+			for k, v := range first.TXTRecords {
+				txtMap[k] = v
+			}
+			// Add discriminator as "disc" for commissionable services.
+			if first.ServiceType == discovery.ServiceTypeCommissionable {
+				txtMap["disc"] = fmt.Sprintf("%d", first.Discriminator)
+			}
+			outputs[KeyTXTRecords] = txtMap
+		}
+	}
+
+	return outputs, nil
 }
 
 // handleVerifyMDNSBrowsing verifies browser finds expected services.

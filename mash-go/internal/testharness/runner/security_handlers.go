@@ -126,6 +126,37 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 		}, nil
 	}
 
+	// If there's already an active commissioning connection, the device
+	// may accept the TLS handshake but immediately close the connection
+	// at the application layer ("commissioning already in progress").
+	// Probe with a short read to detect this closure.
+	secState.pool.mu.Lock()
+	hasExisting := false
+	for _, c := range secState.pool.connections {
+		if c.connected {
+			hasExisting = true
+			break
+		}
+	}
+	secState.pool.mu.Unlock()
+
+	if hasExisting {
+		_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		buf := make([]byte, 1)
+		_, readErr := conn.Read(buf)
+		_ = conn.SetReadDeadline(time.Time{}) // clear deadline
+		if readErr != nil {
+			// Device closed the connection (EOF, reset, or similar).
+			conn.Close()
+			return map[string]any{
+				KeyConnectionEstablished: false,
+				KeyConnectionRejected:    true,
+				KeyRejectionAtTLSLevel:   true,
+				KeyError:                 readErr.Error(),
+			}, nil
+		}
+	}
+
 	// Store in pool
 	secState.pool.mu.Lock()
 	newConn := &Connection{

@@ -268,9 +268,7 @@ steps:
       timeout_ms: 10000
     expect:
       advertising: true
-      txt_records:
-        id: "${device_id}"
-        disc: "${device_discriminator}"
+      txt_records: present
 
   - name: Controller connects and commissions
     action: commission

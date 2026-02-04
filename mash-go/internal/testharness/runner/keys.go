@@ -336,6 +336,7 @@ const (
 	KeyDeviceFound              = "device_found"
 	KeyServiceCount             = "service_count"
 	KeyServices                 = "services"
+	KeyTXTRecords               = "txt_records"
 	KeyDevicesFound             = "devices_found"
 	KeyControllersFound         = "controllers_found"
 	KeyCommissionersFound       = "commissioners_found"

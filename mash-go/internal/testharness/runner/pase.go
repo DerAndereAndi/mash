@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -53,6 +54,18 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// Interpolate parameters so ${setup_code} etc. resolve.
 	params := engine.InterpolateParams(step.Params, state)
 
+	// Apply zone_type from params if specified.
+	if zt, ok := params[KeyZoneType].(string); ok && zt != "" {
+		switch strings.ToUpper(zt) {
+		case "GRID":
+			r.commissionZoneType = cert.ZoneTypeGrid
+		case "LOCAL":
+			r.commissionZoneType = cert.ZoneTypeLocal
+		case "TEST":
+			r.commissionZoneType = cert.ZoneTypeTest
+		}
+	}
+
 	// Get setup code from params or config
 	setupCode, err := r.getSetupCode(params)
 	if err != nil {
@@ -62,6 +75,17 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// Get identities from params or use defaults
 	clientIdentity := r.getClientIdentity(params)
 	serverIdentity := r.getServerIdentity(params)
+
+	// If a previous commission completed on this connection, the device
+	// is now in operational mode and won't accept another PASE handshake.
+	// Disconnect so we create a fresh commissioning connection below.
+	if r.paseState != nil && r.paseState.completed && r.conn.connected {
+		_ = r.conn.Close()
+		r.conn.connected = false
+		// Brief wait for device to re-enter commissioning mode
+		// (test-mode auto-reentry takes ~500ms).
+		time.Sleep(600 * time.Millisecond)
+	}
 
 	// Establish commissioning connection if not already connected
 	// This ensures connection + PASE happen atomically
