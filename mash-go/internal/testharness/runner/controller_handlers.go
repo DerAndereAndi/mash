@@ -65,6 +65,8 @@ func (r *Runner) handleControllerAction(ctx context.Context, step *loader.Step, 
 	// Zone management sub-actions.
 	case "create_zone":
 		result, err = r.handleCreateZone(ctx, subStep, state)
+	case "delete_zone":
+		result, err = r.handleDeleteZone(ctx, subStep, state)
 	case "get_zone_ca_fingerprint":
 		result, err = r.handleGetZoneCAFingerprint(ctx, subStep, state)
 

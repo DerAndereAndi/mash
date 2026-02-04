@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -92,16 +93,18 @@ func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params 
 			return nil, fmt.Errorf("browse commissioners: %w", err)
 		}
 		for svc := range ch {
+			txt := map[string]string{
+				"ZN": svc.ZoneName,
+				"ZI": svc.ZoneID,
+				"DC": strconv.Itoa(int(svc.DeviceCount)),
+			}
 			services = append(services, discoveredService{
 				InstanceName: svc.InstanceName,
 				Host:         svc.Host,
 				Port:         svc.Port,
 				Addresses:    svc.Addresses,
 				ServiceType:  discovery.ServiceTypeCommissioner,
-				TXTRecords: map[string]string{
-					"ZN": svc.ZoneName,
-					"ZI": svc.ZoneID,
-				},
+				TXTRecords:   txt,
 			})
 		}
 
@@ -240,12 +243,14 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 			// Create one commissioner instance per zone.
 			for _, zoneID := range zs.zoneOrder {
 				zoneName := "MASH Zone"
+				deviceCount := 0
 				if z, ok := zs.zones[zoneID]; ok {
 					if z.ZoneName != "" {
 						zoneName = z.ZoneName
 					} else if z.ZoneType != "" {
 						zoneName = z.ZoneType
 					}
+					deviceCount = len(z.DeviceIDs)
 				}
 				ds.services = append(ds.services, discoveredService{
 					InstanceName: zoneName,
@@ -253,7 +258,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 					Host:         "controller.local",
 					Port:         8443,
 					Addresses:    []string{"192.168.1.1"},
-					TXTRecords:   map[string]string{"ZN": zoneName, "ZI": zoneID},
+					TXTRecords:   map[string]string{"ZN": zoneName, "ZI": zoneID, "DC": strconv.Itoa(deviceCount)},
 				})
 			}
 			if len(ds.services) == 0 {
@@ -264,7 +269,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 					Host:         "controller.local",
 					Port:         8443,
 					Addresses:    []string{"192.168.1.1"},
-					TXTRecords:   map[string]string{"ZN": "MASH Zone", "ZI": "sim-zone-id"},
+					TXTRecords:   map[string]string{"ZN": "MASH Zone", "ZI": "sim-zone-id", "DC": "0"},
 				}}
 			}
 			return r.buildBrowseOutput(ds)
@@ -390,8 +395,10 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		KeyServices:                 ds.services,
 		KeyDevicesFound:             devicesFound,
 		KeyControllersFound:         controllersFound,
+		KeyCommissionersFound:       controllersFound > 0,
 		KeyDevicesFoundMin:          devicesFound,
 		KeyControllersFoundMin:      controllersFound,
+		KeyCommissionerCountMin:     controllersFound,
 		KeyControllerFound:          controllersFound > 0,
 		KeyRetriesPerformedMin:      0,
 		KeyInstanceConflictResolved: !instanceConflict,
