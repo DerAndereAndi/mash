@@ -243,13 +243,23 @@ func (a *Attribute) setValueInternal(value any) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Check if value actually changed
-	if a.value != value {
+	// Check if value actually changed.
+	// Use safeNotEqual because some attribute types (arrays/maps) are
+	// not comparable with == and would panic.
+	if safeNotEqual(a.value, value) {
 		a.value = value
 		a.dirty = true
 	}
 
 	return nil
+}
+
+// safeNotEqual returns true if a != b, handling uncomparable types
+// (slices, maps) by treating them as always different.
+func safeNotEqual(a, b any) (result bool) {
+	result = true // assume different; overwritten if comparison succeeds
+	defer func() { recover() }()
+	return a != b
 }
 
 // validateValue checks if the value matches the expected type and range.

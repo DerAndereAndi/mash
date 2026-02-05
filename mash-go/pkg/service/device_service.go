@@ -149,8 +149,9 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 	svc.subscriptionManager = subscription.NewManagerWithConfig(subConfig)
 
 	// Initialize PASE attempt tracker (DEC-047)
-	// Skip in test mode to avoid blocking rapid commissioning cycles.
-	if config.PASEBackoffEnabled && !config.TestMode {
+	// Backoff only triggers on failed attempts (wrong setup code), so it
+	// does not slow down normal commissioning cycles that succeed immediately.
+	if config.PASEBackoffEnabled {
 		svc.paseTracker = NewPASEAttemptTracker(config.PASEBackoffTiers)
 	}
 
@@ -388,11 +389,19 @@ func (s *DeviceService) acceptLoop() {
 
 		// Transport-level connection cap (DEC-062): reject at TCP level before TLS.
 		// Both check and increment happen here in acceptLoop (single goroutine), so no TOCTOU race.
-		if s.activeConns.Load() >= int32(s.config.MaxZones+1) {
+		cap := int32(s.config.MaxZones + 1)
+		current := s.activeConns.Load()
+		if current >= cap {
+			s.debugLog("acceptLoop: connection rejected (cap)",
+				"activeConns", current, "cap", cap,
+				"remoteAddr", conn.RemoteAddr().String())
 			_ = conn.Close()
 			continue
 		}
 		s.activeConns.Add(1)
+		s.debugLog("acceptLoop: connection accepted",
+			"activeConns", current+1, "cap", cap,
+			"remoteAddr", conn.RemoteAddr().String())
 		s.connTracker.Add(conn)
 
 		go s.handleConnection(conn)
@@ -401,7 +410,27 @@ func (s *DeviceService) acceptLoop() {
 
 // handleConnection handles an incoming connection.
 func (s *DeviceService) handleConnection(conn net.Conn) {
-	defer s.activeConns.Add(-1)     // DEC-062: decrement on any exit path
+	// DEC-062: Track active pre-operational connections for the connection cap.
+	// The counter is decremented when this goroutine exits (safety net via defer)
+	// or earlier when the connection transitions to operational mode. Releasing
+	// the slot before the operational message loop ensures that long-lived
+	// operational connections don't consume cap slots intended for limiting
+	// new incoming connections.
+	activeConnReleased := false
+	remoteAddr := conn.RemoteAddr().String()
+	defer func() {
+		if !activeConnReleased {
+			newVal := s.activeConns.Add(-1)
+			s.debugLog("handleConnection: defer released activeConn",
+				"activeConns", newVal, "remoteAddr", remoteAddr)
+		}
+	}()
+	releaseActiveConn := func() {
+		if !activeConnReleased {
+			s.activeConns.Add(-1)
+			activeConnReleased = true
+		}
+	}
 	defer s.connTracker.Remove(conn) // DEC-064: safety net removal
 
 	// TLS handshake
@@ -439,24 +468,24 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 
 	if inCommissioningMode && !peerHasCert {
 		s.debugLog("handleConnection: -> commissioning handler")
-		s.handleCommissioningConnection(tlsConn)
+		s.handleCommissioningConnection(tlsConn, releaseActiveConn)
 	} else if !peerHasCert && s.isZonesFull() {
 		// Not in commissioning mode but zones are full: route through
 		// handleCommissioningConnection so acceptCommissioningConnection()
 		// sends a proper CommissioningError(ErrCodeBusy, RetryAfter=0).
 		s.debugLog("handleConnection: -> busy rejection (zones full, not commissioning)")
-		s.handleCommissioningConnection(tlsConn)
+		s.handleCommissioningConnection(tlsConn, releaseActiveConn)
 	} else {
 		// Operational mode - handle reconnection from known zones.
 		// Also used when in commissioning mode but the peer presented
 		// a certificate (indicating an operational reconnection).
 		s.debugLog("handleConnection: -> operational handler")
-		s.handleOperationalConnection(tlsConn)
+		s.handleOperationalConnection(tlsConn, releaseActiveConn)
 	}
 }
 
 // handleOperationalConnection handles a reconnection from a known zone.
-func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
+func (s *DeviceService) handleOperationalConnection(conn *tls.Conn, releaseActiveConn func()) {
 	s.mu.RLock()
 	// Find a known zone that isn't currently connected
 	var targetZoneID string
@@ -548,6 +577,11 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 	// Operational connections must not be reaped by the stale connection reaper.
 	s.connTracker.Remove(conn)
 
+	// DEC-062: Release the connection cap slot before the message loop.
+	// Operational connections are tracked by the zone system and should not
+	// consume slots intended for limiting new incoming connections.
+	releaseActiveConn()
+
 	// Start message loop - blocks until connection closes
 	s.runZoneMessageLoop(targetZoneID, framedConn, zoneSession)
 
@@ -562,10 +596,13 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn) {
 // DEC-061: The commissioning lock is NOT acquired until the first PASERequest
 // message arrives. This prevents idle TLS connections from blocking commissioning.
 // Flow: Create PASE -> WaitForPASERequest (no lock) -> Acquire lock -> CompleteHandshake -> Cert exchange -> Release lock.
-func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
+func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn, releaseActiveConn func()) {
+	s.debugLog("handleCommissioningConnection: entered", "remoteAddr", conn.RemoteAddr().String())
+
 	// Phase 1: Create PASE session and wait for first message (no lock held)
 	paseSession, err := commissioning.NewPASEServerSession(s.verifier, s.serverID)
 	if err != nil {
+		s.debugLog("handleCommissioningConnection: NewPASEServerSession failed", "error", err)
 		conn.Close()
 		return
 	}
@@ -586,9 +623,43 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 		return
 	}
 
+	// DEC-047: Apply PASE backoff delay before acquiring the commissioning lock.
+	// This must happen before acceptCommissioningConnection so that connections
+	// rejected by cooldown still experience the backoff delay.
+	if s.paseTracker != nil {
+		delay := s.paseTracker.GetDelay()
+		s.debugLog("handleCommissioningConnection: backoff check",
+			"delay", delay,
+			"failedAttempts", s.paseTracker.AttemptCount())
+		if delay > 0 {
+			s.debugLog("handleCommissioningConnection: applying backoff delay", "delay", delay)
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+				s.debugLog("handleCommissioningConnection: backoff delay completed")
+			case <-s.ctx.Done():
+				timer.Stop()
+				conn.Close()
+				return
+			}
+		}
+	}
+
 	// Phase 2: PASERequest received -- now acquire the commissioning lock
 	if ok, reason := s.acceptCommissioningConnection(); !ok {
-		s.debugLog("handleCommissioningConnection: rejected after PASERequest", "reason", reason)
+		// DEC-047: Count cooldown/lock rejections as failed attempts.
+		// The client sent a PASERequest, so this is a real attempt.
+		if s.paseTracker != nil {
+			s.paseTracker.RecordFailure()
+		}
+		s.debugLog("handleCommissioningConnection: rejected after PASERequest",
+			"reason", reason,
+			"failedAttempts", func() int {
+				if s.paseTracker != nil {
+					return s.paseTracker.AttemptCount()
+				}
+				return -1
+			}())
 		retryAfterMs := s.computeBusyRetryAfter()
 		_ = commissioning.WriteCommissioningError(conn, commissioning.ErrCodeBusy, reason, retryAfterMs)
 		conn.Close()
@@ -604,20 +675,6 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 		defer cancel()
 	}
 
-	// DEC-047: Apply PASE backoff delay before processing
-	if s.paseTracker != nil {
-		delay := s.paseTracker.GetDelay()
-		if delay > 0 {
-			s.debugLog("handleCommissioningConnection: applying backoff delay", "delay", delay)
-			select {
-			case <-time.After(delay):
-			case <-handshakeCtx.Done():
-				conn.Close()
-				return
-			}
-		}
-	}
-
 	// Phase 3: Complete PASE handshake (lock held)
 	sharedSecret, err := paseSession.CompleteHandshake(handshakeCtx, conn, req)
 	if err != nil {
@@ -625,6 +682,12 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 		// DEC-047: Record failure for backoff
 		if s.paseTracker != nil {
 			s.paseTracker.RecordFailure()
+			s.debugLog("handleCommissioningConnection: PASE failed, recorded failure",
+				"error", err,
+				"failedAttempts", s.paseTracker.AttemptCount())
+		} else {
+			s.debugLog("handleCommissioningConnection: PASE failed (no tracker)",
+				"error", err)
 		}
 		conn.Close()
 		return
@@ -759,6 +822,11 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn) {
 	// DEC-064: Remove from tracker before entering the operational message loop.
 	// Operational connections must not be reaped by the stale connection reaper.
 	s.connTracker.Remove(conn)
+
+	// DEC-062: Release the connection cap slot before the operational message loop.
+	// Commissioned connections are long-lived; holding the slot would starve
+	// subsequent commissioning attempts that need to reach the PASE handler.
+	releaseActiveConn()
 
 	// Start message loop - blocks until connection closes
 	s.runZoneMessageLoop(zoneID, framedConn, zoneSession)
@@ -2184,7 +2252,11 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 		return false, "commissioning already in progress"
 	}
 
-	// Check 2: Connection cooldown (starts at release, not acceptance)
+	// Check 2: Connection cooldown (starts at release, not acceptance).
+	// When PASE backoff is enabled, cooldown rejections are still counted as
+	// failed attempts (see RecordFailure in the rejection path), so the
+	// backoff tracker escalates through tiers even if cooldown blocks the
+	// attempt from reaching the PASE handler.
 	if s.config.ConnectionCooldown > 0 {
 		elapsed := time.Since(s.lastCommissioningAttempt)
 		if elapsed < s.config.ConnectionCooldown {

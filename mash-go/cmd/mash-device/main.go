@@ -230,6 +230,18 @@ func main() {
 		testControl = features.NewTestControl()
 		_ = testControl.SetTestEventTriggersEnabled(true)
 		device.RootEndpoint().AddFeature(testControl.Feature)
+
+		// Refresh DeviceInfo endpoints attribute so auto-PICS discovery
+		// sees TestControl (used to derive MASH.S.ZONE.MAX).
+		if feat, err := device.RootEndpoint().GetFeature(model.FeatureDeviceInfo); err == nil {
+			if attr, err := feat.GetAttribute(features.DeviceInfoAttrEndpoints); err == nil {
+				var epInfos []*model.EndpointInfo
+				for _, ep := range device.Endpoints() {
+					epInfos = append(epInfos, ep.Info())
+				}
+				_ = attr.SetValueInternal(epInfos)
+			}
+		}
 	}
 
 	// Set up protocol logging if requested
