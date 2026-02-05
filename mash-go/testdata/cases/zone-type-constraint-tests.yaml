@@ -41,17 +41,12 @@ steps:
       session_established: true
 
   - name: Verify zone was added
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zone_count: 1
       zones:
-        - id: "grid-zone-001"
-          type: "GRID"
+        - zone_id: "grid-zone-001"
+          zone_type: "GRID"
 
 postconditions:
   - device_has_one_zone: true
@@ -88,16 +83,11 @@ preconditions:
 
 steps:
   - name: Verify device has GRID zone
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zone_count: 1
       zones:
-        - type: "GRID"
+        - zone_type: "GRID"
 
   - name: Commission with LOCAL zone type
     action: commission
@@ -110,17 +100,12 @@ steps:
       session_established: true
 
   - name: Verify both zones exist
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zone_count: 2
       zones:
-        - type: "GRID"
-        - type: "LOCAL"
+        - zone_type: "GRID"
+        - zone_type: "LOCAL"
 
 postconditions:
   - device_has_two_zones: true
@@ -156,15 +141,10 @@ preconditions:
 
 steps:
   - name: Verify device has GRID zone
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zones:
-        - type: "GRID"
+        - zone_type: "GRID"
 
   - name: Attempt to commission another GRID zone
     action: commission
@@ -178,13 +158,8 @@ steps:
       error_message_contains: "zone type already exists"
 
   - name: Verify zone count unchanged
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zone_count: 1                    # Still just 1 zone
 
 postconditions:
@@ -224,17 +199,12 @@ preconditions:
 
 steps:
   - name: Verify device has both zone types
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zone_count: 2
       zones:
-        - type: "GRID"
-        - type: "LOCAL"
+        - zone_type: "GRID"
+        - zone_type: "LOCAL"
 
   - name: Verify device is NOT listening for pairing requests
     action: verify_mdns_not_browsing
@@ -339,16 +309,11 @@ steps:
       connection_success: true
 
   - name: Read zone list
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zone_count: 1
       zones:
-        - type: "GRID"
+        - zone_type: "GRID"
 
 postconditions:
   - zone_removed: true
@@ -385,15 +350,10 @@ preconditions:
 
 steps:
   - name: Verify device has LOCAL zone
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zones:
-        - type: "LOCAL"
+        - zone_type: "LOCAL"
 
   - name: Attempt to commission another LOCAL zone
     action: commission
@@ -407,13 +367,8 @@ steps:
       error_message_contains: "zone type already exists"
 
   - name: Verify zone count unchanged
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zone_count: 1
 
 postconditions:
@@ -476,17 +431,12 @@ steps:
       session_established: true
 
   - name: Verify new GRID zone is active
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zone_count: 1
       zones:
-        - id: "new-grid-zone"
-          type: "GRID"
+        - zone_id: "new-grid-zone"
+          zone_type: "GRID"
 
 postconditions:
   - old_zone_removed: true

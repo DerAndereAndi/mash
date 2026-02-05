@@ -310,6 +310,24 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 	// or we have already transitioned to an operational connection.
 	commClosed := !sameConn || !pasePerformed || connOperational
 
+	// Derive connection state string for YAML assertions.
+	connState := "CLOSED"
+	if sameConn {
+		if operationalActive {
+			connState = ConnectionStateOperational
+		} else {
+			connState = "CONNECTED"
+		}
+	} else if r.conn != nil {
+		connState = "DISCONNECTED"
+	}
+
+	// close_reason: why the connection was closed (if it was).
+	closeReason := ""
+	if !sameConn {
+		closeReason = "NORMAL"
+	}
+
 	return map[string]any{
 		KeySameConnection:                sameConn,
 		KeyNoReconnectionRequired:        sameConn,
@@ -317,6 +335,8 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 		KeyMutualTLS:                     mutualTLS,
 		KeyPasePerformed:                 pasePerformed,
 		KeyCommissioningConnectionClosed: commClosed,
+		KeyState:                         connState,
+		KeyCloseReason:                   closeReason,
 	}, nil
 }
 

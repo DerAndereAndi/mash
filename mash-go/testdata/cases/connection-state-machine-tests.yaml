@@ -249,6 +249,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 5000000
+        cause: 3
       disconnect_before_response: true
     expect:
       disconnect_occurred: true
@@ -268,6 +269,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 5000000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -413,6 +415,7 @@ steps:
           command: SetLimit
           args:
             consumptionLimit: 5000000
+            cause: 3
         - type: invoke
           endpoint: 1
           feature: EnergyControl
@@ -1234,6 +1237,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 5000000
+        cause: 3
     expect:
       queued: true
 

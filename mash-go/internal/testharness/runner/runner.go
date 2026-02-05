@@ -876,11 +876,13 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		KeyValue:             resp.Payload,
 		KeyStatus:            resp.Status,
 		KeyResponseMessageID: resp.MessageID,
+		KeyMessageIDsMatch:   resp.MessageID == req.MessageID,
 	}
 
-	// Add error code when the response indicates failure.
+	// Add error code and error_status when the response indicates failure.
 	if !resp.IsSuccess() {
 		outputs[KeyErrorCode] = resp.Status.String()
+		outputs[KeyErrorStatus] = resp.Status.String()
 	}
 
 	// When a specific attribute was requested, extract its value from the
@@ -987,11 +989,19 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 		return nil, err
 	}
 
-	return map[string]any{
+	outputs := map[string]any{
 		KeyWriteSuccess: resp.IsSuccess(),
 		KeyResponse:     resp,
 		KeyStatus:       resp.Status,
-	}, nil
+		KeyValue:        value,
+	}
+
+	// Add error code when the response indicates failure.
+	if !resp.IsSuccess() {
+		outputs[KeyErrorCode] = resp.Status.String()
+	}
+
+	return outputs, nil
 }
 
 // handleSubscribe sends a subscribe request.
@@ -1028,6 +1038,17 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 
 	resp, err := r.sendRequest(data, "subscribe")
 	if err != nil {
+		// Return output map (not Go error) for connection failures so
+		// YAML expectations can check tls_error and error fields.
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "EOF") || strings.Contains(errMsg, "closed") ||
+			strings.Contains(errMsg, "reset") || strings.Contains(errMsg, "tls") {
+			return map[string]any{
+				KeySubscribeSuccess: false,
+				KeyError:            errMsg,
+				KeyTLSError:         errMsg,
+			}, nil
+		}
 		return nil, err
 	}
 
@@ -1047,6 +1068,7 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 		KeySubscribeSuccess:       resp.IsSuccess(),
 		KeySubscriptionID:         subscriptionID,
 		KeySubscriptionIDReturned: subscriptionID != nil,
+		KeyPrimingReceived:        primingData != nil,
 		KeyStatus:                 resp.Status,
 	}, nil
 }
@@ -1133,14 +1155,32 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 
 	resp, err := r.sendRequest(data, "invoke")
 	if err != nil {
+		// Return output map (not Go error) for connection failures so
+		// YAML expectations can check error fields.
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "EOF") || strings.Contains(errMsg, "closed") ||
+			strings.Contains(errMsg, "reset") {
+			return map[string]any{
+				KeyInvokeSuccess: false,
+				KeyError:         errMsg,
+			}, nil
+		}
 		return nil, err
 	}
 
-	return map[string]any{
+	outputs := map[string]any{
 		KeyInvokeSuccess: resp.IsSuccess(),
 		KeyResult:        resp.Payload,
 		KeyStatus:        resp.Status,
-	}, nil
+	}
+
+	// Add error code when the response indicates failure.
+	if !resp.IsSuccess() {
+		outputs[KeyErrorCode] = resp.Status.String()
+		outputs[KeyErrorStatus] = resp.Status.String()
+	}
+
+	return outputs, nil
 }
 
 // Utility handlers

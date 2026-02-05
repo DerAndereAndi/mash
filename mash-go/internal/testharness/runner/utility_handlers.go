@@ -47,13 +47,13 @@ func (r *Runner) handleCompare(ctx context.Context, step *loader.Step, state *en
 		result = fmt.Sprintf("%v", left) == fmt.Sprintf("%v", right)
 	case "not_equal", "ne", "!=":
 		result = fmt.Sprintf("%v", left) != fmt.Sprintf("%v", right)
-	case "greater_than", "gt":
+	case "greater_than", "gt", ">":
 		result = leftF > rightF
-	case "less_than", "lt":
+	case "less_than", "lt", "<":
 		result = leftF < rightF
-	case "greater_equal", "gte":
+	case "greater_equal", "gte", ">=":
 		result = leftF >= rightF
-	case "less_equal", "lte":
+	case "less_equal", "lte", "<=":
 		result = leftF <= rightF
 	default:
 		return nil, fmt.Errorf("unknown comparison operator: %s", op)
@@ -202,6 +202,13 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 	minMs := int64(paramInt(params, "min_ms", 0))
 	maxMs := int64(paramInt(params, "max_ms", 0))
 
+	// Support min_duration as a Go duration string (e.g., "9s").
+	if md, ok := params["min_duration"].(string); ok && md != "" {
+		if d, err := time.ParseDuration(md); err == nil {
+			minMs = d.Milliseconds()
+		}
+	}
+
 	// Support max_duration as a Go duration string (e.g., "6s").
 	if md, ok := params["max_duration"].(string); ok && md != "" {
 		if d, err := time.ParseDuration(md); err == nil {
@@ -217,6 +224,7 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 	return map[string]any{
 		KeyWithinTolerance: withinTolerance,
 		KeyWithinLimit:     withinTolerance,
+		KeyWithinBounds:    withinTolerance,
 		KeyElapsedMs:       elapsedMs,
 	}, nil
 }

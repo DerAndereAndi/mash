@@ -32,6 +32,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 7000000  # 7 kW
+        cause: 3
     expect:
       invoke_success: true
       response_contains: effectiveConsumptionLimit
@@ -138,6 +139,7 @@ steps:
       command: SetSetpoint
       args:
         consumptionSetpoint: 5000000  # 5 kW target
+        cause: 3
     expect:
       invoke_success: true
 
@@ -344,6 +346,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 8000000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -356,6 +359,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 5000000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -424,6 +428,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 1000000
+        cause: 3
     expect:
       invoke_success: false
       error_code: OPT_OUT_ACTIVE
@@ -473,6 +478,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 10000000  # 10 kW
+        cause: 3                    # LOCAL_OPTIMIZATION
     expect:
       invoke_success: true
 
@@ -581,6 +587,7 @@ steps:
       args:
         consumptionLimit: 2000000
         duration: 3            # 3 seconds
+        cause: 3
     expect:
       invoke_success: true
 

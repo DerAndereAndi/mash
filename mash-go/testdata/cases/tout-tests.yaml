@@ -76,6 +76,8 @@ steps:
       feature: Signals
       command: SendPriceSignal
       args:
+        source: 3                  # LOCAL_EMS
+        startTime: 0               # current time
         slots:
           - duration: 3600
             price: 280000          # 0.28 EUR/kWh (peak)

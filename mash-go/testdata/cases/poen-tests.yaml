@@ -31,6 +31,8 @@ steps:
       feature: Signals
       command: SendConstraintSignal
       args:
+        source: 3                    # LOCAL_EMS
+        startTime: 0                 # current time
         slots:
           - duration: 3600
             consumptionMax: 10000000  # 10 kW max

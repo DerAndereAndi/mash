@@ -40,6 +40,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 5000000  # 5 kW
+        cause: 3
     expect:
       invoke_success: true
 
@@ -88,6 +89,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 1000000  # 1 kW (restrictive)
+        cause: 3
     expect:
       invoke_success: true
 
@@ -264,6 +266,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 5000000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -887,6 +890,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 10000000  # 10 kW (not limiting)
+        cause: 3
     expect:
       invoke_success: true
 
@@ -908,6 +912,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 100000   # 100 W (very restrictive)
+        cause: 3
     expect:
       invoke_success: true
 

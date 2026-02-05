@@ -134,13 +134,18 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
-		// Connection rejected - this is expected in some tests
-		return map[string]any{
+		out := map[string]any{
 			KeyConnectionEstablished: false,
 			KeyConnectionRejected:    true,
 			KeyRejectionAtTLSLevel:   true,
 			KeyError:                 err.Error(),
-		}, nil
+			KeyTLSError:              err.Error(),
+			KeyTLSHandshakeFailed:    true,
+		}
+		if alert := extractTLSAlert(err); alert != "" {
+			out[KeyTLSAlert] = alert
+		}
+		return out, nil
 	}
 
 	// Check for existing non-operational (commissioning) connections.
@@ -486,12 +491,17 @@ func (r *Runner) handleConnectOperational(ctx context.Context, step *loader.Step
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
-		return map[string]any{
+		out := map[string]any{
 			KeyConnectionEstablished: false,
 			KeyError:                 err.Error(),
 			KeyErrorCode:             classifyConnectError(err),
 			KeyTLSError:              err.Error(),
-		}, nil
+			KeyTLSHandshakeFailed:    true,
+		}
+		if alert := extractTLSAlert(err); alert != "" {
+			out[KeyTLSAlert] = alert
+		}
+		return out, nil
 	}
 
 	// Store connection with zone association

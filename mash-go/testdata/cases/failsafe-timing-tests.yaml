@@ -122,6 +122,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 10000000
+        cause: 3                   # LOCAL_OPTIMIZATION
     expect:
       invoke_success: true
 

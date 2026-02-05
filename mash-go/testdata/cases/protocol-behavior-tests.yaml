@@ -483,6 +483,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 5000000
+        cause: 3
       disconnect_before_response: true
     expect:
       result_status: UNKNOWN

@@ -34,6 +34,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 5000000  # 5 kW
+        cause: 3
     expect:
       invoke_success: true
 
@@ -93,6 +94,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 8000000  # 8 kW
+        cause: 3
     expect:
       invoke_success: true
 
@@ -105,6 +107,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 5000000  # 5 kW (more restrictive)
+        cause: 3
     expect:
       invoke_success: true
 
@@ -166,6 +169,7 @@ steps:
       command: SetLimit
       args:
         productionLimit: -10000000  # -10 kW
+        cause: 3
     expect:
       invoke_success: true
 
@@ -178,6 +182,7 @@ steps:
       command: SetLimit
       args:
         productionLimit: -3000000   # -3 kW (closer to zero = more restrictive)
+        cause: 3
     expect:
       invoke_success: true
 
@@ -229,6 +234,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 1000000   # +1 kW consumption
+        cause: 3
     expect:
       invoke_success: true
 
@@ -241,6 +247,7 @@ steps:
       command: SetLimit
       args:
         productionLimit: -5000000   # -5 kW production
+        cause: 3
     expect:
       invoke_success: true
 
@@ -291,6 +298,7 @@ steps:
       args:
         consumptionLimit: 3000000   # 3 kW
         duration: 5                  # 5 seconds
+        cause: 3
     expect:
       invoke_success: true
 
@@ -356,6 +364,7 @@ steps:
       command: SetSetpoint
       args:
         consumptionSetpoint: 7000000  # 7 kW
+        cause: 3
     expect:
       invoke_success: true
 
@@ -368,6 +377,7 @@ steps:
       command: SetSetpoint
       args:
         consumptionSetpoint: 4000000  # 4 kW
+        cause: 3
     expect:
       invoke_success: true
 
@@ -417,6 +427,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 8000000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -429,6 +440,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 3000000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -573,6 +585,7 @@ steps:
       args:
         consumptionLimit: 6000000
         duration: 3600         # 1 hour
+        cause: 3
     expect:
       invoke_success: true
 
@@ -644,16 +657,11 @@ preconditions:
 
 steps:
   - name: Verify device has GRID zone
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zone_count: 1
       zones:
-        - type: "GRID"
+        - zone_type: "GRID"
 
   - name: Connect LOCAL zone (should succeed - different type)
     action: commission
@@ -665,17 +673,12 @@ steps:
       commission_success: true
 
   - name: Verify 2 zones connected (max capacity)
-    action: read
-    params:
-      endpoint: 0
-      feature: DeviceInfo
-      attribute: zones
+    action: list_zones
     expect:
-      read_success: true
       zone_count: 2
       zones:
-        - type: "GRID"
-        - type: "LOCAL"
+        - zone_type: "GRID"
+        - zone_type: "LOCAL"
 
   - name: Attempt to connect another GRID zone (should fail - same type)
     action: commission

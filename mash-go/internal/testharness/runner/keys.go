@@ -275,7 +275,9 @@ const (
 	KeyAllResponsesReceived   = "all_responses_received"
 	KeyAllCorrelationsCorrect = "all_correlations_correct"
 	KeyErrorMessageContains   = "error_message_contains"
+	KeyMessageIDsMatch        = "message_ids_match"
 	KeyTimeoutAfter           = "timeout_after"
+	KeyResultStatus           = "result_status"
 )
 
 // Connection handler output keys.
@@ -307,6 +309,12 @@ const (
 	KeyReadCount               = "read_count"
 	KeyResults                 = "results"
 	KeyDisconnectedAfterInvoke = "disconnected_after_invoke"
+	KeyCloseAckReceived        = "close_ack_received"
+	KeyCloseAcknowledged       = "close_acknowledged"
+	KeyBothCloseReceived       = "both_close_received"
+	KeyCloseReason             = "close_reason"
+	KeyPingSent                = "ping_sent"
+	KeySequenceMatch           = "sequence_match"
 	KeySubscribeCount          = "subscribe_count"
 	KeySubscriptionCount       = "subscription_count"
 	KeySubscriptionIDReturned  = "subscription_id_returned"
@@ -318,6 +326,8 @@ const (
 	KeyNotificationData        = "notification_data"
 	KeyNotificationsReceived   = "notifications_received"
 	KeyAllReceived             = "all_received"
+	KeyPrimingReceived         = "priming_received"
+	KeySavePrimingValue        = "save_priming_value"
 )
 
 // Security handler output keys.
@@ -414,6 +424,14 @@ const (
 	KeyAllResultsInZone         = "all_results_in_zone"
 	KeyAAAACount                = "aaaa_count"
 	KeyAAAACountMin             = "aaaa_count_min"
+	KeyKeyExists                = "key_exists"
+	KeySRVHostnameValid         = "srv_hostname_valid"
+	KeyIPv6Valid                 = "ipv6_valid"
+	KeyHasGlobalOrULA           = "has_global_or_ula"
+	KeyHasLinkLocal             = "has_link_local"
+	KeyConnectedAddressType     = "connected_address_type"
+	KeyNewAddressAnnounced      = "new_address_announced"
+	KeyAddressesFromMultipleIFs = "addresses_from_multiple_interfaces"
 )
 
 // Renewal handler output keys.
@@ -557,6 +575,7 @@ const (
 	KeyTimestampMs      = "timestamp_ms"
 	KeyWithinTolerance  = "within_tolerance"
 	KeyWithinLimit      = "within_limit"
+	KeyWithinBounds     = "within_bounds"
 	KeyElapsedMs        = "elapsed_ms"
 	KeyStatusMatches    = "status_matches"
 	KeyPayloadMatches   = "payload_matches"

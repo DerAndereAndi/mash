@@ -32,6 +32,8 @@ steps:
       feature: Signals
       command: SendPriceSignal
       args:
+        source: 3                  # LOCAL_EMS
+        startTime: 0               # current time
         slots:
           - duration: 3600
             price: 300000          # 0.30 EUR/kWh (expensive)
@@ -108,6 +110,9 @@ steps:
       endpoint: 1
       feature: Plan
       command: AcceptPlan
+      args:
+        planId: 1
+        planVersion: 1
     expect:
       invoke_success: true
 
@@ -231,6 +236,8 @@ steps:
       feature: Signals
       command: SendPriceSignal
       args:
+        source: 3                  # LOCAL_EMS
+        startTime: 0               # current time
         slots:
           - duration: 3600
             price: 200000

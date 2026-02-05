@@ -675,6 +675,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 5000000
+        cause: 3                   # LOCAL_OPTIMIZATION
         # duration intentionally omitted
     expect:
       invoke_success: true
@@ -726,6 +727,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 0
+        cause: 3                   # LOCAL_OPTIMIZATION
     expect:
       invoke_success: true
 

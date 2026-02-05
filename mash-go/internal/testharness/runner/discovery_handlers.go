@@ -650,7 +650,8 @@ func (r *Runner) handleReadMDNSTXT(ctx context.Context, step *loader.Step, state
 
 	if svc == nil {
 		return map[string]any{
-			KeyTXTFound: false,
+			KeyTXTFound:  false,
+			KeyKeyExists: false,
 		}, nil
 	}
 
@@ -659,9 +660,28 @@ func (r *Runner) handleReadMDNSTXT(ctx context.Context, step *loader.Step, state
 		KeyInstanceName: svc.InstanceName,
 		KeyHost:         svc.Host,
 		KeyPort:         int(svc.Port),
+		KeyKeyExists:    len(svc.TXTRecords) > 0,
 	}
+
+	// Expose individual TXT records as "txt_<key>".
 	for k, v := range svc.TXTRecords {
 		outputs["txt_"+k] = v
+	}
+
+	// Add specific TXT field validation keys.
+	if _, ok := svc.TXTRecords["cat"]; ok {
+		outputs["txt_field_cat"] = svc.TXTRecords["cat"]
+	}
+	if serial, ok := svc.TXTRecords["serial"]; ok {
+		outputs["txt_field_serial"] = serial
+	}
+	if zi, ok := svc.TXTRecords["ZI"]; ok {
+		outputs["txt_field_ZI"] = zi
+		outputs[KeyTXTZILength] = len(zi)
+	}
+	if di, ok := svc.TXTRecords["DI"]; ok {
+		outputs["txt_field_DI"] = di
+		outputs["txt_DI_length"] = len(di)
 	}
 
 	return outputs, nil

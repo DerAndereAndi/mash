@@ -43,6 +43,15 @@ func TestHandleCompare(t *testing.T) {
 		{"== false", float64(5), float64(6), "==", false},
 		{"equal strings", "hello", "hello", "equal", true},
 		{"default op is equal", float64(7), float64(7), "", true},
+		{"> true", float64(10), float64(5), ">", true},
+		{"> false", float64(5), float64(10), ">", false},
+		{"< true", float64(5), float64(10), "<", true},
+		{"< false", float64(10), float64(5), "<", false},
+		{">= true", float64(5), float64(5), ">=", true},
+		{">= false", float64(4), float64(5), ">=", false},
+		{"<= true", float64(5), float64(5), "<=", true},
+		{"<= less", float64(3), float64(5), "<=", true},
+		{"<= false", float64(6), float64(5), "<=", false},
 	}
 
 	for _, tt := range tests {

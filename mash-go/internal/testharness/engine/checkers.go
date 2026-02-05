@@ -886,6 +886,120 @@ func CheckerValueType(key string, expected interface{}, state *ExecutionState) *
 	}
 }
 
+// CheckerKeysArePhases checks if a map's keys are valid AC phase identifiers.
+// Expects the "value" output to be a map with phase keys (A, B, C or similar).
+// Used in YAML as: keys_are_phases: true
+func CheckerKeysArePhases(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+	actual, exists := state.Get("value")
+	if !exists {
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: nil, Passed: false,
+			Message: fmt.Sprintf("output key %q not found", "value"),
+		}
+	}
+
+	validPhases := map[string]bool{"A": true, "B": true, "C": true, "a": true, "b": true, "c": true}
+
+	switch m := actual.(type) {
+	case map[string]interface{}:
+		if len(m) == 0 {
+			return &ExpectResult{
+				Key: key, Expected: expected, Actual: actual, Passed: false,
+				Message: "map is empty",
+			}
+		}
+		for k := range m {
+			if !validPhases[k] {
+				return &ExpectResult{
+					Key: key, Expected: expected, Actual: actual, Passed: false,
+					Message: fmt.Sprintf("key %q is not a valid phase identifier", k),
+				}
+			}
+		}
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: true,
+			Message: fmt.Sprintf("all %d keys are valid phase identifiers", len(m)),
+		}
+	case map[interface{}]interface{}:
+		if len(m) == 0 {
+			return &ExpectResult{
+				Key: key, Expected: expected, Actual: actual, Passed: false,
+				Message: "map is empty",
+			}
+		}
+		for k := range m {
+			ks := fmt.Sprintf("%v", k)
+			if !validPhases[ks] {
+				return &ExpectResult{
+					Key: key, Expected: expected, Actual: actual, Passed: false,
+					Message: fmt.Sprintf("key %q is not a valid phase identifier", ks),
+				}
+			}
+		}
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: true,
+			Message: fmt.Sprintf("all %d keys are valid phase identifiers", len(m)),
+		}
+	default:
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: false,
+			Message: fmt.Sprintf("value is not a map: %T", actual),
+		}
+	}
+}
+
+// CheckerArrayNotEmpty checks if the "value" output is a non-empty array.
+// Used in YAML as: array_not_empty: true
+func CheckerArrayNotEmpty(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+	actual, exists := state.Get("value")
+	if !exists {
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: nil, Passed: false,
+			Message: fmt.Sprintf("output key %q not found", "value"),
+		}
+	}
+
+	if arr, ok := actual.([]interface{}); ok {
+		passed := len(arr) > 0
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: passed,
+			Message: fmt.Sprintf("array length = %d", len(arr)),
+		}
+	}
+
+	return &ExpectResult{
+		Key: key, Expected: expected, Actual: actual, Passed: false,
+		Message: fmt.Sprintf("value is not an array: %T", actual),
+	}
+}
+
+// CheckerSavePrimingValue saves the priming data from a subscribe response
+// under a given name so later steps can compare against it.
+// Used in YAML as: save_priming_value: initial_limit
+func CheckerSavePrimingValue(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+	targetKey, ok := expected.(string)
+	if !ok {
+		return &ExpectResult{
+			Key: key, Expected: expected, Passed: false,
+			Message: fmt.Sprintf("save_priming_value target must be a string, got %T", expected),
+		}
+	}
+
+	primingData, exists := state.Get("_priming_data")
+	if !exists || primingData == nil {
+		return &ExpectResult{
+			Key: key, Expected: expected, Passed: false,
+			Message: "no priming data available from subscribe",
+		}
+	}
+
+	state.Set(targetKey, primingData)
+	return &ExpectResult{
+		Key: key, Expected: expected, Actual: primingData, Passed: true,
+		Message: fmt.Sprintf("saved priming data as %q", targetKey),
+	}
+}
+
 // RegisterEnhancedCheckers registers all enhanced checkers with the engine.
 func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameValueGreaterThan, CheckerValueGreaterThan)
@@ -919,4 +1033,7 @@ func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameResponseContains, CheckerResponseContains)
 	e.RegisterChecker(CheckerNameValueGTESaved, CheckerValueGTESaved)
 	e.RegisterChecker(CheckerNameValueMaxRef, CheckerValueMaxRef)
+	e.RegisterChecker(CheckerNameKeysArePhases, CheckerKeysArePhases)
+	e.RegisterChecker(CheckerNameArrayNotEmpty, CheckerArrayNotEmpty)
+	e.RegisterChecker(CheckerNameSavePrimingValue, CheckerSavePrimingValue)
 }

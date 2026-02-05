@@ -41,6 +41,75 @@ func TestResolveCommandName(t *testing.T) {
 	}
 }
 
+func TestResolveAttributeName(t *testing.T) {
+	tests := []struct {
+		name      string
+		feature   uint8
+		attr      string
+		wantID    uint16
+		wantFound bool
+	}{
+		// ChargingSession attributes
+		{"chargingsession state", uint8(model.FeatureChargingSession), "state", 1, true},
+		{"chargingsession evdemandmode", uint8(model.FeatureChargingSession), "evdemandmode", 40, true},
+		{"chargingsession startdelay", uint8(model.FeatureChargingSession), "startdelay", 80, true},
+		{"chargingsession evstateofcharge", uint8(model.FeatureChargingSession), "evstateofcharge", 30, true},
+		{"chargingsession sessionenergycharged", uint8(model.FeatureChargingSession), "sessionenergycharged", 10, true},
+		{"chargingsession evbatterycapacity", uint8(model.FeatureChargingSession), "evbatterycapacity", 31, true},
+		{"chargingsession evtargetstateofcharge", uint8(model.FeatureChargingSession), "evtargetstateofcharge", 33, true},
+		{"chargingsession chargingmode", uint8(model.FeatureChargingSession), "chargingmode", 70, true},
+		{"chargingsession evminenergyrequest", uint8(model.FeatureChargingSession), "evminenergyrequest", 41, true},
+		{"chargingsession global featuremap", uint8(model.FeatureChargingSession), "featuremap", 0xFFFC, true},
+
+		// Signals attributes
+		{"signals signalsource", uint8(model.FeatureSignals), "signalsource", 1, true},
+		{"signals priceslots", uint8(model.FeatureSignals), "priceslots", 10, true},
+		{"signals constraintslots", uint8(model.FeatureSignals), "constraintslots", 20, true},
+		{"signals forecastslots", uint8(model.FeatureSignals), "forecastslots", 30, true},
+		{"signals global featuremap", uint8(model.FeatureSignals), "featuremap", 0xFFFC, true},
+
+		// Plan attributes
+		{"plan planid", uint8(model.FeaturePlan), "planid", 1, true},
+		{"plan commitment", uint8(model.FeaturePlan), "commitment", 3, true},
+		{"plan starttime", uint8(model.FeaturePlan), "starttime", 10, true},
+		{"plan totalenergyplanned", uint8(model.FeaturePlan), "totalenergyplanned", 20, true},
+		{"plan slots", uint8(model.FeaturePlan), "slots", 40, true},
+		{"plan global featuremap", uint8(model.FeaturePlan), "featuremap", 0xFFFC, true},
+
+		// Tariff attributes
+		{"tariff tariffid", uint8(model.FeatureTariff), "tariffid", 1, true},
+		{"tariff currency", uint8(model.FeatureTariff), "currency", 2, true},
+		{"tariff priceunit", uint8(model.FeatureTariff), "priceunit", 3, true},
+		{"tariff tariffdescription", uint8(model.FeatureTariff), "tariffdescription", 4, true},
+		{"tariff global featuremap", uint8(model.FeatureTariff), "featuremap", 0xFFFC, true},
+
+		// DeviceInfo - verify usecases was added
+		{"deviceinfo usecases", uint8(model.FeatureDeviceInfo), "usecases", 21, true},
+		{"deviceinfo endpoints", uint8(model.FeatureDeviceInfo), "endpoints", 20, true},
+
+		// Existing features still work
+		{"measurement acactivepower", uint8(model.FeatureMeasurement), "acactivepower", 1, true},
+		{"energycontrol controlstate", uint8(model.FeatureEnergyControl), "controlstate", 2, true},
+		{"electrical phasecount", uint8(model.FeatureElectrical), "phasecount", 1, true},
+
+		// Negative cases
+		{"nonexistent attr", uint8(model.FeatureChargingSession), "nonexistent", 0, false},
+		{"unknown feature", 0xFF, "state", 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, found := inspect.ResolveAttributeName(tt.feature, tt.attr)
+			if found != tt.wantFound {
+				t.Errorf("ResolveAttributeName(0x%02x, %q) found = %v, want %v", tt.feature, tt.attr, found, tt.wantFound)
+			}
+			if id != tt.wantID {
+				t.Errorf("ResolveAttributeName(0x%02x, %q) = %d, want %d", tt.feature, tt.attr, id, tt.wantID)
+			}
+		})
+	}
+}
+
 func TestGetCommandName(t *testing.T) {
 	tests := []struct {
 		name     string

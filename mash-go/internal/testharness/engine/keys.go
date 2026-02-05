@@ -47,4 +47,7 @@ const (
 	CheckerNameResponseContains     = "response_contains"
 	CheckerNameValueGTESaved        = "value_gte_saved"
 	CheckerNameValueMaxRef          = "value_max_ref"
+	CheckerNameKeysArePhases        = "keys_are_phases"
+	CheckerNameArrayNotEmpty        = "array_not_empty"
+	CheckerNameSavePrimingValue     = "save_priming_value"
 )

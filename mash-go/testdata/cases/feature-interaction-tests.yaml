@@ -39,6 +39,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 7400000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -176,6 +177,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 7400000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -253,6 +255,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 11000000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -330,6 +333,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 7400000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -576,6 +580,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 6000000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -641,6 +646,7 @@ steps:
       command: SetSetpoint
       args:
         productionSetpoint: 5000000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -830,6 +836,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 7400000
+        cause: 3
     expect:
       invoke_success: true
 

@@ -43,6 +43,7 @@ steps:
       args:
         consumptionLimit: 5000000
         duration: 5
+        cause: 3
     expect:
       invoke_success: true
 
@@ -98,6 +99,7 @@ steps:
       args:
         consumptionLimit: 5000000
         duration: 3
+        cause: 3
     expect:
       invoke_success: true
 
@@ -151,6 +153,7 @@ steps:
       args:
         consumptionLimit: 5000000
         duration: 60
+        cause: 3
     expect:
       invoke_success: true
 
@@ -168,6 +171,7 @@ steps:
       args:
         consumptionLimit: 3000000
         duration: 5
+        cause: 3
     expect:
       invoke_success: true
 
@@ -231,6 +235,7 @@ steps:
       args:
         consumptionLimit: 5000000
         duration: 0
+        cause: 3
     expect:
       invoke_success: true
 
@@ -284,6 +289,7 @@ steps:
       args:
         consumptionLimit: 5000000
         duration: 300
+        cause: 3
     expect:
       invoke_success: true
 
@@ -349,6 +355,7 @@ steps:
       args:
         consumptionLimit: 5000000
         duration: 60
+        cause: 3
     expect:
       invoke_success: true
 
@@ -421,6 +428,7 @@ steps:
       args:
         consumptionLimit: 5000000
         duration: 60
+        cause: 3
     expect:
       invoke_success: true
 
@@ -434,6 +442,7 @@ steps:
       args:
         consumptionLimit: 3000000
         duration: 3
+        cause: 3
     expect:
       invoke_success: true
 
@@ -505,6 +514,7 @@ steps:
       args:
         consumptionLimit: 5000000
         duration: 10
+        cause: 3
     expect:
       invoke_success: true
 
@@ -560,6 +570,7 @@ steps:
       command: SetLimit
       args:
         consumptionLimit: 5000000
+        cause: 3
     expect:
       invoke_success: true
 
@@ -573,6 +584,7 @@ steps:
       args:
         consumptionLimit: 3000000
         duration: 3
+        cause: 3
     expect:
       invoke_success: true
 
@@ -649,6 +661,7 @@ steps:
       args:
         consumptionLimit: 5000000
         duration: 3
+        cause: 3
     expect:
       invoke_success: true
 

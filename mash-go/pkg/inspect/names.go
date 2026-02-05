@@ -137,7 +137,7 @@ func initNameTables() {
 		"nominalminpower":         features.ElectricalAttrNominalMinPower,
 		"maxcurrentperphase":      features.ElectricalAttrMaxCurrentPerPhase,
 		"mincurrentperphase":      features.ElectricalAttrMinCurrentPerPhase,
-		"supportedasymmetric":     features.ElectricalAttrSupportsAsymmetric,
+		"supportsasymmetric":      features.ElectricalAttrSupportsAsymmetric,
 		"energycapacity":          features.ElectricalAttrEnergyCapacity,
 	}
 	for k, v := range globalAttrs {
@@ -169,6 +169,8 @@ func initNameTables() {
 		"hardwareversion": features.DeviceInfoAttrHardwareVersion,
 		"specversion":     features.DeviceInfoAttrSpecVersion,
 		"endpoints":       features.DeviceInfoAttrEndpoints,
+		"endpointlist":    features.DeviceInfoAttrEndpoints,
+		"usecases":        features.DeviceInfoAttrUseCases,
 		"location":        features.DeviceInfoAttrLocation,
 		"label":           features.DeviceInfoAttrLabel,
 	}
@@ -185,6 +187,81 @@ func initNameTables() {
 		testControlAttrs[k] = v
 	}
 	attributeNames[uint8(model.FeatureTestControl)] = testControlAttrs
+
+	// ChargingSession attributes
+	chargingSessionAttrs := map[string]uint16{
+		"state":                           features.ChargingSessionAttrState,
+		"sessionstarttime":                features.ChargingSessionAttrSessionStartTime,
+		"sessionendtime":                  features.ChargingSessionAttrSessionEndTime,
+		"sessionenergycharged":            features.ChargingSessionAttrSessionEnergyCharged,
+		"sessionenergydischarged":         features.ChargingSessionAttrSessionEnergyDischarged,
+		"evidentifications":               features.ChargingSessionAttrEVIdentifications,
+		"evstateofcharge":                 features.ChargingSessionAttrEVStateOfCharge,
+		"evbatterycapacity":               features.ChargingSessionAttrEVBatteryCapacity,
+		"evminstateofcharge":              features.ChargingSessionAttrEVMinStateOfCharge,
+		"evtargetstateofcharge":           features.ChargingSessionAttrEVTargetStateOfCharge,
+		"evdemandmode":                    features.ChargingSessionAttrEVDemandMode,
+		"evminenergyrequest":              features.ChargingSessionAttrEVMinEnergyRequest,
+		"evmaxenergyrequest":              features.ChargingSessionAttrEVMaxEnergyRequest,
+		"evtargetenergyrequest":           features.ChargingSessionAttrEVTargetEnergyRequest,
+		"evdeparturetime":                 features.ChargingSessionAttrEVDepartureTime,
+		"evmindischargingrequest":         features.ChargingSessionAttrEVMinDischargingRequest,
+		"evmaxdischargingrequest":         features.ChargingSessionAttrEVMaxDischargingRequest,
+		"evdischargebelowtargetpermitted": features.ChargingSessionAttrEVDischargeBelowTargetPermitted,
+		"estimatedtimetominsoc":           features.ChargingSessionAttrEstimatedTimeToMinSoC,
+		"estimatedtimetotargetsoc":        features.ChargingSessionAttrEstimatedTimeToTargetSoC,
+		"estimatedtimetofullsoc":          features.ChargingSessionAttrEstimatedTimeToFullSoC,
+		"chargingmode":                    features.ChargingSessionAttrChargingMode,
+		"supportedchargingmodes":          features.ChargingSessionAttrSupportedChargingModes,
+		"surplusthreshold":                features.ChargingSessionAttrSurplusThreshold,
+		"startdelay":                      features.ChargingSessionAttrStartDelay,
+		"stopdelay":                       features.ChargingSessionAttrStopDelay,
+	}
+	for k, v := range globalAttrs {
+		chargingSessionAttrs[k] = v
+	}
+	attributeNames[uint8(model.FeatureChargingSession)] = chargingSessionAttrs
+
+	// Signals attributes
+	signalsAttrs := map[string]uint16{
+		"signalsource":    features.SignalsAttrSignalSource,
+		"starttime":       features.SignalsAttrStartTime,
+		"validuntil":      features.SignalsAttrValidUntil,
+		"priceslots":      features.SignalsAttrPriceSlots,
+		"constraintslots": features.SignalsAttrConstraintSlots,
+		"forecastslots":   features.SignalsAttrForecastSlots,
+	}
+	for k, v := range globalAttrs {
+		signalsAttrs[k] = v
+	}
+	attributeNames[uint8(model.FeatureSignals)] = signalsAttrs
+
+	// Plan attributes
+	planAttrs := map[string]uint16{
+		"planid":             features.PlanAttrPlanID,
+		"planversion":        features.PlanAttrPlanVersion,
+		"commitment":         features.PlanAttrCommitment,
+		"starttime":          features.PlanAttrStartTime,
+		"endtime":            features.PlanAttrEndTime,
+		"totalenergyplanned": features.PlanAttrTotalEnergyPlanned,
+		"slots":              features.PlanAttrSlots,
+	}
+	for k, v := range globalAttrs {
+		planAttrs[k] = v
+	}
+	attributeNames[uint8(model.FeaturePlan)] = planAttrs
+
+	// Tariff attributes
+	tariffAttrs := map[string]uint16{
+		"tariffid":          features.TariffAttrTariffID,
+		"currency":          features.TariffAttrCurrency,
+		"priceunit":         features.TariffAttrPriceUnit,
+		"tariffdescription": features.TariffAttrTariffDescription,
+	}
+	for k, v := range globalAttrs {
+		tariffAttrs[k] = v
+	}
+	attributeNames[uint8(model.FeatureTariff)] = tariffAttrs
 
 	// Command name tables
 	commandNames[uint8(model.FeatureTariff)] = map[string]uint8{

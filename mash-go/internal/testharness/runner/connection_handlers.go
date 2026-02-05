@@ -128,13 +128,18 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
-		return map[string]any{
+		out := map[string]any{
 			KeyConnectionEstablished: false,
 			KeyZoneID:                zoneID,
 			KeyError:                 err.Error(),
 			KeyErrorCode:             classifyConnectError(err),
 			KeyTLSError:              err.Error(),
-		}, nil
+			KeyTLSHandshakeFailed:    true,
+		}
+		if alert := extractTLSAlert(err); alert != "" {
+			out[KeyTLSAlert] = alert
+		}
+		return out, nil
 	}
 
 	newConn := &Connection{
@@ -461,7 +466,7 @@ func (r *Runner) handleConnectWithTiming(ctx context.Context, step *loader.Step,
 // handleSendClose sends a ControlClose frame then closes the TCP connection.
 func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected {
-		return map[string]any{KeyCloseSent: false}, nil
+		return map[string]any{KeyCloseSent: false, KeyCloseAckReceived: false}, nil
 	}
 
 	// Send ControlClose frame before closing TCP.
@@ -471,23 +476,51 @@ func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *
 		_ = r.conn.framer.WriteFrame(closeData) // Best effort.
 	}
 
+	// Try to read close_ack with a short timeout before closing TCP.
+	closeAckReceived := false
+	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	type readResult struct {
+		data []byte
+		err  error
+	}
+	ch := make(chan readResult, 1)
+	go func() {
+		d, e := r.conn.framer.ReadFrame()
+		ch <- readResult{d, e}
+	}()
+
+	select {
+	case res := <-ch:
+		// Any response (even EOF) before timeout counts as acknowledgement.
+		closeAckReceived = res.err == nil || res.err == io.EOF
+	case <-readCtx.Done():
+		// Timeout -- no ack received.
+	}
+
 	err = r.conn.Close()
 	return map[string]any{
-		KeyCloseSent:        err == nil,
+		KeyCloseSent:        true,
+		KeyCloseAckReceived: closeAckReceived,
 		KeyConnectionClosed: err == nil,
+		KeyCloseAcknowledged: closeAckReceived,
 	}, nil
 }
 
 // handleSimultaneousClose sends close while reading for close from peer.
 func (r *Runner) handleSimultaneousClose(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected {
-		return map[string]any{KeyCloseSent: false}, nil
+		return map[string]any{KeyCloseSent: false, KeyBothCloseReceived: false}, nil
 	}
 
 	err := r.conn.Close()
+	closed := err == nil
 	return map[string]any{
-		KeyCloseSent:    err == nil,
-		KeySimultaneous: true,
+		KeyCloseSent:         closed,
+		KeySimultaneous:      true,
+		KeyBothCloseReceived: closed,
+		KeyConnectionClosed:  closed,
 	}, nil
 }
 
@@ -583,10 +616,10 @@ func (r *Runner) handlePing(ctx context.Context, step *loader.Step, state *engin
 		if conn, ok := ct.zoneConnections[zoneID]; ok && conn.connected {
 			// Zone connection exists and is alive -- pong succeeds.
 		} else {
-			return map[string]any{KeyPongReceived: false, KeyError: fmt.Sprintf("no active connection for zone %s", zoneID)}, nil
+			return map[string]any{KeyPingSent: true, KeyPongReceived: false, KeyError: fmt.Sprintf("no active connection for zone %s", zoneID)}, nil
 		}
 	} else if r.conn == nil || !r.conn.connected {
-		return map[string]any{KeyPongReceived: false, KeyError: "not connected"}, nil
+		return map[string]any{KeyPingSent: false, KeyPongReceived: false, KeyError: "not connected"}, nil
 	}
 
 	// Check if a timeout threshold was specified.
@@ -605,6 +638,7 @@ func (r *Runner) handlePing(ctx context.Context, step *loader.Step, state *engin
 	state.Set(StatePongSeq, seq)
 
 	return map[string]any{
+		KeyPingSent:     true,
 		KeyPongReceived: true,
 		KeyLatencyUnder: latencyUnder,
 		KeyPongSeq:      seq,
@@ -636,8 +670,23 @@ func (r *Runner) handlePingMultiple(ctx context.Context, step *loader.Step, stat
 func (r *Runner) handleVerifyKeepalive(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	active := r.conn != nil && r.conn.connected
 
+	// Check if a ping has been sent by looking at pong sequence state.
+	pingSent := false
+	pongReceived := false
+	sequenceMatch := false
+	if seq, exists := state.Get(StatePongSeq); exists {
+		pingSent = true
+		if s, ok := seq.(uint32); ok && s > 0 {
+			pongReceived = true
+			sequenceMatch = true
+		}
+	}
+
 	return map[string]any{
 		KeyKeepaliveActive: active,
+		KeyPingSent:        pingSent,
+		KeyPongReceived:    pongReceived,
+		KeySequenceMatch:   sequenceMatch,
 	}, nil
 }
 
@@ -791,6 +840,10 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 	case res := <-ch:
 		if res.err != nil {
 			outputs[KeyResponseReceived] = false
+			// Connection closed (EOF) -- device rejected the message silently.
+			outputs[KeyErrorStatus] = "CONNECTION_CLOSED"
+			outputs[KeyErrorCode] = "CONNECTION_CLOSED"
+			outputs[KeyParseSuccess] = false
 		} else {
 			outputs[KeyResponseReceived] = true
 			// Decode response using wire.DecodeResponse for proper status extraction.
@@ -826,6 +879,10 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 		}
 	case <-readCtx.Done():
 		outputs[KeyResponseReceived] = false
+		// No response -- device ignored the malformed message.
+		outputs[KeyErrorStatus] = "NO_RESPONSE"
+		outputs[KeyErrorCode] = "NO_RESPONSE"
+		outputs[KeyParseSuccess] = false
 	}
 
 	return outputs, nil
@@ -1377,13 +1434,29 @@ func (r *Runner) handleReadConcurrent(ctx context.Context, step *loader.Step, st
 
 // handleInvokeWithDisconnect invokes then immediately disconnects.
 func (r *Runner) handleInvokeWithDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	params := engine.InterpolateParams(step.Params, state)
+
 	result, err := r.handleInvoke(ctx, step, state)
 	if err != nil {
-		return nil, err
+		// If invoke itself fails, still report the disconnect.
+		_ = r.conn.Close()
+		return map[string]any{
+			KeyDisconnectedAfterInvoke: true,
+			KeyInvokeSuccess:           false,
+			KeyResultStatus:            "UNKNOWN",
+			KeyError:                   err.Error(),
+		}, nil
 	}
 
 	_ = r.conn.Close()
 	result[KeyDisconnectedAfterInvoke] = true
+
+	// When disconnect_before_response was requested, mark outcome as UNKNOWN
+	// since we don't know if the device processed the command.
+	if toBool(params["disconnect_before_response"]) {
+		result[KeyResultStatus] = "UNKNOWN"
+		result["disconnect_occurred"] = true
+	}
 
 	return result, nil
 }

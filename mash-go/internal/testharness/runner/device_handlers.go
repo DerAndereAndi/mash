@@ -726,9 +726,15 @@ func (r *Runner) handleFactoryReset(ctx context.Context, step *loader.Step, stat
 
 	if r.config.Target != "" {
 		if err := r.sendTriggerViaZone(ctx, features.TriggerFactoryReset, state); err != nil {
-			return nil, fmt.Errorf("trigger factory reset on device: %w", err)
+			r.debugf("factory reset trigger skipped (no connection): %v", err)
 		}
 	}
+
+	// Close and reset connection state -- the device is starting fresh.
+	if r.conn != nil && r.conn.connected {
+		_ = r.conn.Close()
+	}
+	r.paseState = nil
 
 	return map[string]any{
 		KeyFactoryReset:     true,

@@ -290,7 +290,7 @@ func TestDeviceServiceZoneManagement(t *testing.T) {
 	}
 }
 
-func TestHandleZoneDisconnect_TestMode_RemovesZone(t *testing.T) {
+func TestHandleZoneDisconnect_TestMode_KeepsZone(t *testing.T) {
 	device := model.NewDevice("test-device", 0x1234, 0x5678)
 	config := validDeviceConfig()
 	config.TestMode = true
@@ -323,22 +323,27 @@ func TestHandleZoneDisconnect_TestMode_RemovesZone(t *testing.T) {
 		t.Fatal("zone should exist after connect")
 	}
 
-	// Disconnect -- in test mode this should also remove the zone
+	// Disconnect -- zone should remain (disconnected) so it can be reconnected.
+	// The test runner sends explicit RemoveZone to clean up between tests.
 	svc.HandleZoneDisconnect(zoneID)
 
 	// Give async event delivery a moment to settle
 	time.Sleep(50 * time.Millisecond)
 
-	// Zone should be fully removed, not just marked disconnected
-	if svc.GetZone(zoneID) != nil {
-		t.Error("zone should be removed after disconnect in test mode")
+	// Zone should still exist but be marked disconnected
+	zone := svc.GetZone(zoneID)
+	if zone == nil {
+		t.Fatal("zone should still exist after disconnect (marked disconnected, not removed)")
+	}
+	if zone.Connected {
+		t.Error("zone should be marked as disconnected")
 	}
 
-	if svc.ZoneCount() != 0 {
-		t.Errorf("expected 0 zones, got %d", svc.ZoneCount())
+	if svc.ZoneCount() != 1 {
+		t.Errorf("expected 1 zone (disconnected), got %d", svc.ZoneCount())
 	}
 
-	// Verify both EventDisconnected and EventZoneRemoved were emitted
+	// Verify EventDisconnected was emitted (but NOT EventZoneRemoved)
 	mu.Lock()
 	events := make([]Event, len(receivedEvents))
 	copy(events, receivedEvents)
@@ -357,8 +362,8 @@ func TestHandleZoneDisconnect_TestMode_RemovesZone(t *testing.T) {
 	if !sawDisconnected {
 		t.Error("expected EventDisconnected event")
 	}
-	if !sawRemoved {
-		t.Error("expected EventZoneRemoved event")
+	if sawRemoved {
+		t.Error("unexpected EventZoneRemoved event -- zone should persist for reconnection")
 	}
 }
 

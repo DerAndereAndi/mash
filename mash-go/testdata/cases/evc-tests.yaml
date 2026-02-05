@@ -280,10 +280,11 @@ steps:
       feature: EnergyControl
       command: SetCurrentLimits
       args:
-        currentLimits:
+        phases:
           A: 16000                 # 16A on phase A
           B: 10000                 # 10A on phase B
           C: 6000                  # 6A on phase C
+        direction: 0               # CONSUMPTION
         cause: 3                   # LOCAL_OPTIMIZATION
     expect:
       invoke_success: true
@@ -465,6 +466,8 @@ steps:
       feature: Signals
       command: SendPriceSignal
       args:
+        source: 3                  # LOCAL_EMS
+        startTime: 0               # current time
         slots:
           - duration: 3600
             price: 250000          # 0.25 EUR/kWh
@@ -538,6 +541,9 @@ steps:
       endpoint: 1
       feature: Plan
       command: AcceptPlan
+      args:
+        planId: 1
+        planVersion: 1
     expect:
       invoke_success: true
 
