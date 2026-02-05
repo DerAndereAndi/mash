@@ -758,8 +758,10 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn, releaseAct
 		return
 	}
 
-	// Register the zone connection
-	s.HandleZoneConnect(zoneID, zoneType)
+	// DEC-066: Register the zone as awaiting operational connection.
+	// The zone is marked as disconnected; the controller will reconnect
+	// with operational certificates via handleOperationalConnection.
+	s.RegisterZoneAwaitingConnection(zoneID, zoneType)
 
 	// Persist state immediately after commissioning
 	_ = s.SaveState()
@@ -786,55 +788,24 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn, releaseAct
 		}()
 	}
 
-	// Create zone session for this connection
-	zoneSession := NewZoneSession(zoneID, framedConn, s.device)
-	zoneSession.SetLogger(s.logger)
-	zoneSession.SetZoneType(zoneType)
+	// DEC-066: Close the commissioning connection. The controller must
+	// reconnect using operational TLS with the newly issued certificate.
+	// This provides a clean trust boundary between PASE and operational sessions.
+	s.debugLog("handleCommissioningConnection: closing commissioning connection (DEC-066)", "zoneID", zoneID)
 
-	// Set snapshot policy and protocol logger if configured
-	zoneSession.SetSnapshotPolicy(s.config.SnapshotPolicy)
-	if s.protocolLogger != nil {
-		connID := generateConnectionID()
-		zoneSession.SetProtocolLogger(s.protocolLogger, connID)
-	}
-
-	// Initialize renewal handler for certificate renewal support
-	zoneSession.InitializeRenewalHandler(s.buildDeviceIdentity())
-
-	// Set callback to persist certificate after renewal
-	zoneSession.SetOnCertRenewalSuccess(s.handleCertRenewalSuccess)
-
-	// Set callback to emit events when attributes are written
-	zoneSession.SetOnWrite(s.makeWriteCallback(zoneID))
-
-	// Set callback to emit events when commands are invoked
-	zoneSession.SetOnInvoke(s.makeInvokeCallback(zoneID))
-
-	// Store the session
-	s.mu.Lock()
-	s.zoneSessions[zoneID] = zoneSession
-	s.mu.Unlock()
-
-	// Release the commissioning connection guard before entering the
-	// message loop. The commissioning phase (PASE + cert exchange) is
-	// complete; holding the guard during the operational message loop
-	// would block all subsequent commissioning attempts for other zones.
+	// Release resources before closing
 	s.releaseCommissioningConnection()
-
-	// DEC-064: Remove from tracker before entering the operational message loop.
-	// Operational connections must not be reaped by the stale connection reaper.
 	s.connTracker.Remove(conn)
-
-	// DEC-062: Release the connection cap slot before the operational message loop.
-	// Commissioned connections are long-lived; holding the slot would starve
-	// subsequent commissioning attempts that need to reach the PASE handler.
 	releaseActiveConn()
 
-	// Start message loop - blocks until connection closes
-	s.runZoneMessageLoop(zoneID, framedConn, zoneSession)
+	// Close the commissioning connection
+	conn.Close()
 
-	// Clean up on disconnect
-	s.handleZoneSessionClose(zoneID)
+	// Emit commissioned event (zone added, but not yet connected via operational TLS)
+	s.emitEvent(Event{
+		Type:   EventCommissioned,
+		ZoneID: zoneID,
+	})
 }
 
 // performCertExchange handles the certificate exchange protocol with the controller.
@@ -1328,6 +1299,18 @@ func (s *DeviceService) GetAllZones() []*ConnectedZone {
 
 // HandleZoneConnect handles a new zone connection.
 func (s *DeviceService) HandleZoneConnect(zoneID string, zoneType cert.ZoneType) {
+	s.handleZoneConnectInternal(zoneID, zoneType, true)
+}
+
+// RegisterZoneAwaitingConnection registers a zone after commissioning but before
+// the operational TLS connection is established. The zone is marked as disconnected
+// so handleOperationalConnection can accept the reconnection. (DEC-066)
+func (s *DeviceService) RegisterZoneAwaitingConnection(zoneID string, zoneType cert.ZoneType) {
+	s.handleZoneConnectInternal(zoneID, zoneType, false)
+}
+
+// handleZoneConnectInternal is the shared implementation for zone registration.
+func (s *DeviceService) handleZoneConnectInternal(zoneID string, zoneType cert.ZoneType, connected bool) {
 	// Reject TEST zones unless in test mode (DEC-060).
 	if zoneType == cert.ZoneTypeTest && !s.config.TestMode {
 		s.debugLog("HandleZoneConnect: TEST zone rejected", "zoneID", zoneID)
@@ -1341,7 +1324,7 @@ func (s *DeviceService) HandleZoneConnect(zoneID string, zoneType cert.ZoneType)
 		ID:        zoneID,
 		Type:      zoneType,
 		Priority:  zoneType.Priority(),
-		Connected: true,
+		Connected: connected,
 		LastSeen:  time.Now(),
 	}
 	s.connectedZones[zoneID] = cz
@@ -1403,10 +1386,15 @@ func (s *DeviceService) HandleZoneConnect(zoneID string, zoneType cert.ZoneType)
 
 	s.mu.Unlock()
 
-	s.emitEvent(Event{
-		Type:   EventConnected,
-		ZoneID: zoneID,
-	})
+	// Only emit EventConnected when an actual connection is established.
+	// For RegisterZoneAwaitingConnection (DEC-066), connected=false and we
+	// emit EventCommissioned separately after the commissioning flow completes.
+	if connected {
+		s.emitEvent(Event{
+			Type:   EventConnected,
+			ZoneID: zoneID,
+		})
+	}
 
 	// Update pairing request listening state based on zone count
 	// Must be called after releasing lock since it acquires its own lock
@@ -1427,7 +1415,6 @@ func (s *DeviceService) HandleZoneDisconnect(zoneID string) {
 	// The failsafe timer was already started on connect
 	// It will trigger if no reconnect happens
 
-	testMode := s.config.TestMode
 	s.mu.Unlock()
 
 	s.emitEvent(Event{
@@ -1435,12 +1422,11 @@ func (s *DeviceService) HandleZoneDisconnect(zoneID string) {
 		ZoneID: zoneID,
 	})
 
-	// In test mode, immediately remove the zone so stale zones don't
-	// block commissioning in subsequent test runs.
-	if testMode {
-		s.debugLog("HandleZoneDisconnect: test-mode auto-remove triggered", "zoneID", zoneID)
-		_ = s.RemoveZone(zoneID)
-	}
+	// Note: In test mode we no longer auto-remove the zone on disconnect.
+	// The test runner sends explicit RemoveZone via closeActiveZoneConns
+	// between tests. Auto-removing here prevents reconnection scenarios
+	// (failsafe tests, reconnect tests) because handleOperationalConnection
+	// requires a disconnected-but-not-removed zone.
 }
 
 // handleFailsafe handles a failsafe timer trigger.
@@ -2274,9 +2260,24 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 	}
 
 	// Check 3: Is there a zone slot available?
+	// In test mode, first evict all disconnected zones to maximize available slots.
+	if s.config.TestMode {
+		if evicted := s.evictDisconnectedZone(); evicted != "" {
+			s.debugLog("acceptCommissioningConnection: evicted stale zone(s)", "firstZoneID", evicted)
+		}
+	}
+
 	s.mu.RLock()
 	zoneCount := len(s.connectedZones)
 	maxZones := s.config.MaxZones
+	// Log zone state for debugging
+	if zoneCount >= maxZones && s.config.TestMode {
+		zoneStates := make([]string, 0, len(s.connectedZones))
+		for zid, cz := range s.connectedZones {
+			zoneStates = append(zoneStates, fmt.Sprintf("%s(connected=%v)", zid, cz.Connected))
+		}
+		s.debugLog("acceptCommissioningConnection: zone slots full", "zones", zoneStates)
+	}
 	s.mu.RUnlock()
 
 	if zoneCount >= maxZones {
@@ -2294,6 +2295,32 @@ func (s *DeviceService) isZonesFull() bool {
 	defer s.mu.RUnlock()
 	return len(s.connectedZones) >= s.config.MaxZones
 }
+
+// evictDisconnectedZone removes ALL disconnected zones to free slots for
+// new commissioning. Returns the first evicted zone ID, or "" if none found.
+// Used in test mode only to recover from orphaned zones left by dead
+// runner connections that couldn't send explicit RemoveZone.
+func (s *DeviceService) evictDisconnectedZone() string {
+	s.mu.Lock()
+	var toEvict []string
+	for zoneID, cz := range s.connectedZones {
+		if !cz.Connected {
+			toEvict = append(toEvict, zoneID)
+		}
+	}
+	s.mu.Unlock()
+
+	var first string
+	for _, zoneID := range toEvict {
+		s.debugLog("evictDisconnectedZone: removing", "zoneID", zoneID)
+		_ = s.RemoveZone(zoneID)
+		if first == "" {
+			first = zoneID
+		}
+	}
+	return first
+}
+
 
 // releaseCommissioningConnection marks the commissioning connection as complete
 // and starts the cooldown timer. Call this when commissioning finishes (success

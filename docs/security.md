@@ -171,7 +171,9 @@ Controller                         Device
      │                               │
      │── Install Operational Cert ──►│  Signed by Zone CA
      │                               │
-     │── Commissioning Complete ────►│
+     │◄── Cert Install Ack ──────────┤
+     │                               │
+     │   [Connection Closed]         │  Device closes commissioning connection
      │                               │
 ```
 
@@ -190,11 +192,39 @@ SPAKE2+ provides password-authenticated key exchange:
 - Forward secrecy
 - Same as Matter (proven, audited)
 
+### 4.5 Commissioning Connection Lifecycle
+
+The commissioning connection uses a temporary TLS session that closes after certificate
+exchange completes. This provides a clean trust boundary between the password-authenticated
+commissioning phase and the certificate-authenticated operational phase:
+
+1. **Commissioning TLS:** Established with temporary/self-signed certificates
+2. **PASE handshake:** Authenticates both parties using the setup code
+3. **Certificate exchange:** Device receives operational certificate signed by Zone CA
+4. **Connection close:** Device closes the commissioning connection after sending CertInstallAck
+5. **Operational reconnect:** Controller initiates new TLS connection using operational certificates
+
+**Why close the commissioning connection?**
+
+- **Clean trust boundary:** Commissioning certificates are never used for operational traffic
+- **Multi-zone support:** Each zone has its own TLS connection with zone-specific certificates
+- **Certificate validation:** Operational TLS forces both sides to validate operational certificates
+- **Aligned with Matter:** Similar to Matter's PASE → CASE transition
+
+**Connection close timing:**
+
+After the device sends CertInstallAck (message type 33), it MUST close the commissioning
+TLS connection. The device then waits for the controller to initiate a new operational
+connection. If no operational connection arrives within 30 seconds, the device MAY remove
+the zone (as if the controller abandoned commissioning).
+
 ---
 
 ## 5. Operational Sessions (CASE-like)
 
-After commissioning, devices use mutual TLS authentication:
+After commissioning, the controller initiates a new TLS connection using operational
+certificates. This is conceptually similar to Matter's CASE (Certificate Authenticated
+Session Establishment):
 
 ```
 Controller                         Device
@@ -207,11 +237,12 @@ Controller                         Device
 
 ### 5.1 Session Establishment
 
-1. Controller initiates TLS connection
-2. Both sides present operational certificates
+1. Controller initiates **new** TLS connection to device (separate from commissioning connection)
+2. Both sides present operational certificates during TLS handshake
 3. Both verify certificates are signed by same Zone CA
-4. Session is established
-5. All subsequent communication is encrypted
+4. Device identifies zone by matching the certificate's issuer to a known Zone CA
+5. Operational session is established
+6. All subsequent communication is encrypted
 
 ### 5.2 Session Security Properties
 

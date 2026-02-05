@@ -3678,6 +3678,52 @@ Move the cooldown timestamp from connection acceptance to connection **release**
 
 ---
 
+### DEC-066: Close Commissioning Connection After Certificate Exchange
+
+**Date:** 2026-02-05
+**Status:** Accepted
+
+**Context:**
+The original MASH implementation kept the TLS connection open from PASE through certificate exchange and into operational messaging. This created several issues:
+
+1. **Trust boundary ambiguity:** The same TLS session used both commissioning (temporary) and operational (permanent) certificates
+2. **Multi-zone complexity:** Device could only present one TLS certificate; multi-zone required workarounds
+3. **Session state confusion:** Test harness had difficulty tracking whether connection was in commissioning or operational state
+4. **Stale connection detection:** When tests failed mid-flow, the device kept zones as "connected" even though the controller was gone
+
+**Decision:**
+The device MUST close the commissioning TLS connection after sending CertInstallAck (message type 33). The controller then initiates a fresh TLS connection using operational certificates:
+
+```
+PASE Connection (temporary):
+  1. TLS handshake (temporary/self-signed certs)
+  2. SPAKE2+ exchange (setup code authentication)
+  3. Certificate exchange (CertRequest → CSR → Install → Ack)
+  4. Device closes connection
+
+Operational Connection (persistent):
+  5. Controller initiates new TLS connection
+  6. Mutual authentication with operational certificates
+  7. Device matches certificate issuer to known Zone CA
+  8. Operational message loop begins
+```
+
+**Rationale:**
+- **Clean separation:** Commissioning credentials never touch operational traffic
+- **Matter alignment:** Similar to Matter's PASE → CASE transition model
+- **Simpler multi-zone:** Each zone has its own TLS connection with zone-specific certificate
+- **Better failure detection:** Fresh TLS handshake forces certificate validation; stale sessions don't accumulate
+
+**Implementation notes:**
+- Device closes connection immediately after sending CertInstallAck
+- Device waits up to 30 seconds for operational reconnect before removing zone
+- Controller must handle the closed connection and initiate reconnect
+- Test harness defaults to `transition_to_operational: true` behavior
+
+**Related:** DEC-047 (commissioning security), security.md Section 4.5
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)

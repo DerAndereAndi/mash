@@ -305,9 +305,10 @@ func TestReconnection_VerifiesZoneCA(t *testing.T) {
 	t.Skip("Zone CA verification test deferred - requires mutual TLS during reconnection")
 }
 
-// TestCommissioning_EventConnectedEmitted verifies EventConnected is emitted
-// after successful cert exchange (not just after PASE).
-func TestCommissioning_EventConnectedEmitted(t *testing.T) {
+// TestCommissioning_EventCommissionedEmitted verifies EventCommissioned is emitted
+// after successful cert exchange.
+// DEC-066: EventConnected is NOT emitted until operational reconnection.
+func TestCommissioning_EventCommissionedEmitted(t *testing.T) {
 	// Set up device service
 	device := model.NewDevice("test-device-event", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
@@ -330,12 +331,18 @@ func TestCommissioning_EventConnectedEmitted(t *testing.T) {
 	deviceSvc.SetAdvertiser(deviceAdvertiser)
 
 	// Track device-side events
+	// DEC-066: After commissioning, we expect EventCommissioned (not EventConnected).
+	// EventConnected is only emitted when operational TLS connection is established.
+	var deviceCommissionedEvent bool
 	var deviceConnectedEvent bool
 	var eventMu sync.Mutex
 	deviceSvc.OnEvent(func(e Event) {
 		eventMu.Lock()
 		defer eventMu.Unlock()
-		if e.Type == EventConnected {
+		switch e.Type {
+		case EventCommissioned:
+			deviceCommissionedEvent = true
+		case EventConnected:
 			deviceConnectedEvent = true
 		}
 	})
@@ -390,10 +397,31 @@ func TestCommissioning_EventConnectedEmitted(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	eventMu.Lock()
+	commissioned := deviceCommissionedEvent
 	connected := deviceConnectedEvent
 	eventMu.Unlock()
 
-	if !connected {
-		t.Error("Expected EventConnected to be emitted on device after successful commissioning")
+	// DEC-066: After commissioning, EventCommissioned should be emitted.
+	if !commissioned {
+		t.Error("Expected EventCommissioned to be emitted on device after successful commissioning")
 	}
+
+	// DEC-066: EventConnected should NOT be emitted after commissioning alone.
+	// It is only emitted when the controller reconnects with operational certificates.
+	if connected {
+		t.Error("EventConnected should NOT be emitted after commissioning (DEC-066); " +
+			"it should only be emitted after operational TLS reconnection")
+	}
+}
+
+// TestDEC066_OperationalReconnection verifies the full DEC-066 flow:
+// 1. Commission device (EventCommissioned emitted, connection closed)
+// 2. Controller reconnects with operational certificates
+// 3. EventConnected emitted on successful operational TLS establishment
+func TestDEC066_OperationalReconnection(t *testing.T) {
+	// This test requires adding a Reconnect(deviceID) method to ControllerService
+	// that reconnects to a device using its stored address and operational certificates.
+	// The current attemptReconnection method requires an OperationalService from mDNS.
+	// TODO: Implement ControllerService.Reconnect(ctx, deviceID) for DEC-066.
+	t.Skip("DEC-066 reconnection test deferred - requires ControllerService.Reconnect implementation")
 }
