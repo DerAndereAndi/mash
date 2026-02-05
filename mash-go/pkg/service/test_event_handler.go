@@ -71,6 +71,8 @@ func (s *DeviceService) dispatchTrigger(ctx context.Context, trigger uint64) err
 		return s.handleMeasurementTrigger(ctx, trigger)
 	case uint16(model.FeatureChargingSession):
 		return s.handleChargingSessionTrigger(ctx, trigger)
+	case uint16(model.FeatureEnergyControl):
+		return s.handleEnergyControlTrigger(ctx, trigger)
 	default:
 		return fmt.Errorf("unknown trigger domain: 0x%04x", domain)
 	}
@@ -89,6 +91,33 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 		s.debugLog("trigger: factory reset (removing all zones)")
 		for _, zoneID := range s.ListZoneIDs() {
 			_ = s.RemoveZone(zoneID)
+		}
+		return nil
+	case features.TriggerResetTestState:
+		s.debugLog("trigger: resetting test state to defaults")
+		for _, ep := range s.device.Endpoints() {
+			// Reset Status to STANDBY.
+			if f, err := ep.GetFeatureByID(uint8(model.FeatureStatus)); err == nil {
+				_ = f.SetAttributeInternal(features.StatusAttrOperatingState, uint8(features.OperatingStateStandby))
+				_ = f.SetAttributeInternal(features.StatusAttrFaultCode, uint32(0))
+				_ = f.SetAttributeInternal(features.StatusAttrFaultMessage, "")
+			}
+			// Reset Measurement to zero.
+			if f, err := ep.GetFeatureByID(uint8(model.FeatureMeasurement)); err == nil {
+				_ = f.SetAttributeInternal(features.MeasurementAttrACActivePower, int64(0))
+			}
+			// Reset ChargingSession to NOT_PLUGGED_IN.
+			if f, err := ep.GetFeatureByID(uint8(model.FeatureChargingSession)); err == nil {
+				_ = f.SetAttributeInternal(features.ChargingSessionAttrState,
+					uint8(features.ChargingStateNotPluggedIn))
+			}
+			// Reset EnergyControl to AUTONOMOUS/NONE.
+			if f, err := ep.GetFeatureByID(uint8(model.FeatureEnergyControl)); err == nil {
+				_ = f.SetAttributeInternal(features.EnergyControlAttrControlState,
+					uint8(features.ControlStateAutonomous))
+				_ = f.SetAttributeInternal(features.EnergyControlAttrProcessState,
+					uint8(features.ProcessStateNone))
+			}
 		}
 		return nil
 	default:
@@ -164,25 +193,98 @@ func (s *DeviceService) handleMeasurementTrigger(_ context.Context, trigger uint
 // handleChargingSessionTrigger handles ChargingSession-domain triggers.
 func (s *DeviceService) handleChargingSessionTrigger(_ context.Context, trigger uint64) error {
 	for _, ep := range s.device.Endpoints() {
-		_, err := ep.GetFeatureByID(uint8(model.FeatureChargingSession))
+		feat, err := ep.GetFeatureByID(uint8(model.FeatureChargingSession))
 		if err != nil {
 			continue
 		}
 
-		// ChargingSession triggers are placeholders for now.
 		switch trigger {
 		case features.TriggerEVPlugIn:
 			s.debugLog("trigger: EV plug in", "endpoint", ep.ID())
-			return nil
+			_ = feat.SetAttributeInternal(features.ChargingSessionAttrSessionStartTime,
+				uint64(time.Now().Unix()))
+			return feat.SetAttributeInternal(features.ChargingSessionAttrState,
+				uint8(features.ChargingStatePluggedInNoDemand))
 		case features.TriggerEVUnplug:
 			s.debugLog("trigger: EV unplug", "endpoint", ep.ID())
-			return nil
+			_ = feat.SetAttributeInternal(features.ChargingSessionAttrSessionEndTime,
+				uint64(time.Now().Unix()))
+			return feat.SetAttributeInternal(features.ChargingSessionAttrState,
+				uint8(features.ChargingStateNotPluggedIn))
 		case features.TriggerEVRequestCharge:
 			s.debugLog("trigger: EV request charge", "endpoint", ep.ID())
-			return nil
+			return feat.SetAttributeInternal(features.ChargingSessionAttrState,
+				uint8(features.ChargingStatePluggedInDemand))
 		default:
 			return fmt.Errorf("unknown charging session trigger: 0x%016x", trigger)
 		}
 	}
 	return fmt.Errorf("no ChargingSession feature found on any endpoint")
+}
+
+// handleEnergyControlTrigger handles EnergyControl-domain triggers.
+func (s *DeviceService) handleEnergyControlTrigger(_ context.Context, trigger uint64) error {
+	for _, ep := range s.device.Endpoints() {
+		feat, err := ep.GetFeatureByID(uint8(model.FeatureEnergyControl))
+		if err != nil {
+			continue
+		}
+
+		switch trigger {
+		// ControlState triggers.
+		case features.TriggerControlStateAutonomous:
+			s.debugLog("trigger: setting control state AUTONOMOUS", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrControlState,
+				uint8(features.ControlStateAutonomous))
+		case features.TriggerControlStateControlled:
+			s.debugLog("trigger: setting control state CONTROLLED", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrControlState,
+				uint8(features.ControlStateControlled))
+		case features.TriggerControlStateLimited:
+			s.debugLog("trigger: setting control state LIMITED", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrControlState,
+				uint8(features.ControlStateLimited))
+		case features.TriggerControlStateFailsafe:
+			s.debugLog("trigger: setting control state FAILSAFE", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrControlState,
+				uint8(features.ControlStateFailsafe))
+		case features.TriggerControlStateOverride:
+			s.debugLog("trigger: setting control state OVERRIDE", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrControlState,
+				uint8(features.ControlStateOverride))
+
+		// ProcessState triggers.
+		case features.TriggerProcessStateNone:
+			s.debugLog("trigger: setting process state NONE", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrProcessState,
+				uint8(features.ProcessStateNone))
+		case features.TriggerProcessStateAvailable:
+			s.debugLog("trigger: setting process state AVAILABLE", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrProcessState,
+				uint8(features.ProcessStateAvailable))
+		case features.TriggerProcessStateScheduled:
+			s.debugLog("trigger: setting process state SCHEDULED", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrProcessState,
+				uint8(features.ProcessStateScheduled))
+		case features.TriggerProcessStateRunning:
+			s.debugLog("trigger: setting process state RUNNING", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrProcessState,
+				uint8(features.ProcessStateRunning))
+		case features.TriggerProcessStatePaused:
+			s.debugLog("trigger: setting process state PAUSED", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrProcessState,
+				uint8(features.ProcessStatePaused))
+		case features.TriggerProcessStateCompleted:
+			s.debugLog("trigger: setting process state COMPLETED", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrProcessState,
+				uint8(features.ProcessStateCompleted))
+		case features.TriggerProcessStateAborted:
+			s.debugLog("trigger: setting process state ABORTED", "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.EnergyControlAttrProcessState,
+				uint8(features.ProcessStateAborted))
+		default:
+			return fmt.Errorf("unknown energy control trigger: 0x%016x", trigger)
+		}
+	}
+	return fmt.Errorf("no EnergyControl feature found on any endpoint")
 }

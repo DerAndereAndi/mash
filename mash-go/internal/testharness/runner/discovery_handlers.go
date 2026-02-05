@@ -530,6 +530,16 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		}
 	}
 
+	// Count IPv6 (AAAA) addresses.
+	aaaaCount := 0
+	for _, svc := range ds.services {
+		for _, addr := range svc.Addresses {
+			if strings.Contains(addr, ":") {
+				aaaaCount++
+			}
+		}
+	}
+
 	// Check if all results belong to the same zone (for zone_id_filter assertion).
 	allInZone := true
 	zoneIDs := make(map[string]bool)
@@ -557,6 +567,8 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		KeyInstanceConflictResolved: !instanceConflict,
 		KeyInstancesForDevice:       len(ds.services),
 		KeyAllResultsInZone:         allInZone,
+		KeyAAAACount:                aaaaCount,
+		KeyAAAACountMin:             aaaaCount,
 	}
 
 	// Add first-service details for easy assertion.

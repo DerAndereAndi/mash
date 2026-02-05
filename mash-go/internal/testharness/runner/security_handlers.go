@@ -490,6 +490,7 @@ func (r *Runner) handleConnectOperational(ctx context.Context, step *loader.Step
 			KeyConnectionEstablished: false,
 			KeyError:                 err.Error(),
 			KeyErrorCode:             classifyConnectError(err),
+			KeyTLSError:              err.Error(),
 		}, nil
 	}
 
@@ -529,13 +530,15 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 		triggerResult, err := r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
 		if err == nil {
 			triggerResult[KeyCommissioningModeEntered] = true
+			triggerResult["commissioning_mode_entered"] = true
 			return triggerResult, nil
 		}
 		// Fall through to stub if trigger fails.
 	}
 
 	return map[string]any{
-		KeyCommissioningModeEntered: true,
+		KeyCommissioningModeEntered:  true,
+		"commissioning_mode_entered": true,
 	}, nil
 }
 

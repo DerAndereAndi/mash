@@ -68,6 +68,10 @@ type Runner struct {
 	// commissionZoneType overrides the zone type used when generating the
 	// Zone CA during performCertExchange. Defaults to ZoneTypeLocal if zero.
 	commissionZoneType cert.ZoneType
+
+	// deviceStateModified is set when a trigger modifies device state.
+	// Used by setupPreconditions to send TriggerResetTestState between tests.
+	deviceStateModified bool
 }
 
 // Config configures the test runner.
@@ -747,7 +751,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 // handleDisconnect closes the connection.
 func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected {
-		return map[string]any{KeyDisconnected: true}, nil
+		return map[string]any{KeyDisconnected: true, KeyConnectionClosed: true}, nil
 	}
 
 	err := r.conn.Close()
@@ -755,7 +759,7 @@ func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state 
 		return nil, fmt.Errorf("failed to disconnect: %w", err)
 	}
 
-	return map[string]any{KeyDisconnected: true}, nil
+	return map[string]any{KeyDisconnected: true, KeyConnectionClosed: true}, nil
 }
 
 // sendRequest sends an encoded request and reads the decoded response.

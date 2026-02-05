@@ -2,8 +2,10 @@ package runner
 
 import (
 	"context"
+	"net"
 	"testing"
 
+	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 )
 
@@ -312,5 +314,211 @@ func TestHandleConfigureDevice(t *testing.T) {
 	}
 	if out[KeyConfigurationSuccess] != true {
 		t.Errorf("expected configuration_success=true, got %v", out[KeyConfigurationSuccess])
+	}
+}
+
+// newTriggerTestRunner creates a Runner with a net.Pipe-backed connection
+// and config.Target set, for testing handlers that call sendTriggerViaZone.
+func newTriggerTestRunner() (*Runner, *engine.ExecutionState, net.Conn) {
+	r, server := newPipedRunner()
+	r.config.Target = "localhost:8443"
+	r.config.EnableKey = "0000000000000000"
+	state := newTestState()
+	return r, state, server
+}
+
+func TestHandleTriggerFault_SendsTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{
+		"fault_code":    42,
+		"fault_message": "test fault",
+	}}
+	out, err := r.handleTriggerFault(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["fault_triggered"] != true {
+		t.Error("expected fault_triggered=true")
+	}
+}
+
+func TestHandleClearFault_SendsTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+
+	// First add a fault to clear.
+	ds := getDeviceState(state)
+	ds.faults = append(ds.faults, faultEntry{Code: 42, Message: "test"})
+	ds.operatingState = OperatingStateFault
+
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{
+		"fault_code": 42,
+	}}
+	out, err := r.handleClearFault(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["fault_cleared"] != true {
+		t.Error("expected fault_cleared=true")
+	}
+}
+
+func TestHandleEVConnect_SendsTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleEVConnect(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyEVConnected] != true {
+		t.Error("expected ev_connected=true")
+	}
+}
+
+func TestHandleEVDisconnect_SendsTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleEVDisconnect(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyEVDisconnected] != true {
+		t.Error("expected ev_disconnected=true")
+	}
+}
+
+func TestHandleEVRequestsCharge_SendsTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleEVRequestsCharge(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["charge_requested"] != true {
+		t.Error("expected charge_requested=true")
+	}
+}
+
+func TestHandlePlugInCable_SendsTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handlePlugInCable(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["cable_plugged_in"] != true {
+		t.Error("expected cable_plugged_in=true")
+	}
+}
+
+func TestHandleUnplugCable_SendsTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleUnplugCable(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["cable_unplugged"] != true {
+		t.Error("expected cable_unplugged=true")
+	}
+}
+
+func TestHandleStartOperation_SendsTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleStartOperation(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["operation_started"] != true {
+		t.Error("expected operation_started=true")
+	}
+}
+
+func TestHandleFactoryReset_SendsTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleFactoryReset(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["factory_reset"] != true {
+		t.Error("expected factory_reset=true")
+	}
+}
+
+func TestHandleMakeProcessAvailable_SendsTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleMakeProcessAvailable(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[StateProcessState] != ProcessStateAvailable {
+		t.Errorf("expected process_state=AVAILABLE, got %v", out[StateProcessState])
+	}
+}
+
+func TestHandleUserOverride_SendsTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleUserOverride(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[StateControlState] != ControlStateOverride {
+		t.Errorf("expected control_state=OVERRIDE, got %v", out[StateControlState])
+	}
+}
+
+func TestDeviceStateModified_SetByTrigger(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	if r.deviceStateModified {
+		t.Fatal("expected deviceStateModified=false initially")
+	}
+
+	step := &loader.Step{Params: map[string]any{}}
+	_, err := r.handleMakeProcessAvailable(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !r.deviceStateModified {
+		t.Error("expected deviceStateModified=true after trigger send")
 	}
 }

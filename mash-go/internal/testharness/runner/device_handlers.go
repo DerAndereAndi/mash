@@ -340,6 +340,9 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 	// Try main connection first.
 	if r.conn != nil && r.conn.connected && r.conn.framer != nil {
 		_, err := r.sendTrigger(ctx, trigger, state)
+		if err == nil {
+			r.deviceStateModified = true
+		}
 		return err
 	}
 
@@ -410,6 +413,7 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 			return fmt.Errorf("trigger failed with status %d", resp.Status)
 		}
 
+		r.deviceStateModified = true
 		return nil
 	}
 
@@ -450,6 +454,12 @@ func (r *Runner) handleTriggerFault(ctx context.Context, step *loader.Step, stat
 
 	state.Set(StateActiveFaultCount, len(ds.faults))
 
+	if r.config.Target != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerFault, state); err != nil {
+			return nil, fmt.Errorf("trigger fault on device: %w", err)
+		}
+	}
+
 	return map[string]any{
 		KeyFaultTriggered:    true,
 		KeyFaultCode:         code,
@@ -478,6 +488,12 @@ func (r *Runner) handleClearFault(ctx context.Context, step *loader.Step, state 
 	}
 
 	state.Set(StateActiveFaultCount, len(ds.faults))
+
+	if r.config.Target != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerClearFault, state); err != nil {
+			return nil, fmt.Errorf("trigger clear fault on device: %w", err)
+		}
+	}
 
 	return map[string]any{
 		KeyFaultCleared:       found,
@@ -569,6 +585,12 @@ func (r *Runner) handleMakeProcessAvailable(ctx context.Context, step *loader.St
 	ds.processState = ProcessStateAvailable
 	state.Set(StateProcessState, ProcessStateAvailable)
 
+	if r.config.Target != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerProcessStateAvailable, state); err != nil {
+			return nil, fmt.Errorf("trigger make process available on device: %w", err)
+		}
+	}
+
 	return map[string]any{StateProcessState: ProcessStateAvailable}, nil
 }
 
@@ -579,6 +601,12 @@ func (r *Runner) handleStartOperation(ctx context.Context, step *loader.Step, st
 	ds.operatingState = OperatingStateRunning
 	state.Set(StateProcessState, ProcessStateRunning)
 	state.Set(StateOperatingState, OperatingStateRunning)
+
+	if r.config.Target != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerSetRunning, state); err != nil {
+			return nil, fmt.Errorf("trigger start operation on device: %w", err)
+		}
+	}
 
 	return map[string]any{
 		StateProcessState:  ProcessStateRunning,
@@ -593,6 +621,12 @@ func (r *Runner) handleEVConnect(ctx context.Context, step *loader.Step, state *
 	ds.cablePluggedIn = true
 	state.Set(StateEVConnected, true)
 
+	if r.config.Target != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerEVPlugIn, state); err != nil {
+			return nil, fmt.Errorf("trigger EV connect on device: %w", err)
+		}
+	}
+
 	return map[string]any{KeyEVConnected: true}, nil
 }
 
@@ -603,6 +637,12 @@ func (r *Runner) handleEVDisconnect(ctx context.Context, step *loader.Step, stat
 	ds.cablePluggedIn = false
 	state.Set(StateEVConnected, false)
 
+	if r.config.Target != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerEVUnplug, state); err != nil {
+			return nil, fmt.Errorf("trigger EV disconnect on device: %w", err)
+		}
+	}
+
 	return map[string]any{KeyEVDisconnected: true}, nil
 }
 
@@ -612,6 +652,12 @@ func (r *Runner) handleEVRequestsCharge(ctx context.Context, step *loader.Step, 
 	ds.evConnected = true
 	state.Set(StateEVChargeRequested, true)
 
+	if r.config.Target != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerEVRequestCharge, state); err != nil {
+			return nil, fmt.Errorf("trigger EV request charge on device: %w", err)
+		}
+	}
+
 	return map[string]any{KeyChargeRequested: true}, nil
 }
 
@@ -620,6 +666,12 @@ func (r *Runner) handlePlugInCable(ctx context.Context, step *loader.Step, state
 	ds := getDeviceState(state)
 	ds.cablePluggedIn = true
 	state.Set(StateCablePluggedIn, true)
+
+	if r.config.Target != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerEVPlugIn, state); err != nil {
+			return nil, fmt.Errorf("trigger plug in cable on device: %w", err)
+		}
+	}
 
 	return map[string]any{KeyCablePluggedIn: true}, nil
 }
@@ -632,6 +684,12 @@ func (r *Runner) handleUnplugCable(ctx context.Context, step *loader.Step, state
 	state.Set(StateCablePluggedIn, false)
 	state.Set(StateEVConnected, false)
 
+	if r.config.Target != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerEVUnplug, state); err != nil {
+			return nil, fmt.Errorf("trigger unplug cable on device: %w", err)
+		}
+	}
+
 	return map[string]any{KeyCableUnplugged: true}, nil
 }
 
@@ -640,6 +698,12 @@ func (r *Runner) handleUserOverride(ctx context.Context, step *loader.Step, stat
 	ds := getDeviceState(state)
 	ds.controlState = ControlStateOverride
 	state.Set(StateControlState, ControlStateOverride)
+
+	if r.config.Target != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerControlStateOverride, state); err != nil {
+			return nil, fmt.Errorf("trigger user override on device: %w", err)
+		}
+	}
 
 	return map[string]any{
 		KeyOverrideActive: true,
@@ -659,6 +723,12 @@ func (r *Runner) handleFactoryReset(ctx context.Context, step *loader.Step, stat
 		attributes:     make(map[string]any),
 	}
 	state.Custom["device_state"] = s
+
+	if r.config.Target != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerFactoryReset, state); err != nil {
+			return nil, fmt.Errorf("trigger factory reset on device: %w", err)
+		}
+	}
 
 	return map[string]any{
 		KeyFactoryReset:     true,

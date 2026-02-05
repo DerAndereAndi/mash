@@ -16,6 +16,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -206,6 +207,15 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 
 	r.debugf("setupPreconditions %s: current=%d needed=%d", tc.ID, current, needed)
 	r.debugSnapshot("setupPreconditions BEFORE " + tc.ID)
+
+	// Reset device test state if a previous test modified it via triggers.
+	if r.deviceStateModified && r.config.Target != "" && r.config.EnableKey != "" {
+		r.debugf("resetting device test state (previous test modified device)")
+		if err := r.sendTriggerViaZone(ctx, features.TriggerResetTestState, state); err != nil {
+			r.debugf("reset trigger failed: %v (continuing)", err)
+		}
+		r.deviceStateModified = false
+	}
 
 	// Clear stale zone CA state for non-commissioned tests. This prevents
 	// a zone CA from a previous commissioned test from causing TLS

@@ -412,6 +412,8 @@ const (
 	KeyDeviceHasTXTRecords      = "device_has_txt_records"
 	KeyTXTValid                 = "txt_valid"
 	KeyAllResultsInZone         = "all_results_in_zone"
+	KeyAAAACount                = "aaaa_count"
+	KeyAAAACountMin             = "aaaa_count_min"
 )
 
 // Renewal handler output keys.

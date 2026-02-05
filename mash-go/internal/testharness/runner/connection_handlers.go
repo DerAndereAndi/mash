@@ -133,6 +133,7 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 			KeyZoneID:                zoneID,
 			KeyError:                 err.Error(),
 			KeyErrorCode:             classifyConnectError(err),
+			KeyTLSError:              err.Error(),
 		}, nil
 	}
 
@@ -457,15 +458,23 @@ func (r *Runner) handleConnectWithTiming(ctx context.Context, step *loader.Step,
 	return result, nil
 }
 
-// handleSendClose sends a close frame.
+// handleSendClose sends a ControlClose frame then closes the TCP connection.
 func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected {
 		return map[string]any{KeyCloseSent: false}, nil
 	}
 
-	err := r.conn.Close()
+	// Send ControlClose frame before closing TCP.
+	closeMsg := &wire.ControlMessage{Type: wire.ControlClose}
+	closeData, err := wire.EncodeControlMessage(closeMsg)
+	if err == nil {
+		_ = r.conn.framer.WriteFrame(closeData) // Best effort.
+	}
+
+	err = r.conn.Close()
 	return map[string]any{
-		KeyCloseSent: err == nil,
+		KeyCloseSent:        err == nil,
+		KeyConnectionClosed: err == nil,
 	}, nil
 }
 
@@ -667,6 +676,22 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 				Payload:    wire.WritePayload{1: value},
 			}
 			data, err = wire.EncodeRequest(req)
+		case "request":
+			req := &wire.Request{
+				MessageID:  uint32(paramInt(params, "message_id", int(r.nextMessageID()))),
+				Operation:  wire.Operation(paramInt(params, "operation", 1)),
+				EndpointID: uint8(paramInt(params, "endpoint_id", 0)),
+				FeatureID:  uint8(paramInt(params, "feature_id", 0)),
+				Payload:    params["payload"],
+			}
+			data, err = wire.EncodeRequest(req)
+		case "response":
+			resp := &wire.Response{
+				MessageID: uint32(paramInt(params, "message_id", 0)),
+				Status:    wire.Status(paramInt(params, "status", 0)),
+				Payload:   params["payload"],
+			}
+			data, err = wire.EncodeResponse(resp)
 		default:
 			return nil, fmt.Errorf("unsupported message_type: %s", msgType)
 		}
@@ -774,6 +799,7 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 				outputs[KeyStatus] = resp.Status
 				if !resp.IsSuccess() {
 					outputs[KeyErrorStatus] = resp.Status.String()
+					outputs[KeyErrorCode] = resp.Status.String()
 					// Extract error message from payload if present.
 					if payload, ok := resp.Payload.(map[any]any); ok {
 						if msg, ok := payload[uint64(1)]; ok {
@@ -1238,6 +1264,7 @@ func (r *Runner) handleQueueCommand(ctx context.Context, step *loader.Step, stat
 
 	return map[string]any{
 		KeyCommandQueued: true,
+		"queued":         true,
 		KeyQueueLength:   len(ct.pendingQueue),
 	}, nil
 }

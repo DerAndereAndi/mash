@@ -11,6 +11,7 @@ const (
 	TriggerEnterCommissioningMode uint64 = 0x0001_0000_0000_0001
 	TriggerExitCommissioningMode  uint64 = 0x0001_0000_0000_0002
 	TriggerFactoryReset           uint64 = 0x0001_0000_0000_0003
+	TriggerResetTestState         uint64 = 0x0001_0000_0000_0004
 )
 
 // Status triggers (domain 0x0002 = Status).
@@ -35,6 +36,23 @@ const (
 	TriggerEVPlugIn        uint64 = 0x0006_0000_0000_0001
 	TriggerEVUnplug        uint64 = 0x0006_0000_0000_0002
 	TriggerEVRequestCharge uint64 = 0x0006_0000_0000_0003
+)
+
+// EnergyControl triggers (domain 0x0005 = EnergyControl).
+const (
+	TriggerControlStateAutonomous uint64 = 0x0005_0000_0000_0001
+	TriggerControlStateControlled uint64 = 0x0005_0000_0000_0002
+	TriggerControlStateLimited    uint64 = 0x0005_0000_0000_0003
+	TriggerControlStateFailsafe   uint64 = 0x0005_0000_0000_0004
+	TriggerControlStateOverride   uint64 = 0x0005_0000_0000_0005
+
+	TriggerProcessStateNone      uint64 = 0x0005_0000_0000_0010
+	TriggerProcessStateAvailable uint64 = 0x0005_0000_0000_0011
+	TriggerProcessStateScheduled uint64 = 0x0005_0000_0000_0012
+	TriggerProcessStateRunning   uint64 = 0x0005_0000_0000_0013
+	TriggerProcessStatePaused    uint64 = 0x0005_0000_0000_0014
+	TriggerProcessStateCompleted uint64 = 0x0005_0000_0000_0015
+	TriggerProcessStateAborted   uint64 = 0x0005_0000_0000_0016
 )
 
 // TriggerTestEvent command parameter and response keys.

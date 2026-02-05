@@ -1390,3 +1390,100 @@ func TestHandleWrite_EOF(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Phase 3 (Task 3.5): send_close sends ControlClose frame
+// ============================================================================
+
+func TestHandleSendClose_SendsControlCloseFrame(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	// Read the ControlClose frame from the server side.
+	frameCh := make(chan []byte, 1)
+	go func() {
+		framer := transport.NewFramer(server)
+		data, err := framer.ReadFrame()
+		if err != nil {
+			frameCh <- nil
+			return
+		}
+		frameCh <- data
+	}()
+
+	out, err := r.handleSendClose(context.Background(), &loader.Step{}, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyCloseSent] != true {
+		t.Error("expected close_sent=true")
+	}
+	if out[KeyConnectionClosed] != true {
+		t.Error("expected connection_closed=true")
+	}
+
+	// Verify the ControlClose frame was sent.
+	frameData := <-frameCh
+	if frameData == nil {
+		t.Fatal("expected to receive ControlClose frame")
+	}
+	msg, decErr := wire.DecodeControlMessage(frameData)
+	if decErr != nil {
+		t.Fatalf("failed to decode control message: %v", decErr)
+	}
+	if msg.Type != wire.ControlClose {
+		t.Errorf("expected ControlClose type (%d), got %d", wire.ControlClose, msg.Type)
+	}
+}
+
+// ============================================================================
+// Phase 3 (Tasks 3.6-3.7): message_type request/response in send_raw
+// ============================================================================
+
+func TestHandleSendRaw_MessageTypeRequest(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{
+		"message_type": "request",
+		"operation":    1,
+		"endpoint_id":  0,
+		"feature_id":   1,
+	}}
+	out, err := r.handleSendRaw(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyRawSent] != true {
+		t.Error("expected raw_sent=true")
+	}
+}
+
+func TestHandleSendRaw_MessageTypeResponse(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+	state := newTestState()
+
+	// For response, server reads a frame and we don't expect echo back.
+	go func() {
+		framer := transport.NewFramer(server)
+		_, _ = framer.ReadFrame() // consume the response frame
+	}()
+
+	step := &loader.Step{Params: map[string]any{
+		"message_type": "response",
+		"message_id":   99999999,
+		"status":       0,
+	}}
+	out, err := r.handleSendRaw(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyRawSent] != true {
+		t.Error("expected raw_sent=true")
+	}
+}
+
