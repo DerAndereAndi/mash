@@ -116,7 +116,6 @@ type Config struct {
 	ProtocolLogFile string
 
 	// Test harness support
-	TestMode  bool
 	EnableKey string // Hex-encoded 128-bit key for TestControl triggers
 }
 
@@ -159,7 +158,6 @@ func init() {
 
 	flag.StringVar(&config.ProtocolLogFile, "protocol-log", "", "File path for protocol event logging (CBOR format)")
 
-	flag.BoolVar(&config.TestMode, "test-mode", false, "Disable security hardening for test harness usage")
 	flag.StringVar(&config.EnableKey, "enable-key", "00112233445566778899aabbccddeeff", "128-bit hex key for TestControl triggers (32 hex chars)")
 }
 
@@ -215,14 +213,8 @@ func main() {
 	svcConfig.DeviceName = config.DeviceName
 	svcConfig.Categories = []discovery.DeviceCategory{deviceCategory}
 	svcConfig.ListenAddress = fmt.Sprintf(":%d", config.Port)
-	svcConfig.TestMode = config.TestMode
 	svcConfig.TestEnableKey = config.EnableKey
 	svcConfig.Logger = logger
-
-	// In test mode, allow TEST zones (DEC-043/DEC-060): GRID + LOCAL + TEST = 3.
-	if config.TestMode {
-		svcConfig.MaxZones = 3
-	}
 
 	// Add TestControl feature to root endpoint.
 	// TestControl is always compiled in (like Matter's TestEventTrigger), but

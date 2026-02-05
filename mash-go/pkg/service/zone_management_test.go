@@ -413,8 +413,8 @@ func TestDeviceServiceListZoneIDs(t *testing.T) {
 	}
 }
 
-func TestHandleZoneConnect_TestZone_RequiresTestMode(t *testing.T) {
-	t.Run("RejectedWhenTestModeDisabled", func(t *testing.T) {
+func TestHandleZoneConnect_TestZone_RequiresEnableKey(t *testing.T) {
+	t.Run("RejectedWithoutEnableKey", func(t *testing.T) {
 		svc := createTestDeviceService(t)
 
 		ctx := context.Background()
@@ -423,17 +423,17 @@ func TestHandleZoneConnect_TestZone_RequiresTestMode(t *testing.T) {
 		}
 		defer svc.Stop()
 
-		// TestMode is false by default -- TEST zone should be rejected
+		// No enable-key configured -- TEST zone should be rejected
 		svc.HandleZoneConnect("test-zone", cert.ZoneTypeTest)
 
 		zone := svc.GetZone("test-zone")
 		if zone != nil {
-			t.Error("TEST zone should be rejected when TestMode is disabled")
+			t.Error("TEST zone should be rejected without valid enable-key")
 		}
 	})
 
-	t.Run("AcceptedWhenTestModeEnabled", func(t *testing.T) {
-		svc := createTestDeviceServiceWithTestMode(t)
+	t.Run("AcceptedWithEnableKey", func(t *testing.T) {
+		svc := createTestDeviceServiceWithTestMode(t) // Has valid enable-key
 
 		ctx := context.Background()
 		if err := svc.Start(ctx); err != nil {
@@ -445,7 +445,7 @@ func TestHandleZoneConnect_TestZone_RequiresTestMode(t *testing.T) {
 
 		zone := svc.GetZone("test-zone")
 		if zone == nil {
-			t.Fatal("TEST zone should be accepted when TestMode is enabled")
+			t.Fatal("TEST zone should be accepted with valid enable-key")
 		}
 		if zone.Type != cert.ZoneTypeTest {
 			t.Errorf("zone.Type = %v, want ZoneTypeTest", zone.Type)
@@ -453,11 +453,16 @@ func TestHandleZoneConnect_TestZone_RequiresTestMode(t *testing.T) {
 	})
 }
 
-func TestNewDeviceService_TestMode_BumpsMaxZones(t *testing.T) {
+func TestEnableKey_AllowsTestZone_WithoutCountingAgainstMaxZones(t *testing.T) {
 	svc := createTestDeviceServiceWithTestMode(t)
-	// The constructor should have bumped MaxZones from 2 to 3.
-	if svc.config.MaxZones != 3 {
-		t.Errorf("config.MaxZones = %d, want 3 in test mode", svc.config.MaxZones)
+	// MaxZones should remain at 2 (GRID + LOCAL).
+	// TEST zones are an extra observer slot enabled by valid enable-key.
+	if svc.config.MaxZones != 2 {
+		t.Errorf("config.MaxZones = %d, want 2 (TEST zones don't count against MaxZones)", svc.config.MaxZones)
+	}
+	// Verify enable-key is valid
+	if !svc.isEnableKeyValid() {
+		t.Error("expected isEnableKeyValid() to return true with configured enable-key")
 	}
 }
 

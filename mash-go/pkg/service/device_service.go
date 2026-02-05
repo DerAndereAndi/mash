@@ -148,10 +148,11 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 	subConfig := subscription.DefaultConfig()
 	svc.subscriptionManager = subscription.NewManagerWithConfig(subConfig)
 
-	// In test mode, disable connection-level security hardening so the test
+	// When enable-key is valid, disable connection-level security hardening so the test
 	// harness can perform rapid PASE attempts without backoff/cooldown interference.
 	// Protocol-level security (e.g., PASE random delay) remains active.
-	if config.TestMode {
+	enableKeyValid := config.TestEnableKey != "" && config.TestEnableKey != "00000000000000000000000000000000"
+	if enableKeyValid {
 		svc.config.PASEBackoffEnabled = false
 		svc.config.ConnectionCooldown = 0
 	}
@@ -161,11 +162,6 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 	// does not slow down normal commissioning cycles that succeed immediately.
 	if svc.config.PASEBackoffEnabled {
 		svc.paseTracker = NewPASEAttemptTracker(svc.config.PASEBackoffTiers)
-	}
-
-	// In test mode, bump MaxZones to 3 (GRID + LOCAL + TEST) if still at default 2 (DEC-060).
-	if config.TestMode && svc.config.MaxZones == 2 {
-		svc.config.MaxZones = 3
 	}
 
 	// Register service-level commands on DeviceInfo feature
@@ -189,6 +185,13 @@ func (s *DeviceService) State() ServiceState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.state
+}
+
+// isEnableKeyValid returns true if a valid enable-key is configured.
+// A valid key is non-empty and not all zeros.
+func (s *DeviceService) isEnableKeyValid() bool {
+	key := s.config.TestEnableKey
+	return key != "" && key != "00000000000000000000000000000000"
 }
 
 // OnEvent registers an event handler.
@@ -317,7 +320,7 @@ func (s *DeviceService) Start(ctx context.Context) error {
 	// Initialize discovery advertiser if not already set (e.g., by tests)
 	if s.advertiser == nil {
 		advConfig := discovery.DefaultAdvertiserConfig()
-		if s.config.TestMode {
+		if s.isEnableKeyValid() {
 			advConfig.Quiet = true
 		}
 		advertiser, err := discovery.NewMDNSAdvertiser(advConfig)
@@ -751,9 +754,19 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn, releaseAct
 		zoneType = zt
 	}
 
-	// Reject TEST zones unless the device is in test mode (DEC-060).
-	if zoneType == cert.ZoneTypeTest && !s.config.TestMode {
-		s.debugLog("handleCommissioningConnection: TEST zone rejected (TestMode disabled)", "zoneID", zoneID)
+	// Reject TEST zones unless a valid enable-key is configured (DEC-060).
+	// TEST zones are an extra "observer" slot that doesn't count against MaxZones.
+	if zoneType == cert.ZoneTypeTest && !s.isEnableKeyValid() {
+		s.debugLog("handleCommissioningConnection: TEST zone rejected (no valid enable-key)", "zoneID", zoneID)
+		conn.Close()
+		return
+	}
+
+	// Reject GRID/LOCAL zones when slots are full.
+	// We accepted the connection earlier because enable-key was valid (potential TEST zone),
+	// but now we know it's not a TEST zone, so check slots again.
+	if zoneType != cert.ZoneTypeTest && s.isZonesFull() {
+		s.debugLog("handleCommissioningConnection: GRID/LOCAL zone rejected (slots full)", "zoneID", zoneID, "zoneType", zoneType)
 		conn.Close()
 		return
 	}
@@ -772,18 +785,18 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn, releaseAct
 		s.debugLog("handleCommissioningConnection: failed to exit commissioning mode", "error", err)
 	}
 
-	// In test mode, schedule auto-reentry into commissioning mode so the next
+	// When enable-key is valid, schedule auto-reentry into commissioning mode so the next
 	// test can commission without waiting for manual intervention.
-	if s.config.TestMode {
-		s.debugLog("handleCommissioningConnection: scheduling test-mode auto-reentry goroutine", "zoneID", zoneID)
+	if s.isEnableKeyValid() {
+		s.debugLog("handleCommissioningConnection: scheduling auto-reentry goroutine", "zoneID", zoneID)
 		go func() {
 			s.debugLog("handleCommissioningConnection: auto-reentry goroutine started, sleeping 500ms", "zoneID", zoneID)
 			time.Sleep(500 * time.Millisecond)
 			s.debugLog("handleCommissioningConnection: auto-reentry goroutine woke up, calling EnterCommissioningMode", "zoneID", zoneID)
 			if err := s.EnterCommissioningMode(); err != nil {
-				s.debugLog("handleCommissioningConnection: test-mode auto-reenter failed", "zoneID", zoneID, "error", err)
+				s.debugLog("handleCommissioningConnection: auto-reenter failed", "zoneID", zoneID, "error", err)
 			} else {
-				s.debugLog("handleCommissioningConnection: test-mode auto-reenter succeeded", "zoneID", zoneID)
+				s.debugLog("handleCommissioningConnection: auto-reenter succeeded", "zoneID", zoneID)
 			}
 		}()
 	}
@@ -1311,9 +1324,9 @@ func (s *DeviceService) RegisterZoneAwaitingConnection(zoneID string, zoneType c
 
 // handleZoneConnectInternal is the shared implementation for zone registration.
 func (s *DeviceService) handleZoneConnectInternal(zoneID string, zoneType cert.ZoneType, connected bool) {
-	// Reject TEST zones unless in test mode (DEC-060).
-	if zoneType == cert.ZoneTypeTest && !s.config.TestMode {
-		s.debugLog("HandleZoneConnect: TEST zone rejected", "zoneID", zoneID)
+	// Reject TEST zones unless a valid enable-key is configured (DEC-060).
+	if zoneType == cert.ZoneTypeTest && !s.isEnableKeyValid() {
+		s.debugLog("HandleZoneConnect: TEST zone rejected (no valid enable-key)", "zoneID", zoneID)
 		return
 	}
 
@@ -2260,28 +2273,24 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 	}
 
 	// Check 3: Is there a zone slot available?
-	// In test mode, first evict all disconnected zones to maximize available slots.
-	if s.config.TestMode {
-		if evicted := s.evictDisconnectedZone(); evicted != "" {
-			s.debugLog("acceptCommissioningConnection: evicted stale zone(s)", "firstZoneID", evicted)
-		}
-	}
-
+	// TEST zones don't count against MaxZones (they're an extra observer slot).
+	// If enable-key is valid, we might be getting a TEST zone, so accept even if full.
 	s.mu.RLock()
-	zoneCount := len(s.connectedZones)
+	nonTestCount := s.nonTestZoneCountLocked()
 	maxZones := s.config.MaxZones
+	enableKeyValid := s.isEnableKeyValid()
 	// Log zone state for debugging
-	if zoneCount >= maxZones && s.config.TestMode {
+	if nonTestCount >= maxZones {
 		zoneStates := make([]string, 0, len(s.connectedZones))
 		for zid, cz := range s.connectedZones {
-			zoneStates = append(zoneStates, fmt.Sprintf("%s(connected=%v)", zid, cz.Connected))
+			zoneStates = append(zoneStates, fmt.Sprintf("%s(type=%s,connected=%v)", zid, cz.Type, cz.Connected))
 		}
-		s.debugLog("acceptCommissioningConnection: zone slots full", "zones", zoneStates)
+		s.debugLog("acceptCommissioningConnection: zone slots full", "zones", zoneStates, "enableKeyValid", enableKeyValid)
 	}
 	s.mu.RUnlock()
 
-	if zoneCount >= maxZones {
-		return false, fmt.Sprintf("zone slots full (%d/%d)", zoneCount, maxZones)
+	if nonTestCount >= maxZones && !enableKeyValid {
+		return false, fmt.Sprintf("zone slots full (%d/%d)", nonTestCount, maxZones)
 	}
 
 	// Accept the connection (cooldown timestamp is set on release, not here)
@@ -2290,10 +2299,23 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 }
 
 // isZonesFull returns true when all zone slots are occupied.
+// TEST zones don't count against MaxZones (they're an extra observer slot).
 func (s *DeviceService) isZonesFull() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return len(s.connectedZones) >= s.config.MaxZones
+	return s.nonTestZoneCountLocked() >= s.config.MaxZones
+}
+
+// nonTestZoneCountLocked returns the count of non-TEST zones.
+// Caller must hold s.mu (read or write lock).
+func (s *DeviceService) nonTestZoneCountLocked() int {
+	count := 0
+	for _, cz := range s.connectedZones {
+		if cz.Type != cert.ZoneTypeTest {
+			count++
+		}
+	}
+	return count
 }
 
 // evictDisconnectedZone removes ALL disconnected zones to free slots for
