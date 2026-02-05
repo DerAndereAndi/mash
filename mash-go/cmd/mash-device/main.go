@@ -224,23 +224,24 @@ func main() {
 		svcConfig.MaxZones = 3
 	}
 
-	// In test mode, add TestControl feature to root endpoint.
-	var testControl *features.TestControl
-	if config.TestMode {
-		testControl = features.NewTestControl()
-		_ = testControl.SetTestEventTriggersEnabled(true)
-		device.RootEndpoint().AddFeature(testControl.Feature)
+	// Add TestControl feature to root endpoint.
+	// TestControl is always compiled in (like Matter's TestEventTrigger), but
+	// testEventTriggersEnabled is only true when a valid enable-key is provided.
+	// This follows Matter's pattern: same device code, just enable via --enable-key.
+	testControl := features.NewTestControl()
+	enableKeyValid := config.EnableKey != "" && config.EnableKey != "00000000000000000000000000000000"
+	_ = testControl.SetTestEventTriggersEnabled(enableKeyValid)
+	device.RootEndpoint().AddFeature(testControl.Feature)
 
-		// Refresh DeviceInfo endpoints attribute so auto-PICS discovery
-		// sees TestControl (used to derive MASH.S.ZONE.MAX).
-		if feat, err := device.RootEndpoint().GetFeature(model.FeatureDeviceInfo); err == nil {
-			if attr, err := feat.GetAttribute(features.DeviceInfoAttrEndpoints); err == nil {
-				var epInfos []*model.EndpointInfo
-				for _, ep := range device.Endpoints() {
-					epInfos = append(epInfos, ep.Info())
-				}
-				_ = attr.SetValueInternal(epInfos)
+	// Refresh DeviceInfo endpoints attribute so auto-PICS discovery
+	// sees TestControl (used to derive MASH.S.ZONE.MAX).
+	if feat, err := device.RootEndpoint().GetFeature(model.FeatureDeviceInfo); err == nil {
+		if attr, err := feat.GetAttribute(features.DeviceInfoAttrEndpoints); err == nil {
+			var epInfos []*model.EndpointInfo
+			for _, ep := range device.Endpoints() {
+				epInfos = append(epInfos, ep.Info())
 			}
+			_ = attr.SetValueInternal(epInfos)
 		}
 	}
 
@@ -261,12 +262,13 @@ func main() {
 		log.Fatalf("Failed to create device service: %v", err)
 	}
 
-	// Register test event trigger handler (must happen after service creation
-	// but before the wrapper is discarded).
-	if config.TestMode && testControl != nil {
+	// Register test event trigger handler when enable-key is valid.
+	// This follows Matter's pattern: TestEventTrigger always compiled in,
+	// but only functional when enable-key is provided.
+	if enableKeyValid {
 		svc.RegisterTestEventHandler(testControl)
 		svc.RegisterSetCommissioningWindowDurationHandler(testControl)
-		log.Printf("TestControl feature enabled (enable-key: %s...)", config.EnableKey[:8])
+		log.Printf("TestControl triggers enabled (enable-key: %s...)", config.EnableKey[:8])
 	}
 
 	// Wire per-zone "my" attribute notifications.
@@ -347,12 +349,6 @@ func main() {
 		}
 	}
 
-	// Disable simulation in test mode -- synthetic data would make test
-	// assertions non-deterministic.
-	if config.TestMode {
-		config.Simulate = false
-	}
-
 	// Set up simulation behavior
 	if config.Interactive {
 		log.Println("Interactive mode enabled - use 'start' to begin simulation")
@@ -428,8 +424,9 @@ func validateConfig() error {
 		return fmt.Errorf("unknown device type: %s", config.Type)
 	}
 
-	// Validate enable key format if test mode is active.
-	if config.TestMode && config.EnableKey != "" {
+	// Validate enable key format when provided.
+	// Enable-key activates TestControl triggers (like Matter's TestEventTrigger).
+	if config.EnableKey != "" {
 		if len(config.EnableKey) != 32 {
 			return fmt.Errorf("enable-key must be 32 hex characters (128-bit), got %d", len(config.EnableKey))
 		}
@@ -663,7 +660,17 @@ func handleEvent(event service.Event) {
 	case service.EventConnected:
 		log.Printf("[EVENT] Zone connected: %s", event.ZoneID)
 		connectedCnt++
-		// Start simulation on first connection (unless in interactive mode)
+
+		// Check if this is a TEST zone -- disable simulation for deterministic testing.
+		// Unlike --test-mode (which enables TestControl triggers), this specifically
+		// targets simulation behavior: TEST zones need deterministic responses.
+		if zone := deviceSvc.GetZone(event.ZoneID); zone != nil && zone.Type == cert.ZoneTypeTest {
+			log.Println("[EVENT] TEST zone connected - disabling simulation for deterministic testing")
+			config.Simulate = false
+			stopSimulation()
+		}
+
+		// Start simulation on first connection (unless in interactive mode or simulation disabled)
 		if config.Simulate && !config.Interactive && !simRunning && connectedCnt == 1 {
 			startSimulation()
 		}

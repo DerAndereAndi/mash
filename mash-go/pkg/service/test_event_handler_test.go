@@ -443,3 +443,37 @@ func TestTriggerResetTestState(t *testing.T) {
 		t.Errorf("expected process state NONE after reset, got %v", got)
 	}
 }
+
+func TestTriggerFactoryReset_ClearsAllZones(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	config.TestEnableKey = "test-enable-key"
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Simulate two connected zones by directly adding to connectedZones.
+	svc.mu.Lock()
+	svc.connectedZones["zone-1"] = &ConnectedZone{ID: "zone-1", Connected: true}
+	svc.connectedZones["zone-2"] = &ConnectedZone{ID: "zone-2", Connected: true}
+	svc.mu.Unlock()
+
+	// Verify zones exist.
+	if len(svc.ListZoneIDs()) != 2 {
+		t.Fatalf("expected 2 zones before reset, got %d", len(svc.ListZoneIDs()))
+	}
+
+	// Send factory reset trigger.
+	if err := svc.dispatchTrigger(ctx, features.TriggerFactoryReset); err != nil {
+		t.Fatalf("dispatchTrigger(FactoryReset) error: %v", err)
+	}
+
+	// Verify all zones removed.
+	if len(svc.ListZoneIDs()) != 0 {
+		t.Errorf("expected 0 zones after factory reset, got %d", len(svc.ListZoneIDs()))
+	}
+}
