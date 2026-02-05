@@ -1172,6 +1172,113 @@ func (s *ControllerService) attemptReconnection(ctx context.Context, svc *discov
 	s.runDeviceMessageLoop(svc.DeviceID, framedConn, session)
 }
 
+// Reconnect establishes an operational TLS connection to a previously commissioned device.
+// This is used after DEC-066 commissioning flow where the commissioning connection is closed
+// and the controller must reconnect using operational certificates.
+//
+// The deviceID must correspond to a device that was previously commissioned and is stored
+// in the connectedDevices map with valid Host and Port information.
+func (s *ControllerService) Reconnect(ctx context.Context, deviceID string) error {
+	// Look up device information
+	s.mu.RLock()
+	device, exists := s.connectedDevices[deviceID]
+	if !exists {
+		s.mu.RUnlock()
+		return fmt.Errorf("device %s not found", deviceID)
+	}
+	host := device.Host
+	port := device.Port
+	s.mu.RUnlock()
+
+	if host == "" || port == 0 {
+		return fmt.Errorf("device %s has no address information", deviceID)
+	}
+
+	// Build the connection address
+	addr := fmt.Sprintf("%s:%d", host, port)
+
+	// Create TLS config for operational connection
+	tlsConfig, err := s.buildOperationalTLSConfig(deviceID)
+	if err != nil {
+		// Fall back to insecure mode if certificates not available
+		tlsConfig = transport.NewCommissioningTLSConfig()
+	}
+
+	// Attempt connection with context timeout
+	dialer := &tls.Dialer{Config: tlsConfig}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		s.emitEvent(Event{
+			Type:     EventReconnectionFailed,
+			DeviceID: deviceID,
+			Error:    err,
+		})
+		return fmt.Errorf("failed to connect to device %s at %s: %w", deviceID, addr, err)
+	}
+
+	tlsConn := conn.(*tls.Conn)
+
+	// Update device state
+	s.mu.Lock()
+	if dev, ok := s.connectedDevices[deviceID]; ok {
+		dev.Connected = true
+		dev.LastSeen = time.Now()
+	}
+	s.mu.Unlock()
+
+	// Create framed connection wrapper for operational messaging
+	framedConn := newFramedConnection(tlsConn)
+
+	// Create device session
+	session := NewDeviceSession(deviceID, framedConn)
+
+	// Set snapshot policy and protocol logger if configured
+	session.SetSnapshotPolicy(s.config.SnapshotPolicy)
+	if s.protocolLogger != nil {
+		connID := s.generateControllerConnID()
+		session.SetProtocolLogger(s.protocolLogger, connID)
+	}
+
+	s.mu.Lock()
+	s.deviceSessions[deviceID] = session
+	s.mu.Unlock()
+
+	// Check protocol version compatibility (DEC-050)
+	if err := s.checkDeviceVersion(ctx, session); err != nil {
+		s.mu.Lock()
+		delete(s.deviceSessions, deviceID)
+		if dev, ok := s.connectedDevices[deviceID]; ok {
+			dev.Connected = false
+		}
+		s.mu.Unlock()
+		session.Close()
+		tlsConn.Close()
+		s.emitEvent(Event{
+			Type:     EventReconnectionFailed,
+			DeviceID: deviceID,
+			Error:    err,
+		})
+		return fmt.Errorf("version check failed for device %s: %w", deviceID, err)
+	}
+
+	// Read remote device capabilities for snapshot tracking
+	if snap := readRemoteCapabilities(ctx, session); snap != nil {
+		session.SetRemoteSnapshotCache(snap)
+	}
+
+	// Emit reconnected event
+	s.emitEvent(Event{
+		Type:     EventDeviceReconnected,
+		DeviceID: deviceID,
+	})
+
+	// Start message loop in goroutine (non-blocking)
+	// Note: runDeviceMessageLoop calls handleDeviceSessionClose on exit
+	go s.runDeviceMessageLoop(deviceID, framedConn, session)
+
+	return nil
+}
+
 // isPASEFailure reports whether the error is a PASE authentication failure,
 // which is retryable during discriminator collision handling.
 func isPASEFailure(err error) bool {

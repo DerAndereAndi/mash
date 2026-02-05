@@ -419,9 +419,155 @@ func TestCommissioning_EventCommissionedEmitted(t *testing.T) {
 // 2. Controller reconnects with operational certificates
 // 3. EventConnected emitted on successful operational TLS establishment
 func TestDEC066_OperationalReconnection(t *testing.T) {
-	// This test requires adding a Reconnect(deviceID) method to ControllerService
-	// that reconnects to a device using its stored address and operational certificates.
-	// The current attemptReconnection method requires an OperationalService from mDNS.
-	// TODO: Implement ControllerService.Reconnect(ctx, deviceID) for DEC-066.
-	t.Skip("DEC-066 reconnection test deferred - requires ControllerService.Reconnect implementation")
+	// Set up device service
+	device := model.NewDevice("test-device-dec066", 0x1234, 0x5678)
+	deviceConfig := validDeviceConfig()
+	deviceConfig.ListenAddress = "localhost:0"
+	deviceConfig.SetupCode = "12345678"
+
+	deviceSvc, err := NewDeviceService(device, deviceConfig)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	deviceCertStore := cert.NewMemoryStore()
+	deviceSvc.SetCertStore(deviceCertStore)
+
+	deviceAdvertiser := mocks.NewMockAdvertiser(t)
+	deviceAdvertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	deviceAdvertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	deviceAdvertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Maybe()
+	deviceAdvertiser.EXPECT().StopAll().Return().Maybe()
+	deviceSvc.SetAdvertiser(deviceAdvertiser)
+
+	// Track device-side events
+	var deviceCommissioned, deviceConnected bool
+	var eventMu sync.Mutex
+	deviceSvc.OnEvent(func(e Event) {
+		eventMu.Lock()
+		defer eventMu.Unlock()
+		switch e.Type {
+		case EventCommissioned:
+			deviceCommissioned = true
+		case EventConnected:
+			deviceConnected = true
+		}
+	})
+
+	ctx := context.Background()
+	if err := deviceSvc.Start(ctx); err != nil {
+		t.Fatalf("Device Start failed: %v", err)
+	}
+	defer func() { _ = deviceSvc.Stop() }()
+
+	if err := deviceSvc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	addr := deviceSvc.TLSAddr()
+
+	// Set up controller
+	controllerConfig := validControllerConfig()
+	controllerSvc, err := NewControllerService(controllerConfig)
+	if err != nil {
+		t.Fatalf("NewControllerService failed: %v", err)
+	}
+
+	controllerCertStore := createControllerCertStore(t, controllerConfig.ZoneName)
+	controllerSvc.SetCertStore(controllerCertStore)
+
+	browser := mocks.NewMockBrowser(t)
+	browser.EXPECT().Stop().Return().Maybe()
+	controllerSvc.SetBrowser(browser)
+
+	if err := controllerSvc.Start(ctx); err != nil {
+		t.Fatalf("Controller Start failed: %v", err)
+	}
+	defer func() { _ = controllerSvc.Stop() }()
+
+	// Phase 1: Commission
+	tcpAddr := addr.(*net.TCPAddr)
+	discoveryService := &discovery.CommissionableService{
+		Host:          "localhost",
+		Port:          uint16(tcpAddr.Port),
+		Addresses:     []string{tcpAddr.IP.String()},
+		Discriminator: 1234,
+		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
+	}
+
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	if err != nil {
+		t.Fatalf("Commission failed: %v", err)
+	}
+
+	// Wait for commissioning to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify EventCommissioned was emitted
+	eventMu.Lock()
+	if !deviceCommissioned {
+		t.Error("Expected EventCommissioned to be emitted after commissioning")
+	}
+	// Reset for reconnection test
+	wasConnectedBeforeReconnect := deviceConnected
+	eventMu.Unlock()
+
+	// DEC-066: EventConnected should NOT have been emitted yet
+	if wasConnectedBeforeReconnect {
+		t.Error("EventConnected should not be emitted after commissioning (DEC-066)")
+	}
+
+	// Verify zone is registered but not connected on device
+	deviceSvc.mu.RLock()
+	var zoneRegistered, zoneConnected bool
+	for _, cz := range deviceSvc.connectedZones {
+		zoneRegistered = true
+		zoneConnected = cz.Connected
+		break
+	}
+	deviceSvc.mu.RUnlock()
+
+	if !zoneRegistered {
+		t.Fatal("Expected zone to be registered after commissioning")
+	}
+	if zoneConnected {
+		t.Error("Zone should be registered as disconnected after commissioning (DEC-066)")
+	}
+
+	// Phase 2: Controller reconnects with operational certificates
+	err = controllerSvc.Reconnect(ctx, connectedDevice.ID)
+	if err != nil {
+		t.Fatalf("Reconnect failed: %v", err)
+	}
+
+	// Wait for reconnection to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify EventConnected was emitted after reconnection
+	eventMu.Lock()
+	connectedAfterReconnect := deviceConnected
+	eventMu.Unlock()
+
+	if !connectedAfterReconnect {
+		t.Error("Expected EventConnected to be emitted after operational reconnection")
+	}
+
+	// Verify zone is now connected
+	deviceSvc.mu.RLock()
+	zoneConnected = false
+	for _, cz := range deviceSvc.connectedZones {
+		zoneConnected = cz.Connected
+		break
+	}
+	deviceSvc.mu.RUnlock()
+
+	if !zoneConnected {
+		t.Error("Zone should be connected after operational reconnection")
+	}
+
+	// Verify controller has active session
+	session := controllerSvc.GetSession(connectedDevice.ID)
+	if session == nil {
+		t.Error("Expected active session after reconnection")
+	}
 }
