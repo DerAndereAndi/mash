@@ -75,6 +75,7 @@ steps:
 
   - name: Accumulate failed attempts to trigger backoff
     action: pase_attempts
+    timeout: "60s"
     params:
       count: 10
       setup_code: "00000000"
@@ -122,6 +123,7 @@ steps:
 
   - name: Accumulate failed attempts
     action: pase_attempts
+    timeout: "30s"
     params:
       count: 5
       setup_code: "00000000"

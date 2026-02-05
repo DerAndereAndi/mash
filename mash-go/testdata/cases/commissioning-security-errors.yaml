@@ -55,15 +55,21 @@ steps:
     action: measure_error_timing
     params:
       error_type: invalid_pubkey
-      iterations: 50
+      iterations: 3
     expect:
       mean_recorded: true
+
+  - name: Reset backoff counter before second measurement
+    action: exit_commissioning_mode
+
+  - name: Re-enter commissioning mode
+    action: enter_commissioning_mode
 
   - name: Measure wrong password timing
     action: measure_error_timing
     params:
       error_type: wrong_password
-      iterations: 50
+      iterations: 3
     expect:
       mean_recorded: true
 

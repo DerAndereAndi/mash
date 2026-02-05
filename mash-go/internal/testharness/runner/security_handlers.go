@@ -737,14 +737,24 @@ func (r *Runner) handlePASEAttempts(ctx context.Context, step *loader.Step, stat
 	var maxDelay time.Duration
 	allImmediate := true
 
+	deadline, hasDeadline := ctx.Deadline()
+
 	for i := 0; i < count; i++ {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("pase_attempts: timed out after %d/%d attempts (max_delay=%v): %w",
+				i, count, maxDelay, ctx.Err())
 		default:
 		}
 
-		delay, _, _ := r.measurePASEAttempt(ctx, setupCode)
+		if hasDeadline {
+			r.debugf("pase_attempts: starting attempt %d/%d (remaining=%v)", i+1, count, time.Until(deadline))
+		}
+
+		delay, handshakeErr, connErr := r.measurePASEAttempt(ctx, setupCode)
+
+		r.debugf("pase_attempts: attempt %d/%d delay=%v handshakeErr=%v connErr=%v",
+			i+1, count, delay, handshakeErr, connErr)
 
 		delays = append(delays, delay)
 		if delay > maxDelay {
