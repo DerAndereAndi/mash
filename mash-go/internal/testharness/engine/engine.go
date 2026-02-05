@@ -298,6 +298,27 @@ func (e *Engine) RunSuite(ctx context.Context, cases []*loader.TestCase) *SuiteR
 	startTime := time.Now()
 	defer func() { result.Duration = time.Since(startTime) }()
 
+	// Auto-calculate suite timeout from individual test timeouts if not set.
+	suiteTimeout := e.config.SuiteTimeout
+	if suiteTimeout == 0 {
+		var total time.Duration
+		for _, tc := range cases {
+			if tc.Timeout != "" {
+				if d, err := time.ParseDuration(tc.Timeout); err == nil {
+					total += d
+					continue
+				}
+			}
+			total += e.config.DefaultTimeout
+		}
+		suiteTimeout = total + 2*time.Minute
+	}
+	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > suiteTimeout {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, suiteTimeout)
+		defer cancel()
+	}
+
 	for _, tc := range cases {
 		// Check for context cancellation
 		select {

@@ -90,6 +90,9 @@ type Config struct {
 	// Timeout is the default test timeout.
 	Timeout time.Duration
 
+	// SuiteTimeout is the overall test suite timeout (0 = auto-calculate).
+	SuiteTimeout time.Duration
+
 	// Verbose enables verbose output.
 	Verbose bool
 
@@ -152,6 +155,7 @@ func New(config *Config) *Runner {
 	// Create engine with config
 	engineConfig := engine.DefaultConfig()
 	engineConfig.DefaultTimeout = config.Timeout
+	engineConfig.SuiteTimeout = config.SuiteTimeout
 
 	// Load PICS if provided
 	var pics *loader.PICSFile

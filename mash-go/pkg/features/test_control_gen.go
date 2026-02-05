@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // TestControl attribute IDs.
@@ -20,7 +21,8 @@ const TestControlFeatureRevision uint16 = 1
 // Test control and event triggering for conformance testing (Matter-inspired).
 type TestControl struct {
 	*model.Feature
-	onTriggerTestEvent func(ctx context.Context, req TriggerTestEventRequest) error
+	onTriggerTestEvent               func(ctx context.Context, req TriggerTestEventRequest) error
+	onSetCommissioningWindowDuration func(ctx context.Context, req SetCommissioningWindowDurationRequest) error
 }
 
 // NewTestControl creates a new TestControl feature.
@@ -62,13 +64,20 @@ func (t *TestControl) SetTestEventTriggersEnabled(testEventTriggersEnabled bool)
 
 // TestControl command IDs.
 const (
-	TestControlCmdTriggerTestEvent uint8 = 1
+	TestControlCmdTriggerTestEvent               uint8 = 1
+	TestControlCmdSetCommissioningWindowDuration uint8 = 2
 )
 
 // TriggerTestEventRequest represents the triggerTestEvent command parameters.
 type TriggerTestEventRequest struct {
 	EnableKey    string
 	EventTrigger uint64
+}
+
+// SetCommissioningWindowDurationRequest represents the setCommissioningWindowDuration command parameters.
+type SetCommissioningWindowDurationRequest struct {
+	EnableKey       string
+	DurationSeconds uint32
 }
 
 // addCommands adds the TestControl commands.
@@ -82,6 +91,16 @@ func (t *TestControl) addCommands() {
 			{Name: "eventTrigger", Type: model.DataTypeUint64, Required: true},
 		},
 	}, t.handleTriggerTestEvent))
+
+	t.AddCommand(model.NewCommand(&model.CommandMetadata{
+		ID:          TestControlCmdSetCommissioningWindowDuration,
+		Name:        "setCommissioningWindowDuration",
+		Description: "Set commissioning window duration (test mode only). Requires matching enableKey.",
+		Parameters: []model.ParameterMetadata{
+			{Name: "enableKey", Type: model.DataTypeString, Required: true},
+			{Name: "durationSeconds", Type: model.DataTypeUint32, Required: true},
+		},
+	}, t.handleSetCommissioningWindowDuration))
 
 }
 
@@ -106,7 +125,33 @@ func (t *TestControl) handleTriggerTestEvent(ctx context.Context, params map[str
 	return map[string]any{"success": err == nil}, err
 }
 
+func (t *TestControl) handleSetCommissioningWindowDuration(ctx context.Context, params map[string]any) (map[string]any, error) {
+	if t.onSetCommissioningWindowDuration == nil {
+		return map[string]any{"success": false}, nil
+	}
+
+	req := SetCommissioningWindowDurationRequest{}
+	if raw, exists := params["enableKey"]; exists {
+		if v, ok := raw.(string); ok {
+			req.EnableKey = v
+		}
+	}
+	if raw, exists := params["durationSeconds"]; exists {
+		if v, ok := wire.ToUint32(raw); ok {
+			req.DurationSeconds = v
+		}
+	}
+
+	err := t.onSetCommissioningWindowDuration(ctx, req)
+	return map[string]any{"success": err == nil}, err
+}
+
 // OnTriggerTestEvent sets the handler for triggerTestEvent command.
 func (t *TestControl) OnTriggerTestEvent(handler func(ctx context.Context, req TriggerTestEventRequest) error) {
 	t.onTriggerTestEvent = handler
+}
+
+// OnSetCommissioningWindowDuration sets the handler for setCommissioningWindowDuration command.
+func (t *TestControl) OnSetCommissioningWindowDuration(handler func(ctx context.Context, req SetCommissioningWindowDurationRequest) error) {
+	t.onSetCommissioningWindowDuration = handler
 }

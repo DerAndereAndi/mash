@@ -217,11 +217,11 @@ func TestWindowSetTimeoutValidation(t *testing.T) {
 		timeout time.Duration
 		wantErr bool
 	}{
-		{"TooShort", 10 * time.Second, true},
-		{"MinValid", MinWindowTimeout, false},
-		{"Normal", 60 * time.Second, false},
-		{"MaxValid", MaxWindowTimeout, false},
-		{"TooLong", 600 * time.Second, true},
+		{"TooShort", 60 * time.Second, true},           // 60s < 180s min
+		{"MinValid", MinWindowTimeout, false},            // 180s (DEC-048)
+		{"Normal", 10 * time.Minute, false},              // 600s, within [180s, 10800s]
+		{"MaxValid", MaxWindowTimeout, false},             // 10800s (DEC-048)
+		{"TooLong", 4 * time.Hour, true},                 // 14400s > 10800s max
 	}
 
 	for _, tt := range tests {

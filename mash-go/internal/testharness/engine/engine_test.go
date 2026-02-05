@@ -404,3 +404,57 @@ func TestEngineUnknownAction(t *testing.T) {
 		t.Error("Error should be set")
 	}
 }
+
+// TestRunSuiteAutoCalculatesTimeout verifies that RunSuite auto-calculates a
+// suite timeout from individual test case timeouts and completes without premature
+// cancellation.
+func TestRunSuiteAutoCalculatesTimeout(t *testing.T) {
+	config := engine.DefaultConfig()
+	config.SuiteTimeout = 0 // auto-calculate
+	e := engine.NewWithConfig(config)
+
+	e.RegisterHandler("fast_action", func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]interface{}, error) {
+		return map[string]interface{}{"ok": true}, nil
+	})
+
+	cases := []*loader.TestCase{
+		{ID: "TC-A", Name: "Test A", Steps: []loader.Step{{Action: "fast_action", Expect: map[string]interface{}{"ok": true}}}, Timeout: "60s"},
+		{ID: "TC-B", Name: "Test B", Steps: []loader.Step{{Action: "fast_action", Expect: map[string]interface{}{"ok": true}}}, Timeout: "30s"},
+	}
+
+	result := e.RunSuite(context.Background(), cases)
+
+	if result.FailCount > 0 {
+		t.Errorf("expected 0 failures, got %d", result.FailCount)
+	}
+	if result.PassCount != 2 {
+		t.Errorf("expected 2 passes, got %d", result.PassCount)
+	}
+}
+
+// TestRunSuiteExplicitTimeout verifies that an explicit suite timeout is respected.
+func TestRunSuiteExplicitTimeout(t *testing.T) {
+	config := engine.DefaultConfig()
+	config.SuiteTimeout = 50 * time.Millisecond
+	e := engine.NewWithConfig(config)
+
+	e.RegisterHandler("slow_action", func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]interface{}, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+			return map[string]interface{}{"ok": true}, nil
+		}
+	})
+
+	cases := []*loader.TestCase{
+		{ID: "TC-SLOW", Name: "Slow Test", Steps: []loader.Step{{Action: "slow_action"}}, Timeout: "5s"},
+	}
+
+	result := e.RunSuite(context.Background(), cases)
+
+	// The suite should be cancelled before the slow action completes.
+	if result.PassCount > 0 {
+		t.Error("expected suite to timeout before test passes")
+	}
+}

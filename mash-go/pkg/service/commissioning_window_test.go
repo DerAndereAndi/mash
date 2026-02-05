@@ -10,6 +10,7 @@ import (
 
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
+	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
 
@@ -351,4 +352,121 @@ func TestCommissioningWindowDoesNotFireAfterSuccessfulCommission(t *testing.T) {
 	if timeoutCount > 0 {
 		t.Errorf("expected no timeout events after successful commission, got %d", timeoutCount)
 	}
+}
+
+// TestTestModeDoesNotExtendCommissioningWindow verifies that TestMode no longer
+// overrides the commissioning window duration to 24h. The window should remain
+// at the configured default (15 minutes) regardless of test mode.
+func TestTestModeDoesNotExtendCommissioningWindow(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	config.TestMode = true
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	want := 15 * time.Minute
+	if svc.config.CommissioningWindowDuration != want {
+		t.Errorf("TestMode CommissioningWindowDuration = %v, want %v (should NOT be 24h)",
+			svc.config.CommissioningWindowDuration, want)
+	}
+}
+
+// TestSetCommissioningWindowDurationHandler verifies the TestControl command
+// for setting the commissioning window duration.
+func TestSetCommissioningWindowDurationHandler(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	config.TestMode = true
+	config.TestEnableKey = "00112233445566778899aabbccddeeff"
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	// Set up mock advertiser so SetAdvertiser creates a DiscoveryManager.
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	dm := svc.DiscoveryManager()
+	if dm == nil {
+		t.Fatal("DiscoveryManager is nil after SetAdvertiser")
+	}
+
+	t.Run("ValidDuration", func(t *testing.T) {
+		dm.SetCommissioningWindowDuration(15 * time.Minute) // reset
+
+		tc := newTestControlFeature(t)
+		svc.RegisterSetCommissioningWindowDurationHandler(tc)
+
+		_, err := tc.InvokeCommand(context.Background(), 2, map[string]any{
+			"enableKey":       "00112233445566778899aabbccddeeff",
+			"durationSeconds": uint32(20),
+		})
+		if err != nil {
+			t.Fatalf("InvokeCommand failed: %v", err)
+		}
+
+		got := dm.CommissioningWindowDuration()
+		if got != 20*time.Second {
+			t.Errorf("CommissioningWindowDuration = %v, want 20s", got)
+		}
+	})
+
+	t.Run("WrongEnableKey", func(t *testing.T) {
+		tc := newTestControlFeature(t)
+		svc.RegisterSetCommissioningWindowDurationHandler(tc)
+
+		_, err := tc.InvokeCommand(context.Background(), 2, map[string]any{
+			"enableKey":       "wrong-key",
+			"durationSeconds": uint32(20),
+		})
+		if err == nil {
+			t.Error("expected error for wrong enableKey, got nil")
+		}
+	})
+
+	t.Run("ClampBelowMinimum", func(t *testing.T) {
+		dm.SetCommissioningWindowDuration(15 * time.Minute) // reset
+
+		tc := newTestControlFeature(t)
+		svc.RegisterSetCommissioningWindowDurationHandler(tc)
+
+		_, _ = tc.InvokeCommand(context.Background(), 2, map[string]any{
+			"enableKey":       "00112233445566778899aabbccddeeff",
+			"durationSeconds": uint32(1),
+		})
+
+		got := dm.CommissioningWindowDuration()
+		if got != 3*time.Second {
+			t.Errorf("CommissioningWindowDuration = %v, want 3s (clamped)", got)
+		}
+	})
+
+	t.Run("ClampAboveMaximum", func(t *testing.T) {
+		dm.SetCommissioningWindowDuration(15 * time.Minute) // reset
+
+		tc := newTestControlFeature(t)
+		svc.RegisterSetCommissioningWindowDurationHandler(tc)
+
+		_, _ = tc.InvokeCommand(context.Background(), 2, map[string]any{
+			"enableKey":       "00112233445566778899aabbccddeeff",
+			"durationSeconds": uint32(20000),
+		})
+
+		got := dm.CommissioningWindowDuration()
+		if got != 10800*time.Second {
+			t.Errorf("CommissioningWindowDuration = %v, want 10800s (clamped)", got)
+		}
+	})
+}
+
+// newTestControlFeature creates a TestControl feature for testing.
+func newTestControlFeature(t *testing.T) *features.TestControl {
+	t.Helper()
+	return features.NewTestControl()
 }

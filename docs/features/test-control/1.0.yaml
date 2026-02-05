@@ -23,3 +23,13 @@ commands:
       - { name: eventTrigger, type: uint64, required: true }
     response:
       - { name: success, type: bool, required: true }
+
+  - id: 0x02
+    name: setCommissioningWindowDuration
+    mandatory: false
+    description: "Set commissioning window duration (test mode only). Requires matching enableKey."
+    parameters:
+      - { name: enableKey, type: string, required: true }
+      - { name: durationSeconds, type: uint32, required: true }
+    response:
+      - { name: success, type: bool, required: true }

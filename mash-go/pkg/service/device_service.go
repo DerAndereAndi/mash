@@ -148,17 +148,19 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 	subConfig := subscription.DefaultConfig()
 	svc.subscriptionManager = subscription.NewManagerWithConfig(subConfig)
 
+	// In test mode, disable connection-level security hardening so the test
+	// harness can perform rapid PASE attempts without backoff/cooldown interference.
+	// Protocol-level security (e.g., PASE random delay) remains active.
+	if config.TestMode {
+		svc.config.PASEBackoffEnabled = false
+		svc.config.ConnectionCooldown = 0
+	}
+
 	// Initialize PASE attempt tracker (DEC-047)
 	// Backoff only triggers on failed attempts (wrong setup code), so it
 	// does not slow down normal commissioning cycles that succeed immediately.
-	if config.PASEBackoffEnabled {
-		svc.paseTracker = NewPASEAttemptTracker(config.PASEBackoffTiers)
-	}
-
-	// In test mode, extend the commissioning window to 24h if still at the default 15m,
-	// so the test harness has time to run the full suite without the window expiring.
-	if config.TestMode && svc.config.CommissioningWindowDuration == 15*time.Minute {
-		svc.config.CommissioningWindowDuration = 24 * time.Hour
+	if svc.config.PASEBackoffEnabled {
+		svc.paseTracker = NewPASEAttemptTracker(svc.config.PASEBackoffTiers)
 	}
 
 	// In test mode, bump MaxZones to 3 (GRID + LOCAL + TEST) if still at default 2 (DEC-060).
@@ -1673,6 +1675,13 @@ func (s *DeviceService) notifyZoneSessions(endpointID uint8, featureID uint8, at
 			"attrID", attrID,
 			"notificationsSent", notificationsSent)
 	}
+}
+
+// DiscoveryManager returns the discovery manager (for test control commands).
+func (s *DeviceService) DiscoveryManager() *discovery.DiscoveryManager {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.discoveryManager
 }
 
 // SetAdvertiser sets the discovery advertiser (for testing/DI).

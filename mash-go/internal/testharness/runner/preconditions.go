@@ -532,6 +532,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	case precondLevelCommissioning:
 		r.debugf("ensuring commissioning mode for %s", tc.ID)
 		r.ensureDisconnected()
+		time.Sleep(200 * time.Millisecond) // Let device process disconnect and auto-reenter commissioning
 		state.Set(StateCommissioningActive, true)
 	}
 

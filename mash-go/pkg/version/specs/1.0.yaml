@@ -254,4 +254,6 @@ features:
     commands:
       mandatory:
         - { id: 1, name: triggerTestEvent }
+      optional:
+        - { id: 2, name: setCommissioningWindowDuration }
 

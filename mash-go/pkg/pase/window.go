@@ -8,14 +8,14 @@ import (
 
 // Window state constants.
 const (
-	// DefaultWindowTimeout is the default commissioning window timeout.
-	DefaultWindowTimeout = 120 * time.Second
+	// DefaultWindowTimeout is the default commissioning window timeout (DEC-048).
+	DefaultWindowTimeout = 15 * time.Minute
 
-	// MinWindowTimeout is the minimum allowed window timeout.
-	MinWindowTimeout = 30 * time.Second
+	// MinWindowTimeout is the minimum allowed window timeout (DEC-048).
+	MinWindowTimeout = 3 * time.Minute
 
-	// MaxWindowTimeout is the maximum allowed window timeout.
-	MaxWindowTimeout = 300 * time.Second
+	// MaxWindowTimeout is the maximum allowed window timeout (DEC-048).
+	MaxWindowTimeout = 3 * time.Hour
 )
 
 // WindowState represents the state of the commissioning window.

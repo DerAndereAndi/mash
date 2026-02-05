@@ -72,6 +72,7 @@ var (
 	protocolLog    = flag.String("protocol-log", "", "File path for protocol event logging (CBOR format)")
 	enableKey      = flag.String("enable-key", "00112233445566778899aabbccddeeff", "128-bit hex key for TestControl triggers (32 hex chars)")
 	debug          = flag.Bool("debug", false, "Enable debug logging (connection lifecycle, precondition transitions, state snapshots)")
+	suiteTimeout   = flag.Duration("suite-timeout", 0, "Suite timeout (0 = auto-calculate from test timeouts)")
 )
 
 func main() {
@@ -168,6 +169,7 @@ func run() int {
 		EnableKey:          *enableKey,
 		AutoPICS:           autoPICS,
 		Debug:              *debug,
+		SuiteTimeout:       *suiteTimeout,
 	}
 	// Only set logger when non-nil to avoid typed-nil interface issue.
 	if protocolLogger != nil {
@@ -187,7 +189,9 @@ func run() int {
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	// Suite timeout is managed by the engine's RunSuite (auto-calculated or explicit).
+	// The top-level context does not impose a timeout to avoid premature cancellation.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	result, err := r.Run(ctx)

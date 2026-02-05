@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
@@ -21,6 +22,39 @@ func (s *DeviceService) RegisterTestEventHandler(tc *features.TestControl) {
 		}
 
 		return s.dispatchTrigger(ctx, req.EventTrigger)
+	})
+}
+
+// RegisterSetCommissioningWindowDurationHandler wires the setCommissioningWindowDuration
+// command on the given TestControl feature. This allows the test harness to dynamically
+// set the commissioning window duration on a running device.
+func (s *DeviceService) RegisterSetCommissioningWindowDurationHandler(tc *features.TestControl) {
+	tc.OnSetCommissioningWindowDuration(func(_ context.Context, req features.SetCommissioningWindowDurationRequest) error {
+		// Validate enable key.
+		if req.EnableKey != s.config.TestEnableKey {
+			s.debugLog("setCommissioningWindowDuration: enable key mismatch")
+			return fmt.Errorf("invalid enable key")
+		}
+
+		// Clamp to [3s, 10800s].
+		durSec := req.DurationSeconds
+		if durSec < 3 {
+			durSec = 3
+		}
+		if durSec > 10800 {
+			durSec = 10800
+		}
+
+		dur := time.Duration(durSec) * time.Second
+		dm := s.DiscoveryManager()
+		if dm != nil {
+			dm.SetCommissioningWindowDuration(dur)
+		}
+
+		s.debugLog("setCommissioningWindowDuration: set",
+			"requestedSeconds", req.DurationSeconds,
+			"effectiveSeconds", durSec)
+		return nil
 	})
 }
 

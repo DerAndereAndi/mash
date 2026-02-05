@@ -265,6 +265,7 @@ func main() {
 	// but before the wrapper is discarded).
 	if config.TestMode && testControl != nil {
 		svc.RegisterTestEventHandler(testControl)
+		svc.RegisterSetCommissioningWindowDurationHandler(testControl)
 		log.Printf("TestControl feature enabled (enable-key: %s...)", config.EnableKey[:8])
 	}
 

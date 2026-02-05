@@ -177,6 +177,10 @@ type EngineConfig struct {
 	// 0 or 1 means sequential execution.
 	ParallelTests int
 
+	// SuiteTimeout is the overall timeout for the entire test suite.
+	// 0 means auto-calculate from sum of individual test timeouts + 2-minute buffer.
+	SuiteTimeout time.Duration
+
 	// StopOnFirstFailure stops execution after the first test failure.
 	StopOnFirstFailure bool
 

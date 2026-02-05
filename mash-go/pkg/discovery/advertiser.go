@@ -169,6 +169,13 @@ func (m *DiscoveryManager) SetCommissioningWindowDuration(d time.Duration) {
 	m.commissioningWindowDuration = d
 }
 
+// CommissioningWindowDuration returns the current commissioning window duration.
+func (m *DiscoveryManager) CommissioningWindowDuration() time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.commissioningWindowDuration
+}
+
 // SetCommissionableInfo sets the device's commissionable information.
 // This should be called before entering commissioning mode.
 func (m *DiscoveryManager) SetCommissionableInfo(info *CommissionableInfo) {

@@ -44,6 +44,13 @@ const (
 	TriggerTestEventRespSuccess       = "success"
 )
 
+// SetCommissioningWindowDuration command parameter and response keys.
+const (
+	SetCommWindowDurParamEnableKey       = "enableKey"
+	SetCommWindowDurParamDurationSeconds = "durationSeconds"
+	SetCommWindowDurRespSuccess          = "success"
+)
+
 // TriggerDomain extracts the feature domain from a trigger opcode.
 // The domain is encoded in the upper 2 bytes.
 func TriggerDomain(trigger uint64) uint16 {

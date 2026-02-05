@@ -9,6 +9,9 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/features"
+	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // registerControllerHandlers registers all controller action handlers.
@@ -227,12 +230,73 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 
 	cs.commissioningWindowDuration = time.Duration(minutes * float64(time.Minute))
 
+	// Dual-mode: also send the real command to the device when connected
+	// with an operational TLS session. Errors are logged but not propagated
+	// (simulation state is the source of truth for the test harness).
+	durationSeconds := uint32(minutes * 60)
+	r.sendSetCommWindowDuration(durationSeconds)
+
 	return map[string]any{
 		KeyDurationSet:     true,
 		KeyMinutes:         minutes,
 		KeyDurationSeconds: minutes * 60,
 		KeyResult:          result,
 	}, nil
+}
+
+// sendSetCommWindowDuration sends the setCommissioningWindowDuration command
+// to the real device over an operational zone connection.
+func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32) {
+	if r.conn == nil || !r.conn.connected || !r.conn.operational || r.config.EnableKey == "" {
+		return
+	}
+
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpInvoke,
+		EndpointID: 0,
+		FeatureID:  uint8(model.FeatureTestControl), //nolint:gosec // constant fits in uint8
+		Payload: &wire.InvokePayload{
+			CommandID: features.TestControlCmdSetCommissioningWindowDuration,
+			Parameters: map[string]any{
+				features.SetCommWindowDurParamEnableKey:       r.config.EnableKey,
+				features.SetCommWindowDurParamDurationSeconds: durationSeconds,
+			},
+		},
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		r.debugf("sendSetCommWindowDuration: encode error: %v", err)
+		return
+	}
+
+	if err := r.conn.framer.WriteFrame(data); err != nil {
+		r.debugf("sendSetCommWindowDuration: write error: %v", err)
+		return
+	}
+
+	// Read the response (may need to skip notifications).
+	for range 5 {
+		respData, readErr := r.conn.framer.ReadFrame()
+		if readErr != nil {
+			r.debugf("sendSetCommWindowDuration: read error: %v", readErr)
+			return
+		}
+		msgType, peekErr := wire.PeekMessageType(respData)
+		if peekErr != nil {
+			r.debugf("sendSetCommWindowDuration: peek error: %v", peekErr)
+			return
+		}
+		if msgType == wire.MessageTypeNotification {
+			r.conn.pendingNotifications = append(r.conn.pendingNotifications, respData)
+			continue
+		}
+		// Got the invoke response -- done.
+		r.debugf("sendSetCommWindowDuration: success (durationSeconds=%d)", durationSeconds)
+		return
+	}
+	r.debugf("sendSetCommWindowDuration: too many notifications, giving up")
 }
 
 // handleGetCommissioningWindowDuration returns the commissioning window duration.

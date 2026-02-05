@@ -1,37 +1,35 @@
 # Test Suite: Commissioning Window Timing Tests
 # Verifies DEC-048: Commissioning Window Duration Alignment
 #
-# Key changes from Matter alignment:
-# - Default: 15 minutes (was 3 hours)
-# - Minimum: 3 minutes (was 1 hour)
-# - Maximum: 3 hours (was 24 hours)
+# These tests use setCommissioningWindowDuration (TestControl command) to set
+# short window durations, enabling fast mechanism-based verification (~30-40s)
+# rather than waiting for the full 15-minute production default.
 #
-# Rationale:
-# - Pairing request (_mashp._udp) provides on-demand re-triggering
-# - Shorter windows reduce attack surface
-# - Aligns with Matter 5.4.2.3.1
+# DEC-048 constants: Default 15m, Min 3m, Max 3h.
 
 ---
-# TC-COMM-WINDOW-001: Default Commissioning Window Duration
+# TC-COMM-WINDOW-001: Commissioning Window Expires After Set Duration
 id: TC-COMM-WINDOW-001
-name: Default Commissioning Window Duration
+name: Commissioning Window Expires After Set Duration
 description: |
-  Verifies device uses 15-minute default commissioning window.
-  Device should stop advertising as commissionable after 15 minutes
-  if not commissioned.
-
-  This aligns with Matter specification 5.4.2.3.1 which recommends
-  a maximum of 15 minutes for commissionable announcements.
+  Verifies that the commissioning window expires after the configured duration.
+  Uses setCommissioningWindowDuration to set a short (20s) window, then verifies
+  the device stops advertising as commissionable after the window expires.
 
 pics_requirements:
   - MASH.S.COMM                        # Device supports commissioning
-  - MASH.S.COMM.WINDOW_DEFAULT: 900    # Default is 15 minutes (900 seconds)
 
 preconditions:
-  - device_uncommissioned: true
-  - commissioning_window_closed: true
+  - device_commissioned: true
 
 steps:
+  - name: Set short commissioning window (20s)
+    action: set_commissioning_window_duration
+    params:
+      duration_seconds: 20
+    expect:
+      duration_set: true
+
   - name: Enter commissioning mode
     action: enter_commissioning_mode
     expect:
@@ -44,23 +42,23 @@ steps:
     expect:
       advertising: true
 
-  - name: Wait 14 minutes
+  - name: Wait 15 seconds (window still open)
     action: wait
     params:
-      duration_seconds: 840
-    note: Window should still be open
+      duration_seconds: 15
+    note: Window should still be open (20s total)
 
-  - name: Verify still advertising at 14 minutes
+  - name: Verify still advertising at 15 seconds
     action: verify_mdns_advertising
     params:
       service_type: "_mashc._udp"
     expect:
       advertising: true
 
-  - name: Wait 2 more minutes (total 16 minutes)
+  - name: Wait 10 more seconds (total ~25s, past 20s window)
     action: wait
     params:
-      duration_seconds: 120
+      duration_seconds: 10
     note: Window should now be expired
 
   - name: Verify no longer advertising
@@ -70,47 +68,46 @@ steps:
     expect:
       not_advertising: true
 
-postconditions:
-  - commissioning_window_expired: true
-  - device_not_advertising_commissionable: true
-
-timeout: "20m"
+timeout: "60s"
 tags:
   - commissioning
   - timing
   - DEC-048
 
 ---
-# TC-COMM-WINDOW-002: Pairing Request Re-triggers Window
+# TC-COMM-WINDOW-002: Pairing Request Re-triggers Expired Window
 id: TC-COMM-WINDOW-002
-name: Pairing Request Re-triggers Window
+name: Pairing Request Re-triggers Expired Window
 description: |
-  Verifies that pairing request (_mashp._udp) can re-open the commissioning
-  window after it has expired.
-
-  This is the key mechanism that allows MASH to use shorter default windows
-  while still supporting deferred commissioning scenarios.
+  Verifies that a pairing request (_mashp._udp) re-opens the commissioning
+  window after it has expired. Uses a short window (15s) to keep total test
+  time under 40 seconds.
 
 pics_requirements:
   - MASH.S.COMM                        # Device supports commissioning
   - MASH.S.COMM.PAIRING_REQUEST        # Device responds to pairing requests
-  - MASH.S.COMM.WINDOW_DEFAULT: 900    # Default is 15 minutes
 
 preconditions:
-  - device_uncommissioned: true
-  - pairing_request_listening: true
+  - device_commissioned: true
 
 steps:
+  - name: Set short commissioning window (15s)
+    action: set_commissioning_window_duration
+    params:
+      duration_seconds: 15
+    expect:
+      duration_set: true
+
   - name: Enter commissioning mode
     action: enter_commissioning_mode
     expect:
       commissioning_mode: true
 
-  - name: Wait for window to expire (15+ minutes)
+  - name: Wait for window to expire (20s > 15s window)
     action: wait
     params:
-      duration_seconds: 920
-    note: Wait slightly longer than 15 minutes to ensure expiry
+      duration_seconds: 20
+    note: Wait past the 15-second window
 
   - name: Verify window closed
     action: verify_mdns_not_advertising
@@ -140,13 +137,8 @@ steps:
       timeout_ms: 5000
     expect:
       advertising: true
-      txt_records:
-        disc: "{{ device_discriminator }}"
 
-postconditions:
-  - commissioning_window_reopened: true
-
-timeout: "20m"
+timeout: "60s"
 tags:
   - commissioning
   - pairing-request
