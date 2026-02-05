@@ -2275,10 +2275,19 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 	// Check 3: Is there a zone slot available?
 	// TEST zones don't count against MaxZones (they're an extra observer slot).
 	// If enable-key is valid, we might be getting a TEST zone, so accept even if full.
+	enableKeyValid := s.isEnableKeyValid()
+
+	// When enable-key is valid, evict disconnected zones to free slots.
+	// This recovers from orphaned zones left by dead test connections.
+	if enableKeyValid {
+		if evicted := s.evictDisconnectedZone(); evicted != "" {
+			s.debugLog("acceptCommissioningConnection: evicted stale zone(s)", "firstZoneID", evicted)
+		}
+	}
+
 	s.mu.RLock()
 	nonTestCount := s.nonTestZoneCountLocked()
 	maxZones := s.config.MaxZones
-	enableKeyValid := s.isEnableKeyValid()
 	// Log zone state for debugging
 	if nonTestCount >= maxZones {
 		zoneStates := make([]string, 0, len(s.connectedZones))

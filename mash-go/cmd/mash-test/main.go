@@ -73,7 +73,7 @@ var (
 	enableKey      = flag.String("enable-key", "00112233445566778899aabbccddeeff", "128-bit hex key for TestControl triggers (32 hex chars)")
 	debug          = flag.Bool("debug", false, "Enable debug logging (connection lifecycle, precondition transitions, state snapshots)")
 	suiteTimeout   = flag.Duration("suite-timeout", 0, "Suite timeout (0 = auto-calculate from test timeouts)")
-	filter         = flag.String("filter", "", "Filter test cases by ID regex (e.g., 'TC-CERT.*' or 'TC-READ-001|TC-WRITE-001')")
+	filter         = flag.String("filter", "", "Filter test cases by ID glob pattern (e.g., 'TC-CERT*' or '*ZONE*')")
 )
 
 func main() {
