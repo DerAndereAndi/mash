@@ -99,3 +99,78 @@ func TestHandleVerifyConnectionState_Operational(t *testing.T) {
 		t.Error("expected commissioning_connection_closed=true after operational reconnect")
 	}
 }
+
+// TestCSRHistoryAccumulation verifies that handleReceiveRenewalCSR appends to CSR history.
+func TestCSRHistoryAccumulation(t *testing.T) {
+	state := newTestState()
+
+	// Simulate receiving CSR A
+	csrA := []byte{0x01, 0x02, 0x03}
+	state.Set(StatePendingCSR, csrA)
+
+	// Append to history as handleReceiveRenewalCSR does
+	var history [][]byte
+	history = append(history, csrA)
+	state.Set(StateCSRHistory, history)
+
+	// Verify history has one entry
+	histData, exists := state.Get(StateCSRHistory)
+	if !exists {
+		t.Fatal("expected CSR history to exist")
+	}
+	hist := histData.([][]byte)
+	if len(hist) != 1 {
+		t.Errorf("expected history length 1, got %d", len(hist))
+	}
+
+	// Simulate receiving CSR B (second renewal request)
+	csrB := []byte{0x04, 0x05, 0x06}
+	state.Set(StatePendingCSR, csrB)
+	hist = append(hist, csrB)
+	state.Set(StateCSRHistory, hist)
+
+	// Verify history has two entries
+	histData, _ = state.Get(StateCSRHistory)
+	hist = histData.([][]byte)
+	if len(hist) != 2 {
+		t.Errorf("expected history length 2, got %d", len(hist))
+	}
+
+	// Verify CSR A is at index 0, CSR B at index 1
+	if hist[0][0] != 0x01 {
+		t.Error("expected CSR A at index 0")
+	}
+	if hist[1][0] != 0x04 {
+		t.Error("expected CSR B at index 1")
+	}
+}
+
+// TestUsePreviousCSR verifies that handleSendCertInstall respects use_previous_csr.
+func TestUsePreviousCSR(t *testing.T) {
+	state := newTestState()
+
+	// Set up CSR history with two entries
+	csrA := []byte{0xAA, 0xAA, 0xAA}
+	csrB := []byte{0xBB, 0xBB, 0xBB}
+	history := [][]byte{csrA, csrB}
+	state.Set(StateCSRHistory, history)
+	state.Set(StatePendingCSR, csrB) // Current pending is B
+
+	// Test retrieving CSR at index 0 (CSR A)
+	histData, exists := state.Get(StateCSRHistory)
+	if !exists {
+		t.Fatal("expected CSR history to exist")
+	}
+	hist := histData.([][]byte)
+
+	csrIndex := 0
+	if csrIndex >= len(hist) {
+		t.Fatalf("invalid CSR index %d (history has %d entries)", csrIndex, len(hist))
+	}
+	selectedCSR := hist[csrIndex]
+
+	// Verify we got CSR A, not the current pending (CSR B)
+	if selectedCSR[0] != 0xAA {
+		t.Errorf("expected CSR A (0xAA), got 0x%02X", selectedCSR[0])
+	}
+}

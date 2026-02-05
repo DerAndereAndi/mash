@@ -111,10 +111,12 @@ func (h *DeviceRenewalHandler) HandleCertInstall(install *commissioning.CertRene
 		}, nil
 	}
 
+	// DEC-047: If the public key doesn't match, the controller used a CSR
+	// from a different nonce session. Return InvalidNonce, not InvalidCert.
 	if !publicKeysEqual(certPub, h.pendingKeyPair.PublicKey) {
 		return &commissioning.CertRenewalAck{
 			MsgType:        commissioning.MsgCertRenewalAck,
-			Status:         commissioning.RenewalStatusInvalidCert,
+			Status:         commissioning.RenewalStatusInvalidNonce,
 			ActiveSequence: h.certSequence,
 		}, nil
 	}

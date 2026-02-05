@@ -22,13 +22,6 @@ preconditions:
   - tls_connection_established: true
 
 steps:
-  - name: Connect to device
-    action: connect
-    params:
-      insecure: true
-    expect:
-      connection_established: true
-
   - name: Send renewal request with nonce
     action: send_renewal_request
     params:

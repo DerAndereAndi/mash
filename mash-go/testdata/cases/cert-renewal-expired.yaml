@@ -17,13 +17,6 @@ preconditions:
   - grace_period_disabled: true
 
 steps:
-  - name: Connect with valid certificate
-    action: connect
-    params:
-      insecure: true
-    expect:
-      connection_established: true
-
   - name: Verify connection works
     action: read
     params:

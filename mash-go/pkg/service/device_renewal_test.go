@@ -140,8 +140,11 @@ func TestDeviceRenewalHandler_HandleInstall(t *testing.T) {
 	}
 }
 
-// TestDeviceRenewalHandler_RejectInvalidCert verifies wrong-key rejection.
-func TestDeviceRenewalHandler_RejectInvalidCert(t *testing.T) {
+// TestDeviceRenewalHandler_RejectWrongKeyPair verifies wrong-key rejection.
+// Per DEC-047, when the cert's public key doesn't match the pending key pair,
+// the device returns InvalidNonce (not InvalidCert) because this indicates
+// the controller used a CSR from a different nonce session.
+func TestDeviceRenewalHandler_RejectWrongKeyPair(t *testing.T) {
 	identity := &cert.DeviceIdentity{
 		DeviceID:     "test-device-001",
 		VendorID:     0x1234,
@@ -193,10 +196,10 @@ func TestDeviceRenewalHandler_RejectInvalidCert(t *testing.T) {
 		t.Fatalf("HandleCertInstall should not return error: %v", err)
 	}
 
-	// Should reject with InvalidCert status
-	if ack.Status != commissioning.RenewalStatusInvalidCert {
-		t.Errorf("Expected status %d (invalid cert), got %d",
-			commissioning.RenewalStatusInvalidCert, ack.Status)
+	// Per DEC-047: public key mismatch returns InvalidNonce (stale CSR)
+	if ack.Status != commissioning.RenewalStatusInvalidNonce {
+		t.Errorf("Expected status %d (InvalidNonce), got %d",
+			commissioning.RenewalStatusInvalidNonce, ack.Status)
 	}
 
 	// Pending key pair should still be present (renewal not complete)
@@ -266,5 +269,97 @@ func TestDeviceRenewalHandler_NoRenewalInProgress(t *testing.T) {
 	// Should fail - no pending key pair
 	if ack.Status == commissioning.RenewalStatusSuccess {
 		t.Error("Expected failure when no renewal in progress")
+	}
+}
+
+// TestDeviceRenewalHandler_RejectStaleNonce verifies nonce binding per DEC-047.
+// When a new renewal request is sent, any cert from a previous CSR must be rejected.
+func TestDeviceRenewalHandler_RejectStaleNonce(t *testing.T) {
+	identity := &cert.DeviceIdentity{
+		DeviceID:     "test-device-001",
+		VendorID:     0x1234,
+		ProductID:    0x5678,
+		SerialNumber: "SN-TEST-001",
+	}
+	handler := NewDeviceRenewalHandler(identity)
+
+	// Create Zone CA for signing
+	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeLocal)
+	if err != nil {
+		t.Fatalf("Failed to create Zone CA: %v", err)
+	}
+
+	// Step 1: Send renewal request with nonce A
+	nonceA := make([]byte, 32)
+	for i := range nonceA {
+		nonceA[i] = 0xAA
+	}
+	csrRespA, err := handler.HandleRenewalRequest(&commissioning.CertRenewalRequest{
+		MsgType: commissioning.MsgCertRenewalRequest,
+		Nonce:   nonceA,
+	})
+	if err != nil {
+		t.Fatalf("HandleRenewalRequest (nonce A) failed: %v", err)
+	}
+
+	// Sign CSR A to get cert A
+	certA, err := cert.SignCSR(zoneCA, csrRespA.CSR)
+	if err != nil {
+		t.Fatalf("Failed to sign CSR A: %v", err)
+	}
+
+	// Step 2: Send renewal request with nonce B (this replaces pending state)
+	nonceB := make([]byte, 32)
+	for i := range nonceB {
+		nonceB[i] = 0xBB
+	}
+	_, err = handler.HandleRenewalRequest(&commissioning.CertRenewalRequest{
+		MsgType: commissioning.MsgCertRenewalRequest,
+		Nonce:   nonceB,
+	})
+	if err != nil {
+		t.Fatalf("HandleRenewalRequest (nonce B) failed: %v", err)
+	}
+
+	// Step 3: Try to install cert A (from old nonce session)
+	// This should fail because cert A's public key doesn't match the new pending key pair
+	install := &commissioning.CertRenewalInstall{
+		MsgType:  commissioning.MsgCertRenewalInstall,
+		NewCert:  certA.Raw,
+		Sequence: 2,
+	}
+
+	ack, err := handler.HandleCertInstall(install)
+	if err != nil {
+		t.Fatalf("HandleCertInstall should not return error: %v", err)
+	}
+
+	// Per DEC-047: Using a CSR from a different nonce session should return InvalidNonce
+	if ack.Status != commissioning.RenewalStatusInvalidNonce {
+		t.Errorf("Expected status %d (InvalidNonce), got %d (%s)",
+			commissioning.RenewalStatusInvalidNonce, ack.Status, renewalStatusName(ack.Status))
+	}
+
+	// Pending key pair should still be present (renewal not complete)
+	if handler.pendingKeyPair == nil {
+		t.Error("Expected pendingKeyPair to remain after rejection")
+	}
+}
+
+// renewalStatusName returns a human-readable name for test output.
+func renewalStatusName(status uint8) string {
+	switch status {
+	case commissioning.RenewalStatusSuccess:
+		return "Success"
+	case commissioning.RenewalStatusCSRFailed:
+		return "CSRFailed"
+	case commissioning.RenewalStatusInstallFailed:
+		return "InstallFailed"
+	case commissioning.RenewalStatusInvalidCert:
+		return "InvalidCert"
+	case commissioning.RenewalStatusInvalidNonce:
+		return "InvalidNonce"
+	default:
+		return "Unknown"
 	}
 }

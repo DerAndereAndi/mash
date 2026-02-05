@@ -115,6 +115,7 @@ const (
 	StateCertSequence        = "cert_sequence"
 	StateRenewalNonce        = "renewal_nonce"
 	StatePendingCSR          = "pending_csr"
+	StateCSRHistory          = "csr_history" // [][]byte - all CSRs received
 	StateRenewalComplete     = "renewal_complete"
 	StateReceivedEvent       = "received_event"
 	StateGracePeriodDays     = "grace_period_days"
@@ -438,9 +439,12 @@ const (
 const (
 	KeyNonceGenerated                = "nonce_generated"
 	KeyNonceLength                   = "nonce_length"
+	KeyNonceHashPresent              = "nonce_hash_present"
+	KeyNonceHashMatchesExpected      = "nonce_hash_matches_expected"
 	KeyCSRReceived                   = "csr_received"
 	KeyCSRValid                      = "csr_valid"
 	KeyCSRLength                     = "csr_length"
+	KeyStatusName                    = "status_name"
 	KeyCertSent                      = "cert_sent"
 	KeySequenceIncremented           = "sequence_incremented"
 	KeyNewSequence                   = "new_sequence"

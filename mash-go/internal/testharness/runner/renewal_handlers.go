@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 )
 
@@ -46,13 +48,26 @@ func (r *Runner) handleSendRenewalRequest(ctx context.Context, step *loader.Step
 		return nil, fmt.Errorf("not connected")
 	}
 
-	// Get nonce length from params (default 32)
-	nonceLen := paramInt(step.Params, KeyNonceLength, 32)
+	var nonce []byte
+	var nonceLen int
 
-	// Generate nonce
-	nonce := make([]byte, nonceLen)
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, fmt.Errorf("generate nonce: %w", err)
+	// Check for explicit nonce parameter (hex string for known-nonce tests).
+	if nonceHex, ok := step.Params["nonce"].(string); ok && nonceHex != "" {
+		var err error
+		nonce, err = hex.DecodeString(nonceHex)
+		if err != nil {
+			return nil, fmt.Errorf("decode nonce hex: %w", err)
+		}
+		nonceLen = len(nonce)
+	} else {
+		// Get nonce length from params (default 32)
+		nonceLen = paramInt(step.Params, KeyNonceLength, 32)
+
+		// Generate random nonce
+		nonce = make([]byte, nonceLen)
+		if _, err := rand.Read(nonce); err != nil {
+			return nil, fmt.Errorf("generate nonce: %w", err)
+		}
 	}
 
 	// Store nonce in state for later verification
@@ -111,13 +126,37 @@ func (r *Runner) handleReceiveRenewalCSR(ctx context.Context, step *loader.Step,
 		csrValid = err == nil
 	}
 
-	// Store CSR for later signing
+	// Check nonce hash (DEC-047)
+	nonceHashPresent := len(csr.NonceHash) > 0
+	nonceHashMatches := false
+	if nonceHashPresent {
+		// Get the nonce we sent from state
+		if nonceData, ok := state.Get(StateRenewalNonce); ok {
+			if nonce, ok := nonceData.([]byte); ok {
+				nonceHashMatches = commissioning.ValidateNonceHash(nonce, csr.NonceHash)
+			}
+		}
+	}
+
+	// Store CSR for later signing (always keep current as pending)
 	state.Set(StatePendingCSR, csr.CSR)
 
+	// Also append to CSR history for use_previous_csr support
+	var csrHistory [][]byte
+	if histData, exists := state.Get(StateCSRHistory); exists {
+		if hist, ok := histData.([][]byte); ok {
+			csrHistory = hist
+		}
+	}
+	csrHistory = append(csrHistory, csr.CSR)
+	state.Set(StateCSRHistory, csrHistory)
+
 	return map[string]any{
-		KeyCSRReceived: true,
-		KeyCSRValid:    csrValid,
-		KeyCSRLength:   len(csr.CSR),
+		KeyCSRReceived:              true,
+		KeyCSRValid:                 csrValid,
+		KeyCSRLength:                len(csr.CSR),
+		KeyNonceHashPresent:         nonceHashPresent,
+		KeyNonceHashMatchesExpected: nonceHashMatches,
 	}, nil
 }
 
@@ -127,21 +166,46 @@ func (r *Runner) handleSendCertInstall(ctx context.Context, step *loader.Step, s
 		return nil, fmt.Errorf("not connected")
 	}
 
-	// Get pending CSR from state
-	csrData, exists := state.Get(StatePendingCSR)
-	if !exists {
-		return nil, fmt.Errorf("no pending CSR")
+	var csrBytes []byte
+
+	// Check if we should use a previous CSR (for nonce mismatch testing)
+	if usePrevious, ok := step.Params["use_previous_csr"].(bool); ok && usePrevious {
+		// Get CSR from history by index
+		csrIndex := paramInt(step.Params, "csr_index", 0)
+		histData, exists := state.Get(StateCSRHistory)
+		if !exists {
+			return nil, fmt.Errorf("no CSR history")
+		}
+		hist, ok := histData.([][]byte)
+		if !ok || csrIndex >= len(hist) {
+			return nil, fmt.Errorf("invalid CSR index %d (history has %d entries)", csrIndex, len(hist))
+		}
+		csrBytes = hist[csrIndex]
+	} else {
+		// Get current pending CSR from state
+		csrData, exists := state.Get(StatePendingCSR)
+		if !exists {
+			return nil, fmt.Errorf("no pending CSR")
+		}
+		var ok bool
+		csrBytes, ok = csrData.([]byte)
+		if !ok {
+			return nil, fmt.Errorf("invalid CSR data type")
+		}
 	}
 
-	csrBytes, ok := csrData.([]byte)
-	if !ok {
-		return nil, fmt.Errorf("invalid CSR data type")
+	// Sign the CSR using the runner's Zone CA to produce a valid certificate
+	var signedCertBytes []byte
+	if r.zoneCA != nil {
+		signedCert, err := cert.SignCSR(r.zoneCA, csrBytes)
+		if err != nil {
+			return nil, fmt.Errorf("sign CSR: %w", err)
+		}
+		signedCertBytes = signedCert.Raw
+	} else {
+		// Fallback: if no Zone CA, use CSR bytes as mock (will fail validation)
+		signedCertBytes = csrBytes
 	}
-
-	// For testing, we create a mock certificate
-	// In a real implementation, this would use the Zone CA
-	// Here we just echo back a placeholder to test the protocol flow
-	mockCert := csrBytes // Placeholder - real impl would sign
 
 	// Get or increment sequence
 	seq := uint32(1)
@@ -155,7 +219,7 @@ func (r *Runner) handleSendCertInstall(ctx context.Context, step *loader.Step, s
 	// Create and send install message
 	install := &commissioning.CertRenewalInstall{
 		MsgType:  commissioning.MsgCertRenewalInstall,
-		NewCert:  mockCert,
+		NewCert:  signedCertBytes,
 		Sequence: seq,
 	}
 
@@ -201,9 +265,28 @@ func (r *Runner) handleReceiveRenewalAck(ctx context.Context, step *loader.Step,
 	return map[string]any{
 		KeyAckReceived:    true,
 		KeyStatus:         int(ack.Status),
+		KeyStatusName:     renewalStatusName(ack.Status),
 		KeyActiveSequence: ack.ActiveSequence,
 		KeyNewCertActive:  ack.Status == commissioning.RenewalStatusSuccess,
 	}, nil
+}
+
+// renewalStatusName returns a human-readable name for a renewal status code.
+func renewalStatusName(status uint8) string {
+	switch status {
+	case commissioning.RenewalStatusSuccess:
+		return "RenewalStatusSuccess"
+	case commissioning.RenewalStatusCSRFailed:
+		return "RenewalStatusCSRFailed"
+	case commissioning.RenewalStatusInstallFailed:
+		return "RenewalStatusInstallFailed"
+	case commissioning.RenewalStatusInvalidCert:
+		return "RenewalStatusInvalidCert"
+	case commissioning.RenewalStatusInvalidNonce:
+		return "RenewalStatusInvalidNonce"
+	default:
+		return fmt.Sprintf("RenewalStatusUnknown(%d)", status)
+	}
 }
 
 // handleFullRenewalFlow performs the complete renewal protocol.

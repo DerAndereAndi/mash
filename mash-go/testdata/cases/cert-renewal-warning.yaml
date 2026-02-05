@@ -18,13 +18,6 @@ preconditions:
   - cert_days_until_expiry: 7
 
 steps:
-  - name: Connect to device
-    action: connect
-    params:
-      insecure: true
-    expect:
-      connection_established: true
-
   - name: Subscribe to DeviceInfo for events
     action: subscribe
     params:
