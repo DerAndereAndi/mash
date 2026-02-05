@@ -47,10 +47,7 @@ func (r *Runner) handleSendRenewalRequest(ctx context.Context, step *loader.Step
 	}
 
 	// Get nonce length from params (default 32)
-	nonceLen := 32
-	if n, ok := step.Params[KeyNonceLength].(float64); ok {
-		nonceLen = int(n)
-	}
+	nonceLen := paramInt(step.Params, KeyNonceLength, 32)
 
 	// Generate nonce
 	nonce := make([]byte, nonceLen)
@@ -327,13 +324,10 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 func (r *Runner) handleSetCertExpiry(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	days := 30 // default
-	if d, ok := params[KeyDaysUntilExpiry].(float64); ok {
-		days = int(d)
-	}
+	days := paramInt(params, KeyDaysUntilExpiry, 30)
 	// Also accept days_remaining (used by controller cert tests).
-	if d, ok := params[KeyDaysRemaining].(float64); ok {
-		days = int(d)
+	if d := paramInt(params, KeyDaysRemaining, -1); d >= 0 {
+		days = d
 	}
 
 	// Store in state for test verification
@@ -352,10 +346,7 @@ func (r *Runner) handleWaitForNotification(ctx context.Context, step *loader.Ste
 		eventType = et
 	}
 
-	timeoutMs := 5000
-	if t, ok := step.Params[KeyTimeoutMs].(float64); ok {
-		timeoutMs = int(t)
-	}
+	timeoutMs := paramInt(step.Params, KeyTimeoutMs, 5000)
 
 	// Create timeout context
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
@@ -428,10 +419,7 @@ func (r *Runner) handleConnectExpectFailure(ctx context.Context, step *loader.St
 
 // handleSetGracePeriod sets the grace period for testing.
 func (r *Runner) handleSetGracePeriod(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	days := 7
-	if d, ok := step.Params["days"].(float64); ok {
-		days = int(d)
-	}
+	days := paramInt(step.Params, "days", 7)
 
 	state.Set(StateGracePeriodDays, days)
 
@@ -443,10 +431,7 @@ func (r *Runner) handleSetGracePeriod(ctx context.Context, step *loader.Step, st
 
 // handleSimulateTimeAdvance simulates time advancement for expiry testing.
 func (r *Runner) handleSimulateTimeAdvance(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	daysPastExpiry := 0
-	if d, ok := step.Params["days_past_expiry"].(float64); ok {
-		daysPastExpiry = int(d)
-	}
+	daysPastExpiry := paramInt(step.Params, "days_past_expiry", 0)
 
 	graceDays := 7
 	if g, ok := state.Get(StateGracePeriodDays); ok {

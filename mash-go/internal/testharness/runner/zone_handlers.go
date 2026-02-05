@@ -474,7 +474,7 @@ func (r *Runner) handleVerifyTLSState(ctx context.Context, step *loader.Step, st
 	}
 
 	tlsState := r.conn.tlsConn.ConnectionState()
-	expectedVersion, _ := params["expected_version"].(float64)
+	expectedVersion := paramFloat(params, "expected_version", 0)
 
 	versionMatch := true
 	if expectedVersion > 0 {

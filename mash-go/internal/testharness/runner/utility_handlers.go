@@ -199,14 +199,8 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 	elapsed := endTime.Sub(startTime)
 	elapsedMs := elapsed.Milliseconds()
 
-	minMs := int64(0)
-	maxMs := int64(0)
-	if m, ok := params["min_ms"].(float64); ok {
-		minMs = int64(m)
-	}
-	if m, ok := params["max_ms"].(float64); ok {
-		maxMs = int64(m)
-	}
+	minMs := int64(paramInt(params, "min_ms", 0))
+	maxMs := int64(paramInt(params, "max_ms", 0))
 
 	// Support max_duration as a Go duration string (e.g., "6s").
 	if md, ok := params["max_duration"].(string); ok && md != "" {
@@ -283,14 +277,8 @@ func (r *Runner) handleWaitForState(ctx context.Context, step *loader.Step, stat
 
 	key, _ := params[KeyKey].(string)
 	expected := params[KeyValue]
-	timeoutMs := 5000
-	if t, ok := params[KeyTimeoutMs].(float64); ok {
-		timeoutMs = int(t)
-	}
-	pollMs := 100
-	if p, ok := params["poll_ms"].(float64); ok {
-		pollMs = int(p)
-	}
+	timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
+	pollMs := paramInt(params, "poll_ms", 100)
 
 	deadline := time.After(time.Duration(timeoutMs) * time.Millisecond)
 	ticker := time.NewTicker(time.Duration(pollMs) * time.Millisecond)
@@ -317,10 +305,7 @@ func (r *Runner) handleWaitForState(ctx context.Context, step *loader.Step, stat
 func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	timeoutMs := 5000
-	if t, ok := params[KeyTimeoutMs].(float64); ok {
-		timeoutMs = int(t)
-	}
+	timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
 
 	eventType, _ := params[KeyEventType].(string)
 
@@ -373,10 +358,7 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	timeoutMs := 5000
-	if t, ok := params[KeyTimeoutMs].(float64); ok {
-		timeoutMs = int(t)
-	}
+	timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
 	// Also accept "timeout" as a duration string (e.g., "5s").
 	if t, ok := params["timeout"].(string); ok {
 		if d, parseErr := time.ParseDuration(t); parseErr == nil {
@@ -484,6 +466,46 @@ func mapQRError(err error) string {
 		return "invalid_setup_code"
 	default:
 		return "parse_error"
+	}
+}
+
+// paramInt extracts an integer parameter from a params map, handling
+// int, float64, and int64 types that YAML v3 may produce. Returns
+// defaultVal if the key is missing or not numeric.
+func paramInt(params map[string]any, key string, defaultVal int) int {
+	v, ok := params[key]
+	if !ok {
+		return defaultVal
+	}
+	switch val := v.(type) {
+	case int:
+		return val
+	case float64:
+		return int(val)
+	case int64:
+		return int(val)
+	default:
+		return defaultVal
+	}
+}
+
+// paramFloat extracts a float64 parameter from a params map, handling
+// int, float64, and int64 types that YAML v3 may produce. Returns
+// defaultVal if the key is missing or not numeric.
+func paramFloat(params map[string]any, key string, defaultVal float64) float64 {
+	v, ok := params[key]
+	if !ok {
+		return defaultVal
+	}
+	switch val := v.(type) {
+	case float64:
+		return val
+	case int:
+		return float64(val)
+	case int64:
+		return float64(val)
+	default:
+		return defaultVal
 	}
 }
 

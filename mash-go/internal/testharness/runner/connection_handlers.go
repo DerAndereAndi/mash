@@ -408,10 +408,7 @@ func (r *Runner) handleWaitForNotificationAsZone(ctx context.Context, step *load
 		}, nil
 	}
 
-	timeoutMs := 5000
-	if t, ok := params[KeyTimeoutMs].(float64); ok {
-		timeoutMs = int(t)
-	}
+	timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
 
 	readCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
@@ -489,10 +486,7 @@ func (r *Runner) handleSimultaneousClose(ctx context.Context, step *loader.Step,
 func (r *Runner) handleWaitDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	timeoutMs := 10000
-	if t, ok := params[KeyTimeoutMs].(float64); ok {
-		timeoutMs = int(t)
-	}
+	timeoutMs := paramInt(params, KeyTimeoutMs, 10000)
 
 	if r.conn == nil || !r.conn.connected {
 		return map[string]any{KeyDisconnected: true}, nil
@@ -588,8 +582,8 @@ func (r *Runner) handlePing(ctx context.Context, step *loader.Step, state *engin
 
 	// Check if a timeout threshold was specified.
 	latencyUnder := true
-	if timeoutMs, ok := params[KeyTimeoutMs].(float64); ok {
-		latencyUnder = timeoutMs > 0 // Connection is alive, so latency is within any positive timeout.
+	if _, ok := params[KeyTimeoutMs]; ok {
+		latencyUnder = paramFloat(params, KeyTimeoutMs, 0) > 0 // Connection is alive, so latency is within any positive timeout.
 	}
 
 	// Increment pong sequence.
@@ -612,10 +606,7 @@ func (r *Runner) handlePing(ctx context.Context, step *loader.Step, state *engin
 func (r *Runner) handlePingMultiple(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	count := 3
-	if c, ok := params[KeyCount].(float64); ok {
-		count = int(c)
-	}
+	count := paramInt(params, KeyCount, 3)
 
 	allReceived := true
 	for i := 0; i < count; i++ {
@@ -1277,10 +1268,7 @@ func (r *Runner) handleWaitForQueuedResult(ctx context.Context, step *loader.Ste
 func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	count := 3
-	if c, ok := params[KeyCount].(float64); ok {
-		count = int(c)
-	}
+	count := paramInt(params, KeyCount, 3)
 
 	if r.conn == nil || !r.conn.connected {
 		return nil, fmt.Errorf("not connected")
@@ -1319,10 +1307,7 @@ func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loa
 func (r *Runner) handleReadConcurrent(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	count := 2
-	if c, ok := params[KeyCount].(float64); ok {
-		count = int(c)
-	}
+	count := paramInt(params, KeyCount, 2)
 
 	// For concurrency testing, we just perform sequential reads.
 	results := make([]map[string]any, 0, count)
@@ -1482,10 +1467,7 @@ func (r *Runner) handleReceiveNotification(ctx context.Context, step *loader.Ste
 func (r *Runner) handleReceiveNotifications(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	count := 1
-	if c, ok := params[KeyCount].(float64); ok {
-		count = int(c)
-	}
+	count := paramInt(params, KeyCount, 1)
 
 	received := 0
 	for i := 0; i < count; i++ {

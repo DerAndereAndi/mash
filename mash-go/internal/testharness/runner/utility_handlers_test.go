@@ -597,3 +597,57 @@ func TestHandleCompareUnknownOperator(t *testing.T) {
 		t.Error("expected error for unknown operator")
 	}
 }
+
+func TestParamInt(t *testing.T) {
+	tests := []struct {
+		name       string
+		params     map[string]any
+		key        string
+		defaultVal int
+		want       int
+	}{
+		{"int value", map[string]any{"k": int(3)}, "k", 1, 3},
+		{"float64 value", map[string]any{"k": float64(3.0)}, "k", 1, 3},
+		{"int64 value", map[string]any{"k": int64(3)}, "k", 1, 3},
+		{"missing key", map[string]any{}, "k", 7, 7},
+		{"string value", map[string]any{"k": "hello"}, "k", 7, 7},
+		{"nil value", map[string]any{"k": nil}, "k", 7, 7},
+		{"zero int", map[string]any{"k": int(0)}, "k", 5, 0},
+		{"zero float64", map[string]any{"k": float64(0)}, "k", 5, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := paramInt(tt.params, tt.key, tt.defaultVal)
+			if got != tt.want {
+				t.Errorf("paramInt(%v, %q, %d) = %d, want %d", tt.params, tt.key, tt.defaultVal, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParamFloat(t *testing.T) {
+	tests := []struct {
+		name       string
+		params     map[string]any
+		key        string
+		defaultVal float64
+		want       float64
+	}{
+		{"float64 value", map[string]any{"k": float64(3.14)}, "k", 0, 3.14},
+		{"int value", map[string]any{"k": int(3)}, "k", 0, 3.0},
+		{"int64 value", map[string]any{"k": int64(3)}, "k", 0, 3.0},
+		{"missing key", map[string]any{}, "k", 9.9, 9.9},
+		{"string value", map[string]any{"k": "hello"}, "k", 9.9, 9.9},
+		{"nil value", map[string]any{"k": nil}, "k", 9.9, 9.9},
+		{"zero float64", map[string]any{"k": float64(0)}, "k", 5.0, 0.0},
+		{"zero int", map[string]any{"k": int(0)}, "k", 5.0, 0.0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := paramFloat(tt.params, tt.key, tt.defaultVal)
+			if got != tt.want {
+				t.Errorf("paramFloat(%v, %q, %f) = %f, want %f", tt.params, tt.key, tt.defaultVal, got, tt.want)
+			}
+		})
+	}
+}

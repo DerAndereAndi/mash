@@ -97,14 +97,8 @@ func (r *Runner) handleInterfaceUp(ctx context.Context, step *loader.Step, state
 func (r *Runner) handleInterfaceFlap(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	count := 3
-	if c, ok := params[KeyCount].(float64); ok {
-		count = int(c)
-	}
-	intervalMs := 100
-	if i, ok := params["interval_ms"].(float64); ok {
-		intervalMs = int(i)
-	}
+	count := paramInt(params, KeyCount, 3)
+	intervalMs := paramInt(params, "interval_ms", 100)
 
 	for i := 0; i < count; i++ {
 		// Down.
@@ -163,11 +157,8 @@ func (r *Runner) handleAdjustClock(ctx context.Context, step *loader.Step, state
 	params := engine.InterpolateParams(step.Params, state)
 	ct := getConnectionTracker(state)
 
-	offsetMs := int64(0)
-	if o, ok := params[KeyOffsetMs].(float64); ok {
-		offsetMs = int64(o)
-	}
-	if d, ok := params["offset_days"].(float64); ok {
+	offsetMs := int64(paramInt(params, KeyOffsetMs, 0))
+	if d := paramInt(params, "offset_days", 0); d > 0 {
 		offsetMs = int64(d) * 24 * 60 * 60 * 1000
 	}
 

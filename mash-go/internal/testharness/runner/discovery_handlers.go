@@ -426,10 +426,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	// Simulate two devices with the same discriminator.
 	retries := 0
 	if twoDevs, _ := state.Get(PrecondTwoDevicesSameDiscriminator); twoDevs == true {
-		disc := uint16(1234)
-		if d, ok := params[KeyDiscriminator].(float64); ok {
-			disc = uint16(d)
-		}
+		disc := uint16(paramInt(params, KeyDiscriminator, 1234))
 		ds.services = []discoveredService{
 			{
 				InstanceName:  fmt.Sprintf("MASH-%d", disc),
@@ -452,10 +449,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		}
 	} else {
 		serviceType, _ := params[KeyServiceType].(string)
-		timeoutMs := 5000
-		if t, ok := params[KeyTimeoutMs].(float64); ok {
-			timeoutMs = int(t)
-		}
+		timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
 
 		// Determine if retry is requested.
 		retryRequested := false
@@ -625,10 +619,7 @@ func (r *Runner) handleReadMDNSTXT(ctx context.Context, step *loader.Step, state
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDiscoveryState(state)
 
-	index := 0
-	if idx, ok := params[KeyIndex].(float64); ok {
-		index = int(idx)
-	}
+	index := paramInt(params, KeyIndex, 0)
 
 	instanceName, _ := params[KeyInstanceName].(string)
 
@@ -776,10 +767,7 @@ func (r *Runner) handleGetQRPayload(ctx context.Context, step *loader.Step, stat
 	}
 
 	// Construct from params.
-	discriminator := uint16(0)
-	if d, ok := params[KeyDiscriminator].(float64); ok {
-		discriminator = uint16(d)
-	}
+	discriminator := uint16(paramInt(params, KeyDiscriminator, 0))
 	setupCode, _ := params[KeySetupCode].(string)
 	if setupCode == "" {
 		setupCode = r.config.SetupCode
@@ -832,10 +820,7 @@ func (r *Runner) handleGetQRPayload(ctx context.Context, step *loader.Step, stat
 func (r *Runner) handleAnnouncePairingRequest(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	discriminator := uint16(0)
-	if d, ok := params[KeyDiscriminator].(float64); ok {
-		discriminator = uint16(d)
-	}
+	discriminator := uint16(paramInt(params, KeyDiscriminator, 0))
 	zoneID, _ := params[KeyZoneID].(string)
 	zoneName, _ := params[KeyZoneName].(string)
 
@@ -864,15 +849,9 @@ func (r *Runner) handleStartDiscoveryReal(ctx context.Context, step *loader.Step
 func (r *Runner) handleWaitForDeviceReal(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	timeoutMs := 10000
-	if t, ok := params[KeyTimeoutMs].(float64); ok {
-		timeoutMs = int(t)
-	}
+	timeoutMs := paramInt(params, KeyTimeoutMs, 10000)
 
-	discriminator := uint16(0)
-	if d, ok := params[KeyDiscriminator].(float64); ok {
-		discriminator = uint16(d)
-	}
+	discriminator := uint16(paramInt(params, KeyDiscriminator, 0))
 
 	if discriminator > 0 {
 		browseCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)

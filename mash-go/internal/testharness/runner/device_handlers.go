@@ -438,10 +438,7 @@ func (r *Runner) handleTriggerFault(ctx context.Context, step *loader.Step, stat
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDeviceState(state)
 
-	code := uint32(0)
-	if c, ok := params[KeyFaultCode].(float64); ok {
-		code = uint32(c)
-	}
+	code := uint32(paramInt(params, KeyFaultCode, 0))
 	message, _ := params["fault_message"].(string)
 
 	ds.faults = append(ds.faults, faultEntry{
@@ -465,10 +462,7 @@ func (r *Runner) handleClearFault(ctx context.Context, step *loader.Step, state 
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDeviceState(state)
 
-	code := uint32(0)
-	if c, ok := params[KeyFaultCode].(float64); ok {
-		code = uint32(c)
-	}
+	code := uint32(paramInt(params, KeyFaultCode, 0))
 
 	found := false
 	for i, f := range ds.faults {
@@ -558,10 +552,7 @@ func (r *Runner) handleSetFailsafeLimit(ctx context.Context, step *loader.Step, 
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDeviceState(state)
 
-	limit := 0.0
-	if l, ok := params[KeyLimitWatts].(float64); ok {
-		limit = l
-	}
+	limit := paramFloat(params, KeyLimitWatts, 0.0)
 
 	ds.failsafeLimit = &limit
 	state.Set(StateFailsafeLimit, limit)

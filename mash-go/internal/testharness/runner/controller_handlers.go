@@ -186,8 +186,8 @@ func (r *Runner) handleVerifyControllerState(ctx context.Context, step *loader.S
 	cs := getControllerState(state)
 
 	allMatch := true
-	if expected, ok := params[KeyDeviceCount].(float64); ok {
-		if len(cs.devices) != int(expected) {
+	if _, ok := params[KeyDeviceCount]; ok {
+		if len(cs.devices) != paramInt(params, KeyDeviceCount, 0) {
 			allMatch = false
 		}
 	}

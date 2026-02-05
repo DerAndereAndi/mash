@@ -271,10 +271,7 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 func (r *Runner) handleCloseConnection(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	secState := getSecurityState(state)
 
-	index := 0
-	if idx, ok := step.Params["index"].(float64); ok {
-		index = int(idx)
-	}
+	index := paramInt(step.Params, "index", 0)
 
 	secState.pool.mu.Lock()
 	defer secState.pool.mu.Unlock()
@@ -301,10 +298,7 @@ func (r *Runner) handleCloseConnection(ctx context.Context, step *loader.Step, s
 func (r *Runner) handleCheckConnectionClosed(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	secState := getSecurityState(state)
 
-	index := 0
-	if idx, ok := step.Params["index"].(float64); ok {
-		index = int(idx)
-	}
+	index := paramInt(step.Params, "index", 0)
 
 	secState.pool.mu.Lock()
 	if index < 0 || index >= len(secState.pool.connections) {
@@ -361,15 +355,9 @@ func (r *Runner) handleCheckActiveConnections(ctx context.Context, step *loader.
 func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
 
-	rate := 100
-	if r, ok := params["rate_per_second"].(float64); ok {
-		rate = int(r)
-	}
+	rate := paramInt(params, "rate_per_second", 100)
 
-	duration := 5
-	if d, ok := params["duration_seconds"].(float64); ok {
-		duration = int(d)
-	}
+	duration := paramInt(params, "duration_seconds", 5)
 
 	target := r.config.Target
 	if t, ok := params[KeyTarget].(string); ok && t != "" {
@@ -661,10 +649,7 @@ func (r *Runner) handleReconnectOperational(ctx context.Context, step *loader.St
 func (r *Runner) handlePASERequestSlow(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
 
-	delayMs := 20000 // Default 20s between messages
-	if d, ok := params["delay_between_messages_ms"].(float64); ok {
-		delayMs = int(d)
-	}
+	delayMs := paramInt(params, "delay_between_messages_ms", 20000)
 
 	// Store delay for continue_slow_exchange
 	state.Set(StateSlowExchangeDelayMs, delayMs)
@@ -682,10 +667,7 @@ func (r *Runner) handlePASERequestSlow(ctx context.Context, step *loader.Step, s
 func (r *Runner) handleContinueSlowExchange(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
 
-	totalDurationMs := 90000 // Default 90s
-	if d, ok := params["total_duration_ms"].(float64); ok {
-		totalDurationMs = int(d)
-	}
+	totalDurationMs := paramInt(params, "total_duration_ms", 90000)
 
 	startTime, _ := state.Get(StateSlowExchangeStart)
 
@@ -744,10 +726,7 @@ func (r *Runner) handleContinueSlowExchange(ctx context.Context, step *loader.St
 func (r *Runner) handlePASEAttempts(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
 
-	count := 1
-	if c, ok := params[KeyCount].(float64); ok {
-		count = int(c)
-	}
+	count := paramInt(params, KeyCount, 1)
 
 	setupCode := "00000000" // Wrong code by default
 	if sc, ok := params[KeySetupCode].(string); ok {
@@ -765,10 +744,7 @@ func (r *Runner) handlePASEAttempts(ctx context.Context, step *loader.Step, stat
 		default:
 		}
 
-		delay, _, err := r.measurePASEAttempt(ctx, setupCode)
-		if err != nil {
-			// Expected to fail with wrong code - just measure timing
-		}
+		delay, _, _ := r.measurePASEAttempt(ctx, setupCode)
 
 		delays = append(delays, delay)
 		if delay > maxDelay {
@@ -799,14 +775,14 @@ func (r *Runner) handlePASEAttemptTimed(ctx context.Context, step *loader.Step, 
 		setupCode = sc
 	}
 
-	delay, _, err := r.measurePASEAttempt(ctx, setupCode)
+	delay, handshakeErr, connErr := r.measurePASEAttempt(ctx, setupCode)
 	// Error is expected for wrong passwords - we're measuring timing
 
 	state.Set(StateLastResponseDelayMs, delay.Milliseconds())
 
 	return map[string]any{
 		KeyResponseDelayMs: delay.Milliseconds(),
-		KeyAttemptFailed:   err != nil,
+		KeyAttemptFailed:   connErr != nil || handshakeErr != nil,
 	}, nil
 }
 
@@ -896,10 +872,7 @@ func (r *Runner) handleMeasureErrorTiming(ctx context.Context, step *loader.Step
 		errorType = et
 	}
 
-	iterations := 50
-	if iter, ok := params["iterations"].(float64); ok {
-		iterations = int(iter)
-	}
+	iterations := paramInt(params, "iterations", 50)
 
 	secState := getSecurityState(state)
 
@@ -1127,14 +1100,7 @@ func (r *Runner) checkMeanDifferenceMax(key string, expected interface{}, state 
 func (r *Runner) handleFillConnections(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
 
-	count := 0
-	if c, ok := params[KeyCount].(float64); ok {
-		count = int(c)
-	} else if c, ok := params[KeyCount].(int64); ok {
-		count = int(c)
-	} else if c, ok := params[KeyCount].(int); ok {
-		count = c
-	}
+	count := paramInt(params, KeyCount, 0)
 
 	if count <= 0 {
 		return nil, fmt.Errorf("fill_connections: count must be > 0, got %v", params[KeyCount])
