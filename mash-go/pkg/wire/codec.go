@@ -30,11 +30,16 @@ func init() {
 		panic(fmt.Sprintf("failed to create CBOR encoder mode: %v", err))
 	}
 
-	// Configure decoder to be lenient for forward compatibility
+	// Configure decoder with strict CBOR validation per MASH protocol spec:
+	// - Duplicate map keys are rejected (not silently ignored)
+	// - NaN and Infinity float values are rejected
+	// - Indefinite length encoding is allowed for forward compatibility
 	decOpts := cbor.DecOptions{
-		DupMapKey:         cbor.DupMapKeyQuiet, // Ignore duplicate keys (last wins)
+		DupMapKey:         cbor.DupMapKeyEnforcedAPF, // Reject duplicate keys with error
 		IndefLength:       cbor.IndefLengthAllowed,
 		ExtraReturnErrors: cbor.ExtraDecErrorNone,
+		NaN:               cbor.NaNDecodeForbidden, // Reject NaN float values
+		Inf:               cbor.InfDecodeForbidden, // Reject Infinity float values
 	}
 	decMode, err = decOpts.DecMode()
 	if err != nil {
@@ -174,7 +179,23 @@ const (
 // - Request: has endpoint (key 3) and feature (key 4) as integers
 // - Response: has payload at key 3 as a map, or status > 4
 func PeekMessageType(data []byte) (MessageType, error) {
-	// Decode into a generic map to inspect field types
+	// First decode into map[any]any to detect non-integer keys
+	var anyMap map[any]any
+	if err := Unmarshal(data, &anyMap); err != nil {
+		return MessageTypeUnknown, fmt.Errorf("failed to peek message: %w", err)
+	}
+
+	// MASH protocol requires integer keys at the top level - reject string keys
+	for k := range anyMap {
+		switch k.(type) {
+		case uint64, int64, int, uint, uint32, int32, uint16, int16, uint8, int8:
+			// Valid integer key
+		default:
+			return MessageTypeUnknown, fmt.Errorf("invalid message: non-integer key %T(%v)", k, k)
+		}
+	}
+
+	// Now decode into uint64 map for processing
 	var rawMsg map[uint64]any
 	if err := Unmarshal(data, &rawMsg); err != nil {
 		return MessageTypeUnknown, fmt.Errorf("failed to peek message: %w", err)

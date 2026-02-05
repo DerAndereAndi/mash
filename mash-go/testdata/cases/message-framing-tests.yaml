@@ -107,7 +107,7 @@ steps:
       cbor_bytes_hex: "a3010101010300"  # key 1 appears twice
     expect:
       error_status: INVALID_PARAMETER
-      error_message_contains: "Duplicate key"
+      error_message_contains: "duplicate map key"
 
 postconditions:
   - duplicate_keys_rejected: true

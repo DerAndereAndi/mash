@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -1000,6 +1001,42 @@ func CheckerSavePrimingValue(key string, expected interface{}, state *ExecutionS
 	}
 }
 
+// CheckerErrorMessageContains checks if the error_message_contains output contains the expected substring.
+// This is used for validating error messages from protocol responses.
+func CheckerErrorMessageContains(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+	actual, exists := state.Get(key)
+	if !exists {
+		return &ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Actual:   nil,
+			Passed:   false,
+			Message:  fmt.Sprintf("key %q not found in outputs", key),
+		}
+	}
+
+	actualStr, ok1 := actual.(string)
+	expectedStr, ok2 := expected.(string)
+	if !ok1 || !ok2 {
+		return &ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Actual:   actual,
+			Passed:   false,
+			Message:  fmt.Sprintf("expected string types for contains check, got %T and %T", actual, expected),
+		}
+	}
+
+	passed := strings.Contains(actualStr, expectedStr)
+	return &ExpectResult{
+		Key:      key,
+		Expected: expected,
+		Actual:   actual,
+		Passed:   passed,
+		Message:  fmt.Sprintf("error message contains %q: %v", expectedStr, passed),
+	}
+}
+
 // RegisterEnhancedCheckers registers all enhanced checkers with the engine.
 func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameValueGreaterThan, CheckerValueGreaterThan)
@@ -1036,4 +1073,5 @@ func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameKeysArePhases, CheckerKeysArePhases)
 	e.RegisterChecker(CheckerNameArrayNotEmpty, CheckerArrayNotEmpty)
 	e.RegisterChecker(CheckerNameSavePrimingValue, CheckerSavePrimingValue)
+	e.RegisterChecker(CheckerNameErrorMessageContains, CheckerErrorMessageContains)
 }

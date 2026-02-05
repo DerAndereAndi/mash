@@ -97,7 +97,8 @@ func (s *ZoneSession) OnMessage(data []byte) {
 	// Determine message type
 	msgType, err := wire.PeekMessageType(data)
 	if err != nil {
-		// Invalid message - ignore
+		// Invalid CBOR - send error response (messageID 0 since we couldn't parse it)
+		s.sendErrorResponse(0, wire.StatusInvalidParameter, "invalid CBOR: "+err.Error())
 		return
 	}
 

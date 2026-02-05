@@ -98,6 +98,8 @@ func (s *DeviceSession) OnMessage(data []byte) {
 				"deviceID", s.deviceID,
 				"error", err)
 		}
+		// Invalid CBOR - send error response
+		s.sendErrorResponse(0, wire.StatusInvalidParameter, "invalid CBOR: "+err.Error())
 		return
 	}
 

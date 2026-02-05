@@ -50,4 +50,5 @@ const (
 	CheckerNameKeysArePhases        = "keys_are_phases"
 	CheckerNameArrayNotEmpty        = "array_not_empty"
 	CheckerNameSavePrimingValue     = "save_priming_value"
+	CheckerNameErrorMessageContains = "error_message_contains"
 )

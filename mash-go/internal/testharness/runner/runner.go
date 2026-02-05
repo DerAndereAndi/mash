@@ -1233,13 +1233,18 @@ func (r *Runner) checkConnectionEstablished(key string, expected any, state *eng
 }
 
 func (r *Runner) checkResponseReceived(key string, expected any, state *engine.ExecutionState) *engine.ExpectResult {
-	actual, exists := state.Get(KeyResponse)
+	actual, exists := state.Get(KeyResponseReceived)
+	if !exists {
+		// Fall back: check if the response was actually received
+		actual = false
+	}
+	passed := actual == expected
 	return &engine.ExpectResult{
 		Key:      key,
 		Expected: expected,
 		Actual:   actual,
-		Passed:   exists,
-		Message:  fmt.Sprintf("response received: %v", exists),
+		Passed:   passed,
+		Message:  fmt.Sprintf("response received: %v", actual),
 	}
 }
 

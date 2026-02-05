@@ -553,6 +553,71 @@ func TestCBORIntegerTypeRoundtrip(t *testing.T) {
 	}
 }
 
+// TestCBORValidationStringKeys verifies that string keys in messages are rejected.
+func TestCBORValidationStringKeys(t *testing.T) {
+	// CBOR map with string keys - should be rejected by PeekMessageType
+	// A2 68 6D657373616765 01 68 6F7065726174696F6E 01
+	// = {"message": 1, "operation": 1}
+	// Simpler: A1 61 61 01 = {"a": 1}
+	stringKeyCBOR := []byte{0xA1, 0x61, 0x61, 0x01} // {"a": 1}
+
+	_, err := PeekMessageType(stringKeyCBOR)
+	if err == nil {
+		t.Errorf("Expected error for string keys in CBOR message, got nil")
+	}
+}
+
+// TestCBORValidationDuplicateKeys verifies that duplicate map keys are rejected.
+func TestCBORValidationDuplicateKeys(t *testing.T) {
+	// Hand-crafted CBOR with duplicate key 1:
+	// A3       # map(3)
+	//    01    # unsigned(1) - key 1
+	//    19 3039 # unsigned(12345) - value
+	//    01    # unsigned(1) - duplicate key 1
+	//    02    # unsigned(2) - value
+	//    02    # unsigned(2) - key 2
+	//    03    # unsigned(3) - value
+	duplicateKeyCBOR := []byte{0xA3, 0x01, 0x19, 0x30, 0x39, 0x01, 0x02, 0x02, 0x03}
+
+	var result map[int]int
+	err := Unmarshal(duplicateKeyCBOR, &result)
+	if err == nil {
+		t.Errorf("Expected error for duplicate CBOR keys, got nil (result: %v)", result)
+	}
+}
+
+// TestCBORValidationNaN verifies that NaN float values are rejected.
+func TestCBORValidationNaN(t *testing.T) {
+	// CBOR NaN: F9 7E 00 (half-precision quiet NaN)
+	nanCBOR := []byte{0xF9, 0x7E, 0x00}
+
+	var result float64
+	err := Unmarshal(nanCBOR, &result)
+	if err == nil {
+		t.Errorf("Expected error for NaN value, got nil (result: %v)", result)
+	}
+}
+
+// TestCBORValidationInfinity verifies that Infinity float values are rejected.
+func TestCBORValidationInfinity(t *testing.T) {
+	// CBOR +Infinity: F9 7C 00 (half-precision positive infinity)
+	infCBOR := []byte{0xF9, 0x7C, 0x00}
+
+	var result float64
+	err := Unmarshal(infCBOR, &result)
+	if err == nil {
+		t.Errorf("Expected error for Infinity value, got nil (result: %v)", result)
+	}
+
+	// CBOR -Infinity: F9 FC 00 (half-precision negative infinity)
+	negInfCBOR := []byte{0xF9, 0xFC, 0x00}
+
+	err = Unmarshal(negInfCBOR, &result)
+	if err == nil {
+		t.Errorf("Expected error for -Infinity value, got nil (result: %v)", result)
+	}
+}
+
 // TestNotificationChangesTypeCoercion tests the full notification path type handling.
 func TestNotificationChangesTypeCoercion(t *testing.T) {
 	// Create a notification with int64 power value

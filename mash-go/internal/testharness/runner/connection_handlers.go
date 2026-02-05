@@ -809,6 +809,7 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 		}, nil
 	}
 
+	r.debugf("handleSendRaw: about to write %d bytes, conn.connected=%v", len(data), r.conn.connected)
 	err = r.conn.framer.WriteFrame(data)
 	if err != nil {
 		return map[string]any{
@@ -839,12 +840,14 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 	select {
 	case res := <-ch:
 		if res.err != nil {
+			r.debugf("handleSendRaw: read error: %v", res.err)
 			outputs[KeyResponseReceived] = false
 			// Connection closed (EOF) -- device rejected the message silently.
 			outputs[KeyErrorStatus] = "CONNECTION_CLOSED"
 			outputs[KeyErrorCode] = "CONNECTION_CLOSED"
 			outputs[KeyParseSuccess] = false
 		} else {
+			r.debugf("handleSendRaw: received %d bytes", len(res.data))
 			outputs[KeyResponseReceived] = true
 			// Decode response using wire.DecodeResponse for proper status extraction.
 			if resp, decErr := wire.DecodeResponse(res.data); decErr == nil {
@@ -853,6 +856,11 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 				if !resp.IsSuccess() {
 					outputs[KeyErrorStatus] = resp.Status.String()
 					outputs[KeyErrorCode] = resp.Status.String()
+					// INVALID_PARAMETER typically indicates the device failed to parse
+					// the request (bad CBOR, missing fields, etc.), so parse_success is false.
+					if resp.Status == wire.StatusInvalidParameter {
+						outputs[KeyParseSuccess] = false
+					}
 					// Extract error message from payload if present.
 					if payload, ok := resp.Payload.(map[any]any); ok {
 						if msg, ok := payload[uint64(1)]; ok {
@@ -878,6 +886,7 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 			}
 		}
 	case <-readCtx.Done():
+		r.debugf("handleSendRaw: read timeout (5s)")
 		outputs[KeyResponseReceived] = false
 		// No response -- device ignored the malformed message.
 		outputs[KeyErrorStatus] = "NO_RESPONSE"
@@ -885,6 +894,7 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 		outputs[KeyParseSuccess] = false
 	}
 
+	r.debugf("handleSendRaw: final outputs[response_received]=%v", outputs[KeyResponseReceived])
 	return outputs, nil
 }
 

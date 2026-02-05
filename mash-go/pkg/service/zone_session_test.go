@@ -915,3 +915,31 @@ func TestZoneSession_IncomingRequestStillWorks(t *testing.T) {
 		t.Errorf("Expected success, got %v", resp.Status)
 	}
 }
+
+// TestZoneSession_InvalidCBORReturnsError verifies that invalid CBOR (e.g. duplicate keys)
+// results in an INVALID_PARAMETER error response, not silent ignoring.
+func TestZoneSession_InvalidCBORReturnsError(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockSendableConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	// Send invalid CBOR with duplicate keys:
+	// A3 01 01 01 02 02 03 = map(3) with key 1 appearing twice
+	invalidCBOR := []byte{0xA3, 0x01, 0x01, 0x01, 0x02, 0x02, 0x03}
+	session.OnMessage(invalidCBOR)
+
+	time.Sleep(50 * time.Millisecond)
+
+	sent := conn.SentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("Expected 1 error response for invalid CBOR, got %d", len(sent))
+	}
+
+	resp, err := wire.DecodeResponse(sent[0])
+	if err != nil {
+		t.Fatalf("Failed to decode error response: %v", err)
+	}
+	if resp.Status != wire.StatusInvalidParameter {
+		t.Errorf("Expected INVALID_PARAMETER status, got %v", resp.Status)
+	}
+}
