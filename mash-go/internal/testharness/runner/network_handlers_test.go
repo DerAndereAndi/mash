@@ -3,7 +3,9 @@ package runner
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 )
 
@@ -124,5 +126,80 @@ func TestHandleNetworkFilter(t *testing.T) {
 	filter, _ := state.Get("network_filter")
 	if filter != "drop_all" {
 		t.Errorf("expected drop_all, got %v", filter)
+	}
+}
+
+func TestHandleAdjustClock_SendsTrigger(t *testing.T) {
+	// Create a runner with a piped connection and target set (real device mode).
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+	go serverEchoResponse(server)
+
+	step := &loader.Step{
+		Params: map[string]any{
+			"offset_seconds": 400,
+		},
+	}
+
+	result, err := r.handleAdjustClock(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("handleAdjustClock returned error: %v", err)
+	}
+
+	// Verify the local offset was set.
+	ct := getConnectionTracker(state)
+	expected := 400 * time.Second
+	if ct.clockOffset != expected {
+		t.Errorf("clockOffset = %v, want %v", ct.clockOffset, expected)
+	}
+
+	// Verify output keys.
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if !result[KeyClockAdjusted].(bool) {
+		t.Error("expected clock_adjusted = true")
+	}
+	if result[KeyOffsetMs] != int64(400000) {
+		t.Errorf("expected offset_ms = 400000, got %v", result[KeyOffsetMs])
+	}
+
+	// Verify device state was modified (trigger was sent).
+	if !r.deviceStateModified {
+		t.Error("expected deviceStateModified=true after sending clock trigger to device")
+	}
+}
+
+func TestHandleAdjustClock_NoTriggerWithoutTarget(t *testing.T) {
+	// Runner without target -- no trigger should be sent.
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+
+	step := &loader.Step{
+		Params: map[string]any{
+			"offset_seconds": 200,
+		},
+	}
+
+	result, err := r.handleAdjustClock(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("handleAdjustClock returned error: %v", err)
+	}
+
+	// Verify the local offset was set.
+	ct := getConnectionTracker(state)
+	expected := 200 * time.Second
+	if ct.clockOffset != expected {
+		t.Errorf("clockOffset = %v, want %v", ct.clockOffset, expected)
+	}
+
+	// Verify output.
+	if !result[KeyClockAdjusted].(bool) {
+		t.Error("expected clock_adjusted = true")
+	}
+
+	// No trigger should have been sent (no target).
+	if r.deviceStateModified {
+		t.Error("expected deviceStateModified=false when no target is set")
 	}
 }

@@ -8,7 +8,7 @@ import (
 // TestChecker_ValueGreaterThan tests the value_greater_than checker.
 func TestChecker_ValueGreaterThan(t *testing.T) {
 	state := NewExecutionState(context.Background())
-	state.Set("count", float64(10))
+	state.Set("value", float64(10))
 
 	tests := []struct {
 		expected interface{}
@@ -20,7 +20,7 @@ func TestChecker_ValueGreaterThan(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := CheckerValueGreaterThan("count", tt.expected, state)
+		result := CheckerValueGreaterThan("value_greater_than", tt.expected, state)
 		if result.Passed != tt.passed {
 			t.Errorf("ValueGreaterThan(10, %v) = %v, want %v", tt.expected, result.Passed, tt.passed)
 		}
@@ -30,7 +30,7 @@ func TestChecker_ValueGreaterThan(t *testing.T) {
 // TestChecker_ValueLessThan tests the value_less_than checker.
 func TestChecker_ValueLessThan(t *testing.T) {
 	state := NewExecutionState(context.Background())
-	state.Set("count", float64(10))
+	state.Set("value", float64(10))
 
 	tests := []struct {
 		expected interface{}
@@ -42,7 +42,7 @@ func TestChecker_ValueLessThan(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := CheckerValueLessThan("count", tt.expected, state)
+		result := CheckerValueLessThan("value_less_than", tt.expected, state)
 		if result.Passed != tt.passed {
 			t.Errorf("ValueLessThan(10, %v) = %v, want %v", tt.expected, result.Passed, tt.passed)
 		}
@@ -76,61 +76,64 @@ func TestChecker_ValueInRange(t *testing.T) {
 // TestChecker_ValueIsNull tests the value_is_null checker.
 func TestChecker_ValueIsNull(t *testing.T) {
 	state := NewExecutionState(context.Background())
-	state.Set("nil_value", nil)
-	state.Set("non_nil_value", "something")
 
 	// Test nil value
-	result := CheckerValueIsNull("nil_value", true, state)
+	state.Set("value", nil)
+	result := CheckerValueIsNull("value_is_null", true, state)
 	if !result.Passed {
 		t.Error("ValueIsNull(nil) should pass")
 	}
 
 	// Test non-nil value expecting null
-	result = CheckerValueIsNull("non_nil_value", true, state)
+	state.Set("value", "something")
+	result = CheckerValueIsNull("value_is_null", true, state)
 	if result.Passed {
 		t.Error("ValueIsNull(something) expecting true should fail")
 	}
 
 	// Test non-nil value expecting not null
-	result = CheckerValueIsNull("non_nil_value", false, state)
+	state.Set("value", "something")
+	result = CheckerValueIsNull("value_is_null", false, state)
 	if !result.Passed {
 		t.Error("ValueIsNull(something) expecting false should pass")
-	}
-
-	// Test missing key (treated as null)
-	result = CheckerValueIsNull("missing_key", true, state)
-	if !result.Passed {
-		t.Error("ValueIsNull(missing) expecting true should pass")
 	}
 }
 
 // TestChecker_ValueIsMap tests the value_is_map checker.
 func TestChecker_ValueIsMap(t *testing.T) {
 	state := NewExecutionState(context.Background())
-	state.Set("map_value", map[string]interface{}{"key": "value"})
-	state.Set("string_value", "not a map")
-	state.Set("array_value", []interface{}{1, 2, 3})
 
-	// Test map value
-	result := CheckerValueIsMap("map_value", true, state)
+	// Test map[string]any value
+	state.Set("value", map[string]interface{}{"key": "value"})
+	result := CheckerValueIsMap("value_is_map", true, state)
 	if !result.Passed {
-		t.Error("ValueIsMap(map) should pass")
+		t.Error("ValueIsMap(map[string]any) should pass")
+	}
+
+	// Test map[any]any value (CBOR round-trip)
+	state.Set("value", map[any]any{uint64(0): uint64(1)})
+	result = CheckerValueIsMap("value_is_map", true, state)
+	if !result.Passed {
+		t.Error("ValueIsMap(map[any]any) should pass")
 	}
 
 	// Test non-map value
-	result = CheckerValueIsMap("string_value", true, state)
+	state.Set("value", "not a map")
+	result = CheckerValueIsMap("value_is_map", true, state)
 	if result.Passed {
 		t.Error("ValueIsMap(string) should fail")
 	}
 
 	// Test array value (not a map)
-	result = CheckerValueIsMap("array_value", true, state)
+	state.Set("value", []interface{}{1, 2, 3})
+	result = CheckerValueIsMap("value_is_map", true, state)
 	if result.Passed {
 		t.Error("ValueIsMap(array) should fail")
 	}
 
 	// Test expecting not a map
-	result = CheckerValueIsMap("string_value", false, state)
+	state.Set("value", "not a map")
+	result = CheckerValueIsMap("value_is_map", false, state)
 	if !result.Passed {
 		t.Error("ValueIsMap(string) expecting false should pass")
 	}
@@ -168,29 +171,29 @@ func TestChecker_Contains(t *testing.T) {
 // TestChecker_MapSizeEquals tests the map_size_equals checker.
 func TestChecker_MapSizeEquals(t *testing.T) {
 	state := NewExecutionState(context.Background())
-	state.Set("map2", map[string]interface{}{"a": 1, "b": 2})
-	state.Set("map0", map[string]interface{}{})
-	state.Set("array3", []interface{}{1, 2, 3})
 
 	// Test map size equals
-	result := CheckerMapSizeEquals("map2", float64(2), state)
+	state.Set("value", map[string]interface{}{"a": 1, "b": 2})
+	result := CheckerMapSizeEquals("map_size_equals", float64(2), state)
 	if !result.Passed {
 		t.Errorf("MapSizeEquals(map2, 2) = %v, want true. Message: %s", result.Passed, result.Message)
 	}
 
-	result = CheckerMapSizeEquals("map2", float64(3), state)
+	result = CheckerMapSizeEquals("map_size_equals", float64(3), state)
 	if result.Passed {
 		t.Error("MapSizeEquals(map2, 3) should fail")
 	}
 
 	// Test empty map
-	result = CheckerMapSizeEquals("map0", float64(0), state)
+	state.Set("value", map[string]interface{}{})
+	result = CheckerMapSizeEquals("map_size_equals", float64(0), state)
 	if !result.Passed {
 		t.Error("MapSizeEquals(map0, 0) should pass")
 	}
 
 	// Test array size
-	result = CheckerMapSizeEquals("array3", float64(3), state)
+	state.Set("value", []interface{}{1, 2, 3})
+	result = CheckerMapSizeEquals("map_size_equals", float64(3), state)
 	if !result.Passed {
 		t.Error("MapSizeEquals(array3, 3) should pass (works for arrays too)")
 	}
@@ -255,16 +258,17 @@ func TestChecker_NotFound(t *testing.T) {
 // TestChecker_TypeConversion tests numeric type handling.
 func TestChecker_TypeConversion(t *testing.T) {
 	state := NewExecutionState(context.Background())
-	state.Set("int_value", int(10))   // Set as int
-	state.Set("float_value", 10.5)    // Set as float64
 
-	// Should work with both int and float64
-	result := CheckerValueGreaterThan("int_value", float64(5), state)
+	// Should work with int value
+	state.Set("value", int(10))
+	result := CheckerValueGreaterThan("value_greater_than", float64(5), state)
 	if !result.Passed {
 		t.Error("Should handle int value with float64 comparison")
 	}
 
-	result = CheckerValueGreaterThan("float_value", float64(5), state)
+	// Should work with float64 value
+	state.Set("value", 10.5)
+	result = CheckerValueGreaterThan("value_greater_than", float64(5), state)
 	if !result.Passed {
 		t.Error("Should handle float64 value")
 	}

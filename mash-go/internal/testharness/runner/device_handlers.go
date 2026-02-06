@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -118,8 +119,12 @@ func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step,
 		result, err = r.handleListZones(ctx, subStep, state)
 	case "zone_count":
 		result, err = r.handleZoneCount(ctx, subStep, state)
+	case "get_zone":
+		result, err = r.handleGetZone(ctx, subStep, state)
 	case "highest_priority_zone":
 		result, err = r.handleHighestPriorityZone(ctx, subStep, state)
+	case "highest_priority_connected_zone":
+		result, err = r.handleHighestPriorityConnectedZone(ctx, subStep, state)
 
 	// Network simulation sub-actions.
 	case "interface_down":
@@ -179,9 +184,45 @@ func (r *Runner) handleDeviceSetValue(ctx context.Context, step *loader.Step, st
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDeviceState(state)
 
-	key, _ := params[KeyKey].(string)
+	// If attribute+feature+endpoint are provided, invoke TriggerTestEvent on the
+	// device's TestControl feature to change the value.
+	attribute, _ := params["attribute"].(string)
+	featureRaw := params[KeyFeature]
 	value := params[KeyValue]
 
+	if attribute != "" && featureRaw != nil {
+		// Resolve the trigger code for this attribute+value combination.
+		trigger, err := r.resolveTriggerForSetValue(featureRaw, attribute, value)
+		r.debugf("device_set_value: feature=%v attr=%s value=%v trigger=0x%016x err=%v", featureRaw, attribute, value, trigger, err)
+		if err != nil {
+			// Fall back to local state only.
+			r.debugf("device_set_value: no trigger for %s.%s=%v: %v", featureRaw, attribute, value, err)
+			ds.attributes[attribute] = value
+			state.Set(attribute, value)
+			return map[string]any{KeyValueSet: true, KeyKey: attribute}, nil
+		}
+
+		// Invoke TriggerTestEvent on the device.
+		result, err := r.invokeTriggerTestEvent(trigger)
+		if err != nil {
+			return map[string]any{
+				KeyValueSet: false,
+				KeyError:    err.Error(),
+			}, nil
+		}
+		// Also store locally.
+		ds.attributes[attribute] = value
+		state.Set(attribute, value)
+		return map[string]any{
+			KeyValueSet:   true,
+			KeyKey:        attribute,
+			KeyTriggerSent: true,
+			KeyStatus:     result,
+		}, nil
+	}
+
+	// Legacy: store key/value locally only.
+	key, _ := params[KeyKey].(string)
 	if key != "" {
 		ds.attributes[key] = value
 		state.Set(key, value)
@@ -193,21 +234,132 @@ func (r *Runner) handleDeviceSetValue(ctx context.Context, step *loader.Step, st
 	}, nil
 }
 
+// resolveTriggerForSetValue maps feature+attribute+value to a TriggerTestEvent code.
+func (r *Runner) resolveTriggerForSetValue(featureRaw any, attribute string, value any) (uint64, error) {
+	featureName := fmt.Sprintf("%v", featureRaw)
+	attrLower := strings.ToLower(attribute)
+	val := paramInt(map[string]any{"v": value}, "v", 0)
+
+	switch strings.ToLower(featureName) {
+	case "measurement":
+		switch attrLower {
+		case "acactivepower":
+			switch val {
+			case 0:
+				return features.TriggerSetPowerZero, nil
+			case 100000:
+				return features.TriggerSetPower100, nil
+			case 1000000:
+				return features.TriggerSetPower1000, nil
+			default:
+				// Use custom trigger: encode value in lower 32 bits.
+				return features.TriggerSetPowerCustomBase | uint64(uint32(val)), nil
+			}
+		case "stateofcharge":
+			switch val {
+			case 50:
+				return features.TriggerSetSoC50, nil
+			case 100:
+				return features.TriggerSetSoC100, nil
+			}
+		}
+	case "status":
+		switch attrLower {
+		case "operatingstate":
+			switch val {
+			case int(features.OperatingStateStandby):
+				return features.TriggerSetStandby, nil
+			case int(features.OperatingStateRunning):
+				return features.TriggerSetRunning, nil
+			case int(features.OperatingStateFault):
+				return features.TriggerFault, nil
+			}
+		}
+	}
+
+	return 0, fmt.Errorf("no trigger mapping for %s.%s=%v", featureName, attribute, value)
+}
+
+// invokeTriggerTestEvent sends a TriggerTestEvent invoke to the device's TestControl feature.
+func (r *Runner) invokeTriggerTestEvent(trigger uint64) (string, error) {
+	if !r.conn.connected {
+		return "", fmt.Errorf("not connected")
+	}
+
+	// Build invoke payload: {1: "triggerTestEvent", 2: {1: enableKey, 2: eventTrigger}}
+	invokePayload := &wire.InvokePayload{
+		CommandID: features.TestControlCmdTriggerTestEvent,
+		Parameters: map[string]any{
+			"enableKey":    r.config.EnableKey,
+			"eventTrigger": trigger,
+		},
+	}
+
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpInvoke,
+		EndpointID: 0, // Device root
+		FeatureID:  uint8(model.FeatureTestControl),
+		Payload:    invokePayload,
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode trigger request: %w", err)
+	}
+
+	resp, err := r.sendRequest(data, "triggerTestEvent")
+	if err != nil {
+		r.debugf("invokeTriggerTestEvent: sendRequest error: %v", err)
+		return "", err
+	}
+
+	r.debugf("invokeTriggerTestEvent: response status=%v payload=%v", resp.Status, resp.Payload)
+	if !resp.IsSuccess() {
+		return resp.Status.String(), fmt.Errorf("triggerTestEvent failed: %v", resp.Status)
+	}
+
+	return "SUCCESS", nil
+}
+
 // handleDeviceSetValuesRapid sets multiple values rapidly (stress test).
 func (r *Runner) handleDeviceSetValuesRapid(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
-	ds := getDeviceState(state)
 
-	values, ok := params["values"].(map[string]any)
+	intervalMs := paramInt(params, "interval_ms", 100)
+	featureName, _ := params[KeyFeature].(string)
+
+	// Accept "changes" as an array of {attribute, value} maps.
+	changes, ok := params["changes"].([]any)
 	if !ok {
-		return nil, fmt.Errorf("values parameter must be a map")
+		return nil, fmt.Errorf("changes parameter must be an array")
 	}
 
 	count := 0
-	for k, v := range values {
-		ds.attributes[k] = v
-		state.Set(k, v)
+	for i, change := range changes {
+		cm, ok := change.(map[string]any)
+		if !ok {
+			continue
+		}
+		attr, _ := cm["attribute"].(string)
+		val := cm["value"]
+
+		trigger, err := r.resolveTriggerForSetValue(featureName, attr, val)
+		if err != nil {
+			r.debugf("device_set_values_rapid: skip change %d (%s=%v): %v", i, attr, val, err)
+			continue
+		}
+
+		if _, err := r.invokeTriggerTestEvent(trigger); err != nil {
+			r.debugf("device_set_values_rapid: trigger failed for change %d: %v", i, err)
+			continue
+		}
 		count++
+
+		// Delay between changes (except after the last one).
+		if i < len(changes)-1 && intervalMs > 0 {
+			time.Sleep(time.Duration(intervalMs) * time.Millisecond)
+		}
 	}
 
 	return map[string]any{
@@ -505,6 +657,9 @@ func (r *Runner) handleClearFault(ctx context.Context, step *loader.Step, state 
 func (r *Runner) handleQueryDeviceState(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ds := getDeviceState(state)
 
+	deviceID, _ := state.Get(StateDeviceID)
+	deviceIDStr, _ := deviceID.(string)
+
 	return map[string]any{
 		StateOperatingState: ds.operatingState,
 		StateControlState:   ds.controlState,
@@ -512,6 +667,8 @@ func (r *Runner) handleQueryDeviceState(ctx context.Context, step *loader.Step, 
 		KeyActiveFaults:     len(ds.faults),
 		KeyEVConnected:      ds.evConnected,
 		KeyCablePluggedIn:   ds.cablePluggedIn,
+		KeyDeviceID:         deviceIDStr,
+		"device_id_present": deviceIDStr != "",
 	}, nil
 }
 
@@ -537,28 +694,67 @@ func (r *Runner) handleVerifyDeviceState(ctx context.Context, step *loader.Step,
 		}
 	}
 
+	// Add device ID information.
+	deviceID, _ := state.Get(StateDeviceID)
+	deviceIDStr, _ := deviceID.(string)
+	hasDeviceID := deviceIDStr != ""
+
+	// Check if device ID matches the cert CN.
+	certCN := ""
+	if r.issuedDeviceCert != nil {
+		certCN = r.issuedDeviceCert.Subject.CommonName
+	}
+	idMatchesCN := hasDeviceID && certCN != "" && deviceIDStr == certCN
+
 	return map[string]any{
-		KeyStateMatches:     allMatch,
-		StateOperatingState: ds.operatingState,
-		StateControlState:   ds.controlState,
-		StateProcessState:   ds.processState,
+		KeyStateMatches:          allMatch,
+		StateOperatingState:      ds.operatingState,
+		StateControlState:        ds.controlState,
+		StateProcessState:        ds.processState,
+		KeyDeviceHasDeviceID:     hasDeviceID,
+		KeyDeviceIDMatchesCertCN: idMatchesCN,
+		KeyDeviceID:              deviceIDStr,
 	}, nil
 }
 
 // handleSetConnected sets the connection state flag.
 func (r *Runner) handleSetConnected(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	params := engine.InterpolateParams(step.Params, state)
+
 	ds := getDeviceState(state)
 	ds.controlState = ControlStateControlled
 	state.Set(StateDeviceConnected, true)
+
+	// Also update zone state if zone_id is provided.
+	if zoneID, _ := params[KeyZoneID].(string); zoneID != "" {
+		zs := getZoneState(state)
+		if zone, ok := zs.zones[zoneID]; ok {
+			zone.Connected = true
+			zone.LastSeen = time.Now()
+			zone.LastSeenUpdated = true
+		}
+	}
 
 	return map[string]any{KeyConnected: true}, nil
 }
 
 // handleSetDisconnected sets the disconnection state.
 func (r *Runner) handleSetDisconnected(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	params := engine.InterpolateParams(step.Params, state)
+
 	ds := getDeviceState(state)
 	ds.controlState = ControlStateFailsafe
 	state.Set(StateDeviceConnected, false)
+
+	// Also update zone state if zone_id is provided.
+	// SetDisconnected does NOT update LastSeen per spec.
+	if zoneID, _ := params[KeyZoneID].(string); zoneID != "" {
+		zs := getZoneState(state)
+		if zone, ok := zs.zones[zoneID]; ok {
+			zone.Connected = false
+			zone.LastSeenUpdated = false
+		}
+	}
 
 	return map[string]any{KeyDisconnected: true}, nil
 }

@@ -9,6 +9,8 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
+	"github.com/mash-protocol/mash-go/pkg/inspect"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // registerUtilityHandlers registers utility action handlers.
@@ -150,6 +152,10 @@ func (r *Runner) handleRecordTime(ctx context.Context, step *loader.Step, state 
 
 	key, _ := params[KeyKey].(string)
 	if key == "" {
+		// Accept "name" as alias for "key" (used in test YAML).
+		key, _ = params["name"].(string)
+	}
+	if key == "" {
 		key = "recorded_time"
 	}
 
@@ -166,34 +172,62 @@ func (r *Runner) handleRecordTime(ctx context.Context, step *loader.Step, state 
 func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
+	// Accept "reference" and "event" as aliases for "start_key" (used in test YAML).
 	startKey, _ := params["start_key"].(string)
-	endKey, _ := params["end_key"].(string)
+	if startKey == "" {
+		startKey, _ = params["reference"].(string)
+	}
+	if startKey == "" {
+		startKey, _ = params["event"].(string)
+	}
 	if startKey == "" {
 		startKey = "start_time"
 	}
-	if endKey == "" {
-		endKey = "end_time"
-	}
+
+	endKey, _ := params["end_key"].(string)
 
 	startVal, startOK := state.Get(startKey)
-	endVal, endOK := state.Get(endKey)
-
-	if !startOK || !endOK {
+	if !startOK {
 		return map[string]any{
 			KeyWithinTolerance: false,
+			KeyWithinLimit:     false,
 			KeyElapsedMs:       int64(0),
-			KeyError:           "start or end time not recorded",
+			KeyError:           fmt.Sprintf("start time %q not recorded", startKey),
 		}, nil
 	}
 
 	startTime, sok := startVal.(time.Time)
-	endTime, eok := endVal.(time.Time)
-	if !sok || !eok {
+	if !sok {
 		return map[string]any{
 			KeyWithinTolerance: false,
+			KeyWithinLimit:     false,
 			KeyElapsedMs:       int64(0),
-			KeyError:           "recorded values are not time.Time",
+			KeyError:           fmt.Sprintf("recorded value for %q is not time.Time", startKey),
 		}, nil
+	}
+
+	// Use end_key if specified, otherwise use current time.
+	endTime := time.Now()
+	if endKey != "" {
+		endVal, endOK := state.Get(endKey)
+		if !endOK {
+			return map[string]any{
+				KeyWithinTolerance: false,
+				KeyWithinLimit:     false,
+				KeyElapsedMs:       int64(0),
+				KeyError:           fmt.Sprintf("end time %q not recorded", endKey),
+			}, nil
+		}
+		var eok bool
+		endTime, eok = endVal.(time.Time)
+		if !eok {
+			return map[string]any{
+				KeyWithinTolerance: false,
+				KeyWithinLimit:     false,
+				KeyElapsedMs:       int64(0),
+				KeyError:           fmt.Sprintf("recorded value for %q is not time.Time", endKey),
+			}, nil
+		}
 	}
 
 	elapsed := endTime.Sub(startTime)
@@ -213,6 +247,24 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 	if md, ok := params["max_duration"].(string); ok && md != "" {
 		if d, err := time.ParseDuration(md); err == nil {
 			maxMs = d.Milliseconds()
+		}
+	}
+
+	// Support expected_duration + tolerance (e.g., "60s" +/- "60s").
+	if ed, ok := params["expected_duration"].(string); ok && ed != "" {
+		if d, err := time.ParseDuration(ed); err == nil {
+			expectedMs := d.Milliseconds()
+			toleranceMs := int64(0)
+			if tol, ok := params["tolerance"].(string); ok && tol != "" {
+				if td, err := time.ParseDuration(tol); err == nil {
+					toleranceMs = td.Milliseconds()
+				}
+			}
+			minMs = expectedMs - toleranceMs
+			if minMs < 0 {
+				minMs = 0
+			}
+			maxMs = expectedMs + toleranceMs
 		}
 	}
 
@@ -314,8 +366,39 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 	params := engine.InterpolateParams(step.Params, state)
 
 	timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
+	// Also accept "timeout" as a duration string (e.g., "5s").
+	if t, ok := params["timeout"].(string); ok {
+		if d, parseErr := time.ParseDuration(t); parseErr == nil {
+			timeoutMs = int(d.Milliseconds())
+		}
+	}
 
 	eventType, _ := params[KeyEventType].(string)
+
+	// Check if subscribe response already contained priming data.
+	// If so, treat it as a received priming notification without reading the wire.
+	if primingData, ok := state.Get("_priming_data"); ok && primingData != nil {
+		// Consume priming data so subsequent calls wait for real notifications.
+		state.Set("_priming_data", nil)
+		r.debugf("receive_notification: using priming data from subscribe response")
+		return r.buildNotificationOutput(primingData, eventType, state, true)
+	}
+
+	// Check if a notification was buffered by sendRequest (interleaved with a response).
+	if len(r.pendingNotifications) > 0 {
+		data := r.pendingNotifications[0]
+		r.pendingNotifications = r.pendingNotifications[1:]
+		r.debugf("receive_notification: using buffered notification frame (%d bytes)", len(data))
+		notif, err := wire.DecodeNotification(data)
+		if err == nil {
+			out, outErr := r.buildNotificationOutput(notif.Changes, eventType, state, false)
+			if out != nil {
+				out[KeySubscriptionID] = notif.SubscriptionID
+			}
+			return out, outErr
+		}
+		// Not a valid notification -- ignore and continue to wire read.
+	}
 
 	if r.conn == nil || !r.conn.connected {
 		return map[string]any{
@@ -347,16 +430,125 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 				KeyError:                res.err.Error(),
 			}, nil
 		}
-		return map[string]any{
-			KeyNotificationReceived: true,
-			KeyEventType:            eventType,
-			KeyNotificationData:     res.data,
-		}, nil
+		// Decode the notification frame
+		notif, err := wire.DecodeNotification(res.data)
+		if err != nil {
+			// Might be a response or other message - return raw
+			return map[string]any{
+				KeyNotificationReceived: true,
+				KeyNotificationData:     res.data,
+				KeyEventType:            eventType,
+			}, nil
+		}
+		out, outErr := r.buildNotificationOutput(notif.Changes, eventType, state, false)
+		if out != nil {
+			out[KeySubscriptionID] = notif.SubscriptionID
+		}
+		return out, outErr
 	case <-readCtx.Done():
 		return map[string]any{
 			KeyNotificationReceived: false,
 			KeyEventType:            eventType,
 		}, nil
+	}
+}
+
+// buildNotificationOutput builds the output map from notification changes.
+// It resolves attribute names, determines priming vs delta, etc.
+func (r *Runner) buildNotificationOutput(changes any, eventType string, state *engine.ExecutionState, fromPriming bool) (map[string]any, error) {
+	outputs := map[string]any{
+		KeyNotificationReceived: true,
+		KeyEventType:            eventType,
+	}
+
+	// Get the subscribed feature ID to resolve attribute names.
+	featureID := uint8(0)
+	if fid, ok := state.Get(StateSubscribedFeatureID); ok {
+		switch v := fid.(type) {
+		case uint8:
+			featureID = v
+		case int:
+			featureID = uint8(v)
+		}
+	}
+
+	// Normalize the changes map to map[uint16]any.
+	changesMap := normalizeChangesMap(changes)
+	r.debugf("buildNotificationOutput: featureID=%d attrs=%d fromPriming=%v", featureID, len(changesMap), fromPriming)
+	if changesMap == nil {
+		outputs[KeyIsPrimingReport] = fromPriming
+		outputs[KeyIsDelta] = !fromPriming
+		return outputs, nil
+	}
+
+	// Resolve attribute names from the changes.
+	namedValues := make(map[string]any)
+	attrNames := make([]string, 0, len(changesMap))
+	for attrID, val := range changesMap {
+		name := inspect.GetAttributeName(featureID, attrID)
+		if name == "" {
+			name = fmt.Sprintf("%d", attrID)
+		}
+		namedValues[name] = val
+		attrNames = append(attrNames, name)
+	}
+
+	// Determine notification type using priming attribute count as baseline.
+	// - priming: the first report after subscribe (from subscribe response)
+	// - heartbeat: full-state notification at maxInterval (same attr count as priming)
+	// - delta: notification with fewer attributes than priming
+	isPriming := fromPriming
+	if isPriming {
+		// Save attribute count from priming for future heartbeat/delta detection.
+		state.Set("_priming_attr_count", len(changesMap))
+	}
+
+	primingCount := 0
+	if pc, ok := state.Get("_priming_attr_count"); ok {
+		if v, ok := pc.(int); ok {
+			primingCount = v
+		}
+	}
+
+	isFullState := primingCount > 0 && len(changesMap) >= primingCount
+	isHeartbeat := !fromPriming && isFullState
+	isDelta := !fromPriming && !isFullState
+
+	outputs[KeyIsPrimingReport] = isPriming
+	outputs[KeyIsHeartbeat] = isHeartbeat
+	outputs[KeyIsDelta] = isDelta
+	outputs[KeyContainsAllAttributes] = isFullState
+	outputs[KeyContainsFullState] = isFullState
+	outputs[KeyValue] = namedValues
+	outputs["contains"] = attrNames
+	outputs[KeyContainsOnly] = attrNames
+
+	return outputs, nil
+}
+
+// normalizeChangesMap converts various CBOR-decoded map types to map[uint16]any.
+func normalizeChangesMap(v any) map[uint16]any {
+	switch m := v.(type) {
+	case map[uint16]any:
+		return m
+	case map[any]any:
+		result := make(map[uint16]any, len(m))
+		for k, val := range m {
+			if id, ok := wire.ToUint32(k); ok {
+				result[uint16(id)] = val
+			}
+		}
+		return result
+	case map[uint64]any:
+		result := make(map[uint64]any, len(m))
+		_ = result // needed for type conversion
+		out := make(map[uint16]any, len(m))
+		for k, val := range m {
+			out[uint16(k)] = val
+		}
+		return out
+	default:
+		return nil
 	}
 }
 

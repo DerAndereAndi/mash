@@ -95,6 +95,9 @@ type DeviceService struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// Test clock offset for certificate validation (set via TriggerAdjustClockBase)
+	clockOffset time.Duration
+
 	// Security Hardening (DEC-047)
 	// Connection tracking
 	commissioningConnActive  bool       // Only one commissioning connection allowed
@@ -134,6 +137,7 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 		failsafeTimers: make(map[string]*failsafe.Timer),
 		zoneIndexMap:   make(map[string]uint8),
 		connTracker:    newConnTracker(),
+		certStore:      cert.NewMemoryStore(),
 		logger:         config.Logger,
 		protocolLogger: config.ProtocolLogger,
 	}
@@ -413,6 +417,62 @@ func (s *DeviceService) acceptLoop() {
 	}
 }
 
+// verifyClientCert validates a client certificate against known Zone CAs.
+// Returns nil if the certificate is valid, or an error describing why it was rejected.
+func (s *DeviceService) verifyClientCert(peerCert *x509.Certificate) error {
+	// Build a CA pool from all known Zone CAs.
+	caPool := x509.NewCertPool()
+	foundCA := false
+	if s.certStore != nil {
+		for _, ca := range s.certStore.GetAllZoneCAs() {
+			caPool.AddCert(ca)
+			foundCA = true
+		}
+	}
+
+	if !foundCA {
+		// No Zone CAs known yet -- allow connection (first commissioning
+		// may present a self-signed cert before cert exchange completes).
+		return nil
+	}
+
+	// Read clock offset under lock (may be set by test triggers).
+	s.mu.RLock()
+	offset := s.clockOffset
+	s.mu.RUnlock()
+
+	// Verify the client certificate against known Zone CAs.
+	// Apply clock offset (from test triggers) to simulate clock skew.
+	now := time.Now().Add(offset)
+	opts := x509.VerifyOptions{
+		Roots:       caPool,
+		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+		CurrentTime: now,
+	}
+	_, err := peerCert.Verify(opts)
+	if err == nil {
+		return nil
+	}
+
+	// Clock skew tolerance: accept certs whose NotBefore is up to 300s in
+	// the future (device clock behind controller), or whose NotAfter is up
+	// to 300s in the past (device clock ahead of controller).
+	const clockSkewTolerance = 300 * time.Second
+	if now.Before(peerCert.NotBefore) && peerCert.NotBefore.Sub(now) <= clockSkewTolerance {
+		opts.CurrentTime = peerCert.NotBefore
+		if _, err2 := peerCert.Verify(opts); err2 == nil {
+			return nil
+		}
+	}
+	if now.After(peerCert.NotAfter) && now.Sub(peerCert.NotAfter) <= clockSkewTolerance {
+		opts.CurrentTime = peerCert.NotAfter
+		if _, err2 := peerCert.Verify(opts); err2 == nil {
+			return nil
+		}
+	}
+	return err
+}
+
 // handleConnection handles an incoming connection.
 func (s *DeviceService) handleConnection(conn net.Conn) {
 	// DEC-062: Track active pre-operational connections for the connection cap.
@@ -464,6 +524,20 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 	// If the peer presented a client certificate, this is an operational
 	// reconnection from a known zone (not a new PASE commissioning).
 	peerHasCert := len(state.PeerCertificates) > 0
+
+	// Validate the client certificate against known Zone CAs.
+	// This must happen after the TLS handshake (not in VerifyPeerCertificate)
+	// because TLS 1.3 client cert verification happens after the handshake
+	// completes from the client's point of view.
+	if peerHasCert {
+		if err := s.verifyClientCert(state.PeerCertificates[0]); err != nil {
+			s.debugLog("handleConnection: client cert rejected",
+				"cn", state.PeerCertificates[0].Subject.CommonName,
+				"err", err)
+			tlsConn.Close()
+			return
+		}
+	}
 
 	s.debugLog("handleConnection: routing decision",
 		"discoveryState", discoveryState,
@@ -700,6 +774,15 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn, releaseAct
 
 	// DEC-047: Reset PASE tracker on successful authentication
 	s.ResetPASETracker()
+
+	// Reset test-mode clock offset on new PASE so operational
+	// connections during this commission use real time for cert
+	// validation. Without this, a stale offset from a previous
+	// test would cause verifyClientCert to reject the fresh
+	// operational cert issued in the current cert exchange.
+	s.mu.Lock()
+	s.clockOffset = 0
+	s.mu.Unlock()
 
 	// Derive zone ID from shared secret
 	zoneID := deriveZoneID(sharedSecret)
@@ -1440,6 +1523,26 @@ func (s *DeviceService) HandleZoneDisconnect(zoneID string) {
 	// between tests. Auto-removing here prevents reconnection scenarios
 	// (failsafe tests, reconnect tests) because handleOperationalConnection
 	// requires a disconnected-but-not-removed zone.
+
+	// With enable-key active, auto-re-enter commissioning mode when all
+	// zones are disconnected. The runner may not be able to send explicit
+	// RemoveZone (dead connection), so the device must be ready for new
+	// PASE without waiting for the runner to clean up.
+	if s.isEnableKeyValid() {
+		s.mu.RLock()
+		allDisconnected := true
+		for _, cz := range s.connectedZones {
+			if cz.Connected {
+				allDisconnected = false
+				break
+			}
+		}
+		s.mu.RUnlock()
+		if allDisconnected {
+			s.debugLog("HandleZoneDisconnect: all zones disconnected, re-entering commissioning mode")
+			_ = s.EnterCommissioningMode()
+		}
+	}
 }
 
 // handleFailsafe handles a failsafe timer trigger.
@@ -1982,6 +2085,12 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 	// Remove from connected zones
 	delete(s.connectedZones, zoneID)
 	s.mu.Unlock()
+
+	// Remove operational cert and Zone CA from cert store so the zone
+	// slot is freed for future commissioning.
+	if s.certStore != nil {
+		_ = s.certStore.RemoveOperationalCert(zoneID)
+	}
 
 	// Save state to persist the removal
 	_ = s.SaveState() // Ignore error - zone is already removed from memory

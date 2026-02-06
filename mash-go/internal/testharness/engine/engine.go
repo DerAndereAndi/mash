@@ -271,6 +271,16 @@ func defaultChecker(key string, expected interface{}, state *ExecutionState) *Ex
 		}
 	}
 
+	// When both expected and actual are lists of maps, use subset matching:
+	// each expected map must have all its keys present in the corresponding
+	// actual map with matching values. Extra keys in actual are allowed.
+	if passed, msg := subsetMatchListOfMaps(expected, actual); msg != "" {
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual,
+			Passed: passed, Message: msg,
+		}
+	}
+
 	// Simple equality check
 	passed := fmt.Sprintf("%v", expected) == fmt.Sprintf("%v", actual)
 	result := &ExpectResult{
@@ -287,6 +297,69 @@ func defaultChecker(key string, expected interface{}, state *ExecutionState) *Ex
 	}
 
 	return result
+}
+
+// subsetMatchListOfMaps performs subset matching when both expected and actual
+// are slices of maps. Returns (passed, message). If the pattern doesn't apply,
+// returns ("", "") to signal the caller should fall through to the default check.
+func subsetMatchListOfMaps(expected, actual interface{}) (bool, string) {
+	expList, expOK := expected.([]interface{})
+	if !expOK || len(expList) == 0 {
+		return false, ""
+	}
+	// At least one expected item must be a map for this to apply.
+	hasMap := false
+	for _, item := range expList {
+		if _, ok := item.(map[string]interface{}); ok {
+			hasMap = true
+			break
+		}
+	}
+	if !hasMap {
+		return false, ""
+	}
+
+	// Normalize actual to []interface{}.
+	var actList []interface{}
+	switch a := actual.(type) {
+	case []interface{}:
+		actList = a
+	case []map[string]any:
+		for _, m := range a {
+			actList = append(actList, m)
+		}
+	default:
+		return false, ""
+	}
+
+	if len(actList) != len(expList) {
+		return false, fmt.Sprintf("expected %d items, got %d", len(expList), len(actList))
+	}
+
+	for i, expItem := range expList {
+		expMap, ok := expItem.(map[string]interface{})
+		if !ok {
+			// Non-map item: fallback to simple equality.
+			if fmt.Sprintf("%v", expItem) != fmt.Sprintf("%v", actList[i]) {
+				return false, fmt.Sprintf("item[%d]: expected %v, got %v", i, expItem, actList[i])
+			}
+			continue
+		}
+		actMap, ok := actList[i].(map[string]interface{})
+		if !ok {
+			return false, fmt.Sprintf("item[%d]: expected map, got %T", i, actList[i])
+		}
+		for k, ev := range expMap {
+			av, has := actMap[k]
+			if !has {
+				return false, fmt.Sprintf("item[%d]: missing key %q", i, k)
+			}
+			if fmt.Sprintf("%v", ev) != fmt.Sprintf("%v", av) {
+				return false, fmt.Sprintf("item[%d].%s: expected %v, got %v", i, k, ev, av)
+			}
+		}
+	}
+	return true, "all expected fields match"
 }
 
 // RunSuite executes all test cases in a suite.

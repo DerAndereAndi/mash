@@ -46,14 +46,17 @@ type zoneState struct {
 
 // zoneInfo represents a single zone.
 type zoneInfo struct {
-	ZoneID        string
-	ZoneName      string
-	ZoneType      string
-	Priority      int
-	Metadata      map[string]any
-	CAFingerprint string
-	Connected     bool
-	DeviceIDs     []string
+	ZoneID           string
+	ZoneName         string
+	ZoneType         string
+	Priority         int
+	Metadata         map[string]any
+	CAFingerprint    string
+	Connected        bool
+	DeviceIDs        []string
+	CommissionedAt   time.Time
+	LastSeen         time.Time
+	LastSeenUpdated  bool // tracks whether LastSeen changed on last operation
 }
 
 // zonePriority maps zone types to their priority (higher number = higher priority).

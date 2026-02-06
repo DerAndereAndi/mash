@@ -61,8 +61,8 @@ func TestLimitResolver_SingleZoneSetClear(t *testing.T) {
 	if !resp.Applied {
 		t.Fatal("expected limit to be applied")
 	}
-	if resp.ControlState != ControlStateLimited {
-		t.Fatalf("expected LIMITED, got %s", resp.ControlState)
+	if resp.ControlState != ControlStateControlled {
+		t.Fatalf("expected CONTROLLED, got %s", resp.ControlState)
 	}
 	if resp.EffectiveConsumptionLimit == nil || *resp.EffectiveConsumptionLimit != 5000000 {
 		t.Fatal("expected effective consumption limit of 5000000")
@@ -73,8 +73,8 @@ func TestLimitResolver_SingleZoneSetClear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if lr.ec.ControlState() != ControlStateControlled {
-		t.Fatalf("expected CONTROLLED after clear, got %s", lr.ec.ControlState())
+	if lr.ec.ControlState() != ControlStateAutonomous {
+		t.Fatalf("expected AUTONOMOUS after clear, got %s", lr.ec.ControlState())
 	}
 	if _, ok := lr.ec.EffectiveConsumptionLimit(); ok {
 		t.Fatal("expected no effective consumption limit after clear")
@@ -117,8 +117,8 @@ func TestLimitResolver_ClearPromotesRemaining(t *testing.T) {
 	if !ok || eff != 6000000 {
 		t.Fatalf("expected promoted limit 6000000, got %d (ok=%v)", eff, ok)
 	}
-	if lr.ec.ControlState() != ControlStateLimited {
-		t.Fatalf("expected still LIMITED, got %s", lr.ec.ControlState())
+	if lr.ec.ControlState() != ControlStateControlled {
+		t.Fatalf("expected still CONTROLLED, got %s", lr.ec.ControlState())
 	}
 }
 
@@ -198,8 +198,8 @@ func TestLimitResolver_ClearByDirection(t *testing.T) {
 	if !okP || effP != 3000000 {
 		t.Fatalf("production should remain, got %d (ok=%v)", effP, okP)
 	}
-	if lr.ec.ControlState() != ControlStateLimited {
-		t.Fatalf("expected still LIMITED (production active), got %s", lr.ec.ControlState())
+	if lr.ec.ControlState() != ControlStateControlled {
+		t.Fatalf("expected still CONTROLLED (production active), got %s", lr.ec.ControlState())
 	}
 }
 
@@ -255,16 +255,16 @@ func TestLimitResolver_ControlStateTransitions(t *testing.T) {
 		t.Fatalf("expected CONTROLLED, got %s", lr.ec.ControlState())
 	}
 
-	// Set limit -> LIMITED
+	// Set limit -> CONTROLLED (controller has authority)
 	_, _ = lr.HandleSetLimit(ctx, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
-	if lr.ec.ControlState() != ControlStateLimited {
-		t.Fatalf("expected LIMITED, got %s", lr.ec.ControlState())
-	}
-
-	// Clear -> CONTROLLED
-	_ = lr.HandleClearLimit(ctx, ClearLimitRequest{})
 	if lr.ec.ControlState() != ControlStateControlled {
 		t.Fatalf("expected CONTROLLED, got %s", lr.ec.ControlState())
+	}
+
+	// Clear -> AUTONOMOUS (no external control)
+	_ = lr.HandleClearLimit(ctx, ClearLimitRequest{})
+	if lr.ec.ControlState() != ControlStateAutonomous {
+		t.Fatalf("expected AUTONOMOUS, got %s", lr.ec.ControlState())
 	}
 }
 
@@ -283,8 +283,8 @@ func TestLimitResolver_NilLimitsDeactivate(t *testing.T) {
 	if !resp.Applied {
 		t.Fatal("expected applied (deactivation)")
 	}
-	if lr.ec.ControlState() != ControlStateControlled {
-		t.Fatalf("expected CONTROLLED after deactivation, got %s", lr.ec.ControlState())
+	if lr.ec.ControlState() != ControlStateAutonomous {
+		t.Fatalf("expected AUTONOMOUS after deactivation, got %s", lr.ec.ControlState())
 	}
 }
 

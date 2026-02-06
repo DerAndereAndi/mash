@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
@@ -475,5 +476,109 @@ func TestTriggerFactoryReset_ClearsAllZones(t *testing.T) {
 	// Verify all zones removed.
 	if len(svc.ListZoneIDs()) != 0 {
 		t.Errorf("expected 0 zones after factory reset, got %d", len(svc.ListZoneIDs()))
+	}
+}
+
+func TestTriggerAdjustClock_SetsOffset(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService: %v", err)
+	}
+
+	// Encode +400 seconds in trigger
+	trigger := features.TriggerAdjustClockBase | uint64(uint32(int32(400)))
+	if err := svc.dispatchTrigger(context.Background(), trigger); err != nil {
+		t.Fatalf("dispatchTrigger: %v", err)
+	}
+
+	expected := 400 * time.Second
+	if svc.clockOffset != expected {
+		t.Errorf("clockOffset = %v, want %v", svc.clockOffset, expected)
+	}
+}
+
+func TestTriggerAdjustClock_NegativeOffset(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService: %v", err)
+	}
+
+	// Encode -200 seconds via two's complement
+	offsetSec := int32(-200)
+	trigger := features.TriggerAdjustClockBase | uint64(uint32(offsetSec))
+	if err := svc.dispatchTrigger(context.Background(), trigger); err != nil {
+		t.Fatalf("dispatchTrigger: %v", err)
+	}
+
+	expected := -200 * time.Second
+	if svc.clockOffset != expected {
+		t.Errorf("clockOffset = %v, want %v", svc.clockOffset, expected)
+	}
+}
+
+func TestTriggerResetTestState_ClearsClockOffset(t *testing.T) {
+	svc := newDeviceServiceWithAllFeatures(t)
+	ctx := context.Background()
+
+	// Set a clock offset first
+	trigger := features.TriggerAdjustClockBase | uint64(uint32(int32(400)))
+	if err := svc.dispatchTrigger(ctx, trigger); err != nil {
+		t.Fatalf("dispatchTrigger(AdjustClock): %v", err)
+	}
+	if svc.clockOffset == 0 {
+		t.Fatal("clockOffset should be non-zero after adjust")
+	}
+
+	// Reset should clear it
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+	if svc.clockOffset != 0 {
+		t.Errorf("clockOffset = %v after reset, want 0", svc.clockOffset)
+	}
+}
+
+func TestVerifyClientCert_UsesClockOffset(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService: %v", err)
+	}
+
+	// Generate a zone CA and store it
+	zoneCA, err := cert.GenerateZoneCA("test-zone", cert.ZoneTypeLocal)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA: %v", err)
+	}
+	if err := svc.certStore.SetZoneCACert("test-zone", zoneCA.Certificate); err != nil {
+		t.Fatalf("SetZoneCACert: %v", err)
+	}
+
+	// Generate a valid controller cert (valid for OperationalCertValidity = 365 days)
+	controllerCert, err := cert.GenerateControllerOperationalCert(zoneCA, "test-ctrl")
+	if err != nil {
+		t.Fatalf("GenerateControllerOperationalCert: %v", err)
+	}
+
+	// Without offset, cert should be valid
+	if err := svc.verifyClientCert(controllerCert.Certificate); err != nil {
+		t.Fatalf("cert should be valid without offset: %v", err)
+	}
+
+	// With +366d offset, cert should be expired (NotAfter is +365d from cert creation)
+	svc.clockOffset = 366 * 24 * time.Hour
+	if err := svc.verifyClientCert(controllerCert.Certificate); err == nil {
+		t.Error("cert should be rejected with +366d clock offset")
+	}
+
+	// Reset offset, should be valid again
+	svc.clockOffset = 0
+	if err := svc.verifyClientCert(controllerCert.Certificate); err != nil {
+		t.Errorf("cert should be valid after clearing offset: %v", err)
 	}
 }

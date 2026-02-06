@@ -126,6 +126,9 @@ const (
 	// Subscription state.
 	StateSubscriptionID         = "subscription_id"
 	StateRecordedSubscriptionID = "recorded_subscription_id"
+	StateSavedSubscriptionID    = "_saved_subscription_id"
+	StateSubscribedEndpointID   = "_subscribed_endpoint_id"
+	StateSubscribedFeatureID    = "_subscribed_feature_id"
 
 	// Network state.
 	StateNetworkPartitioned = "network_partitioned"
@@ -293,6 +296,7 @@ const (
 	KeyLatencyUnder            = "latency_under"
 	KeyPongSeq                 = "pong_seq"
 	KeyAllPongsReceived        = "all_pongs_received"
+	KeyAverageLatencyUnder     = "average_latency_under"
 	KeyKeepaliveActive         = "keepalive_active"
 	KeyRawSent                 = "raw_sent"
 	KeyParseSuccess            = "parse_success"
@@ -329,6 +333,18 @@ const (
 	KeyAllReceived             = "all_received"
 	KeyPrimingReceived         = "priming_received"
 	KeySavePrimingValue        = "save_priming_value"
+	KeyIsPrimingReport         = "is_priming_report"
+	KeyIsDelta                 = "is_delta"
+	KeyIsHeartbeat             = "is_heartbeat"
+	KeyContainsAllAttributes   = "contains_all_attributes"
+	KeyContainsFullState       = "contains_full_state"
+	KeySubscriptionIDSaved     = "subscription_id_saved"
+	KeyContainsOnly            = "contains_only"
+	KeyUnsubscribeSuccess      = "unsubscribe_success"
+	KeyAllIDsMatchSubs         = "all_ids_match_subscriptions"
+	KeyReceivedCount           = "received_count"
+	KeyAllIDsUnique            = "all_ids_unique"
+	KeyNotificationCount       = "notification_count"
 )
 
 // Security handler output keys.
@@ -485,8 +501,13 @@ const (
 	KeyHasOperationalCert  = "has_operational_cert"
 	KeyCertSignedByZoneCA  = "cert_signed_by_zone_ca"
 	KeyCertValidityDays    = "cert_validity_days"
-	KeyCertStoreValid      = "cert_store_valid"
-	KeyCertCount           = "cert_count"
+	KeyCertStoreValid          = "cert_store_valid"
+	KeyCertCount               = "cert_count"
+	KeyCommonNameIsDeviceID    = "common_name_is_device_id"
+	KeyDeviceHasDeviceID       = "device_has_device_id"
+	KeyDeviceIDMatchesCertCN   = "device_id_matches_cert_cn"
+	KeyZoneCAStored            = "zone_ca_stored"
+	KeyOperationalCertStored   = "operational_cert_stored"
 	KeyDeviceID            = "device_id"
 	KeyExtracted           = "extracted"
 	KeyCommissioningState  = "commissioning_state"

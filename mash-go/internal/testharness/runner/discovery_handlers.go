@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -552,6 +553,26 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		allInZone = false
 	}
 
+	// Classify addresses across all services.
+	hasLinkLocal := false
+	hasGlobalOrULA := false
+	allIPv6Valid := aaaaCount > 0
+	for _, svc := range ds.services {
+		for _, addr := range svc.Addresses {
+			ip := net.ParseIP(addr)
+			if ip == nil {
+				continue
+			}
+			if ip.To4() == nil { // IPv6
+				if ip.IsLinkLocalUnicast() {
+					hasLinkLocal = true
+				} else {
+					hasGlobalOrULA = true
+				}
+			}
+		}
+	}
+
 	outputs := map[string]any{
 		KeyDeviceFound:              len(ds.services) > 0,
 		KeyServiceCount:             len(ds.services),
@@ -569,16 +590,32 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		KeyAllResultsInZone:         allInZone,
 		KeyAAAACount:                aaaaCount,
 		KeyAAAACountMin:             aaaaCount,
+		KeyIPv6Valid:                allIPv6Valid,
+		KeyHasGlobalOrULA:           hasGlobalOrULA,
+		KeyHasLinkLocal:             hasLinkLocal,
 	}
 
 	// Add first-service details for easy assertion.
 	if len(ds.services) > 0 {
 		first := ds.services[0]
 		outputs[KeyInstanceName] = first.InstanceName
+		outputs["service_has_txt_records"] = len(first.TXTRecords) > 0
+
+		// SRV record fields.
+		outputs["srv_port"] = int(first.Port)
+		outputs[KeySRVHostnameValid] = first.Host != ""
 
 		// Add all TXT record fields.
 		for k, v := range first.TXTRecords {
 			outputs["txt_field_"+k] = v
+		}
+
+		// TXT record length fields.
+		if zi, ok := first.TXTRecords["ZI"]; ok {
+			outputs["txt_ZI_length"] = len(zi)
+		}
+		if di, ok := first.TXTRecords["DI"]; ok {
+			outputs["txt_DI_length"] = len(di)
 		}
 
 		// Add service-type-specific derived fields.
@@ -599,7 +636,11 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 			outputs[KeyZoneIDHexValid] = isValidHex(zi)
 			outputs[KeyDeviceIDHexValid] = isValidHex(di)
 			// Instance name format: <zone-id>-<device-id>.
-			outputs[KeyInstanceNameFormat] = strings.Contains(first.InstanceName, "-")
+			if strings.Contains(first.InstanceName, "-") {
+				outputs[KeyInstanceNameFormat] = "<zone-id>-<device-id>"
+			} else {
+				outputs[KeyInstanceNameFormat] = first.InstanceName
+			}
 
 		case discovery.ServiceTypeCommissioner:
 			// Commissioner-specific fields.
@@ -749,12 +790,16 @@ func (r *Runner) handleVerifyMDNSNotAdvertising(ctx context.Context, step *loade
 		serviceType = ServiceAliasCommissionable
 	}
 
-	// Use a short browse timeout (1s) to reduce false positives from
-	// test-mode auto-reenter of commissioning mode.
+	// Default to a short browse timeout to reduce false positives from
+	// test-mode auto-reenter of commissioning mode. Respect step's timeout if set.
+	timeoutMs := float64(1000)
+	if t := paramFloat(params, KeyTimeoutMs, 0); t > 0 {
+		timeoutMs = t
+	}
 	browseStep := &loader.Step{
 		Params: map[string]any{
 			KeyServiceType: serviceType,
-			KeyTimeoutMs:   float64(1000),
+			KeyTimeoutMs:   timeoutMs,
 		},
 	}
 	result, err := r.handleBrowseMDNS(ctx, browseStep, state)
@@ -987,5 +1032,17 @@ func (r *Runner) handleVerifyTXTRecordsReal(ctx context.Context, step *loader.St
 		}
 	}
 
-	return map[string]any{KeyTXTValid: allValid}, nil
+	outputs := map[string]any{KeyTXTValid: allValid}
+
+	// Expose zone/device ID derived fields for assertions.
+	if zi, ok := svc.TXTRecords["ZI"]; ok {
+		outputs["zone_id_length"] = len(zi)
+		outputs["zone_id_hex_valid"] = isValidHex(zi)
+	}
+	if di, ok := svc.TXTRecords["DI"]; ok {
+		outputs["device_id_length"] = len(di)
+		outputs["device_id_hex_valid"] = isValidHex(di)
+	}
+
+	return outputs, nil
 }

@@ -119,8 +119,19 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 					uint8(features.ProcessStateNone))
 			}
 		}
+		// Reset clock offset.
+		s.clockOffset = 0
 		return nil
 	default:
+		// Check for parameterized triggers (base + encoded value).
+		if trigger&0xFFFF_FFFF_0000_0000 == features.TriggerAdjustClockBase {
+			offsetSeconds := int32(trigger & 0xFFFF_FFFF)
+			s.mu.Lock()
+			s.clockOffset = time.Duration(offsetSeconds) * time.Second
+			s.mu.Unlock()
+			s.debugLog("trigger: clock offset adjusted", "offsetSeconds", offsetSeconds)
+			return nil
+		}
 		return fmt.Errorf("unknown commissioning trigger: 0x%016x", trigger)
 	}
 }
@@ -167,22 +178,27 @@ func (s *DeviceService) handleMeasurementTrigger(_ context.Context, trigger uint
 			continue
 		}
 
-		switch trigger {
-		case features.TriggerSetPower100:
+		switch {
+		case trigger == features.TriggerSetPower100:
 			s.debugLog("trigger: setting power to 100W", "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.MeasurementAttrACActivePower, int64(100000))
-		case features.TriggerSetPower1000:
+		case trigger == features.TriggerSetPower1000:
 			s.debugLog("trigger: setting power to 1kW", "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.MeasurementAttrACActivePower, int64(1000000))
-		case features.TriggerSetPowerZero:
+		case trigger == features.TriggerSetPowerZero:
 			s.debugLog("trigger: setting power to 0W", "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.MeasurementAttrACActivePower, int64(0))
-		case features.TriggerSetSoC50:
+		case trigger == features.TriggerSetSoC50:
 			s.debugLog("trigger: setting SoC to 50%", "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.MeasurementAttrStateOfCharge, uint8(50))
-		case features.TriggerSetSoC100:
+		case trigger == features.TriggerSetSoC100:
 			s.debugLog("trigger: setting SoC to 100%", "endpoint", ep.ID())
 			return feat.SetAttributeInternal(features.MeasurementAttrStateOfCharge, uint8(100))
+		case trigger&0xFFFF_FFFF_0000_0000 == features.TriggerSetPowerCustomBase:
+			// Custom power value encoded in lower 32 bits (milliwatts as int32).
+			mw := int64(int32(trigger & 0xFFFF_FFFF))
+			s.debugLog("trigger: setting power to custom value", "milliwatts", mw, "endpoint", ep.ID())
+			return feat.SetAttributeInternal(features.MeasurementAttrACActivePower, mw)
 		default:
 			return fmt.Errorf("unknown measurement trigger: 0x%016x", trigger)
 		}

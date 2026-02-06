@@ -30,16 +30,16 @@ func ToFloat64(v interface{}) (float64, bool) {
 	}
 }
 
-// CheckerValueGreaterThan checks if the actual value is greater than expected.
+// CheckerValueGreaterThan checks if the "value" output is greater than expected.
 func CheckerValueGreaterThan(key string, expected interface{}, state *ExecutionState) *ExpectResult {
-	actual, exists := state.Get(key)
+	actual, exists := state.Get("value")
 	if !exists {
 		return &ExpectResult{
 			Key:      key,
 			Expected: expected,
 			Actual:   nil,
 			Passed:   false,
-			Message:  fmt.Sprintf("key %q not found", key),
+			Message:  fmt.Sprintf("output key %q not found", "value"),
 		}
 	}
 
@@ -65,16 +65,16 @@ func CheckerValueGreaterThan(key string, expected interface{}, state *ExecutionS
 	}
 }
 
-// CheckerValueLessThan checks if the actual value is less than expected.
+// CheckerValueLessThan checks if the "value" output is less than expected.
 func CheckerValueLessThan(key string, expected interface{}, state *ExecutionState) *ExpectResult {
-	actual, exists := state.Get(key)
+	actual, exists := state.Get("value")
 	if !exists {
 		return &ExpectResult{
 			Key:      key,
 			Expected: expected,
 			Actual:   nil,
 			Passed:   false,
-			Message:  fmt.Sprintf("key %q not found", key),
+			Message:  fmt.Sprintf("output key %q not found", "value"),
 		}
 	}
 
@@ -103,38 +103,42 @@ func CheckerValueLessThan(key string, expected interface{}, state *ExecutionStat
 // CheckerValueInRange checks if the actual value is within a range [min, max].
 // Expected should be a map with "min" and "max" keys.
 func CheckerValueInRange(key string, expected interface{}, state *ExecutionState) *ExpectResult {
-	actual, exists := state.Get(key)
+	actual, exists := state.Get("value")
 	if !exists {
 		return &ExpectResult{
 			Key:      key,
 			Expected: expected,
 			Actual:   nil,
 			Passed:   false,
-			Message:  fmt.Sprintf("key %q not found", key),
+			Message:  fmt.Sprintf("output key %q not found", "value"),
 		}
 	}
 
-	// Expected should be a map with min and max
-	rangeMap, ok := expected.(map[string]interface{})
-	if !ok {
-		return &ExpectResult{
-			Key:      key,
-			Expected: expected,
-			Actual:   actual,
-			Passed:   false,
-			Message:  "expected must be a map with 'min' and 'max' keys",
+	// Expected can be a map with min/max keys or a [min, max] array.
+	var minVal, maxVal interface{}
+	switch e := expected.(type) {
+	case map[string]interface{}:
+		var hasMin, hasMax bool
+		minVal, hasMin = e["min"]
+		maxVal, hasMax = e["max"]
+		if !hasMin || !hasMax {
+			return &ExpectResult{
+				Key: key, Expected: expected, Actual: actual,
+				Passed: false, Message: "expected must have both 'min' and 'max' keys",
+			}
 		}
-	}
-
-	minVal, hasMin := rangeMap["min"]
-	maxVal, hasMax := rangeMap["max"]
-	if !hasMin || !hasMax {
+	case []interface{}:
+		if len(e) != 2 {
+			return &ExpectResult{
+				Key: key, Expected: expected, Actual: actual,
+				Passed: false, Message: "expected array must have exactly 2 elements [min, max]",
+			}
+		}
+		minVal, maxVal = e[0], e[1]
+	default:
 		return &ExpectResult{
-			Key:      key,
-			Expected: expected,
-			Actual:   actual,
-			Passed:   false,
-			Message:  "expected must have both 'min' and 'max' keys",
+			Key: key, Expected: expected, Actual: actual,
+			Passed: false, Message: "expected must be a map with 'min'/'max' or a [min, max] array",
 		}
 	}
 
@@ -161,9 +165,9 @@ func CheckerValueInRange(key string, expected interface{}, state *ExecutionState
 	}
 }
 
-// CheckerValueIsNull checks if the actual value is nil/null.
+// CheckerValueIsNull checks if the "value" output is nil/null.
 func CheckerValueIsNull(key string, expected interface{}, state *ExecutionState) *ExpectResult {
-	actual, exists := state.Get(key)
+	actual, exists := state.Get("value")
 
 	expectNull, _ := expected.(bool)
 	if !expectNull {
@@ -190,20 +194,24 @@ func CheckerValueIsNull(key string, expected interface{}, state *ExecutionState)
 	}
 }
 
-// CheckerValueIsMap checks if the actual value is a map.
+// CheckerValueIsMap checks if the "value" output is a map.
 func CheckerValueIsMap(key string, expected interface{}, state *ExecutionState) *ExpectResult {
-	actual, exists := state.Get(key)
+	actual, exists := state.Get("value")
 	if !exists {
 		return &ExpectResult{
 			Key:      key,
 			Expected: expected,
 			Actual:   nil,
 			Passed:   false,
-			Message:  fmt.Sprintf("key %q not found", key),
+			Message:  fmt.Sprintf("output key %q not found", "value"),
 		}
 	}
 
-	_, isMap := actual.(map[string]interface{})
+	isMap := false
+	switch actual.(type) {
+	case map[string]any, map[any]any:
+		isMap = true
+	}
 	expectMap, _ := expected.(bool)
 
 	passed := isMap == expectMap
@@ -216,7 +224,9 @@ func CheckerValueIsMap(key string, expected interface{}, state *ExecutionState) 
 	}
 }
 
-// CheckerContains checks if an array contains a value or a map contains a key.
+// CheckerContains checks if an array/map contains a value or set of values.
+// When expected is a list, checks that ALL items in expected are present in actual.
+// Supports actual types: []interface{}, []string, map[string]interface{}, map[string]any.
 func CheckerContains(key string, expected interface{}, state *ExecutionState) *ExpectResult {
 	actual, exists := state.Get(key)
 	if !exists {
@@ -229,52 +239,60 @@ func CheckerContains(key string, expected interface{}, state *ExecutionState) *E
 		}
 	}
 
-	// Check if it's an array
-	if arr, ok := actual.([]interface{}); ok {
-		for _, item := range arr {
-			if fmt.Sprintf("%v", item) == fmt.Sprintf("%v", expected) {
-				return &ExpectResult{
-					Key:      key,
-					Expected: expected,
-					Actual:   actual,
-					Passed:   true,
-					Message:  fmt.Sprintf("array contains %v", expected),
-				}
+	// Normalize actual to a set of string keys for uniform checking.
+	actualSet := make(map[string]bool)
+	switch a := actual.(type) {
+	case []interface{}:
+		for _, item := range a {
+			actualSet[fmt.Sprintf("%v", item)] = true
+		}
+	case []string:
+		for _, item := range a {
+			actualSet[item] = true
+		}
+	case map[string]interface{}:
+		for k := range a {
+			actualSet[k] = true
+		}
+	default:
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: false,
+			Message: fmt.Sprintf("value is neither array nor map: %T", actual),
+		}
+	}
+
+	// If expected is a list, check ALL items are present.
+	if expList, ok := expected.([]interface{}); ok {
+		var missing []string
+		for _, item := range expList {
+			s := fmt.Sprintf("%v", item)
+			if !actualSet[s] {
+				missing = append(missing, s)
 			}
 		}
+		passed := len(missing) == 0
+		msg := fmt.Sprintf("contains all %d expected items", len(expList))
+		if !passed {
+			msg = fmt.Sprintf("missing: %v", missing)
+		}
 		return &ExpectResult{
-			Key:      key,
-			Expected: expected,
-			Actual:   actual,
-			Passed:   false,
-			Message:  fmt.Sprintf("array does not contain %v", expected),
+			Key: key, Expected: expected, Actual: actual, Passed: passed,
+			Message: msg,
 		}
 	}
 
-	// Check if it's a map
-	if m, ok := actual.(map[string]interface{}); ok {
-		keyStr := fmt.Sprintf("%v", expected)
-		_, hasKey := m[keyStr]
-		return &ExpectResult{
-			Key:      key,
-			Expected: expected,
-			Actual:   actual,
-			Passed:   hasKey,
-			Message:  fmt.Sprintf("map contains key %q = %v", keyStr, hasKey),
-		}
-	}
-
+	// Single value check.
+	s := fmt.Sprintf("%v", expected)
+	passed := actualSet[s]
 	return &ExpectResult{
-		Key:      key,
-		Expected: expected,
-		Actual:   actual,
-		Passed:   false,
-		Message:  fmt.Sprintf("value is neither array nor map: %T", actual),
+		Key: key, Expected: expected, Actual: actual, Passed: passed,
+		Message: fmt.Sprintf("contains %q = %v", s, passed),
 	}
 }
 
-// CheckerMapSizeEquals checks if the size of a map or array equals expected.
-func CheckerMapSizeEquals(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+// CheckerContainsOnly checks if an array/map contains EXACTLY the expected items
+// (no more, no fewer). Used to verify delta notifications contain only changed attributes.
+func CheckerContainsOnly(key string, expected interface{}, state *ExecutionState) *ExpectResult {
 	actual, exists := state.Get(key)
 	if !exists {
 		return &ExpectResult{
@@ -286,25 +304,120 @@ func CheckerMapSizeEquals(key string, expected interface{}, state *ExecutionStat
 		}
 	}
 
-	expectedSize, ok := ToFloat64(expected)
+	// Normalize actual to a set of string keys.
+	actualSet := make(map[string]bool)
+	switch a := actual.(type) {
+	case []interface{}:
+		for _, item := range a {
+			actualSet[fmt.Sprintf("%v", item)] = true
+		}
+	case []string:
+		for _, item := range a {
+			actualSet[item] = true
+		}
+	case map[string]interface{}:
+		for k := range a {
+			actualSet[k] = true
+		}
+	default:
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: false,
+			Message: fmt.Sprintf("value is neither array nor map: %T", actual),
+		}
+	}
+
+	// Normalize expected to a set of string keys.
+	expectedSet := make(map[string]bool)
+	switch e := expected.(type) {
+	case []interface{}:
+		for _, item := range e {
+			expectedSet[fmt.Sprintf("%v", item)] = true
+		}
+	case []string:
+		for _, item := range e {
+			expectedSet[item] = true
+		}
+	case string:
+		expectedSet[e] = true
+	default:
+		expectedSet[fmt.Sprintf("%v", expected)] = true
+	}
+
+	// Check both directions: all expected present AND no extras.
+	var missing, extra []string
+	for k := range expectedSet {
+		if !actualSet[k] {
+			missing = append(missing, k)
+		}
+	}
+	for k := range actualSet {
+		if !expectedSet[k] {
+			extra = append(extra, k)
+		}
+	}
+
+	passed := len(missing) == 0 && len(extra) == 0
+	msg := fmt.Sprintf("contains exactly %d expected items", len(expectedSet))
+	if !passed {
+		parts := []string{}
+		if len(missing) > 0 {
+			parts = append(parts, fmt.Sprintf("missing: %v", missing))
+		}
+		if len(extra) > 0 {
+			parts = append(parts, fmt.Sprintf("extra: %v", extra))
+		}
+		msg = strings.Join(parts, "; ")
+	}
+	return &ExpectResult{
+		Key: key, Expected: expected, Actual: actual, Passed: passed,
+		Message: msg,
+	}
+}
+
+// CheckerMapSizeEquals checks if the size of the "value" map or array equals expected.
+// The expected value can be a number or a string referencing a saved state key.
+func CheckerMapSizeEquals(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+	actual, exists := state.Get("value")
+	if !exists {
+		return &ExpectResult{
+			Key:      key,
+			Expected: expected,
+			Actual:   nil,
+			Passed:   false,
+			Message:  fmt.Sprintf("output key %q not found", "value"),
+		}
+	}
+
+	// Expected can be a saved state reference (string like "phase_count").
+	resolvedExpected := expected
+	if ref, ok := expected.(string); ok {
+		if saved, savedOK := state.Get(ref); savedOK {
+			resolvedExpected = saved
+		}
+	}
+
+	expectedSize, ok := ToFloat64(resolvedExpected)
 	if !ok {
 		return &ExpectResult{
 			Key:      key,
 			Expected: expected,
 			Actual:   actual,
 			Passed:   false,
-			Message:  fmt.Sprintf("expected size must be numeric, got %T", expected),
+			Message:  fmt.Sprintf("expected size must be numeric, got %T (%v)", resolvedExpected, resolvedExpected),
 		}
 	}
 
 	var actualSize int
 
-	// Check if it's a map
-	if m, ok := actual.(map[string]interface{}); ok {
+	// Check if it's a map (handle both string-keyed and any-keyed from CBOR)
+	switch m := actual.(type) {
+	case map[string]any:
 		actualSize = len(m)
-	} else if arr, ok := actual.([]interface{}); ok {
-		actualSize = len(arr)
-	} else {
+	case map[any]any:
+		actualSize = len(m)
+	case []any:
+		actualSize = len(m)
+	default:
 		return &ExpectResult{
 			Key:      key,
 			Expected: expected,
@@ -887,10 +1000,49 @@ func CheckerValueType(key string, expected interface{}, state *ExecutionState) *
 	}
 }
 
+// isValidPhaseKey checks if a key represents a valid AC phase identifier.
+// Accepts string names (A, B, C) and numeric IDs (0=A, 1=B, 2=C) as they
+// appear after CBOR round-trip.
+func isValidPhaseKey(k any) bool {
+	switch v := k.(type) {
+	case string:
+		return v == "A" || v == "B" || v == "C" || v == "a" || v == "b" || v == "c"
+	case uint64:
+		return v <= 2
+	case int64:
+		return v >= 0 && v <= 2
+	case int:
+		return v >= 0 && v <= 2
+	case uint8:
+		return v <= 2
+	default:
+		return false
+	}
+}
+
+// isValidGridPhaseValue checks if a value represents a valid grid phase.
+// Accepts string names (L1, L2, L3) and numeric IDs (0=L1, 1=L2, 2=L3).
+func isValidGridPhaseValue(v any) bool {
+	switch val := v.(type) {
+	case string:
+		return val == "L1" || val == "L2" || val == "L3" || val == "l1" || val == "l2" || val == "l3"
+	case uint64:
+		return val <= 2
+	case int64:
+		return val >= 0 && val <= 2
+	case int:
+		return val >= 0 && val <= 2
+	case uint8:
+		return val <= 2
+	default:
+		return false
+	}
+}
+
 // CheckerKeysArePhases checks if a map's keys are valid AC phase identifiers.
-// Expects the "value" output to be a map with phase keys (A, B, C or similar).
+// Accepts string keys (A, B, C) or numeric IDs (0, 1, 2) from CBOR.
 // Used in YAML as: keys_are_phases: true
-func CheckerKeysArePhases(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+func CheckerKeysArePhases(key string, expected any, state *ExecutionState) *ExpectResult {
 	actual, exists := state.Get("value")
 	if !exists {
 		return &ExpectResult{
@@ -899,48 +1051,88 @@ func CheckerKeysArePhases(key string, expected interface{}, state *ExecutionStat
 		}
 	}
 
-	validPhases := map[string]bool{"A": true, "B": true, "C": true, "a": true, "b": true, "c": true}
+	checkKeys := func(keys []any) *ExpectResult {
+		if len(keys) == 0 {
+			return &ExpectResult{Key: key, Expected: expected, Actual: actual, Passed: false, Message: "map is empty"}
+		}
+		for _, k := range keys {
+			if !isValidPhaseKey(k) {
+				return &ExpectResult{
+					Key: key, Expected: expected, Actual: actual, Passed: false,
+					Message: fmt.Sprintf("key %v is not a valid phase identifier", k),
+				}
+			}
+		}
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: true,
+			Message: fmt.Sprintf("all %d keys are valid phase identifiers", len(keys)),
+		}
+	}
 
 	switch m := actual.(type) {
-	case map[string]interface{}:
-		if len(m) == 0 {
-			return &ExpectResult{
-				Key: key, Expected: expected, Actual: actual, Passed: false,
-				Message: "map is empty",
-			}
-		}
+	case map[string]any:
+		keys := make([]any, 0, len(m))
 		for k := range m {
-			if !validPhases[k] {
+			keys = append(keys, k)
+		}
+		return checkKeys(keys)
+	case map[any]any:
+		keys := make([]any, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		return checkKeys(keys)
+	default:
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: false,
+			Message: fmt.Sprintf("value is not a map: %T", actual),
+		}
+	}
+}
+
+// CheckerValuesValidGridPhases checks if a map's values are valid grid phase identifiers.
+// Accepts string values (L1, L2, L3) or numeric IDs (0, 1, 2) from CBOR.
+// Used in YAML as: values_valid_grid_phases: true
+func CheckerValuesValidGridPhases(key string, expected any, state *ExecutionState) *ExpectResult {
+	actual, exists := state.Get("value")
+	if !exists {
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: nil, Passed: false,
+			Message: fmt.Sprintf("output key %q not found", "value"),
+		}
+	}
+
+	checkValues := func(values []any) *ExpectResult {
+		if len(values) == 0 {
+			return &ExpectResult{Key: key, Expected: expected, Actual: actual, Passed: false, Message: "map is empty"}
+		}
+		for _, v := range values {
+			if !isValidGridPhaseValue(v) {
 				return &ExpectResult{
 					Key: key, Expected: expected, Actual: actual, Passed: false,
-					Message: fmt.Sprintf("key %q is not a valid phase identifier", k),
+					Message: fmt.Sprintf("value %v is not a valid grid phase identifier", v),
 				}
 			}
 		}
 		return &ExpectResult{
 			Key: key, Expected: expected, Actual: actual, Passed: true,
-			Message: fmt.Sprintf("all %d keys are valid phase identifiers", len(m)),
+			Message: fmt.Sprintf("all %d values are valid grid phase identifiers", len(values)),
 		}
-	case map[interface{}]interface{}:
-		if len(m) == 0 {
-			return &ExpectResult{
-				Key: key, Expected: expected, Actual: actual, Passed: false,
-				Message: "map is empty",
-			}
+	}
+
+	switch m := actual.(type) {
+	case map[string]any:
+		vals := make([]any, 0, len(m))
+		for _, v := range m {
+			vals = append(vals, v)
 		}
-		for k := range m {
-			ks := fmt.Sprintf("%v", k)
-			if !validPhases[ks] {
-				return &ExpectResult{
-					Key: key, Expected: expected, Actual: actual, Passed: false,
-					Message: fmt.Sprintf("key %q is not a valid phase identifier", ks),
-				}
-			}
+		return checkValues(vals)
+	case map[any]any:
+		vals := make([]any, 0, len(m))
+		for _, v := range m {
+			vals = append(vals, v)
 		}
-		return &ExpectResult{
-			Key: key, Expected: expected, Actual: actual, Passed: true,
-			Message: fmt.Sprintf("all %d keys are valid phase identifiers", len(m)),
-		}
+		return checkValues(vals)
 	default:
 		return &ExpectResult{
 			Key: key, Expected: expected, Actual: actual, Passed: false,
@@ -1037,6 +1229,89 @@ func CheckerErrorMessageContains(key string, expected interface{}, state *Execut
 	}
 }
 
+// CheckerNoError verifies the "error" output field is absent, nil, or empty.
+// Used in YAML as: no_error: true
+func CheckerNoError(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+	actual, exists := state.Get("error")
+	if !exists || actual == nil || actual == "" {
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: true,
+			Message: "no error present",
+		}
+	}
+	return &ExpectResult{
+		Key: key, Expected: expected, Actual: actual, Passed: false,
+		Message: fmt.Sprintf("error present: %v", actual),
+	}
+}
+
+// CheckerDurationUnder checks that actual duration is under the expected threshold.
+// The expected value is a duration string (e.g. "1000ms"). The actual value from
+// the handler is a time.Duration (nanoseconds as int64) or a boolean true
+// (meaning latency ~0 in simulated mode).
+func CheckerDurationUnder(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+	actual, exists := state.Get(key)
+	if !exists {
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: nil, Passed: false,
+			Message: fmt.Sprintf("key %q not found in outputs", key),
+		}
+	}
+
+	// Parse expected threshold as a duration.
+	threshold, err := parseDuration(expected)
+	if err != nil {
+		// Fall back to string comparison if threshold is not a duration.
+		passed := fmt.Sprintf("%v", expected) == fmt.Sprintf("%v", actual)
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: passed,
+			Message: fmt.Sprintf("%s: expected %v, got %v", key, expected, actual),
+		}
+	}
+
+	// Parse actual value as a duration.
+	actualDur, err := parseDuration(actual)
+	if err != nil {
+		return &ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: false,
+			Message: fmt.Sprintf("cannot parse actual value %v as duration", actual),
+		}
+	}
+
+	passed := actualDur < threshold
+	return &ExpectResult{
+		Key: key, Expected: expected, Actual: actual, Passed: passed,
+		Message: fmt.Sprintf("%s: %v < %v = %v", key, actualDur, threshold, passed),
+	}
+}
+
+// parseDuration parses a value as time.Duration. Supports:
+// - time.Duration (returned as-is)
+// - bool true (treated as 0, i.e. instant/simulated)
+// - string ("1000ms", "5s", etc.)
+// - numeric int/float (treated as milliseconds)
+func parseDuration(v interface{}) (time.Duration, error) {
+	switch val := v.(type) {
+	case time.Duration:
+		return val, nil
+	case bool:
+		if val {
+			return 0, nil // true = instant/simulated
+		}
+		return 0, fmt.Errorf("false is not a valid duration")
+	case string:
+		return time.ParseDuration(val)
+	case int:
+		return time.Duration(val) * time.Millisecond, nil
+	case int64:
+		return time.Duration(val) * time.Millisecond, nil
+	case float64:
+		return time.Duration(val * float64(time.Millisecond)), nil
+	default:
+		return 0, fmt.Errorf("unsupported duration type %T", v)
+	}
+}
+
 // RegisterEnhancedCheckers registers all enhanced checkers with the engine.
 func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameValueGreaterThan, CheckerValueGreaterThan)
@@ -1045,6 +1320,7 @@ func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameValueIsNull, CheckerValueIsNull)
 	e.RegisterChecker(CheckerNameValueIsMap, CheckerValueIsMap)
 	e.RegisterChecker(CheckerNameContains, CheckerContains)
+	e.RegisterChecker(CheckerNameContainsOnly, CheckerContainsOnly)
 	e.RegisterChecker(CheckerNameMapSizeEquals, CheckerMapSizeEquals)
 	e.RegisterChecker(CheckerNameSaveAs, CheckerSaveAs)
 	e.RegisterChecker(CheckerNameValueEquals, CheckerValueEquals)
@@ -1071,7 +1347,12 @@ func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameValueGTESaved, CheckerValueGTESaved)
 	e.RegisterChecker(CheckerNameValueMaxRef, CheckerValueMaxRef)
 	e.RegisterChecker(CheckerNameKeysArePhases, CheckerKeysArePhases)
+	e.RegisterChecker(CheckerNameKeysValidPhases, CheckerKeysArePhases)             // alias
+	e.RegisterChecker(CheckerNameValuesValidGridPhases, CheckerValuesValidGridPhases)
 	e.RegisterChecker(CheckerNameArrayNotEmpty, CheckerArrayNotEmpty)
 	e.RegisterChecker(CheckerNameSavePrimingValue, CheckerSavePrimingValue)
 	e.RegisterChecker(CheckerNameErrorMessageContains, CheckerErrorMessageContains)
+	e.RegisterChecker(CheckerNameNoError, CheckerNoError)
+	e.RegisterChecker(CheckerNameLatencyUnder, CheckerDurationUnder)
+	e.RegisterChecker(CheckerNameAverageLatencyUnder, CheckerDurationUnder) // same logic
 }

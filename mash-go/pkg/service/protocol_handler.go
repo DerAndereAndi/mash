@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -299,13 +300,10 @@ func (h *ProtocolHandler) handleRead(req *wire.Request) *wire.Response {
 		}
 	}
 
-	// Determine which attributes to read
-	var attributeIDs []uint16
-	if req.Payload != nil {
-		if readPayload, ok := req.Payload.(*wire.ReadPayload); ok && len(readPayload.AttributeIDs) > 0 {
-			attributeIDs = readPayload.AttributeIDs
-		}
-	}
+	// Determine which attributes to read.
+	// The Payload field is decoded as `any` by CBOR, so after a round-trip
+	// it's a raw map (map[any]any), not *wire.ReadPayload.
+	attributeIDs := wire.ExtractReadAttributeIDs(req.Payload)
 
 	// Build context with caller zone identity
 	ctx := context.Background()
@@ -326,10 +324,16 @@ func (h *ProtocolHandler) handleRead(req *wire.Request) *wire.Response {
 		result = make(map[uint16]any)
 		for _, attrID := range attributeIDs {
 			value, err := feature.ReadAttributeWithContext(ctx, attrID)
-			if err == nil {
-				result[attrID] = value
+			if err != nil {
+				return &wire.Response{
+					MessageID: req.MessageID,
+					Status:    wire.StatusInvalidAttribute,
+					Payload: &wire.ErrorPayload{
+						Message: fmt.Sprintf("attribute 0x%04x not found", attrID),
+					},
+				}
 			}
-			// Silently skip attributes that don't exist or aren't readable
+			result[attrID] = value
 		}
 	}
 
@@ -366,20 +370,16 @@ func (h *ProtocolHandler) handleWrite(req *wire.Request) *wire.Response {
 		}
 	}
 
-	// Parse write payload
-	writePayload, ok := req.Payload.(wire.WritePayload)
-	if !ok {
-		// Try map[uint16]any as well
-		if mapPayload, ok := req.Payload.(map[uint16]any); ok {
-			writePayload = wire.WritePayload(mapPayload)
-		} else {
-			return &wire.Response{
-				MessageID: req.MessageID,
-				Status:    wire.StatusInvalidParameter,
-				Payload: &wire.ErrorPayload{
-					Message: "invalid write payload",
-				},
-			}
+	// Parse write payload. After CBOR round-trip, the payload is a raw map
+	// with uint64 keys, not wire.WritePayload.
+	writePayload := wire.ExtractWritePayload(req.Payload)
+	if writePayload == nil {
+		return &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusInvalidParameter,
+			Payload: &wire.ErrorPayload{
+				Message: "invalid write payload",
+			},
 		}
 	}
 
@@ -397,7 +397,7 @@ func (h *ProtocolHandler) handleWrite(req *wire.Request) *wire.Response {
 				switch err {
 				case model.ErrAttributeNotFound:
 					firstErrorStatus = wire.StatusInvalidAttribute
-				case model.ErrFeatureReadOnly:
+				case model.ErrFeatureReadOnly, model.ErrAttributeNotWritable:
 					firstErrorStatus = wire.StatusReadOnly
 				default:
 					firstErrorStatus = wire.StatusConstraintError
@@ -469,13 +469,9 @@ func (h *ProtocolHandler) handleSubscribe(req *wire.Request) *wire.Response {
 		}
 	}
 
-	// Parse subscribe payload
-	var subPayload *wire.SubscribePayload
-	if req.Payload != nil {
-		if sp, ok := req.Payload.(*wire.SubscribePayload); ok {
-			subPayload = sp
-		}
-	}
+	// Parse subscribe payload. After CBOR round-trip the payload is a raw
+	// map, not *wire.SubscribePayload.
+	subPayload := wire.ExtractSubscribePayload(req.Payload)
 
 	// Extract attribute IDs from payload
 	var attributeIDs []uint16
@@ -520,15 +516,22 @@ func (h *ProtocolHandler) handleSubscribe(req *wire.Request) *wire.Response {
 
 // handleUnsubscribe processes an unsubscribe request.
 func (h *ProtocolHandler) handleUnsubscribe(req *wire.Request) *wire.Response {
-	// Parse unsubscribe payload
-	var unsubPayload *wire.UnsubscribePayload
+	// Parse unsubscribe payload. After CBOR roundtrip, the payload may be
+	// a typed *UnsubscribePayload (from Go tests) or a map[any]any (from wire).
+	var subID uint32
 	if req.Payload != nil {
-		if up, ok := req.Payload.(*wire.UnsubscribePayload); ok {
-			unsubPayload = up
+		switch p := req.Payload.(type) {
+		case *wire.UnsubscribePayload:
+			subID = p.SubscriptionID
+		case map[any]any:
+			// CBOR key 1 = subscriptionId
+			if id, ok := wire.ToUint32(p[uint64(1)]); ok {
+				subID = id
+			}
 		}
 	}
 
-	if unsubPayload == nil || unsubPayload.SubscriptionID == 0 {
+	if subID == 0 {
 		return &wire.Response{
 			MessageID: req.MessageID,
 			Status:    wire.StatusInvalidParameter,
@@ -539,7 +542,7 @@ func (h *ProtocolHandler) handleUnsubscribe(req *wire.Request) *wire.Response {
 	}
 
 	// Remove subscription using SubscriptionManager
-	exists := h.subscriptions.RemoveInbound(unsubPayload.SubscriptionID)
+	exists := h.subscriptions.RemoveInbound(subID)
 
 	if !exists {
 		return &wire.Response{

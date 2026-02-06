@@ -192,15 +192,18 @@ func TestHandleUnsubscribe(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
+	// Non-numeric subscription_id should fail validation.
 	step := &loader.Step{Params: map[string]any{"subscription_id": "sub-123"}}
 	out, _ := r.handleUnsubscribe(context.Background(), step, state)
-	if out["unsubscribed"] != true {
-		t.Error("expected unsubscribed=true")
+	if out["unsubscribe_success"] != false {
+		t.Error("expected unsubscribe_success=false for non-numeric subscription_id")
 	}
 
-	id, _ := state.Get("unsubscribed_id")
-	if id != "sub-123" {
-		t.Errorf("expected sub-123 in state, got %v", id)
+	// Numeric subscription_id should proceed (but fail at send because not connected).
+	step2 := &loader.Step{Params: map[string]any{"subscription_id": 42}}
+	out2, _ := r.handleUnsubscribe(context.Background(), step2, state)
+	if out2["unsubscribe_success"] != false {
+		t.Error("expected unsubscribe_success=false when not connected")
 	}
 }
 

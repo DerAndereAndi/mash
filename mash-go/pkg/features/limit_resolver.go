@@ -334,6 +334,13 @@ func (lr *LimitResolver) handleTimerExpiry(zoneIdx uint8, cmdType duration.Comma
 
 // resolveAndApply computes effective limits and updates the EnergyControl feature.
 // Must be called with mu held.
+//
+// State transitions:
+//   - CONTROLLED: A zone has sent a SetLimit/SetSetpoint command (controller has authority).
+//   - AUTONOMOUS: No zone has any active limits (no external control).
+//
+// The device application layer is responsible for promoting CONTROLLED -> LIMITED
+// when it detects that its operation is actually being curtailed by the limit.
 func (lr *LimitResolver) resolveAndApply() {
 	effConsumption, _ := lr.consumptionLimits.ResolveLimits()
 	effProduction, _ := lr.productionLimits.ResolveLimits()
@@ -341,11 +348,12 @@ func (lr *LimitResolver) resolveAndApply() {
 	_ = lr.ec.SetEffectiveConsumptionLimitPtr(effConsumption)
 	_ = lr.ec.SetEffectiveProductionLimitPtr(effProduction)
 
-	// Update control state
+	// Update control state: CONTROLLED when any limits are active,
+	// AUTONOMOUS when all limits have been cleared.
 	if effConsumption != nil || effProduction != nil {
-		_ = lr.ec.SetControlState(ControlStateLimited)
-	} else {
 		_ = lr.ec.SetControlState(ControlStateControlled)
+	} else {
+		_ = lr.ec.SetControlState(ControlStateAutonomous)
 	}
 }
 

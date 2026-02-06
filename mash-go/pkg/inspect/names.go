@@ -1,6 +1,8 @@
 package inspect
 
 import (
+	"strings"
+
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
@@ -48,37 +50,37 @@ var (
 func initNameTables() {
 	// Global attributes (present on all features)
 	globalAttrs := map[string]uint16{
-		"featuremap":    model.AttrIDFeatureMap,
-		"attributelist": model.AttrIDAttributeList,
-		"commandlist":   model.AttrIDCommandList,
+		"featureMap":    model.AttrIDFeatureMap,
+		"attributeList": model.AttrIDAttributeList,
+		"commandList":   model.AttrIDCommandList,
 	}
 
 	// Measurement attributes
 	measurementAttrs := map[string]uint16{
-		"acactivepower":            features.MeasurementAttrACActivePower,
-		"acreactivepower":          features.MeasurementAttrACReactivePower,
-		"acapparentpower":          features.MeasurementAttrACApparentPower,
-		"acactivepowerperphase":    features.MeasurementAttrACActivePowerPerPhase,
-		"acreactivepowerperphase":  features.MeasurementAttrACReactivePowerPerPhase,
-		"acapparentpowerperphase":  features.MeasurementAttrACApparentPowerPerPhase,
-		"accurrentperphase":        features.MeasurementAttrACCurrentPerPhase,
-		"acvoltageperphase":        features.MeasurementAttrACVoltagePerPhase,
-		"acvoltagephasetophasepair": features.MeasurementAttrACVoltagePhaseToPhasePair,
-		"acfrequency":              features.MeasurementAttrACFrequency,
-		"powerfactor":              features.MeasurementAttrPowerFactor,
-		"acenergyconsumed":         features.MeasurementAttrACEnergyConsumed,
-		"acenergyproduced":         features.MeasurementAttrACEnergyProduced,
-		"dcpower":                  features.MeasurementAttrDCPower,
-		"dccurrent":                features.MeasurementAttrDCCurrent,
-		"dcvoltage":                features.MeasurementAttrDCVoltage,
-		"dcenergyin":               features.MeasurementAttrDCEnergyIn,
-		"dcenergyout":              features.MeasurementAttrDCEnergyOut,
-		"stateofcharge":            features.MeasurementAttrStateOfCharge,
-		"stateofhealth":            features.MeasurementAttrStateOfHealth,
-		"stateofenergy":            features.MeasurementAttrStateOfEnergy,
-		"useablecapacity":          features.MeasurementAttrUseableCapacity,
-		"cyclecount":               features.MeasurementAttrCycleCount,
-		"temperature":              features.MeasurementAttrTemperature,
+		"acActivePower":              features.MeasurementAttrACActivePower,
+		"acReactivePower":            features.MeasurementAttrACReactivePower,
+		"acApparentPower":            features.MeasurementAttrACApparentPower,
+		"acActivePowerPerPhase":      features.MeasurementAttrACActivePowerPerPhase,
+		"acReactivePowerPerPhase":    features.MeasurementAttrACReactivePowerPerPhase,
+		"acApparentPowerPerPhase":    features.MeasurementAttrACApparentPowerPerPhase,
+		"acCurrentPerPhase":          features.MeasurementAttrACCurrentPerPhase,
+		"acVoltagePerPhase":          features.MeasurementAttrACVoltagePerPhase,
+		"acVoltagePhaseToPhasePair":  features.MeasurementAttrACVoltagePhaseToPhasePair,
+		"acFrequency":               features.MeasurementAttrACFrequency,
+		"powerFactor":               features.MeasurementAttrPowerFactor,
+		"acEnergyConsumed":          features.MeasurementAttrACEnergyConsumed,
+		"acEnergyProduced":          features.MeasurementAttrACEnergyProduced,
+		"dcPower":                   features.MeasurementAttrDCPower,
+		"dcCurrent":                 features.MeasurementAttrDCCurrent,
+		"dcVoltage":                 features.MeasurementAttrDCVoltage,
+		"dcEnergyIn":                features.MeasurementAttrDCEnergyIn,
+		"dcEnergyOut":               features.MeasurementAttrDCEnergyOut,
+		"stateOfCharge":             features.MeasurementAttrStateOfCharge,
+		"stateOfHealth":             features.MeasurementAttrStateOfHealth,
+		"stateOfEnergy":             features.MeasurementAttrStateOfEnergy,
+		"useableCapacity":           features.MeasurementAttrUseableCapacity,
+		"cycleCount":                features.MeasurementAttrCycleCount,
+		"temperature":               features.MeasurementAttrTemperature,
 	}
 	// Add global attributes to measurement
 	for k, v := range globalAttrs {
@@ -88,37 +90,42 @@ func initNameTables() {
 
 	// EnergyControl attributes
 	energyControlAttrs := map[string]uint16{
-		"devicetype":                         features.EnergyControlAttrDeviceType,
-		"controlstate":                       features.EnergyControlAttrControlState,
-		"optoutstate":                        features.EnergyControlAttrOptOutState,
-		"acceptslimits":                      features.EnergyControlAttrAcceptsLimits,
-		"acceptscurrentlimits":               features.EnergyControlAttrAcceptsCurrentLimits,
-		"acceptssetpoints":                   features.EnergyControlAttrAcceptsSetpoints,
-		"acceptscurrentsetpoints":            features.EnergyControlAttrAcceptsCurrentSetpoints,
-		"ispausable":                         features.EnergyControlAttrIsPausable,
-		"isshiftable":                        features.EnergyControlAttrIsShiftable,
-		"isstoppable":                        features.EnergyControlAttrIsStoppable,
-		"effectiveconsumptionlimit":          features.EnergyControlAttrEffectiveConsumptionLimit,
-		"myconsumptionlimit":                 features.EnergyControlAttrMyConsumptionLimit,
-		"effectiveproductionlimit":           features.EnergyControlAttrEffectiveProductionLimit,
-		"myproductionlimit":                  features.EnergyControlAttrMyProductionLimit,
-		"effectivecurrentlimitsconsumption":  features.EnergyControlAttrEffectiveCurrentLimitsConsumption,
-		"mycurrentlimitsconsumption":         features.EnergyControlAttrMyCurrentLimitsConsumption,
-		"effectivecurrentlimitsproduction":   features.EnergyControlAttrEffectiveCurrentLimitsProduction,
-		"mycurrentlimitsproduction":          features.EnergyControlAttrMyCurrentLimitsProduction,
-		"effectiveconsumptionsetpoint":       features.EnergyControlAttrEffectiveConsumptionSetpoint,
-		"myconsumptionsetpoint":              features.EnergyControlAttrMyConsumptionSetpoint,
-		"effectiveproductionsetpoint":        features.EnergyControlAttrEffectiveProductionSetpoint,
-		"myproductionsetpoint":               features.EnergyControlAttrMyProductionSetpoint,
-		"effectivecurrentsetpointsconsumption": features.EnergyControlAttrEffectiveCurrentSetpointsConsumption,
-		"mycurrentsetpointsconsumption":      features.EnergyControlAttrMyCurrentSetpointsConsumption,
-		"effectivecurrentsetpointsproduction": features.EnergyControlAttrEffectiveCurrentSetpointsProduction,
-		"mycurrentsetpointsproduction":       features.EnergyControlAttrMyCurrentSetpointsProduction,
-		"failsafeconsumptionlimit":           features.EnergyControlAttrFailsafeConsumptionLimit,
-		"failsafeproductionlimit":            features.EnergyControlAttrFailsafeProductionLimit,
-		"failsafeduration":                   features.EnergyControlAttrFailsafeDuration,
-		"processstate":                       features.EnergyControlAttrProcessState,
-		"optionalprocess":                    features.EnergyControlAttrOptionalProcess,
+		"deviceType":                            features.EnergyControlAttrDeviceType,
+		"controlState":                          features.EnergyControlAttrControlState,
+		"optOutState":                           features.EnergyControlAttrOptOutState,
+		"acceptsLimits":                         features.EnergyControlAttrAcceptsLimits,
+		"acceptsCurrentLimits":                  features.EnergyControlAttrAcceptsCurrentLimits,
+		"acceptsSetpoints":                      features.EnergyControlAttrAcceptsSetpoints,
+		"acceptsCurrentSetpoints":               features.EnergyControlAttrAcceptsCurrentSetpoints,
+		"isPausable":                            features.EnergyControlAttrIsPausable,
+		"isShiftable":                           features.EnergyControlAttrIsShiftable,
+		"isStoppable":                           features.EnergyControlAttrIsStoppable,
+		"effectiveConsumptionLimit":              features.EnergyControlAttrEffectiveConsumptionLimit,
+		"myConsumptionLimit":                    features.EnergyControlAttrMyConsumptionLimit,
+		"effectiveProductionLimit":              features.EnergyControlAttrEffectiveProductionLimit,
+		"myProductionLimit":                     features.EnergyControlAttrMyProductionLimit,
+		"effectiveCurrentLimitsConsumption":     features.EnergyControlAttrEffectiveCurrentLimitsConsumption,
+		"myCurrentLimitsConsumption":            features.EnergyControlAttrMyCurrentLimitsConsumption,
+		"effectiveCurrentLimitsProduction":      features.EnergyControlAttrEffectiveCurrentLimitsProduction,
+		"myCurrentLimitsProduction":             features.EnergyControlAttrMyCurrentLimitsProduction,
+		"effectiveConsumptionSetpoint":          features.EnergyControlAttrEffectiveConsumptionSetpoint,
+		"myConsumptionSetpoint":                 features.EnergyControlAttrMyConsumptionSetpoint,
+		"effectiveProductionSetpoint":           features.EnergyControlAttrEffectiveProductionSetpoint,
+		"myProductionSetpoint":                  features.EnergyControlAttrMyProductionSetpoint,
+		"effectiveCurrentSetpointsConsumption":  features.EnergyControlAttrEffectiveCurrentSetpointsConsumption,
+		"myCurrentSetpointsConsumption":         features.EnergyControlAttrMyCurrentSetpointsConsumption,
+		"effectiveCurrentSetpointsProduction":   features.EnergyControlAttrEffectiveCurrentSetpointsProduction,
+		"myCurrentSetpointsProduction":          features.EnergyControlAttrMyCurrentSetpointsProduction,
+		"failsafeConsumptionLimit":              features.EnergyControlAttrFailsafeConsumptionLimit,
+		"failsafeProductionLimit":               features.EnergyControlAttrFailsafeProductionLimit,
+		"failsafeDuration":                      features.EnergyControlAttrFailsafeDuration,
+		"processState":                          features.EnergyControlAttrProcessState,
+		"optionalProcess":                       features.EnergyControlAttrOptionalProcess,
+		"controlMode":                           features.EnergyControlAttrControlMode,
+		"overrideReason":                        features.EnergyControlAttrOverrideReason,
+		"overrideDirection":                     features.EnergyControlAttrOverrideDirection,
+		"minRunDuration":                        features.EnergyControlAttrMinRunDuration,
+		"minPauseDuration":                      features.EnergyControlAttrMinPauseDuration,
 	}
 	for k, v := range globalAttrs {
 		energyControlAttrs[k] = v
@@ -127,18 +134,18 @@ func initNameTables() {
 
 	// Electrical attributes
 	electricalAttrs := map[string]uint16{
-		"phasecount":              features.ElectricalAttrPhaseCount,
-		"phasemapping":            features.ElectricalAttrPhaseMapping,
-		"supporteddirections":     features.ElectricalAttrSupportedDirections,
-		"nominalvoltage":          features.ElectricalAttrNominalVoltage,
-		"nominalfrequency":        features.ElectricalAttrNominalFrequency,
-		"nominalmaxconsumption":   features.ElectricalAttrNominalMaxConsumption,
-		"nominalmaxproduction":    features.ElectricalAttrNominalMaxProduction,
-		"nominalminpower":         features.ElectricalAttrNominalMinPower,
-		"maxcurrentperphase":      features.ElectricalAttrMaxCurrentPerPhase,
-		"mincurrentperphase":      features.ElectricalAttrMinCurrentPerPhase,
-		"supportsasymmetric":      features.ElectricalAttrSupportsAsymmetric,
-		"energycapacity":          features.ElectricalAttrEnergyCapacity,
+		"phaseCount":            features.ElectricalAttrPhaseCount,
+		"phaseMapping":          features.ElectricalAttrPhaseMapping,
+		"supportedDirections":   features.ElectricalAttrSupportedDirections,
+		"nominalVoltage":        features.ElectricalAttrNominalVoltage,
+		"nominalFrequency":      features.ElectricalAttrNominalFrequency,
+		"nominalMaxConsumption": features.ElectricalAttrNominalMaxConsumption,
+		"nominalMaxProduction":  features.ElectricalAttrNominalMaxProduction,
+		"nominalMinPower":       features.ElectricalAttrNominalMinPower,
+		"maxCurrentPerPhase":    features.ElectricalAttrMaxCurrentPerPhase,
+		"minCurrentPerPhase":    features.ElectricalAttrMinCurrentPerPhase,
+		"supportsAsymmetric":    features.ElectricalAttrSupportsAsymmetric,
+		"energyCapacity":        features.ElectricalAttrEnergyCapacity,
 	}
 	for k, v := range globalAttrs {
 		electricalAttrs[k] = v
@@ -147,10 +154,10 @@ func initNameTables() {
 
 	// Status attributes
 	statusAttrs := map[string]uint16{
-		"operatingstate": features.StatusAttrOperatingState,
-		"statedetail":    features.StatusAttrStateDetail,
-		"faultcode":      features.StatusAttrFaultCode,
-		"faultmessage":   features.StatusAttrFaultMessage,
+		"operatingState": features.StatusAttrOperatingState,
+		"stateDetail":    features.StatusAttrStateDetail,
+		"faultCode":      features.StatusAttrFaultCode,
+		"faultMessage":   features.StatusAttrFaultMessage,
 	}
 	for k, v := range globalAttrs {
 		statusAttrs[k] = v
@@ -159,18 +166,18 @@ func initNameTables() {
 
 	// DeviceInfo attributes
 	deviceInfoAttrs := map[string]uint16{
-		"deviceid":        features.DeviceInfoAttrDeviceID,
-		"vendorname":      features.DeviceInfoAttrVendorName,
-		"productname":     features.DeviceInfoAttrProductName,
-		"serialnumber":    features.DeviceInfoAttrSerialNumber,
-		"vendorid":        features.DeviceInfoAttrVendorID,
-		"productid":       features.DeviceInfoAttrProductID,
-		"softwareversion": features.DeviceInfoAttrSoftwareVersion,
-		"hardwareversion": features.DeviceInfoAttrHardwareVersion,
-		"specversion":     features.DeviceInfoAttrSpecVersion,
+		"deviceId":        features.DeviceInfoAttrDeviceID,
+		"vendorName":      features.DeviceInfoAttrVendorName,
+		"productName":     features.DeviceInfoAttrProductName,
+		"serialNumber":    features.DeviceInfoAttrSerialNumber,
+		"vendorId":        features.DeviceInfoAttrVendorID,
+		"productId":       features.DeviceInfoAttrProductID,
+		"softwareVersion": features.DeviceInfoAttrSoftwareVersion,
+		"hardwareVersion": features.DeviceInfoAttrHardwareVersion,
+		"specVersion":     features.DeviceInfoAttrSpecVersion,
 		"endpoints":       features.DeviceInfoAttrEndpoints,
-		"endpointlist":    features.DeviceInfoAttrEndpoints,
-		"usecases":        features.DeviceInfoAttrUseCases,
+		"endpointList":    features.DeviceInfoAttrEndpoints,
+		"useCases":        features.DeviceInfoAttrUseCases,
 		"location":        features.DeviceInfoAttrLocation,
 		"label":           features.DeviceInfoAttrLabel,
 	}
@@ -181,7 +188,7 @@ func initNameTables() {
 
 	// TestControl attributes
 	testControlAttrs := map[string]uint16{
-		"testeventtriggersenabled": features.TestControlAttrTestEventTriggersEnabled,
+		"testEventTriggersEnabled": features.TestControlAttrTestEventTriggersEnabled,
 	}
 	for k, v := range globalAttrs {
 		testControlAttrs[k] = v
@@ -190,32 +197,32 @@ func initNameTables() {
 
 	// ChargingSession attributes
 	chargingSessionAttrs := map[string]uint16{
-		"state":                           features.ChargingSessionAttrState,
-		"sessionstarttime":                features.ChargingSessionAttrSessionStartTime,
-		"sessionendtime":                  features.ChargingSessionAttrSessionEndTime,
-		"sessionenergycharged":            features.ChargingSessionAttrSessionEnergyCharged,
-		"sessionenergydischarged":         features.ChargingSessionAttrSessionEnergyDischarged,
-		"evidentifications":               features.ChargingSessionAttrEVIdentifications,
-		"evstateofcharge":                 features.ChargingSessionAttrEVStateOfCharge,
-		"evbatterycapacity":               features.ChargingSessionAttrEVBatteryCapacity,
-		"evminstateofcharge":              features.ChargingSessionAttrEVMinStateOfCharge,
-		"evtargetstateofcharge":           features.ChargingSessionAttrEVTargetStateOfCharge,
-		"evdemandmode":                    features.ChargingSessionAttrEVDemandMode,
-		"evminenergyrequest":              features.ChargingSessionAttrEVMinEnergyRequest,
-		"evmaxenergyrequest":              features.ChargingSessionAttrEVMaxEnergyRequest,
-		"evtargetenergyrequest":           features.ChargingSessionAttrEVTargetEnergyRequest,
-		"evdeparturetime":                 features.ChargingSessionAttrEVDepartureTime,
-		"evmindischargingrequest":         features.ChargingSessionAttrEVMinDischargingRequest,
-		"evmaxdischargingrequest":         features.ChargingSessionAttrEVMaxDischargingRequest,
-		"evdischargebelowtargetpermitted": features.ChargingSessionAttrEVDischargeBelowTargetPermitted,
-		"estimatedtimetominsoc":           features.ChargingSessionAttrEstimatedTimeToMinSoC,
-		"estimatedtimetotargetsoc":        features.ChargingSessionAttrEstimatedTimeToTargetSoC,
-		"estimatedtimetofullsoc":          features.ChargingSessionAttrEstimatedTimeToFullSoC,
-		"chargingmode":                    features.ChargingSessionAttrChargingMode,
-		"supportedchargingmodes":          features.ChargingSessionAttrSupportedChargingModes,
-		"surplusthreshold":                features.ChargingSessionAttrSurplusThreshold,
-		"startdelay":                      features.ChargingSessionAttrStartDelay,
-		"stopdelay":                       features.ChargingSessionAttrStopDelay,
+		"state":                          features.ChargingSessionAttrState,
+		"sessionStartTime":               features.ChargingSessionAttrSessionStartTime,
+		"sessionEndTime":                 features.ChargingSessionAttrSessionEndTime,
+		"sessionEnergyCharged":           features.ChargingSessionAttrSessionEnergyCharged,
+		"sessionEnergyDischarged":        features.ChargingSessionAttrSessionEnergyDischarged,
+		"evIdentifications":              features.ChargingSessionAttrEVIdentifications,
+		"evStateOfCharge":                features.ChargingSessionAttrEVStateOfCharge,
+		"evBatteryCapacity":              features.ChargingSessionAttrEVBatteryCapacity,
+		"evMinStateOfCharge":             features.ChargingSessionAttrEVMinStateOfCharge,
+		"evTargetStateOfCharge":          features.ChargingSessionAttrEVTargetStateOfCharge,
+		"evDemandMode":                   features.ChargingSessionAttrEVDemandMode,
+		"evMinEnergyRequest":             features.ChargingSessionAttrEVMinEnergyRequest,
+		"evMaxEnergyRequest":             features.ChargingSessionAttrEVMaxEnergyRequest,
+		"evTargetEnergyRequest":          features.ChargingSessionAttrEVTargetEnergyRequest,
+		"evDepartureTime":                features.ChargingSessionAttrEVDepartureTime,
+		"evMinDischargingRequest":        features.ChargingSessionAttrEVMinDischargingRequest,
+		"evMaxDischargingRequest":        features.ChargingSessionAttrEVMaxDischargingRequest,
+		"evDischargeBelowTargetPermitted": features.ChargingSessionAttrEVDischargeBelowTargetPermitted,
+		"estimatedTimeToMinSoC":          features.ChargingSessionAttrEstimatedTimeToMinSoC,
+		"estimatedTimeToTargetSoC":       features.ChargingSessionAttrEstimatedTimeToTargetSoC,
+		"estimatedTimeToFullSoC":         features.ChargingSessionAttrEstimatedTimeToFullSoC,
+		"chargingMode":                   features.ChargingSessionAttrChargingMode,
+		"supportedChargingModes":         features.ChargingSessionAttrSupportedChargingModes,
+		"surplusThreshold":               features.ChargingSessionAttrSurplusThreshold,
+		"startDelay":                     features.ChargingSessionAttrStartDelay,
+		"stopDelay":                      features.ChargingSessionAttrStopDelay,
 	}
 	for k, v := range globalAttrs {
 		chargingSessionAttrs[k] = v
@@ -224,12 +231,13 @@ func initNameTables() {
 
 	// Signals attributes
 	signalsAttrs := map[string]uint16{
-		"signalsource":    features.SignalsAttrSignalSource,
-		"starttime":       features.SignalsAttrStartTime,
-		"validuntil":      features.SignalsAttrValidUntil,
-		"priceslots":      features.SignalsAttrPriceSlots,
-		"constraintslots": features.SignalsAttrConstraintSlots,
-		"forecastslots":   features.SignalsAttrForecastSlots,
+		"signalSource":    features.SignalsAttrSignalSource,
+		"startTime":       features.SignalsAttrStartTime,
+		"validUntil":      features.SignalsAttrValidUntil,
+		"priceSlots":      features.SignalsAttrPriceSlots,
+		"constraintSlots": features.SignalsAttrConstraintSlots,
+		"forecastSlots":   features.SignalsAttrForecastSlots,
+		"schedule":        features.SignalsAttrPriceSlots, // alias used in test specs
 	}
 	for k, v := range globalAttrs {
 		signalsAttrs[k] = v
@@ -238,12 +246,12 @@ func initNameTables() {
 
 	// Plan attributes
 	planAttrs := map[string]uint16{
-		"planid":             features.PlanAttrPlanID,
-		"planversion":        features.PlanAttrPlanVersion,
+		"planId":             features.PlanAttrPlanID,
+		"planVersion":        features.PlanAttrPlanVersion,
 		"commitment":         features.PlanAttrCommitment,
-		"starttime":          features.PlanAttrStartTime,
-		"endtime":            features.PlanAttrEndTime,
-		"totalenergyplanned": features.PlanAttrTotalEnergyPlanned,
+		"startTime":          features.PlanAttrStartTime,
+		"endTime":            features.PlanAttrEndTime,
+		"totalEnergyPlanned": features.PlanAttrTotalEnergyPlanned,
 		"slots":              features.PlanAttrSlots,
 	}
 	for k, v := range globalAttrs {
@@ -253,10 +261,10 @@ func initNameTables() {
 
 	// Tariff attributes
 	tariffAttrs := map[string]uint16{
-		"tariffid":          features.TariffAttrTariffID,
+		"tariffId":          features.TariffAttrTariffID,
 		"currency":          features.TariffAttrCurrency,
-		"priceunit":         features.TariffAttrPriceUnit,
-		"tariffdescription": features.TariffAttrTariffDescription,
+		"priceUnit":         features.TariffAttrPriceUnit,
+		"tariffDescription": features.TariffAttrTariffDescription,
 	}
 	for k, v := range globalAttrs {
 		tariffAttrs[k] = v
@@ -265,39 +273,39 @@ func initNameTables() {
 
 	// Command name tables
 	commandNames[uint8(model.FeatureTariff)] = map[string]uint8{
-		"settariff": features.TariffCmdSetTariff,
+		"setTariff": features.TariffCmdSetTariff,
 	}
 	commandNames[uint8(model.FeatureSignals)] = map[string]uint8{
-		"sendpricesignal":      features.SignalsCmdSendPriceSignal,
-		"sendconstraintsignal": features.SignalsCmdSendConstraintSignal,
-		"sendforecastsignal":   features.SignalsCmdSendForecastSignal,
-		"clearsignals":         features.SignalsCmdClearSignals,
+		"sendPriceSignal":      features.SignalsCmdSendPriceSignal,
+		"sendConstraintSignal": features.SignalsCmdSendConstraintSignal,
+		"sendForecastSignal":   features.SignalsCmdSendForecastSignal,
+		"clearSignals":         features.SignalsCmdClearSignals,
 	}
 	commandNames[uint8(model.FeatureEnergyControl)] = map[string]uint8{
-		"setlimit":              features.EnergyControlCmdSetLimit,
-		"clearlimit":            features.EnergyControlCmdClearLimit,
-		"setcurrentlimits":      features.EnergyControlCmdSetCurrentLimits,
-		"clearcurrentlimits":    features.EnergyControlCmdClearCurrentLimits,
-		"setsetpoint":           features.EnergyControlCmdSetSetpoint,
-		"clearsetpoint":         features.EnergyControlCmdClearSetpoint,
-		"setcurrentsetpoints":   features.EnergyControlCmdSetCurrentSetpoints,
-		"clearcurrentsetpoints": features.EnergyControlCmdClearCurrentSetpoints,
+		"setLimit":              features.EnergyControlCmdSetLimit,
+		"clearLimit":            features.EnergyControlCmdClearLimit,
+		"setCurrentLimits":      features.EnergyControlCmdSetCurrentLimits,
+		"clearCurrentLimits":    features.EnergyControlCmdClearCurrentLimits,
+		"setSetpoint":           features.EnergyControlCmdSetSetpoint,
+		"clearSetpoint":         features.EnergyControlCmdClearSetpoint,
+		"setCurrentSetpoints":   features.EnergyControlCmdSetCurrentSetpoints,
+		"clearCurrentSetpoints": features.EnergyControlCmdClearCurrentSetpoints,
 		"pause":                 features.EnergyControlCmdPause,
 		"resume":                features.EnergyControlCmdResume,
 		"stop":                  features.EnergyControlCmdStop,
 	}
 	commandNames[uint8(model.FeaturePlan)] = map[string]uint8{
-		"requestplan": features.PlanCmdRequestPlan,
-		"acceptplan":  features.PlanCmdAcceptPlan,
+		"requestPlan": features.PlanCmdRequestPlan,
+		"acceptPlan":  features.PlanCmdAcceptPlan,
 	}
 	commandNames[uint8(model.FeatureChargingSession)] = map[string]uint8{
-		"setchargingmode": features.ChargingSessionCmdSetChargingMode,
+		"setChargingMode": features.ChargingSessionCmdSetChargingMode,
 	}
 	commandNames[uint8(model.FeatureDeviceInfo)] = map[string]uint8{
-		"removezone": features.DeviceInfoCmdRemoveZone,
+		"removeZone": features.DeviceInfoCmdRemoveZone,
 	}
 	commandNames[uint8(model.FeatureTestControl)] = map[string]uint8{
-		"triggertestevent": features.TestControlCmdTriggerTestEvent,
+		"triggerTestEvent": features.TestControlCmdTriggerTestEvent,
 	}
 }
 
@@ -305,23 +313,37 @@ func init() {
 	initNameTables()
 }
 
-// ResolveEndpointName resolves an endpoint name to its ID.
+// ResolveEndpointName resolves an endpoint name to its ID (case-insensitive).
 func ResolveEndpointName(name string) (uint8, bool) {
-	id, ok := endpointNames[name]
-	return id, ok
+	lname := strings.ToLower(name)
+	for k, v := range endpointNames {
+		if strings.ToLower(k) == lname {
+			return v, true
+		}
+	}
+	return 0, false
 }
 
-// ResolveFeatureName resolves a feature name to its ID.
+// ResolveFeatureName resolves a feature name to its ID (case-insensitive).
 func ResolveFeatureName(name string) (uint8, bool) {
-	id, ok := featureNames[name]
-	return id, ok
+	lname := strings.ToLower(name)
+	for k, v := range featureNames {
+		if strings.ToLower(k) == lname {
+			return v, true
+		}
+	}
+	return 0, false
 }
 
-// ResolveAttributeName resolves an attribute name to its ID for a given feature.
+// ResolveAttributeName resolves an attribute name to its ID for a given feature (case-insensitive).
 func ResolveAttributeName(featureID uint8, name string) (uint16, bool) {
 	if attrNames, ok := attributeNames[featureID]; ok {
-		id, found := attrNames[name]
-		return id, found
+		lname := strings.ToLower(name)
+		for k, v := range attrNames {
+			if strings.ToLower(k) == lname {
+				return v, true
+			}
+		}
 	}
 	return 0, false
 }
@@ -351,11 +373,15 @@ func GetAttributeName(featureID uint8, attrID uint16) string {
 	return ""
 }
 
-// ResolveCommandName resolves a command name to its ID for a given feature.
+// ResolveCommandName resolves a command name to its ID for a given feature (case-insensitive).
 func ResolveCommandName(featureID uint8, name string) (uint8, bool) {
 	if cmdNames, ok := commandNames[featureID]; ok {
-		id, found := cmdNames[name]
-		return id, found
+		lname := strings.ToLower(name)
+		for k, v := range cmdNames {
+			if strings.ToLower(k) == lname {
+				return v, true
+			}
+		}
 	}
 	return 0, false
 }

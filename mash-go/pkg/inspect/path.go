@@ -226,11 +226,9 @@ func parseAttributeID(s string, featureID uint8) (uint16, error) {
 	if id, err := parseUint16(s); err == nil {
 		return id, nil
 	}
-	// Try name resolution based on feature
-	if attrNames, ok := attributeNames[featureID]; ok {
-		if id, ok := attrNames[strings.ToLower(s)]; ok {
-			return id, nil
-		}
+	// Try name resolution based on feature (case-insensitive)
+	if id, ok := ResolveAttributeName(featureID, s); ok {
+		return id, nil
 	}
 	return 0, fmt.Errorf("%w: %s", ErrInvalidNumber, s)
 }

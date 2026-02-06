@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
@@ -72,14 +73,15 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 	fingerprint := generateFingerprint(zoneID)
 
 	zone := &zoneInfo{
-		ZoneID:        zoneID,
-		ZoneName:      zoneName,
-		ZoneType:      zoneType,
-		Priority:      priority,
-		Metadata:      make(map[string]any),
-		CAFingerprint: fingerprint,
-		Connected:     false,
-		DeviceIDs:     make([]string, 0),
+		ZoneID:         zoneID,
+		ZoneName:       zoneName,
+		ZoneType:       zoneType,
+		Priority:       priority,
+		Metadata:       make(map[string]any),
+		CAFingerprint:  fingerprint,
+		Connected:      false,
+		DeviceIDs:      make([]string, 0),
+		CommissionedAt: time.Now(),
 	}
 
 	zs.zones[zoneID] = zone
@@ -116,19 +118,38 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 	}, nil
 }
 
-// handleAddZone adds a device to an existing zone.
+// handleAddZone adds a zone. If the zone doesn't exist and zone_type is
+// provided, it creates the zone (delegates to handleCreateZone). If the zone
+// already exists and a device_id is provided, it adds a device to the zone.
 func (r *Runner) handleAddZone(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 	zs := getZoneState(state)
 
 	zoneID, _ := params[KeyZoneID].(string)
-	deviceID, _ := params[KeyDeviceID].(string)
+	zoneType, _ := params[KeyZoneType].(string)
 
-	zone, exists := zs.zones[zoneID]
-	if !exists {
-		return nil, fmt.Errorf("zone %s not found", zoneID)
+	// If zone doesn't exist and zone_type is provided, create it.
+	if _, exists := zs.zones[zoneID]; !exists && zoneType != "" {
+		out, err := r.handleCreateZone(ctx, step, state)
+		if err != nil {
+			// Return error string as output (not Go error) so checkers can match it.
+			errStr := err.Error()
+			errName := errStr
+			if errStr == fmt.Sprintf("zone type %s already exists", zoneType) {
+				errName = "ErrZoneTypeExists"
+			}
+			return map[string]any{KeyError: errName}, nil
+		}
+		return out, nil
 	}
 
+	// Add device to existing zone.
+	zone, exists := zs.zones[zoneID]
+	if !exists {
+		return map[string]any{KeyError: "ErrZoneNotFound"}, nil
+	}
+
+	deviceID, _ := params[KeyDeviceID].(string)
 	zone.DeviceIDs = append(zone.DeviceIDs, deviceID)
 
 	return map[string]any{
@@ -145,7 +166,7 @@ func (r *Runner) handleDeleteZone(ctx context.Context, step *loader.Step, state 
 	zoneID, _ := params[KeyZoneID].(string)
 
 	if _, exists := zs.zones[zoneID]; !exists {
-		return map[string]any{KeyZoneRemoved: false}, nil
+		return map[string]any{KeyZoneRemoved: false, KeyError: "ErrZoneNotFound"}, nil
 	}
 
 	delete(zs.zones, zoneID)
@@ -181,13 +202,20 @@ func (r *Runner) handleGetZone(ctx context.Context, step *loader.Step, state *en
 		return map[string]any{KeyZoneFound: false}, nil
 	}
 
+	// "recent" means within the last 30 seconds.
+	commissionedRecent := !zone.CommissionedAt.IsZero() && time.Since(zone.CommissionedAt) < 30*time.Second
+	lastSeenRecent := !zone.LastSeen.IsZero() && time.Since(zone.LastSeen) < 30*time.Second
+
 	return map[string]any{
-		KeyZoneFound:    true,
-		KeyZoneID:       zone.ZoneID,
-		KeyZoneType:     zone.ZoneType,
-		KeyZoneMetadata: zone.Metadata,
-		KeyConnected:    zone.Connected,
-		KeyDeviceCount:  len(zone.DeviceIDs),
+		KeyZoneFound:              true,
+		KeyZoneID:                 zone.ZoneID,
+		KeyZoneType:               zone.ZoneType,
+		KeyZoneMetadata:           zone.Metadata,
+		KeyConnected:              zone.Connected,
+		KeyDeviceCount:            len(zone.DeviceIDs),
+		"commissioned_at_recent":  commissionedRecent,
+		"last_seen_recent":        lastSeenRecent,
+		"last_seen_not_updated":   !zone.LastSeenUpdated,
 	}, nil
 }
 
@@ -199,7 +227,7 @@ func (r *Runner) handleHasZone(ctx context.Context, step *loader.Step, state *en
 	zoneID, _ := params[KeyZoneID].(string)
 	_, exists := zs.zones[zoneID]
 
-	return map[string]any{KeyZoneExists: exists}, nil
+	return map[string]any{KeyZoneExists: exists, KeyResult: exists}, nil
 }
 
 // handleListZones lists all active zones.
@@ -207,6 +235,7 @@ func (r *Runner) handleListZones(ctx context.Context, step *loader.Step, state *
 	zs := getZoneState(state)
 
 	zones := make([]map[string]any, 0, len(zs.zones))
+	zoneIDs := make([]any, 0, len(zs.zones))
 	for _, id := range zs.zoneOrder {
 		if z, ok := zs.zones[id]; ok {
 			zones = append(zones, map[string]any{
@@ -214,19 +243,22 @@ func (r *Runner) handleListZones(ctx context.Context, step *loader.Step, state *
 				KeyZoneType:  z.ZoneType,
 				KeyConnected: z.Connected,
 			})
+			zoneIDs = append(zoneIDs, z.ZoneID)
 		}
 	}
 
 	return map[string]any{
-		KeyZones:     zones,
-		KeyZoneCount: len(zones),
+		KeyZones:          zones,
+		KeyZoneCount:      len(zones),
+		"zone_ids_include": zoneIDs,
 	}, nil
 }
 
 // handleZoneCount returns the number of active zones.
 func (r *Runner) handleZoneCount(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	zs := getZoneState(state)
-	return map[string]any{KeyCount: len(zs.zones)}, nil
+	count := len(zs.zones)
+	return map[string]any{KeyCount: count, KeyResult: count}, nil
 }
 
 // handleGetZoneMetadata returns zone metadata.

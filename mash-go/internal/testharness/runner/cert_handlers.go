@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -84,23 +85,39 @@ func (r *Runner) handleVerifyCertSubject(ctx context.Context, step *loader.Step,
 
 	expectedDeviceID, _ := params[KeyDeviceID].(string)
 
-	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
-		return map[string]any{KeySubjectMatches: false}, nil
+	// Prefer the issued device cert over the TLS peer cert.
+	var cert *x509.Certificate
+	if r.issuedDeviceCert != nil {
+		cert = r.issuedDeviceCert
+	} else if r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
+		cs := r.conn.tlsConn.ConnectionState()
+		if len(cs.PeerCertificates) > 0 {
+			cert = cs.PeerCertificates[0]
+		}
 	}
 
-	tlsState := r.conn.tlsConn.ConnectionState()
-	if len(tlsState.PeerCertificates) == 0 {
-		return map[string]any{KeySubjectMatches: false}, nil
+	if cert == nil {
+		return map[string]any{
+			KeySubjectMatches:       false,
+			KeyCommonNameIsDeviceID: false,
+			KeyDeviceIDLength:       0,
+			KeyDeviceIDHexValid:     false,
+		}, nil
 	}
 
-	cert := tlsState.PeerCertificates[0]
 	cn := cert.Subject.CommonName
-
 	matches := expectedDeviceID == "" || strings.Contains(cn, expectedDeviceID)
 
+	// The CN should be a pure hex device ID (e.g., 16 hex chars = 8 bytes).
+	_, hexErr := hex.DecodeString(cn)
+	isHexValid := hexErr == nil && cn != ""
+
 	return map[string]any{
-		KeySubjectMatches: matches,
-		KeyCommonName:     cn,
+		KeySubjectMatches:       matches,
+		KeyCommonName:           cn,
+		KeyCommonNameIsDeviceID: isHexValid,
+		KeyDeviceIDLength:       len(cn),
+		KeyDeviceIDHexValid:     isHexValid,
 	}, nil
 }
 
@@ -117,20 +134,30 @@ func (r *Runner) handleVerifyDeviceCert(ctx context.Context, step *loader.Step, 
 	certSignedByZoneCA := false
 	certValidityDays := 0
 
-	if r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
+	// Prefer the issued device cert (stored during cert exchange) over the
+	// TLS peer cert, which may still be the commissioning self-signed cert
+	// if the connection hasn't been upgraded to operational TLS yet.
+	var deviceCert *x509.Certificate
+	if r.issuedDeviceCert != nil {
+		deviceCert = r.issuedDeviceCert
+		hasOperationalCert = true
+	} else if r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
 		cs := r.conn.tlsConn.ConnectionState()
-		hasOperationalCert = len(cs.PeerCertificates) > 0
+		if len(cs.PeerCertificates) > 0 {
+			deviceCert = cs.PeerCertificates[0]
+			hasOperationalCert = true
+		}
+	}
 
-		if hasOperationalCert {
-			cert := cs.PeerCertificates[0]
-			certValidityDays = int(time.Until(cert.NotAfter).Hours() / 24)
+	if deviceCert != nil {
+		// Use NotAfter-NotBefore for the issued validity, not remaining time.
+		certValidityDays = int(math.Round(deviceCert.NotAfter.Sub(deviceCert.NotBefore).Hours() / 24))
 
-			// Verify against Zone CA pool if available.
-			if r.zoneCAPool != nil {
-				opts := x509.VerifyOptions{Roots: r.zoneCAPool}
-				_, verifyErr := cert.Verify(opts)
-				certSignedByZoneCA = verifyErr == nil
-			}
+		// Verify against Zone CA pool if available.
+		if r.zoneCAPool != nil {
+			opts := x509.VerifyOptions{Roots: r.zoneCAPool}
+			_, verifyErr := deviceCert.Verify(opts)
+			certSignedByZoneCA = verifyErr == nil
 		}
 	}
 
@@ -143,15 +170,24 @@ func (r *Runner) handleVerifyDeviceCert(ctx context.Context, step *loader.Step, 
 
 // handleVerifyDeviceCertStore verifies device has certs stored.
 func (r *Runner) handleVerifyDeviceCertStore(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
-		return map[string]any{KeyCertStoreValid: false}, nil
+	hasCerts := false
+	certCount := 0
+
+	if r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
+		tlsState := r.conn.tlsConn.ConnectionState()
+		hasCerts = len(tlsState.PeerCertificates) > 0
+		certCount = len(tlsState.PeerCertificates)
 	}
 
-	tlsState := r.conn.tlsConn.ConnectionState()
+	// The runner stores Zone CA and issued device cert during commissioning.
+	zoneCAStored := r.zoneCAPool != nil
+	operationalCertStored := r.issuedDeviceCert != nil
 
 	return map[string]any{
-		KeyCertStoreValid: len(tlsState.PeerCertificates) > 0,
-		KeyCertCount:      len(tlsState.PeerCertificates),
+		KeyCertStoreValid:        hasCerts || operationalCertStored,
+		KeyCertCount:             certCount,
+		KeyZoneCAStored:          zoneCAStored,
+		KeyOperationalCertStored: operationalCertStored,
 	}, nil
 }
 

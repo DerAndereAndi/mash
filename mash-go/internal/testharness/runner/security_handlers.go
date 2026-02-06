@@ -491,15 +491,19 @@ func (r *Runner) handleConnectOperational(ctx context.Context, step *loader.Step
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
+		errorCode := classifyConnectError(err)
+		alert := extractTLSAlert(err)
+		tlsError := errorCode
+		if alert != "" {
+			tlsError = alert
+		}
 		out := map[string]any{
 			KeyConnectionEstablished: false,
-			KeyError:                 err.Error(),
-			KeyErrorCode:             classifyConnectError(err),
-			KeyTLSError:              err.Error(),
+			KeyError:                 errorCode,
+			KeyErrorCode:             errorCode,
+			KeyTLSError:              tlsError,
+			KeyTLSAlert:              alert,
 			KeyTLSHandshakeFailed:    true,
-		}
-		if alert := extractTLSAlert(err); alert != "" {
-			out[KeyTLSAlert] = alert
 		}
 		return out, nil
 	}

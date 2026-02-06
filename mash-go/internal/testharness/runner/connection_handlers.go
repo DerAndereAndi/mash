@@ -128,16 +128,20 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
+		errorCode := classifyConnectError(err)
+		alert := extractTLSAlert(err)
+		tlsError := errorCode
+		if alert != "" {
+			tlsError = alert
+		}
 		out := map[string]any{
 			KeyConnectionEstablished: false,
 			KeyZoneID:                zoneID,
-			KeyError:                 err.Error(),
-			KeyErrorCode:             classifyConnectError(err),
-			KeyTLSError:              err.Error(),
+			KeyError:                 errorCode,
+			KeyErrorCode:             errorCode,
+			KeyTLSError:              tlsError,
+			KeyTLSAlert:              alert,
 			KeyTLSHandshakeFailed:    true,
-		}
-		if alert := extractTLSAlert(err); alert != "" {
-			out[KeyTLSAlert] = alert
 		}
 		return out, nil
 	}
@@ -661,8 +665,9 @@ func (r *Runner) handlePingMultiple(ctx context.Context, step *loader.Step, stat
 	}
 
 	return map[string]any{
-		KeyAllPongsReceived: allReceived,
-		KeyCount:            count,
+		KeyAllPongsReceived:    allReceived,
+		KeyAverageLatencyUnder: allReceived, // Simulated: true means latency ~0.
+		KeyCount:               count,
 	}, nil
 }
 
@@ -1560,11 +1565,67 @@ func (r *Runner) handleSubscribeOrdered(ctx context.Context, step *loader.Step, 
 func (r *Runner) handleUnsubscribe(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	subID := params[KeySubscriptionID]
+	// Resolve subscription ID -- may be a literal or "saved_subscription_id"
+	// referencing the value stored by a previous subscribe step.
+	var subID uint32
+	rawID := params[KeySubscriptionID]
+	switch v := rawID.(type) {
+	case string:
+		if v == "saved_subscription_id" {
+			if saved, ok := state.Get(StateSavedSubscriptionID); ok {
+				if id, ok := wire.ToUint32(saved); ok {
+					subID = id
+				}
+			}
+		}
+	default:
+		if id, ok := wire.ToUint32(rawID); ok {
+			subID = id
+		}
+	}
+
+	if subID == 0 {
+		return map[string]any{
+			KeyUnsubscribeSuccess: false,
+			KeyError:              "no subscription ID to unsubscribe",
+		}, nil
+	}
+
+	if !r.conn.connected {
+		return map[string]any{
+			KeyUnsubscribeSuccess: false,
+			KeyError:              "not connected",
+		}, nil
+	}
+
+	// Send unsubscribe request: Subscribe operation with featureID=0
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  0,
+		Payload:    &wire.UnsubscribePayload{SubscriptionID: subID},
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode unsubscribe request: %w", err)
+	}
+
+	resp, err := r.sendRequest(data, "unsubscribe")
+	if err != nil {
+		return map[string]any{
+			KeyUnsubscribeSuccess: false,
+			KeyError:              err.Error(),
+		}, nil
+	}
+
 	state.Set(StateUnsubscribedID, subID)
 
 	return map[string]any{
-		KeyUnsubscribed: true,
+		KeyUnsubscribeSuccess: resp.IsSuccess(),
+		KeyUnsubscribed:       resp.IsSuccess(),
+		KeyStatus:             resp.Status,
 	}, nil
 }
 
@@ -1580,17 +1641,35 @@ func (r *Runner) handleReceiveNotifications(ctx context.Context, step *loader.St
 	count := paramInt(params, KeyCount, 1)
 
 	received := 0
+	var subIDs []string
 	for i := 0; i < count; i++ {
 		out, _ := r.handleWaitNotification(ctx, step, state)
 		if out[KeyNotificationReceived] == true {
 			received++
+			if sid, ok := out[KeySubscriptionID]; ok && sid != nil {
+				subIDs = append(subIDs, fmt.Sprintf("%v", sid))
+			}
 		} else {
 			break
 		}
 	}
 
+	// Check subscription ID uniqueness.
+	seen := make(map[string]bool, len(subIDs))
+	allUnique := true
+	for _, id := range subIDs {
+		if seen[id] {
+			allUnique = false
+			break
+		}
+		seen[id] = true
+	}
+
 	return map[string]any{
 		KeyNotificationsReceived: received,
+		KeyReceivedCount:         received,
 		KeyAllReceived:           received == count,
+		KeyAllIDsUnique:          allUnique,
+		KeyAllIDsMatchSubs:       allUnique && received == count,
 	}, nil
 }

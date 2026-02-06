@@ -204,8 +204,8 @@ func TestClassifyConnectError(t *testing.T) {
 		{"timeout", fmt.Errorf("dial tcp: i/o timeout"), ErrCodeTimeout},
 		{"deadline", fmt.Errorf("context deadline exceeded"), ErrCodeTimeout},
 		{"refused", fmt.Errorf("dial tcp 127.0.0.1:8443: connection refused"), ErrCodeConnectionFailed},
-		{"tls", fmt.Errorf("tls: bad certificate"), ErrCodeTLSError},
-		{"certificate", fmt.Errorf("x509: certificate signed by unknown authority"), ErrCodeTLSError},
+		{"tls", fmt.Errorf("tls: bad certificate"), "bad_certificate"},
+		{"certificate", fmt.Errorf("x509: certificate signed by unknown authority"), "unknown_ca"},
 		{"generic", fmt.Errorf("some other error"), ErrCodeConnectionError},
 	}
 

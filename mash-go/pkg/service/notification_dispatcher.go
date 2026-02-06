@@ -265,15 +265,21 @@ func (d *NotificationDispatcher) HandleSubscribe(connID uint64, req *wire.Reques
 
 // HandleUnsubscribe processes an unsubscribe request for a connection.
 func (d *NotificationDispatcher) HandleUnsubscribe(connID uint64, req *wire.Request) *wire.Response {
-	// Parse unsubscribe payload
-	var unsubPayload *wire.UnsubscribePayload
+	// Parse unsubscribe payload. After CBOR roundtrip, the payload may be
+	// a typed *UnsubscribePayload (from Go tests) or a map[any]any (from wire).
+	var subID uint32
 	if req.Payload != nil {
-		if up, ok := req.Payload.(*wire.UnsubscribePayload); ok {
-			unsubPayload = up
+		switch p := req.Payload.(type) {
+		case *wire.UnsubscribePayload:
+			subID = p.SubscriptionID
+		case map[any]any:
+			if id, ok := wire.ToUint32(p[uint64(1)]); ok {
+				subID = id
+			}
 		}
 	}
 
-	if unsubPayload == nil || unsubPayload.SubscriptionID == 0 {
+	if subID == 0 {
 		return &wire.Response{
 			MessageID: req.MessageID,
 			Status:    wire.StatusInvalidParameter,
@@ -282,8 +288,6 @@ func (d *NotificationDispatcher) HandleUnsubscribe(connID uint64, req *wire.Requ
 			},
 		}
 	}
-
-	subID := unsubPayload.SubscriptionID
 
 	// Verify subscription belongs to this connection
 	d.mu.Lock()

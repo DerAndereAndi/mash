@@ -12,6 +12,11 @@ const (
 	TriggerExitCommissioningMode  uint64 = 0x0001_0000_0000_0002
 	TriggerFactoryReset           uint64 = 0x0001_0000_0000_0003
 	TriggerResetTestState         uint64 = 0x0001_0000_0000_0004
+
+	// TriggerAdjustClockBase encodes a clock offset in the lower 32 bits.
+	// The value is in seconds (signed, stored as uint32 via two's complement).
+	// Usage: TriggerAdjustClockBase | uint64(uint32(int32(offsetSeconds)))
+	TriggerAdjustClockBase uint64 = 0x0001_0001_0000_0000
 )
 
 // Status triggers (domain 0x0002 = Status).
@@ -29,6 +34,11 @@ const (
 	TriggerSetPowerZero uint64 = 0x0004_0000_0000_0003
 	TriggerSetSoC50     uint64 = 0x0004_0000_0000_0010
 	TriggerSetSoC100    uint64 = 0x0004_0000_0000_0011
+
+	// TriggerSetPowerCustomBase encodes an arbitrary power value in the lower 32 bits.
+	// The value is in milliwatts (signed, stored as uint32).
+	// Usage: TriggerSetPowerCustomBase | uint64(uint32(milliwatts))
+	TriggerSetPowerCustomBase uint64 = 0x0004_0001_0000_0000
 )
 
 // ChargingSession triggers (domain 0x0006 = ChargingSession).

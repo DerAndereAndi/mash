@@ -232,6 +232,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		r.zoneCA = nil
 		r.controllerCert = nil
 		r.zoneCAPool = nil
+		r.issuedDeviceCert = nil
 	}
 
 	// Close stale zone connections from previous tests so the device marks
@@ -795,6 +796,7 @@ func isTransientError(err error) bool {
 		strings.Contains(msg, "connection reset") ||
 		strings.Contains(msg, "broken pipe") ||
 		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "deadline exceeded") ||
 		isNetError(err)
 }
 
@@ -864,6 +866,7 @@ func (r *Runner) ensureDisconnected() {
 	r.zoneCA = nil
 	r.controllerCert = nil
 	r.zoneCAPool = nil
+	r.issuedDeviceCert = nil
 }
 
 // sendRemoveZone sends a RemoveZone invoke to the device so it re-enters

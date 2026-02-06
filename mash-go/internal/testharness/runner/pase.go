@@ -266,6 +266,27 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		state.Set(StateDeviceID, deviceID)
 	}
 
+	// Register the commissioned zone in the local zone state so that
+	// list_zones, remove_zone, etc. reflect the commissioning result.
+	if zt, ok := params[KeyZoneType].(string); ok && zt != "" {
+		zs := getZoneState(state)
+		zoneID, _ := params[KeyZoneID].(string)
+		if zoneID == "" {
+			zoneID = strings.ToUpper(zt) // fallback label
+		}
+		if _, exists := zs.zones[zoneID]; !exists {
+			zone := &zoneInfo{
+				ZoneID:    zoneID,
+				ZoneType:  strings.ToUpper(zt),
+				Priority:  zonePriority[strings.ToUpper(zt)],
+				Connected: false,
+				Metadata:  make(map[string]any),
+			}
+			zs.zones[zoneID] = zone
+			zs.zoneOrder = append(zs.zoneOrder, zoneID)
+		}
+	}
+
 	outputs := map[string]any{
 		KeySessionEstablished: true,
 		KeyCommissionSuccess:  true,
@@ -338,6 +359,9 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("generate controller cert: %w", err)
 	}
 	r.controllerCert = controllerCert
+
+	// Store the issued device cert for verify_device_cert.
+	r.issuedDeviceCert = deviceCert
 
 	// Extract device ID from the signed certificate.
 	deviceID, _ := cert.ExtractDeviceID(deviceCert)

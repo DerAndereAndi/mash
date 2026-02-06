@@ -117,8 +117,8 @@ func TestGetCommandName(t *testing.T) {
 		cmdID    uint8
 		wantName string
 	}{
-		{"tariff cmd 1", uint8(model.FeatureTariff), 1, "settariff"},
-		{"signals cmd 4", uint8(model.FeatureSignals), 4, "clearsignals"},
+		{"tariff cmd 1", uint8(model.FeatureTariff), 1, "setTariff"},
+		{"signals cmd 4", uint8(model.FeatureSignals), 4, "clearSignals"},
 		{"unknown cmd", uint8(model.FeatureTariff), 99, ""},
 		{"unknown feature", 0xFF, 1, ""},
 	}

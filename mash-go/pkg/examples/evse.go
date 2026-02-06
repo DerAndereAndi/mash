@@ -102,6 +102,15 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 	e.electrical = features.NewElectrical()
 	e.electrical.Feature.SetFeatureMap(evseCapabilities)
 	_ = e.electrical.SetPhaseCount(cfg.PhaseCount)
+	// Default phase-to-grid mapping: A->L1, B->L2, C->L3 (as many as configured).
+	phaseMap := map[features.Phase]features.GridPhase{features.PhaseA: features.GridPhaseL1}
+	if cfg.PhaseCount >= 2 {
+		phaseMap[features.PhaseB] = features.GridPhaseL2
+	}
+	if cfg.PhaseCount >= 3 {
+		phaseMap[features.PhaseC] = features.GridPhaseL3
+	}
+	_ = e.electrical.SetPhaseMapping(phaseMap)
 	_ = e.electrical.SetNominalVoltage(cfg.NominalVoltage)
 	_ = e.electrical.SetNominalFrequency(50)
 	_ = e.electrical.SetMaxCurrentPerPhase(cfg.MaxCurrentPerPhase)

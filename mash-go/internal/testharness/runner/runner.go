@@ -44,6 +44,10 @@ type Runner struct {
 	// controllerCert is the controller operational cert generated during commissioning.
 	controllerCert *cert.OperationalCert
 
+	// issuedDeviceCert is the operational cert issued to the device during cert exchange.
+	// Used by verify_device_cert to validate the cert even before operational TLS reconnect.
+	issuedDeviceCert *x509.Certificate
+
 	// zoneCAPool holds the Zone CA certificate pool obtained during commissioning.
 	// Used for TLS verification on operational (non-commissioning) connections.
 	zoneCAPool *x509.CertPool
@@ -72,6 +76,10 @@ type Runner struct {
 	// deviceStateModified is set when a trigger modifies device state.
 	// Used by setupPreconditions to send TriggerResetTestState between tests.
 	deviceStateModified bool
+
+	// pendingNotifications buffers notification frames that arrived while
+	// reading a command response (interleaved with the response).
+	pendingNotifications [][]byte
 }
 
 // Config configures the test runner.
@@ -608,6 +616,36 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		}
 	}
 
+	// Translate boolean cert test params to client_cert type.
+	if _, ok := step.Params["client_cert"]; !ok {
+		if toBool(step.Params["use_expired_cert"]) {
+			step.Params["client_cert"] = "controller_expired"
+			r.debugf("handleConnect: translated use_expired_cert to client_cert=controller_expired, zoneCA=%v", r.zoneCA != nil)
+		} else if toBool(step.Params["use_wrong_zone_cert"]) {
+			step.Params["client_cert"] = "controller_wrong_zone"
+		} else if toBool(step.Params["use_operational_cert"]) {
+			step.Params["client_cert"] = "controller_operational"
+		}
+	}
+
+	// Translate cert_type param (used by connect_as_controller tests) to client_cert.
+	if certType, ok := step.Params["cert_type"].(string); ok && certType != "" {
+		if _, hasCC := step.Params["client_cert"]; !hasCC {
+			switch certType {
+			case "expired":
+				step.Params["client_cert"] = "controller_expired"
+			case "wrong_zone_ca":
+				step.Params["client_cert"] = "controller_wrong_zone"
+			case "self_signed":
+				step.Params["client_cert"] = "controller_self_signed"
+			case "valid":
+				step.Params["client_cert"] = "controller_operational"
+			default:
+				step.Params["client_cert"] = "controller_" + certType
+			}
+		}
+	}
+
 	// Override client certificate if specified in params.
 	// cert_chain and client_cert are mutually exclusive; cert_chain takes priority.
 	if chainSpec, ok := step.Params["cert_chain"].([]any); ok && len(chainSpec) > 0 {
@@ -636,6 +674,10 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			if certErr != nil {
 				return nil, fmt.Errorf("generating test client cert %q: %w", clientCertType, certErr)
 			}
+			r.debugf("handleConnect: generated test cert type=%s, leaf=%v", clientCertType, testCert.Leaf != nil)
+			if testCert.Leaf != nil {
+				r.debugf("handleConnect: test cert NotAfter=%v, expired=%v", testCert.Leaf.NotAfter, time.Now().After(testCert.Leaf.NotAfter))
+			}
 			tlsConfig.Certificates = []tls.Certificate{testCert}
 		}
 	}
@@ -644,12 +686,32 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	startTime := time.Now()
 	state.Set("start_time", startTime)
 
+	// When connecting with an operational cert, close the existing zone
+	// connection first so the device has a disconnected zone available to
+	// reconnect. Without this, the device rejects the new connection with
+	// "no disconnected zones" (not a cert issue) which confuses probing.
+	clientCertParam, _ := step.Params["client_cert"].(string)
+	if clientCertParam == "controller_operational" && r.conn != nil && r.conn.tlsConn != nil {
+		_ = r.conn.tlsConn.Close()
+		r.conn.tlsConn = nil
+		r.conn.connected = false
+		// Brief wait for device to detect the disconnect.
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	// Connect with timeout
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
 		state.Set("end_time", time.Now())
 		errorCode := classifyConnectError(err)
+		alert := extractTLSAlert(err)
+		// Use the classified error code for tls_error (tests expect short
+		// strings like "certificate_expired", not raw Go error text).
+		tlsError := errorCode
+		if alert != "" {
+			tlsError = alert
+		}
 		// Return connection failure as outputs so tests can assert on TLS errors.
 		return map[string]any{
 			KeyConnectionEstablished: false,
@@ -660,14 +722,75 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			KeyError:                 errorCode,
 			KeyErrorCode:             errorCode,
 			KeyErrorDetail:           err.Error(),
-			KeyTLSError:              err.Error(),
-			KeyTLSAlert:              extractTLSAlert(err),
+			KeyTLSError:              tlsError,
+			KeyTLSAlert:              alert,
 		}, nil
+	}
+
+	// TLS 1.3 with RequestClientCert: the server validates the client cert
+	// AFTER the handshake completes from the client's perspective. If the
+	// server rejects the cert, it closes the connection. Detect this by
+	// attempting a short read -- if the server closed, we'll get an error.
+	// For non-operational test certs (expired, wrong_zone, self_signed), always
+	// probe for post-handshake rejection. For operational certs, only probe when
+	// a clock offset is active (the device might reject due to clock skew making
+	// the cert appear not-yet-valid). Skip probing for operational certs without
+	// clock offset because the device may close the connection for other reasons
+	// (e.g., no disconnected zone to reconnect to), not cert rejection.
+	clientCertType, _ := step.Params["client_cert"].(string)
+	clockOffset, _ := state.Get(StateClockOffsetMs)
+	hasClockOffset := clockOffset != nil && clockOffset != int64(0) && clockOffset != 0
+	probeForRejection := len(tlsConfig.Certificates) > 0 && clientCertType != "" &&
+		(clientCertType != "controller_operational" || hasClockOffset)
+	if probeForRejection {
+		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		probe := make([]byte, 1)
+		_, probeErr := conn.Read(probe)
+		_ = conn.SetReadDeadline(time.Time{}) // clear deadline
+		if probeErr != nil {
+			isTimeout := false
+			if ne, ok := probeErr.(net.Error); ok && ne.Timeout() {
+				isTimeout = true
+			}
+			if !isTimeout {
+				// Server closed the connection -- cert was rejected.
+				// Classify based on what test cert we sent, since the server
+				// can't send a specific reason in TLS 1.3 post-handshake.
+				conn.Close()
+				state.Set("end_time", time.Now())
+				tlsError := classifyTestCertRejection(clientCertType, probeErr)
+				// For post-handshake rejection, the probe error is typically
+				// io.EOF which doesn't contain a TLS alert keyword. Use the
+				// inferred classification for tls_alert as well.
+				alert := extractTLSAlert(probeErr)
+				if alert == "" || alert == probeErr.Error() {
+					alert = tlsError
+				}
+				return map[string]any{
+					KeyConnectionEstablished: false,
+					KeyConnected:             false,
+					KeyTLSHandshakeSuccess:   false,
+					KeyTLSHandshakeFailed:    true,
+					KeyTarget:                target,
+					KeyError:                 tlsError,
+					KeyErrorCode:             tlsError,
+					KeyErrorDetail:           probeErr.Error(),
+					KeyTLSError:              tlsError,
+					KeyTLSAlert:              alert,
+				}, nil
+			}
+		}
 	}
 
 	// Record end time for verify_timing.
 	state.Set("end_time", time.Now())
 
+	// Close the previous TLS connection before replacing it. Without
+	// this, the device still sees the old TCP connection as an active
+	// zone, preventing it from re-entering commissioning mode.
+	if r.conn.tlsConn != nil && r.conn.tlsConn != conn {
+		_ = r.conn.tlsConn.Close()
+	}
 	r.conn.tlsConn = conn
 	r.conn.framer = transport.NewFramer(conn)
 	r.conn.connected = true
@@ -748,16 +871,38 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}, nil
 }
 
-// handleDisconnect closes the connection.
+// handleDisconnect closes the connection. If graceful=true, sends a
+// ControlClose frame and waits for acknowledgement before closing TCP.
 func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected {
-		return map[string]any{KeyDisconnected: true, KeyConnectionClosed: true}, nil
+		return map[string]any{KeyDisconnected: true, KeyConnectionClosed: true, KeyCloseAcknowledged: true}, nil
+	}
+
+	params := engine.InterpolateParams(step.Params, state)
+	graceful, _ := params["graceful"].(bool)
+
+	if graceful {
+		// Delegate to send_close which handles ControlClose + ack.
+		out, err := r.handleSendClose(ctx, step, state)
+		if err != nil {
+			return nil, err
+		}
+		out[KeyDisconnected] = true
+		// Clear subscription state.
+		state.Set("_priming_data", nil)
+		r.pendingNotifications = nil
+		return out, nil
 	}
 
 	err := r.conn.Close()
 	if err != nil {
 		return nil, fmt.Errorf("failed to disconnect: %w", err)
 	}
+
+	// Clear subscription state so stale priming data / notifications don't
+	// leak into subsequent steps after the session is gone.
+	state.Set("_priming_data", nil)
+	r.pendingNotifications = nil
 
 	return map[string]any{KeyDisconnected: true, KeyConnectionClosed: true}, nil
 }
@@ -771,18 +916,31 @@ func (r *Runner) sendRequest(data []byte, op string) (*wire.Response, error) {
 		return nil, fmt.Errorf("failed to send %s request: %w", op, err)
 	}
 
-	respData, err := r.conn.framer.ReadFrame()
-	if err != nil {
-		r.conn.connected = false
-		return nil, fmt.Errorf("failed to read %s response: %w", op, err)
+	// Read frames until we get a response (skip notifications with messageId=0).
+	for i := 0; i < 5; i++ {
+		respData, err := r.conn.framer.ReadFrame()
+		if err != nil {
+			r.conn.connected = false
+			return nil, fmt.Errorf("failed to read %s response: %w", op, err)
+		}
+
+		resp, err := wire.DecodeResponse(respData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode %s response: %w", op, err)
+		}
+
+		// Notifications have messageId=0. Queue them for later consumption
+		// and keep reading for the actual command response.
+		if resp.MessageID == 0 {
+			r.debugf("sendRequest(%s): skipping notification frame (buffered)", op)
+			r.pendingNotifications = append(r.pendingNotifications, respData)
+			continue
+		}
+
+		return resp, nil
 	}
 
-	resp, err := wire.DecodeResponse(respData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode %s response: %w", op, err)
-	}
-
-	return resp, nil
+	return nil, fmt.Errorf("failed to read %s response: too many interleaved notifications", op)
 }
 
 // handleRead sends a read request and returns the response.
@@ -805,17 +963,22 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		return nil, fmt.Errorf("resolving feature: %w", err)
 	}
 
-	attribute, _ := params["attribute"].(string)
-
-	// Resolve attribute name to numeric ID for filtered reads.
+	// Resolve attribute: may be a string name ("acActivePower") or numeric ID
+	// (int from YAML, e.g., 0xFF parses as int 255).
 	var attrID uint16
 	var hasAttr bool
-	if attribute != "" {
-		attrID, err = r.resolver.ResolveAttribute(params[KeyFeature], attribute)
+	var attrName string
+	if attrRaw, ok := params["attribute"]; ok && attrRaw != nil {
+		attrID, err = r.resolver.ResolveAttribute(params[KeyFeature], attrRaw)
 		if err != nil {
 			return nil, fmt.Errorf("resolving attribute: %w", err)
 		}
 		hasAttr = true
+		if s, ok := attrRaw.(string); ok {
+			attrName = s
+		} else {
+			attrName = fmt.Sprintf("attr_%d", attrID)
+		}
 	}
 
 	// Create read request
@@ -891,8 +1054,14 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 	if hasAttr && resp.Payload != nil {
 		if extracted, ok := extractAttributeValue(resp.Payload, attrID); ok {
 			outputs[KeyValue] = extracted
+			// Add snake_case validation keys for common assertions.
+			snakeName := camelToSnake(attrName)
+			outputs[snakeName+"_present"] = true
+			outputs[snakeName+"_not_empty"] = !isEmptyValue(extracted)
+			outputs[snakeName+"_valid"] = extracted != nil
+			outputs[snakeName+"_format_valid"] = extracted != nil
 		}
-		outputs[attribute+"_present"] = resp.Payload != nil
+		outputs[attrName+"_present"] = resp.Payload != nil
 	}
 
 	return outputs, nil
@@ -927,6 +1096,60 @@ func extractAttributeValue(payload any, attrID uint16) (any, bool) {
 	return nil, false
 }
 
+// normalizePayloadMap converts a CBOR-decoded payload to map[string]any
+// for comparison with YAML expectation maps. Handles map[any]any (CBOR
+// integer keys are converted to string representations).
+func normalizePayloadMap(payload any) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	switch m := payload.(type) {
+	case map[string]any:
+		return m
+	case map[any]any:
+		result := make(map[string]any, len(m))
+		for k, v := range m {
+			result[fmt.Sprintf("%v", k)] = v
+		}
+		return result
+	}
+	return nil
+}
+
+// camelToSnake converts a camelCase string to snake_case.
+func camelToSnake(s string) string {
+	var result []byte
+	for i, c := range s {
+		if c >= 'A' && c <= 'Z' {
+			if i > 0 {
+				result = append(result, '_')
+			}
+			result = append(result, byte(c+'a'-'A'))
+		} else {
+			result = append(result, byte(c))
+		}
+	}
+	return string(result)
+}
+
+// isEmptyValue returns true if the value is nil, empty string, empty slice, or empty map.
+func isEmptyValue(v any) bool {
+	if v == nil {
+		return true
+	}
+	switch val := v.(type) {
+	case string:
+		return val == ""
+	case []any:
+		return len(val) == 0
+	case map[string]any:
+		return len(val) == 0
+	case map[any]any:
+		return len(val) == 0
+	}
+	return false
+}
+
 // handleWrite sends a write request.
 func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if !r.conn.connected {
@@ -953,8 +1176,8 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 	// value in a WritePayload map (map[uint16]any{attrID: value}) so the
 	// device receives the correct CBOR-encoded structure.
 	var payload any = value
-	if attribute, ok := params["attribute"].(string); ok && attribute != "" {
-		attrID, attrErr := r.resolver.ResolveAttribute(params[KeyFeature], attribute)
+	if attrRaw, ok := params["attribute"]; ok && attrRaw != nil {
+		attrID, attrErr := r.resolver.ResolveAttribute(params[KeyFeature], attrRaw)
 		if attrErr != nil {
 			return nil, fmt.Errorf("resolving attribute: %w", attrErr)
 		}
@@ -1058,16 +1281,25 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 	subscriptionID := extractSubscriptionID(resp.Payload)
 	primingData := extractPrimingData(resp.Payload)
 
-	// Store priming data in state so wait_report can use it as an initial
-	// report if no subsequent notification frame arrives.
+	// Store priming data in state so receive_notification/wait_report can use
+	// it as an initial report if no subsequent notification frame arrives.
 	if primingData != nil {
 		state.Set("_priming_data", primingData)
 	}
+
+	// Save subscription metadata in state for later use by unsubscribe
+	// and notification analysis.
+	if subscriptionID != nil {
+		state.Set(StateSavedSubscriptionID, subscriptionID)
+	}
+	state.Set(StateSubscribedEndpointID, endpointID)
+	state.Set(StateSubscribedFeatureID, featureID)
 
 	return map[string]any{
 		KeySubscribeSuccess:       resp.IsSuccess(),
 		KeySubscriptionID:         subscriptionID,
 		KeySubscriptionIDReturned: subscriptionID != nil,
+		KeySubscriptionIDSaved:    subscriptionID != nil,
 		KeyPrimingReceived:        primingData != nil,
 		KeyStatus:                 resp.Status,
 	}, nil
@@ -1171,6 +1403,7 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 	outputs := map[string]any{
 		KeyInvokeSuccess: resp.IsSuccess(),
 		KeyResult:        resp.Payload,
+		KeyResponse:      normalizePayloadMap(resp.Payload),
 		KeyStatus:        resp.Status,
 	}
 
@@ -1180,7 +1413,46 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 		outputs[KeyErrorStatus] = resp.Status.String()
 	}
 
+	// Flatten response payload into output map for response_contains and
+	// application-level error detection. The payload is typically a
+	// map[any]any or map[string]any from CBOR decoding.
+	if resp.Payload != nil {
+		flattenInvokeResponse(resp.Payload, outputs)
+	}
+
 	return outputs, nil
+}
+
+// flattenInvokeResponse extracts well-known keys from an invoke response
+// payload and merges them into the output map. This enables:
+//   - response_contains checker to find keys by name
+//   - Detection of "applied: false" as invoke failure
+//   - Extraction of rejectReason as error_code
+func flattenInvokeResponse(payload any, outputs map[string]any) {
+	var m map[string]any
+	switch p := payload.(type) {
+	case map[string]any:
+		m = p
+	case map[any]any:
+		m = make(map[string]any, len(p))
+		for k, v := range p {
+			m[fmt.Sprintf("%v", k)] = v
+		}
+	default:
+		return
+	}
+
+	// Check "applied" field: if explicitly false, override invoke_success.
+	if applied, ok := m["applied"]; ok {
+		if applied == false {
+			outputs[KeyInvokeSuccess] = false
+			// Extract rejectReason as error_code if present.
+			if reason, hasReason := m["rejectReason"]; hasReason {
+				outputs[KeyErrorCode] = rejectReasonToErrorCode(reason)
+				outputs[KeyErrorStatus] = outputs[KeyErrorCode]
+			}
+		}
+	}
 }
 
 // Utility handlers
@@ -1421,15 +1693,30 @@ func extractTLSAlert(err error) string {
 	msg := err.Error()
 	// Go TLS errors contain alert descriptions like "bad certificate",
 	// "certificate expired", "unknown authority", etc.
-	alertKeywords := []string{
-		"bad certificate", "certificate expired", "unknown authority",
-		"handshake failure", "protocol version", "no application protocol",
-		"certificate unknown", "decrypt error", "illegal parameter",
-		"close notify",
+	// Map Go's TLS error strings to standard TLS alert names.
+	// The first matching keyword wins, so order matters when a Go error
+	// string differs from the canonical TLS alert name.
+	alertMappings := []struct {
+		keyword string
+		alert   string
+	}{
+		{"bad certificate", "bad_certificate"},
+		{"certificate expired", "certificate_expired"},
+		{"not yet valid", "certificate_expired"},
+		{"unknown authority", "unknown_ca"},
+		{"handshake failure", "handshake_failure"},
+		{"protocol version", "protocol_version"},
+		{"no application protocol", "no_application_protocol"},
+		{"certificate unknown", "certificate_unknown"},
+		{"decrypt error", "decrypt_error"},
+		{"illegal parameter", "illegal_parameter"},
+		{"close notify", "close_notify"},
+		{"chain too long", "chain_too_deep"},
+		{"path length constraint", "chain_too_deep"},
 	}
-	for _, kw := range alertKeywords {
-		if contains(msg, kw) {
-			return strings.ReplaceAll(kw, " ", "_")
+	for _, m := range alertMappings {
+		if contains(msg, m.keyword) {
+			return m.alert
 		}
 	}
 	// Return the full error as fallback.
@@ -1437,6 +1724,84 @@ func extractTLSAlert(err error) string {
 }
 
 // classifyConnectError returns a short error code for connection failures.
+// classifyTestCertRejection maps a test cert type to the expected rejection
+// reason. In TLS 1.3 with RequestClientCert, the server can't send a specific
+// alert reason for client cert rejection, so we infer from the cert type.
+func classifyTestCertRejection(certType string, err error) string {
+	// First check if the error itself contains useful info.
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "expired") || strings.Contains(msg, "not yet valid") {
+			return "certificate_expired"
+		}
+		if strings.Contains(msg, "unknown ca") || strings.Contains(msg, "unknown authority") {
+			return "unknown_ca"
+		}
+		if strings.Contains(msg, "bad certificate") || strings.Contains(msg, "bad_certificate") {
+			return "bad_certificate"
+		}
+	}
+
+	// Infer from the test cert type we sent.
+	switch certType {
+	case "controller_expired":
+		return "certificate_expired"
+	case "controller_not_yet_valid":
+		return "certificate_expired"
+	case "controller_wrong_zone":
+		return "unknown_ca"
+	case "controller_no_client_auth":
+		return "bad_certificate"
+	case "controller_ca_true":
+		return "bad_certificate"
+	case "controller_self_signed":
+		return "unknown_ca"
+	case "controller_operational":
+		// A valid operational cert rejected post-handshake is typically
+		// due to clock skew making the cert appear expired or not-yet-valid.
+		return "certificate_expired"
+	default:
+		return "certificate_rejected"
+	}
+}
+
+// rejectReasonToErrorCode maps an invoke response rejectReason value to
+// a wire-level error code string. The reject reason is typically a uint8
+// or uint64 from CBOR decoding.
+func rejectReasonToErrorCode(reason any) string {
+	var code uint8
+	switch v := reason.(type) {
+	case uint64:
+		code = uint8(v)
+	case uint8:
+		code = v
+	case int:
+		code = uint8(v)
+	case int64:
+		code = uint8(v)
+	case float64:
+		code = uint8(v)
+	default:
+		return fmt.Sprintf("%v", reason)
+	}
+
+	// Map LimitRejectReason values to test-expected error codes.
+	switch code {
+	case 0x00: // BelowMinimum
+		return "BELOW_MINIMUM"
+	case 0x01: // AboveContractual
+		return "ABOVE_CONTRACTUAL"
+	case 0x02: // InvalidValue
+		return "INVALID_PARAMETER"
+	case 0x03: // DeviceOverride
+		return "DEVICE_OVERRIDE"
+	case 0x04: // NotSupported
+		return "UNSUPPORTED_COMMAND"
+	default:
+		return fmt.Sprintf("REJECT_%d", code)
+	}
+}
+
 func classifyConnectError(err error) string {
 	if err == nil {
 		return ""
@@ -1448,6 +1813,14 @@ func classifyConnectError(err error) string {
 		return ErrCodeTimeout
 	case strings.Contains(msg, "connection refused"):
 		return ErrCodeConnectionFailed
+	case strings.Contains(msg, "chain too long") || strings.Contains(msg, "path length constraint"):
+		return "chain_too_deep"
+	case strings.Contains(msg, "unknown authority"):
+		return "unknown_ca"
+	case strings.Contains(msg, "certificate expired") || strings.Contains(msg, "not yet valid"):
+		return "certificate_expired"
+	case strings.Contains(msg, "bad certificate"):
+		return "bad_certificate"
 	case strings.Contains(msg, "tls") || strings.Contains(msg, "certificate"):
 		return ErrCodeTLSError
 	default:

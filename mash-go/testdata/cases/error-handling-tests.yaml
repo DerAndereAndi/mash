@@ -227,7 +227,7 @@ steps:
         cause: 3
     expect:
       invoke_success: false
-      error_code: CONSTRAINT_VIOLATION
+      error_code: CONSTRAINT_ERROR
 
 postconditions:
   - constraint_enforced: true

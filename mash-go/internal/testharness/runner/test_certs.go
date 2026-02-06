@@ -82,6 +82,11 @@ func generateTestClientCert(certType string, zoneCA *cert.ZoneCA) (tls.Certifica
 		template.IsCA = true
 		template.BasicConstraintsValid = true
 
+	case "controller_self_signed":
+		// Self-signed: use the cert's own key as signer (not the zone CA).
+		signerCert = template
+		signerKey = privKey
+
 	default:
 		return tls.Certificate{}, fmt.Errorf("unknown test cert type: %q", certType)
 	}

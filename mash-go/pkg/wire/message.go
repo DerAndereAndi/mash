@@ -96,6 +96,52 @@ type ReadPayload struct {
 	AttributeIDs []uint16 `cbor:"1,keyasint,omitempty"`
 }
 
+// ExtractReadAttributeIDs extracts attribute IDs from a read request payload.
+// After CBOR round-trip the Payload is a raw map (map[any]any), not
+// *ReadPayload, so this function handles both typed and untyped forms.
+func ExtractReadAttributeIDs(payload any) []uint16 {
+	if payload == nil {
+		return nil
+	}
+
+	// Typed form (used before encoding)
+	if rp, ok := payload.(*ReadPayload); ok {
+		return rp.AttributeIDs
+	}
+
+	// Raw CBOR map: {uint64(1): []any{uint64(id), ...}}
+	var arr []any
+	switch m := payload.(type) {
+	case map[any]any:
+		if v, ok := m[uint64(1)]; ok {
+			arr, _ = v.([]any)
+		}
+	case map[uint64]any:
+		if v, ok := m[uint64(1)]; ok {
+			arr, _ = v.([]any)
+		}
+	default:
+		return nil
+	}
+
+	if len(arr) == 0 {
+		return nil
+	}
+
+	ids := make([]uint16, 0, len(arr))
+	for _, item := range arr {
+		switch v := item.(type) {
+		case uint64:
+			ids = append(ids, uint16(v))
+		case int64:
+			ids = append(ids, uint16(v))
+		case float64:
+			ids = append(ids, uint16(v))
+		}
+	}
+	return ids
+}
+
 // ReadResponsePayload represents the payload for a Read response.
 // Keys are attribute IDs, values are attribute values.
 type ReadResponsePayload map[uint16]any
@@ -103,6 +149,45 @@ type ReadResponsePayload map[uint16]any
 // WritePayload represents the payload for a Write request.
 // Keys are attribute IDs, values are values to write.
 type WritePayload map[uint16]any
+
+// ExtractWritePayload extracts a write payload from a raw CBOR-decoded value.
+// After CBOR round-trip the payload is map[any]any with uint64 keys.
+func ExtractWritePayload(payload any) WritePayload {
+	if payload == nil {
+		return nil
+	}
+	if wp, ok := payload.(WritePayload); ok {
+		return wp
+	}
+	if wp, ok := payload.(map[uint16]any); ok {
+		return WritePayload(wp)
+	}
+
+	// Raw CBOR map with uint64 keys
+	result := make(WritePayload)
+	switch m := payload.(type) {
+	case map[any]any:
+		for k, v := range m {
+			switch key := k.(type) {
+			case uint64:
+				result[uint16(key)] = v
+			case int64:
+				result[uint16(key)] = v
+			}
+		}
+	case map[uint64]any:
+		for k, v := range m {
+			result[uint16(k)] = v
+		}
+	default:
+		return nil
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
 
 // WriteResponsePayload represents the payload for a Write response.
 // Contains resulting values (may differ from requested due to constraints).
@@ -121,6 +206,56 @@ type SubscribePayload struct {
 	AttributeIDs []uint16 `cbor:"1,keyasint,omitempty"`
 	MinInterval  uint32   `cbor:"2,keyasint,omitempty"`
 	MaxInterval  uint32   `cbor:"3,keyasint,omitempty"`
+}
+
+// ExtractSubscribePayload extracts a subscribe payload from a raw
+// CBOR-decoded value. Returns nil if there is no payload.
+func ExtractSubscribePayload(payload any) *SubscribePayload {
+	if payload == nil {
+		return nil
+	}
+	if sp, ok := payload.(*SubscribePayload); ok {
+		return sp
+	}
+
+	sp := &SubscribePayload{}
+	var m map[uint64]any
+
+	switch raw := payload.(type) {
+	case map[any]any:
+		m = make(map[uint64]any, len(raw))
+		for k, v := range raw {
+			if key, ok := k.(uint64); ok {
+				m[key] = v
+			}
+		}
+	case map[uint64]any:
+		m = raw
+	default:
+		return nil
+	}
+
+	// key 1: attributeIDs
+	if arr, ok := m[1].([]any); ok {
+		for _, item := range arr {
+			switch v := item.(type) {
+			case uint64:
+				sp.AttributeIDs = append(sp.AttributeIDs, uint16(v))
+			case int64:
+				sp.AttributeIDs = append(sp.AttributeIDs, uint16(v))
+			}
+		}
+	}
+	// key 2: minInterval
+	if v, ok := m[2].(uint64); ok {
+		sp.MinInterval = uint32(v)
+	}
+	// key 3: maxInterval
+	if v, ok := m[3].(uint64); ok {
+		sp.MaxInterval = uint32(v)
+	}
+
+	return sp
 }
 
 // SubscribeResponsePayload represents the payload for a Subscribe response.
