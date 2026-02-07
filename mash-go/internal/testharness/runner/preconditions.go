@@ -272,12 +272,9 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		r.debugf("closing %d stale zone connections", len(r.activeZoneConns))
 	}
 	r.closeActiveZoneConns()
-	// Brief pause to let the device process the disconnections before we
-	// attempt to establish new connections.
-	if hadActive && r.config.Target != "" {
-		r.debugf("sleeping 50ms for device to process zone disconnections")
-		time.Sleep(50 * time.Millisecond)
-	}
+	// No explicit sleep needed here: subsequent steps use mDNS polling
+	// (waitForCommissioningMode) or protocol probes (waitForOperationalReady)
+	// to detect when the device is ready.
 
 	// Force-close any stale main connection whose socket is still open
 	// despite being marked as disconnected. A failed request sets
@@ -419,17 +416,10 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 				if r.config.Target != "" {
 					r.debugf("two_zones_connected: commissioning against real device")
 					// Wait for the device to finish processing zone removals
-					// from a previous test. closeActiveZoneConns may have run
-					// in an earlier test's precondition setup, so hadActive was
-					// false for this test even though the device is still busy
-					// with RemoveZone -> EnterCommissioningMode transitions.
+					// and re-enter commissioning mode (mDNS advertisement).
 					if !r.lastDeviceConnClose.IsZero() {
-						elapsed := time.Since(r.lastDeviceConnClose)
-						minWait := 1500 * time.Millisecond
-						if elapsed < minWait {
-							wait := minWait - elapsed
-							r.debugf("two_zones_connected: waiting %s for device recovery (elapsed %s)", wait.Round(time.Millisecond), elapsed.Round(time.Millisecond))
-							time.Sleep(wait)
+						if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+							r.debugf("two_zones_connected: %v (continuing)", err)
 						}
 					}
 
@@ -499,22 +489,23 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 							}
 						}
 
+						// For the last zone, verify the device is processing
+						// protocol messages before detaching the connection.
+						if i == len(zones)-1 {
+							if err := r.waitForOperationalReady(2 * time.Second); err != nil {
+								r.debugf("two_zones_connected: %v (continuing)", err)
+							}
+						}
+
 						// Detach from runner so the next iteration
 						// creates a fresh connection.
 						r.conn = &Connection{}
 
 						if i < len(zones)-1 {
 							// Wait for device to re-enter commissioning mode.
-							r.debugf("two_zones_connected: waiting 600ms for device to re-enter commissioning mode")
-							time.Sleep(600 * time.Millisecond)
-						} else {
-							// Wait for the device to fully process the last
-							// operational reconnect. Without this, the test
-							// step may execute before handleOperationalConnection
-							// runs on the device (race between the runner's
-							// TLS dial completing and the device goroutine).
-							r.debugf("two_zones_connected: waiting 200ms for last operational reconnect to settle")
-							time.Sleep(200 * time.Millisecond)
+							if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+								r.debugf("two_zones_connected: %v (continuing)", err)
+							}
 						}
 					}
 					// Reset commission zone type to default.
@@ -540,12 +531,8 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 
 					// Wait for device to process prior zone removals.
 					if !r.lastDeviceConnClose.IsZero() {
-						elapsed := time.Since(r.lastDeviceConnClose)
-						minWait := 1500 * time.Millisecond
-						if elapsed < minWait {
-							wait := minWait - elapsed
-							r.debugf("device_zones_full: waiting %s for device recovery", wait.Round(time.Millisecond))
-							time.Sleep(wait)
+						if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+							r.debugf("device_zones_full: %v (continuing)", err)
 						}
 					}
 
@@ -610,15 +597,16 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 						r.conn = &Connection{}
 
 						if i < len(zones)-1 {
-							r.debugf("device_zones_full: waiting 600ms for device to re-enter commissioning mode")
-							time.Sleep(600 * time.Millisecond)
+							if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+								r.debugf("device_zones_full: %v (continuing)", err)
+							}
 						}
 					}
-					// Wait for device to stabilize after filling all zones.
-					// The device exits commissioning mode and (in test mode)
-					// schedules auto-reentry after 500ms. Give it time to settle.
-					r.debugf("device_zones_full: waiting 800ms for device to stabilize")
-					time.Sleep(800 * time.Millisecond)
+					// Wait for device to exit and re-enter commissioning mode
+					// after filling all zone slots.
+					if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+						r.debugf("device_zones_full: post-fill %v (continuing)", err)
+					}
 
 					r.commissionZoneType = 0
 					// Clear main connection state so the runner does not
@@ -699,24 +687,12 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	case precondLevelCommissioning:
 		r.debugf("ensuring commissioning mode for %s", tc.ID)
 		r.ensureDisconnected()
-		// Wait for device to process RemoveZone + disconnect and re-enter
-		// commissioning mode. The device needs ~500ms for zone cleanup and
-		// mDNS re-advertisement. Use lastDeviceConnClose for elapsed-aware wait.
+		// Wait for device to re-enter commissioning mode (mDNS advertisement).
 		if r.config.Target != "" {
-			minWait := 1500 * time.Millisecond
-			if !r.lastDeviceConnClose.IsZero() {
-				elapsed := time.Since(r.lastDeviceConnClose)
-				if elapsed < minWait {
-					wait := minWait - elapsed
-					r.debugf("commissioning mode: waiting %s for device recovery (elapsed %s)", wait.Round(time.Millisecond), elapsed.Round(time.Millisecond))
-					time.Sleep(wait)
-				}
-			} else {
-				time.Sleep(minWait)
+			if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+				r.debugf("commissioning mode: %v (continuing)", err)
 			}
 			r.lastDeviceConnClose = time.Now()
-		} else {
-			time.Sleep(200 * time.Millisecond)
 		}
 		state.Set(StateCommissioningActive, true)
 	}
@@ -907,18 +883,25 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 		r.conn = nil
 	}
 
-	// Wait briefly for the device to be ready for operational connections.
-	// The device needs time to register the zone as awaiting reconnection.
-	time.Sleep(50 * time.Millisecond)
-
 	// DEC-066: Establish new operational TLS connection.
+	// Retry the dial briefly in case the device hasn't finished registering
+	// the zone as awaiting reconnection.
 	r.debugf("transitionToOperational: reconnecting with operational TLS")
 
 	tlsConfig := r.operationalTLSConfig()
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	tlsConn, err := tls.DialWithDialer(dialer, "tcp", r.config.Target, tlsConfig)
-	if err != nil {
-		return fmt.Errorf("operational reconnection failed: %w", err)
+	var tlsConn *tls.Conn
+	var dialErr error
+	for attempt := range 3 {
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", r.config.Target, tlsConfig)
+		if dialErr == nil {
+			break
+		}
+		r.debugf("transitionToOperational: dial attempt %d failed: %v", attempt+1, dialErr)
+		time.Sleep(50 * time.Millisecond)
+	}
+	if dialErr != nil {
+		return fmt.Errorf("operational reconnection failed: %w", dialErr)
 	}
 
 	// Create new connection wrapper
@@ -929,6 +912,11 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 		operational: true,
 	}
 	state.Set(StateConnection, r.conn)
+
+	// Verify the device is processing protocol messages on this connection.
+	if err := r.waitForOperationalReady(2 * time.Second); err != nil {
+		r.debugf("transitionToOperational: %v (continuing)", err)
+	}
 
 	// Register the commissioned zone so closeActiveZoneConns can clean it up.
 	connKey := "main-" + zoneID

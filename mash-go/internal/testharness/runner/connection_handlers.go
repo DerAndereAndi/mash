@@ -486,9 +486,15 @@ func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *
 	pendingResponseReceived := false
 	if rs, ok := state.Get(KeyRequestSent); ok {
 		if sent, ok := rs.(bool); ok && sent {
-			// An async request was sent -- give the device time to respond
-			// before we close, so the response is flushed to the wire.
-			time.Sleep(200 * time.Millisecond)
+			// An async request was sent -- read the pending response
+			// before we close, so it's not lost.
+			if r.conn.tlsConn != nil {
+				_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+				if data, err := r.conn.framer.ReadFrame(); err == nil {
+					r.pendingNotifications = append(r.pendingNotifications, data)
+				}
+				_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+			}
 			pendingResponseReceived = true
 		}
 	}

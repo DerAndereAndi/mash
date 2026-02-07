@@ -732,17 +732,33 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	// reconnect. Without this, the device rejects the new connection with
 	// "no disconnected zones" (not a cert issue) which confuses probing.
 	clientCertParam, _ := step.Params["client_cert"].(string)
+	needsDisconnectWait := false
 	if clientCertParam == "controller_operational" && r.conn != nil && r.conn.tlsConn != nil {
 		_ = r.conn.tlsConn.Close()
 		r.conn.tlsConn = nil
 		r.conn.connected = false
-		// Brief wait for device to detect the disconnect.
-		time.Sleep(50 * time.Millisecond)
+		needsDisconnectWait = true
 	}
 
-	// Connect with timeout
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+	// Connect with timeout. If we just closed an existing connection,
+	// retry briefly in case the device hasn't detected the disconnect yet.
+	var conn *tls.Conn
+	var err error
+	maxAttempts := 1
+	if needsDisconnectWait {
+		maxAttempts = 3
+	}
+	for attempt := range maxAttempts {
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		conn, err = tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		if err == nil {
+			break
+		}
+		if attempt < maxAttempts-1 {
+			r.debugf("handleConnect: dial attempt %d failed: %v, retrying", attempt+1, err)
+			time.Sleep(25 * time.Millisecond)
+		}
+	}
 	if err != nil {
 		state.Set(StateEndTime, time.Now())
 		errorCode := classifyConnectError(err)

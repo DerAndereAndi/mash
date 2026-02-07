@@ -191,8 +191,8 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 		// after the SPAKE2+ computation fails with dummy values.
 		_, readErr := readCommissioningErrorRaw(conn, 5*time.Second)
 		conn.Close()
-		// Wait for the device to fully release the lock and start cooldown.
-		time.Sleep(200 * time.Millisecond)
+		// The device releases the PASE lock when it detects the TCP close,
+		// which happens nearly instantly. No explicit wait needed.
 		if readErr != nil {
 			// Device closed connection without sending an error (also
 			// indicates PASE failure -- the lock is released either way).

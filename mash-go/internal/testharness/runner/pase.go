@@ -111,9 +111,10 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		}
 		_ = r.conn.Close()
 		r.conn.connected = false
-		// Brief wait for device to re-enter commissioning mode
-		// (test-mode auto-reentry takes ~500ms).
-		time.Sleep(600 * time.Millisecond)
+		// Wait for device to re-enter commissioning mode (mDNS advertisement).
+		if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+			r.debugf("handleCommission: %v (continuing)", err)
+		}
 	}
 
 	r.debugf("handleCommission: conn.connected=%v tlsConn=%v paseState=%v",
@@ -279,23 +280,36 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	doTransition, _ := params[ParamTransitionToOperational].(bool)
 	if certErr == nil && doTransition {
 		_ = r.conn.Close()
-		// Brief wait for device to process the close and switch to operational mode.
-		time.Sleep(100 * time.Millisecond)
 
 		target := r.config.Target
 		if t, ok := params[KeyTarget].(string); ok && t != "" {
 			target = t
 		}
 
+		// Retry the dial briefly in case the device hasn't registered the
+		// zone as awaiting reconnection yet.
 		tlsConfig := r.operationalTLSConfig()
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		opConn, opErr := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		var opConn *tls.Conn
+		var opErr error
+		for attempt := range 3 {
+			dialer := &net.Dialer{Timeout: 10 * time.Second}
+			opConn, opErr = tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+			if opErr == nil {
+				break
+			}
+			r.debugf("handleCommission: operational dial attempt %d failed: %v", attempt+1, opErr)
+			time.Sleep(50 * time.Millisecond)
+		}
 		if opErr == nil {
 			r.conn.tlsConn = opConn
 			r.conn.framer = transport.NewFramer(opConn)
 			r.conn.connected = true
 			r.conn.operational = true
 			state.Set(StateConnection, r.conn)
+			// Verify the device is processing protocol messages.
+			if err := r.waitForOperationalReady(2 * time.Second); err != nil {
+				r.debugf("handleCommission: %v (continuing)", err)
+			}
 		}
 		// If operational reconnect fails, proceed anyway -- the commission
 		// itself succeeded and tests can check connection state separately.

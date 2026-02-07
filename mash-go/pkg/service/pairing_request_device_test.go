@@ -561,6 +561,9 @@ func TestDevice_PairingRequestListening_ResumeAfterZoneRemoved(t *testing.T) {
 	advertiser := mocks.NewMockAdvertiser(t)
 	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Times(2)
 	advertiser.EXPECT().StopOperational(mock.Anything).Return(nil).Maybe()
+	// DEC-059: RemoveZone auto-enters commissioning mode when slots become available.
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
 	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 

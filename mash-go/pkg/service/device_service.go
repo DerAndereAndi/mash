@@ -81,6 +81,11 @@ type DeviceService struct {
 	// Event handlers
 	eventHandlers []EventHandler
 
+	// autoReentryPending is set after commissioning completes in test mode.
+	// The next handleOperationalConnection consumes it to re-enter
+	// commissioning mode without a sleep-based delay.
+	autoReentryPending bool
+
 	// Logger for debug output (optional)
 	logger *slog.Logger
 
@@ -641,6 +646,20 @@ func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.
 		ZoneID: targetZoneID,
 	})
 
+	// Test mode auto-reentry: consume the flag set by handleCommissioningConnection
+	// and re-enter commissioning mode now that the operational connection is live.
+	s.mu.Lock()
+	pending := s.autoReentryPending
+	if pending {
+		s.autoReentryPending = false
+	}
+	s.mu.Unlock()
+	if pending && !s.isZonesFull() {
+		if err := s.EnterCommissioningMode(); err != nil {
+			s.debugLog("handleOperationalConnection: auto-reentry failed", "error", err)
+		}
+	}
+
 	// DEC-064: Remove from tracker before entering the operational message loop.
 	// Operational connections must not be reaped by the stale connection reaper.
 	// Use rawConn (the original net.Conn from Accept) since the tracker keys
@@ -859,26 +878,13 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 		s.debugLog("handleCommissioningConnection: failed to exit commissioning mode", "error", err)
 	}
 
-	// When enable-key is valid, schedule auto-reentry into commissioning mode so the next
-	// test can commission without waiting for manual intervention.
+	// Signal handleOperationalConnection to re-enter commissioning mode
+	// after the operational TLS reconnect succeeds. This replaces the old
+	// sleep-based goroutine with a flag consumed on the next connection.
 	if s.isEnableKeyValid() {
-		s.debugLog("handleCommissioningConnection: scheduling auto-reentry goroutine", "zoneID", zoneID)
-		go func() {
-			s.debugLog("handleCommissioningConnection: auto-reentry goroutine started, sleeping 500ms", "zoneID", zoneID)
-			time.Sleep(500 * time.Millisecond)
-			// Only re-enter commissioning if zone slots are available.
-			// At max capacity the device should not advertise _mashc._udp.
-			if s.isZonesFull() {
-				s.debugLog("handleCommissioningConnection: auto-reentry skipped (zones full)", "zoneID", zoneID)
-				return
-			}
-			s.debugLog("handleCommissioningConnection: auto-reentry goroutine woke up, calling EnterCommissioningMode", "zoneID", zoneID)
-			if err := s.EnterCommissioningMode(); err != nil {
-				s.debugLog("handleCommissioningConnection: auto-reenter failed", "zoneID", zoneID, "error", err)
-			} else {
-				s.debugLog("handleCommissioningConnection: auto-reenter succeeded", "zoneID", zoneID)
-			}
-		}()
+		s.mu.Lock()
+		s.autoReentryPending = true
+		s.mu.Unlock()
 	}
 
 	// DEC-066: Close the commissioning connection. The controller must
@@ -1092,8 +1098,9 @@ func (s *DeviceService) runZoneMessageLoop(_ string, conn *framedConnection, ses
 					if ackData, encErr := wire.EncodeControlMessage(closeAck); encErr == nil {
 						conn.Send(ackData)
 					}
-					// Brief delay to flush the ack frame before closing.
-					time.Sleep(50 * time.Millisecond)
+					// conn.Send writes synchronously through TLS to the TCP
+					// send buffer. conn.Close sends TLS close_notify then TCP
+					// FIN; the kernel delivers buffered data before the FIN.
 					conn.Close()
 					return
 				case wire.ControlPong:

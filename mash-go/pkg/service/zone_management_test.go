@@ -374,13 +374,14 @@ func TestDeviceServiceRemoveZoneWithRemainingZonesStaysOperational(t *testing.T)
 		t.Fatalf("ExitCommissioningMode failed: %v", err)
 	}
 
-	// Remove one zone -- should NOT re-enter commissioning
+	// Remove one zone -- DEC-059: device re-enters commissioning mode
+	// when zone slots become available, even with other zones still connected.
 	if err := svc.RemoveZone("zone-1"); err != nil {
 		t.Fatalf("RemoveZone failed: %v", err)
 	}
 
-	if svc.discoveryManager.IsCommissioningMode() {
-		t.Error("should NOT enter commissioning mode when zones remain")
+	if !svc.discoveryManager.IsCommissioningMode() {
+		t.Error("should enter commissioning mode when zone slots become available (DEC-059)")
 	}
 }
 
