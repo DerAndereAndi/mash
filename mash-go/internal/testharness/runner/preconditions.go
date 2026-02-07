@@ -132,6 +132,7 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceHasGridZone:          precondLevelCommissioned,
 	PrecondDeviceHasLocalZone:         precondLevelCommissioned,
 	PrecondSessionPreviouslyConnected: precondLevelCommissioned,
+	PrecondFreshCommission:            precondLevelCommissioned,
 
 	// State-machine preconditions (require commissioned session).
 	PrecondControlState:          precondLevelCommissioned,
@@ -175,6 +176,11 @@ func hasPrecondition(conditions []loader.Condition, key string) bool {
 		}
 	}
 	return false
+}
+
+// needsFreshCommission checks if any condition explicitly requests a fresh commissioning cycle.
+func needsFreshCommission(conditions []loader.Condition) bool {
+	return hasPrecondition(conditions, PrecondFreshCommission)
 }
 
 // SortByPreconditionLevel sorts test cases by their required precondition level
@@ -267,11 +273,27 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 
 	// Close stale zone connections from previous tests so the device marks
 	// those zones as disconnected and can accept new connections.
-	hadActive := len(r.activeZoneConns) > 0
-	if hadActive {
-		r.debugf("closing %d stale zone connections", len(r.activeZoneConns))
+	// When both the current and needed level are "commissioned" and no
+	// incompatible preconditions are present, skip the teardown to reuse
+	// the existing operational session (saves ~1.5s per test).
+	canReuseSession := current >= precondLevelCommissioned &&
+		needed >= precondLevelCommissioned &&
+		!needsFreshCommission(tc.Preconditions) &&
+		!needsZoneConns &&
+		!hasPrecondition(tc.Preconditions, PrecondDeviceZonesFull) &&
+		!hasPrecondition(tc.Preconditions, PrecondDeviceHasGridZone) &&
+		!hasPrecondition(tc.Preconditions, PrecondDeviceHasLocalZone) &&
+		!hasPrecondition(tc.Preconditions, PrecondSessionPreviouslyConnected)
+
+	if !canReuseSession {
+		hadActive := len(r.activeZoneConns) > 0
+		if hadActive {
+			r.debugf("closing %d stale zone connections", len(r.activeZoneConns))
+		}
+		r.closeActiveZoneConns()
+	} else {
+		r.debugf("reusing session for %s (skipping closeActiveZoneConns)", tc.ID)
 	}
-	r.closeActiveZoneConns()
 	// No explicit sleep needed here: subsequent steps use mDNS polling
 	// (waitForCommissioningMode) or protocol probes (waitForOperationalReady)
 	// to detect when the device is ready.

@@ -26,6 +26,7 @@ const (
 	PrecondDeviceHasGridZone          = "device_has_grid_zone"
 	PrecondDeviceHasLocalZone         = "device_has_local_zone"
 	PrecondSessionPreviouslyConnected = "session_previously_connected"
+	PrecondFreshCommission            = "fresh_commission"
 )
 
 // State-machine simulation preconditions (require commissioned session).

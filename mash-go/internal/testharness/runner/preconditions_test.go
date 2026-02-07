@@ -940,6 +940,181 @@ func TestSetupPreconditions_SessionPreviouslyConnected(t *testing.T) {
 	}
 }
 
+func TestPreconditionLevel_FreshCommission(t *testing.T) {
+	conditions := []loader.Condition{{PrecondFreshCommission: true}}
+	got := preconditionLevelFor(conditions)
+	if got != precondLevelCommissioned {
+		t.Errorf("preconditionLevel(fresh_commission) = %d, want %d", got, precondLevelCommissioned)
+	}
+}
+
+func TestNeedsFreshCommission(t *testing.T) {
+	tests := []struct {
+		name       string
+		conditions []loader.Condition
+		want       bool
+	}{
+		{"nil conditions", nil, false},
+		{"empty conditions", []loader.Condition{}, false},
+		{"session_established only", []loader.Condition{{PrecondSessionEstablished: true}}, false},
+		{"fresh_commission true", []loader.Condition{{PrecondFreshCommission: true}}, true},
+		{"fresh_commission false", []loader.Condition{{PrecondFreshCommission: false}}, false},
+		{"mixed with fresh_commission", []loader.Condition{
+			{PrecondSessionEstablished: true},
+			{PrecondFreshCommission: true},
+		}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := needsFreshCommission(tt.conditions)
+			if got != tt.want {
+				t.Errorf("needsFreshCommission() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetupPreconditions_SessionReuse_SkipsCloseZoneConns(t *testing.T) {
+	// Commissioned runner + session_established test -> session preserved.
+	r := newTestRunner()
+	r.conn.connected = true
+	r.conn.operational = true
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.activeZoneConns["main-abc123"] = r.conn
+	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID:            "TC-READ-002",
+		Preconditions: []loader.Condition{{PrecondSessionEstablished: true}},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !r.conn.connected {
+		t.Error("expected connection to remain connected")
+	}
+	if r.paseState == nil || !r.paseState.completed {
+		t.Error("expected PASE state to be preserved")
+	}
+	if len(r.activeZoneConns) != 1 {
+		t.Errorf("expected 1 active zone conn, got %d", len(r.activeZoneConns))
+	}
+}
+
+func TestSetupPreconditions_FreshCommission_ClosesZoneConns(t *testing.T) {
+	// fresh_commission=true -> session torn down even at level 3 -> level 3.
+	r := newTestRunner()
+	r.conn.connected = true
+	r.conn.operational = true
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.activeZoneConns["main-abc123"] = r.conn
+	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-COMM-001",
+		Preconditions: []loader.Condition{
+			{PrecondSessionEstablished: true},
+			{PrecondFreshCommission: true},
+		},
+	}
+
+	_ = r.setupPreconditions(context.Background(), tc, state)
+
+	// closeActiveZoneConns should have been called -- verify the map is empty.
+	if len(r.activeZoneConns) != 0 {
+		t.Errorf("expected 0 active zone conns, got %d", len(r.activeZoneConns))
+	}
+	// Note: paseState is cleared only when real sockets (tlsConn/conn) are
+	// present, which stub connections lack. The important assertion is that
+	// closeActiveZoneConns was called (activeZoneConns emptied).
+}
+
+func TestSetupPreconditions_SessionReuse_TwoZonesConnectedForcesClose(t *testing.T) {
+	// two_zones_connected forces teardown even at level 3 -> level 3.
+	r := newTestRunner()
+	r.conn.connected = true
+	r.conn.operational = true
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.activeZoneConns["main-abc123"] = r.conn
+	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-MULTI-003",
+		Preconditions: []loader.Condition{
+			{PrecondTwoZonesConnected: true},
+		},
+	}
+
+	_ = r.setupPreconditions(context.Background(), tc, state)
+
+	// The old main connection should have been closed by closeActiveZoneConns.
+	if r.paseState != nil {
+		t.Error("expected paseState cleared after two_zones_connected teardown")
+	}
+}
+
+func TestSetupPreconditions_SessionReuse_DeviceHasGridZoneForcesClose(t *testing.T) {
+	// device_has_grid_zone forces teardown even at level 3 -> level 3.
+	r := newTestRunner()
+	r.conn.connected = true
+	r.conn.operational = true
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.activeZoneConns["main-abc123"] = r.conn
+	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-ZONE-010",
+		Preconditions: []loader.Condition{
+			{PrecondDeviceHasGridZone: true},
+		},
+	}
+
+	_ = r.setupPreconditions(context.Background(), tc, state)
+
+	// closeActiveZoneConns should have been called, clearing paseState.
+	if len(r.activeZoneConns) != 0 {
+		t.Errorf("expected 0 active zone conns after device_has_grid_zone, got %d", len(r.activeZoneConns))
+	}
+}
+
+func TestSetupPreconditions_SessionReuse_BackwardsTransitionUnaffected(t *testing.T) {
+	// Level 3 -> level 1 still tears down (canReuseSession=false because needed < commissioned).
+	r := newTestRunner()
+	r.conn.connected = true
+	r.conn.operational = true
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.activeZoneConns["main-abc123"] = r.conn
+	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-BACK-002",
+		Preconditions: []loader.Condition{
+			{PrecondDeviceInCommissioningMode: true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if r.conn.connected {
+		t.Error("expected connection to be closed for backwards transition")
+	}
+	if r.paseState != nil {
+		t.Error("expected paseState to be nil after backwards transition")
+	}
+}
+
 func TestCooldownRemaining(t *testing.T) {
 	tests := []struct {
 		name string
