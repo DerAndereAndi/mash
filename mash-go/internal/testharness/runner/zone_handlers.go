@@ -138,7 +138,11 @@ func (r *Runner) handleAddZone(ctx context.Context, step *loader.Step, state *en
 			if errStr == fmt.Sprintf("zone type %s already exists", zoneType) {
 				errName = "ErrZoneTypeExists"
 			}
-			return map[string]any{KeyError: errName}, nil
+			return map[string]any{
+				KeyError:                 errName,
+				KeyErrorCode:             10,
+				KeyErrorMessageContains: "zone type already exists",
+			}, nil
 		}
 		return out, nil
 	}
@@ -146,7 +150,7 @@ func (r *Runner) handleAddZone(ctx context.Context, step *loader.Step, state *en
 	// Add device to existing zone.
 	zone, exists := zs.zones[zoneID]
 	if !exists {
-		return map[string]any{KeyError: "ErrZoneNotFound"}, nil
+		return map[string]any{KeyError: "ErrZoneNotFound", KeyErrorCode: 11}, nil
 	}
 
 	deviceID, _ := params[KeyDeviceID].(string)
@@ -213,9 +217,9 @@ func (r *Runner) handleGetZone(ctx context.Context, step *loader.Step, state *en
 		KeyZoneMetadata:           zone.Metadata,
 		KeyConnected:              zone.Connected,
 		KeyDeviceCount:            len(zone.DeviceIDs),
-		"commissioned_at_recent":  commissionedRecent,
-		"last_seen_recent":        lastSeenRecent,
-		"last_seen_not_updated":   !zone.LastSeenUpdated,
+		KeyCommissionedAtRecent: commissionedRecent,
+		KeyLastSeenRecent:      lastSeenRecent,
+		KeyLastSeenNotUpdated:  !zone.LastSeenUpdated,
 	}, nil
 }
 
@@ -250,7 +254,7 @@ func (r *Runner) handleListZones(ctx context.Context, step *loader.Step, state *
 	return map[string]any{
 		KeyZones:          zones,
 		KeyZoneCount:      len(zones),
-		"zone_ids_include": zoneIDs,
+		KeyZoneIDsInclude: zoneIDs,
 	}, nil
 }
 
@@ -270,7 +274,7 @@ func (r *Runner) handleGetZoneMetadata(ctx context.Context, step *loader.Step, s
 
 	// Support zone_id_ref: dereference a state variable to get the zone ID.
 	if zoneID == "" {
-		if ref, ok := params["zone_id_ref"].(string); ok && ref != "" {
+		if ref, ok := params[ParamZoneIDRef].(string); ok && ref != "" {
 			if val, exists := state.Get(ref); exists {
 				zoneID, _ = val.(string)
 			}
@@ -286,8 +290,8 @@ func (r *Runner) handleGetZoneMetadata(ctx context.Context, step *loader.Step, s
 		KeyMetadata:  zone.Metadata,
 		KeyZoneName:  zone.ZoneName,
 		KeyZoneType:  zone.ZoneType,
-		"zone_priority":    zone.Priority,
-		"created_at_recent": true,
+		KeyZonePriority:    zone.Priority,
+		KeyCreatedAtRecent: true,
 	}, nil
 }
 

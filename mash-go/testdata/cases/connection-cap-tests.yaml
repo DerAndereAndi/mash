@@ -38,6 +38,11 @@ steps:
     params:
       index: 0
 
+  - name: Wait for device to process close
+    action: wait
+    params:
+      duration_ms: 200
+
   - name: Retry connection after closing one (slot freed)
     action: open_commissioning_connection
     expect:

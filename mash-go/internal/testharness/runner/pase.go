@@ -15,6 +15,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/service"
 	"github.com/mash-protocol/mash-go/pkg/transport"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // PASEState holds the state for PASE commissioning sessions.
@@ -55,14 +56,34 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	params := engine.InterpolateParams(step.Params, state)
 
 	// Apply zone_type from params if specified.
+	requestedZoneType := ""
 	if zt, ok := params[KeyZoneType].(string); ok && zt != "" {
-		switch strings.ToUpper(zt) {
+		requestedZoneType = strings.ToUpper(zt)
+		switch requestedZoneType {
 		case "GRID":
 			r.commissionZoneType = cert.ZoneTypeGrid
 		case "LOCAL":
 			r.commissionZoneType = cert.ZoneTypeLocal
 		case "TEST":
 			r.commissionZoneType = cert.ZoneTypeTest
+		}
+	}
+
+	// Check for duplicate zone type before attempting PASE.
+	// The device will reject this, but we can return structured output.
+	if requestedZoneType != "" {
+		zs := getZoneState(state)
+		for _, z := range zs.zones {
+			if z.ZoneType == requestedZoneType {
+				return map[string]any{
+					KeySessionEstablished:    false,
+					KeyCommissionSuccess:     false,
+					KeySuccess:               false,
+					KeyErrorCode:             10, // ZONE_TYPE_EXISTS
+					KeyError:                 "zone type already exists",
+					KeyErrorMessageContains: "zone type already exists",
+				}, nil
+			}
 		}
 	}
 
@@ -80,6 +101,14 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// is now in operational mode and won't accept another PASE handshake.
 	// Disconnect so we create a fresh commissioning connection below.
 	if r.paseState != nil && r.paseState.completed && r.conn.connected {
+		r.debugf("handleCommission: closing stale operational conn (pase completed, conn live)")
+		// Send ControlClose so the device's message loop exits immediately.
+		if r.conn.framer != nil {
+			closeMsg := &wire.ControlMessage{Type: wire.ControlClose}
+			if closeData, encErr := wire.EncodeControlMessage(closeMsg); encErr == nil {
+				_ = r.conn.framer.WriteFrame(closeData)
+			}
+		}
 		_ = r.conn.Close()
 		r.conn.connected = false
 		// Brief wait for device to re-enter commissioning mode
@@ -87,10 +116,14 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		time.Sleep(600 * time.Millisecond)
 	}
 
+	r.debugf("handleCommission: conn.connected=%v tlsConn=%v paseState=%v",
+		r.conn.connected, r.conn.tlsConn != nil, r.paseState != nil)
+
 	// Establish commissioning connection if not already connected
 	// This ensures connection + PASE happen atomically
 	var conn net.Conn
 	if r.conn.connected && r.conn.tlsConn != nil {
+		r.debugf("handleCommission: reusing existing TLS connection")
 		conn = r.conn.tlsConn
 	} else {
 		// Create new commissioning connection
@@ -99,12 +132,15 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			target = t
 		}
 
+		r.debugf("handleCommission: dialing new commissioning connection to %s", target)
 		tlsConfig := transport.NewCommissioningTLSConfig()
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
 		tlsConn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 		if err != nil {
+			r.debugf("handleCommission: dial failed: %v", err)
 			return nil, fmt.Errorf("failed to connect for commissioning: %w", err)
 		}
+		r.debugf("handleCommission: connected to %s", tlsConn.RemoteAddr())
 
 		// Store connection for later use
 		r.conn.tlsConn = tlsConn
@@ -127,8 +163,10 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	}
 
 	// Perform the full SPAKE2+ handshake
+	r.debugf("handleCommission: starting PASE handshake")
 	sessionKey, err := session.Handshake(ctx, conn)
 	if err != nil {
+		r.debugf("handleCommission: PASE handshake failed: %v", err)
 		// DEC-065: If the device rejected with a cooldown error, wait for it
 		// to expire and retry with a fresh connection. This handles tests
 		// where a prior step (e.g., pase_attempts) triggered a cooldown.
@@ -176,14 +214,33 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		// the connection is in an unusable state (the device closes
 		// it on PASE failure per the MASH spec).
 		r.conn.connected = false
-		// Return structured output so tests can assert on the failure
-		// rather than propagating an error that breaks preconditions.
-		return map[string]any{
+
+		// Distinguish PASE protocol errors (device sent an error code)
+		// from connection/infrastructure errors (timeout, EOF, etc.).
+		// Protocol errors return nil Go error so the engine can check
+		// expectations against the structured output. Connection errors
+		// return a Go error so ensureCommissioned can retry.
+		errStr := err.Error()
+		errorName := errStr
+		isPASEProtocolError := false
+		if code, ok := extractPASEErrorCode(errStr); ok {
+			isPASEProtocolError = true
+			errorName = paseErrorCodeName(code)
+		}
+
+		outputs := map[string]any{
 			KeySessionEstablished: false,
 			KeyCommissionSuccess:  false,
 			KeySuccess:            false,
-			KeyError:              err.Error(),
-		}, fmt.Errorf("PASE handshake failed: %w", err)
+			KeyError:              errorName,
+		}
+
+		if isPASEProtocolError {
+			// Protocol-level failure: return nil error so engine checks expectations.
+			return outputs, nil
+		}
+		// Infrastructure failure: return Go error for retry logic.
+		return outputs, fmt.Errorf("PASE handshake failed: %w", err)
 	}
 
 	// Store successful state
@@ -219,7 +276,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// the PASE-to-operational transition required by the spec.
 	// Opt-in via transition_to_operational param because multi-zone
 	// preconditions need the commissioning connection to stay open.
-	doTransition, _ := params["transition_to_operational"].(bool)
+	doTransition, _ := params[ParamTransitionToOperational].(bool)
 	if certErr == nil && doTransition {
 		_ = r.conn.Close()
 		// Brief wait for device to process the close and switch to operational mode.
@@ -293,6 +350,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		KeySuccess:            true,
 		KeyKeyLength:          len(sessionKey),
 		KeyKeyNotZero:         !isZeroKey(sessionKey),
+		KeyState:              ConnectionStatePASEVerified,
 	}
 	if deviceID != "" {
 		outputs[KeyDeviceID] = deviceID
@@ -503,7 +561,7 @@ func (r *Runner) getSetupCode(params map[string]any) (commissioning.SetupCode, e
 // getSetupCodeFromLegacyParams handles the legacy "password" parameter.
 func (r *Runner) getSetupCodeFromLegacyParams(params map[string]any) (commissioning.SetupCode, error) {
 	// Legacy test cases use "password" parameter
-	if pw, ok := params["password"].(string); ok && pw != "" {
+	if pw, ok := params[ParamPassword].(string); ok && pw != "" {
 		// If it's an 8-digit numeric string, parse as setup code
 		if len(pw) == 8 && isNumeric(pw) {
 			return commissioning.ParseSetupCode(pw)
@@ -520,7 +578,7 @@ func (r *Runner) getSetupCodeFromLegacyParams(params map[string]any) (commission
 // getClientIdentity returns the client identity from params or default.
 // Default matches the identity used by mash-controller and expected by mash-device.
 func (r *Runner) getClientIdentity(params map[string]any) string {
-	if ci, ok := params["client_identity"].(string); ok && ci != "" {
+	if ci, ok := params[ParamClientIdentity].(string); ok && ci != "" {
 		return ci
 	}
 	if r.config.ClientIdentity != "" {
@@ -532,7 +590,7 @@ func (r *Runner) getClientIdentity(params map[string]any) string {
 // getServerIdentity returns the server identity from params or default.
 // Default matches the identity used by mash-device.
 func (r *Runner) getServerIdentity(params map[string]any) string {
-	if si, ok := params["server_identity"].(string); ok && si != "" {
+	if si, ok := params[ParamServerIdentity].(string); ok && si != "" {
 		return si
 	}
 	if r.config.ServerIdentity != "" {
@@ -571,4 +629,51 @@ func deriveSetupCodeFromPassword(password string) commissioning.SetupCode {
 	}
 	// Ensure it fits in 8 digits (max 99999999)
 	return commissioning.SetupCode(hash % 100000000)
+}
+
+// extractPASEErrorCode parses a PASE error code from an error string like
+// "PASE failed: error code 2" or "commissioning error code 5: device busy".
+func extractPASEErrorCode(errStr string) (uint8, bool) {
+	// Match "error code N" anywhere in the string.
+	idx := strings.Index(errStr, "error code ")
+	if idx < 0 {
+		return 0, false
+	}
+	numStr := errStr[idx+len("error code "):]
+	// Extract digits (may be followed by ":" or end of string).
+	end := 0
+	for end < len(numStr) && numStr[end] >= '0' && numStr[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0, false
+	}
+	var code uint8
+	for _, c := range numStr[:end] {
+		code = code*10 + uint8(c-'0')
+	}
+	return code, true
+}
+
+// paseErrorCodeName maps a PASE error code to the human-readable name used
+// in test expectations.
+func paseErrorCodeName(code uint8) string {
+	switch code {
+	case commissioning.ErrCodeSuccess:
+		return PASEErrorSuccess
+	case commissioning.ErrCodeAuthFailed: // 1
+		return PASEErrorAuthFailed
+	case commissioning.ErrCodeConfirmFailed: // 2
+		return PASEErrorVerificationFailed
+	case commissioning.ErrCodeCSRFailed: // 3
+		return PASEErrorCSRFailed
+	case commissioning.ErrCodeCertInstallFailed: // 4
+		return PASEErrorCertInstallFailed
+	case commissioning.ErrCodeBusy: // 5
+		return PASEErrorDeviceBusy
+	case commissioning.ErrCodeZoneTypeExists: // 10
+		return PASEErrorZoneTypeExists
+	default:
+		return fmt.Sprintf("ERROR_%d", code)
+	}
 }

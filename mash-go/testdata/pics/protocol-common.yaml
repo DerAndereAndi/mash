@@ -205,6 +205,7 @@ items:
   MASH.S.COMM.ERR_BUSY_RETRY_AFTER: true  # Busy response includes RetryAfter
   MASH.S.CONN.STALE_REAPER: true          # Stale connection reaper (DEC-064)
   MASH.S.CONN.STALE_TIMEOUT: 90           # Stale timeout (seconds)
+  MASH.S.CONN.STALE_TIMEOUT_MS: 90000     # Stale timeout (milliseconds)
 
   # ==========================================================================
   # Zone Management
@@ -268,9 +269,6 @@ items:
   D.CERT.GRACE_PERIOD: true               # Device supports grace period
   D.EVENT.CERT_EXPIRING: true              # Device sends cert expiry events
   D.ZONE.MULTI: true                       # Device supports multiple zones
-  D.BIDIR.READ: true                       # Device supports reading from controller
-  D.BIDIR.SUBSCRIBE: true                  # Device supports subscribing to controller
-  C.BIDIR.EXPOSE: true                     # Controller supports exposing features
   C.CERT.ZONE_CA: true                    # Controller has Zone CA capability
 
   # ==========================================================================

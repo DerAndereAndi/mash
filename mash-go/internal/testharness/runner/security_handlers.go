@@ -551,8 +551,8 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 	}
 
 	return map[string]any{
-		KeyCommissioningModeEntered:  true,
-		"commissioning_mode_entered": true,
+		KeyCommissioningModeEntered:      true,
+		KeyCommissioningModeEnteredAlias: true,
 	}, nil
 }
 
@@ -585,12 +585,12 @@ func (r *Runner) handleSendPing(ctx context.Context, step *loader.Step, state *e
 	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
 
 	connName := ""
-	if c, ok := params["connection"].(string); ok {
+	if c, ok := params[ParamConnection].(string); ok {
 		connName = c
 	}
 	// Also accept "zone" param as an alias for "connection".
 	if connName == "" {
-		if z, ok := params["zone"].(string); ok {
+		if z, ok := params[ParamZone].(string); ok {
 			connName = z
 		}
 	}

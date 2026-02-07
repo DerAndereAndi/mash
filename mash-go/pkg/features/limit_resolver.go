@@ -2,12 +2,14 @@ package features
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/duration"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 	"github.com/mash-protocol/mash-go/pkg/zone"
 )
 
@@ -29,6 +31,14 @@ type LimitResolver struct {
 	zoneIndexMap map[string]uint8
 	indexZoneMap map[uint8]string
 	nextIndex    uint8
+
+	// MaxConsumption is the device's nominal maximum consumption power (mW).
+	// If > 0, SetLimit rejects consumptionLimit values above this threshold
+	// with StatusConstraintError (following Matter's fail-fast pattern).
+	MaxConsumption int64
+	// MaxProduction is the device's nominal maximum production power (mW).
+	// If > 0, SetLimit rejects productionLimit values above this threshold.
+	MaxProduction int64
 
 	// Injected context extractors (avoids import cycle with pkg/service).
 	ZoneIDFromContext   func(ctx context.Context) string
@@ -135,6 +145,20 @@ func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest
 			RejectReason: &reason,
 			ControlState: lr.ec.ControlState(),
 		}, nil
+	}
+
+	// Validate against device capacity constraints (fail-fast, before state changes).
+	if req.ConsumptionLimit != nil && lr.MaxConsumption > 0 && *req.ConsumptionLimit > lr.MaxConsumption {
+		return SetLimitResponse{}, &wire.CommandError{
+			Status:  wire.StatusConstraintError,
+			Message: fmt.Sprintf("consumptionLimit %d mW exceeds device maximum %d mW", *req.ConsumptionLimit, lr.MaxConsumption),
+		}
+	}
+	if req.ProductionLimit != nil && lr.MaxProduction > 0 && *req.ProductionLimit > lr.MaxProduction {
+		return SetLimitResponse{}, &wire.CommandError{
+			Status:  wire.StatusConstraintError,
+			Message: fmt.Sprintf("productionLimit %d mW exceeds device maximum %d mW", *req.ProductionLimit, lr.MaxProduction),
+		}
 	}
 
 	// Check override state

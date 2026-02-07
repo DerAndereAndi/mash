@@ -22,15 +22,16 @@ func (r *Runner) registerTriggerHandlers() {
 // handleTriggerTestEvent sends a triggerTestEvent invoke to the device's
 // TestControl feature on endpoint 0.
 func (r *Runner) handleTriggerTestEvent(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.connected {
-		return nil, fmt.Errorf("not connected")
+	if r.conn == nil || !r.conn.connected {
+		// Not connected -- simulate known triggers via state manipulation.
+		return r.simulateTrigger(step, state)
 	}
 
 	params := engine.InterpolateParams(step.Params, state)
 
 	// Get enable key: from step params, or fall back to runner config.
 	enableKey := r.config.EnableKey
-	if k, ok := params["enable_key"].(string); ok && k != "" {
+	if k, ok := params[ParamEnableKey].(string); ok && k != "" {
 		enableKey = k
 	}
 	if enableKey == "" {
@@ -100,6 +101,33 @@ func (r *Runner) sendTrigger(ctx context.Context, trigger uint64, state *engine.
 		},
 	}
 	return r.handleTriggerTestEvent(ctx, syntheticStep, state)
+}
+
+// simulateTrigger handles known triggers when no device connection exists.
+// It manipulates runner state to simulate the trigger's effect.
+func (r *Runner) simulateTrigger(step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	params := engine.InterpolateParams(step.Params, state)
+
+	trigger, err := parseEventTrigger(params[KeyEventTrigger])
+	if err != nil {
+		return nil, fmt.Errorf("invalid event_trigger: %w", err)
+	}
+
+	switch trigger {
+	case features.TriggerExitCommissioningMode:
+		state.Set(StateCommissioningActive, false)
+	case features.TriggerEnterCommissioningMode:
+		state.Set(StateCommissioningActive, true)
+	default:
+		// Unknown trigger -- cannot simulate without a connection.
+		return nil, fmt.Errorf("not connected and trigger 0x%016x cannot be simulated", trigger)
+	}
+
+	return map[string]any{
+		KeyTriggerSent:  true,
+		KeyEventTrigger: trigger,
+		KeySuccess:      true,
+	}, nil
 }
 
 // parseEventTrigger parses an event trigger value from YAML.

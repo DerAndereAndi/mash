@@ -214,14 +214,14 @@ func TestSetCommissioningWindowDuration_Clamped(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
 
-	// Too short (60s = 1 minute, minimum is 3 minutes).
-	step := &loader.Step{Params: map[string]any{"duration_seconds": float64(60)}}
+	// Too short (1s, minimum is 3 seconds).
+	step := &loader.Step{Params: map[string]any{"duration_seconds": float64(1)}}
 	out, _ := r.handleSetCommissioningWindowDuration(context.Background(), step, state)
 	if out["result"] != "clamped_or_rejected" {
-		t.Errorf("expected clamped_or_rejected for 60s, got %v", out["result"])
+		t.Errorf("expected clamped_or_rejected for 1s, got %v", out["result"])
 	}
-	if out["minutes"] != 3.0 {
-		t.Errorf("expected clamped to 3 minutes, got %v", out["minutes"])
+	if out["minutes"] != 3.0/60.0 {
+		t.Errorf("expected clamped to 0.05 minutes (3s), got %v", out["minutes"])
 	}
 
 	// Too long (15000s = 250 minutes, maximum is 180 minutes).

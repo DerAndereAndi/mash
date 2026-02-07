@@ -17,6 +17,9 @@ items:
   # Protocol declaration
   MASH.C: 1
 
+  # Bidirectional support (controller exposes features to devices)
+  C.BIDIR.EXPOSE: true                     # Controller supports exposing features
+
   # ==========================================================================
   # Use case declarations (client-side) with per-scenario codes
   # ==========================================================================

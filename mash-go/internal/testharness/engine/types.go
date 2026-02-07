@@ -194,6 +194,12 @@ type EngineConfig struct {
 	// If nil, preconditions are not evaluated.
 	SetupPreconditions func(ctx context.Context, tc *loader.TestCase, state *ExecutionState) error
 
+	// TeardownTest is called after step execution to clean up per-test state.
+	// The callback receives the execution state so it can close resources
+	// (e.g., pool connections) before the state goes out of scope.
+	// If nil, no teardown is performed.
+	TeardownTest func(ctx context.Context, tc *loader.TestCase, state *ExecutionState)
+
 	// OnTestComplete is called after each test finishes in RunSuite.
 	// Use this to stream results in real-time (e.g., to a reporter).
 	// If nil, no per-test callback is made.

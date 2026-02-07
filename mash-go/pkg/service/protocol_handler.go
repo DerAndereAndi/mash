@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -643,7 +644,10 @@ func (h *ProtocolHandler) handleInvoke(req *wire.Request) *wire.Response {
 	result, err := feature.InvokeCommand(ctx, commandID, params)
 	if err != nil {
 		status := wire.StatusInvalidCommand
-		if err == model.ErrCommandNotFound {
+		var cmdErr *wire.CommandError
+		if errors.As(err, &cmdErr) {
+			status = cmdErr.Status
+		} else if err == model.ErrCommandNotFound {
 			status = wire.StatusInvalidCommand
 		}
 		return &wire.Response{

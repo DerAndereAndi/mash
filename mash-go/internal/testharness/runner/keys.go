@@ -46,6 +46,14 @@ const (
 	PrecondControllerCertNearExpiry = "controller_cert_near_expiry"
 )
 
+// Zone management test preconditions (runner-side zone state).
+const (
+	PrecondNoZonesConfigured   = "no_zones_configured"
+	PrecondLocalZoneConfigured = "local_zone_configured"
+	PrecondTwoZonesConfigured  = "two_zones_configured"
+	PrecondSubscriptionActive  = "subscription_active"
+)
+
 // Environment/negative-test preconditions.
 const (
 	PrecondDeviceZonesFull              = "device_zones_full"
@@ -129,11 +137,15 @@ const (
 	StateSavedSubscriptionID    = "_saved_subscription_id"
 	StateSubscribedEndpointID   = "_subscribed_endpoint_id"
 	StateSubscribedFeatureID    = "_subscribed_feature_id"
+	StateSubscribedAttributes   = "_subscribed_attributes"
 
 	// Network state.
 	StateNetworkPartitioned = "network_partitioned"
 	StateNetworkFilter      = "network_filter"
 	StateInterfaceUp        = "interface_up"
+	StateKeepaliveIdle      = "_keepalive_idle"
+	StateKeepaliveIdleSec   = "_keepalive_idle_sec"
+	StateGracefullyClosed   = "_gracefully_closed"
 	StateDeviceAddress      = "device_address"
 	StateClockOffsetMs      = "clock_offset_ms"
 
@@ -157,6 +169,11 @@ const (
 
 	// Cert handler state.
 	StateExtractedDeviceID = "extracted_device_id"
+
+	// Commissioned zone IDs (set by preconditions after commissioning).
+	StateGridZoneID  = "grid_zone_id"
+	StateLocalZoneID = "local_zone_id"
+	StateTestZoneID  = "test_zone_id"
 
 	// Setup.
 	StateSetupCode = "setup_code"
@@ -250,11 +267,15 @@ const (
 	KeyZoneRemoved         = "zone_removed"
 	KeyZoneDeleted         = "zone_deleted"
 	KeyZoneFound           = "zone_found"
-	KeyZoneMetadata        = "zone_metadata"
-	KeyDeviceCount         = "device_count"
+	KeyZoneMetadata          = "zone_metadata"
+	KeyDeviceCount           = "device_count"
+	KeyCommissionedAtRecent  = "commissioned_at_recent"
+	KeyLastSeenRecent        = "last_seen_recent"
+	KeyLastSeenNotUpdated    = "last_seen_not_updated"
 	KeyZoneExists          = "zone_exists"
 	KeyZones               = "zones"
 	KeyZoneCount           = "zone_count"
+	KeyZoneIDsInclude      = "zone_ids_include"
 	KeyCount               = "count"
 	KeyMetadata            = "metadata"
 	KeyCAValid             = "ca_valid"
@@ -278,9 +299,12 @@ const (
 	KeyConnectionError        = "connection_error"
 	KeyAllResponsesReceived   = "all_responses_received"
 	KeyAllCorrelationsCorrect = "all_correlations_correct"
+	KeyEachMessageIDMatches   = "each_message_id_matches"
+	KeyChangedAttribute       = "changed_attribute"
 	KeyErrorMessageContains   = "error_message_contains"
 	KeyMessageIDsMatch        = "message_ids_match"
 	KeyTimeoutAfter           = "timeout_after"
+	KeyTimeoutDetected        = "timeout_detected"
 	KeyResultStatus           = "result_status"
 )
 
@@ -316,6 +340,7 @@ const (
 	KeyDisconnectedAfterInvoke = "disconnected_after_invoke"
 	KeyCloseAckReceived        = "close_ack_received"
 	KeyCloseAcknowledged       = "close_acknowledged"
+	KeyPendingResponseReceived = "pending_response_received"
 	KeyBothCloseReceived       = "both_close_received"
 	KeyCloseReason             = "close_reason"
 	KeyPingSent                = "ping_sent"
@@ -362,8 +387,9 @@ const (
 	KeyCommissionable           = "commissionable"
 	KeyAdvertisementFound       = "advertisement_found"
 	KeyConnectionType           = "connection_type"
-	KeyCommissioningModeEntered = "commissioning_mode"
-	KeyCommissioningModeExited  = "commissioning_mode_exited"
+	KeyCommissioningModeEntered      = "commissioning_mode"
+	KeyCommissioningModeEnteredAlias = "commissioning_mode_entered"
+	KeyCommissioningModeExited       = "commissioning_mode_exited"
 	KeyCNMismatchWarning        = "cn_mismatch_warning"
 	KeyReconnectionSuccessful   = "reconnection_successful"
 	KeySlowExchangeStarted      = "slow_exchange_started"
@@ -426,6 +452,7 @@ const (
 	KeyPort                     = "port"
 	KeyAdvertising              = "advertising"
 	KeyNotAdvertising           = "not_advertising"
+	KeyBrowsing                 = "browsing"
 	KeyNotBrowsing              = "not_browsing"
 	KeyQRPayload                = "qr_payload"
 	KeyValid                    = "valid"
@@ -434,6 +461,8 @@ const (
 	KeyPairingRequestAnnounced  = "pairing_request_announced"
 	KeyAnnouncementSent         = "announcement_sent"
 	KeyZoneName                 = "zone_name"
+	KeyZonePriority             = "zone_priority"
+	KeyCreatedAtRecent          = "created_at_recent"
 	KeyDiscoveryStarted         = "discovery_started"
 	KeyDiscoveryStopped         = "discovery_stopped"
 	KeyDeviceHasTXTRecords      = "device_has_txt_records"
@@ -509,6 +538,7 @@ const (
 	KeyZoneCAStored            = "zone_ca_stored"
 	KeyOperationalCertStored   = "operational_cert_stored"
 	KeyDeviceID            = "device_id"
+	KeyDeviceIDPresent     = "device_id_present"
 	KeyExtracted           = "extracted"
 	KeyCommissioningState  = "commissioning_state"
 	KeyStateMatches        = "state_matches"
@@ -645,16 +675,49 @@ const (
 	TimingErrorWrongPassword = "wrong_password"
 )
 
+// PASE error code names (mapped from commissioning.ErrCode* constants).
+const (
+	PASEErrorSuccess            = "SUCCESS"
+	PASEErrorAuthFailed         = "AUTHENTICATION_FAILED"
+	PASEErrorVerificationFailed = "VERIFICATION_FAILED"
+	PASEErrorCSRFailed          = "CSR_FAILED"
+	PASEErrorCertInstallFailed  = "CERT_INSTALL_FAILED"
+	PASEErrorDeviceBusy         = "DEVICE_BUSY"
+	PASEErrorZoneTypeExists     = "ZONE_TYPE_EXISTS"
+)
+
 // Service type short aliases -- used in YAML params alongside discovery.ServiceType* mDNS constants.
 const (
-	ServiceAliasCommissionable = "commissionable"
-	ServiceAliasOperational    = "operational"
-	ServiceAliasCommissioner   = "commissioner"
+	ServiceAliasCommissionable  = "commissionable"
+	ServiceAliasOperational     = "operational"
+	ServiceAliasCommissioner    = "commissioner"
+	ServiceAliasPairingRequest  = "pairing_request"
 )
 
 // Connection state values.
 const (
-	ConnectionStateOperational = "OPERATIONAL"
+	ConnectionStateOperational  = "OPERATIONAL"
+	ConnectionStateClosed       = "CLOSED"
+	ConnectionStateDisconnected = "DISCONNECTED"
+	ConnectionStatePASEVerified = "PASE_VERIFIED"
+)
+
+// Commissioning state values (used by handleVerifyCommissioningState).
+const (
+	CommissioningStateAdvertising = "ADVERTISING"
+	CommissioningStateConnected   = "CONNECTED"
+	CommissioningStateCommissioned = "COMMISSIONED"
+)
+
+// Close reason values.
+const (
+	CloseReasonKeepaliveTimeout = "KEEPALIVE_TIMEOUT"
+	CloseReasonNormal           = "NORMAL"
+)
+
+// Network filter values.
+const (
+	NetworkFilterBlockPongs = "block_pongs"
 )
 
 // Zone type string values -- protocol-defined zone types for multi-zone architecture.
@@ -701,6 +764,160 @@ const (
 	ErrCodeNoDevicesFound        = "NO_DEVICES_FOUND"
 	ErrCodeAddrResolutionFailed  = "ADDRESS_RESOLUTION_FAILED"
 	ErrCodeDiscriminatorMismatch = "DISCRIMINATOR_MISMATCH"
+)
+
+// PASE handler output keys.
+const (
+	KeyXSent     = "x_sent"
+	KeyYReceived = "y_received"
+)
+
+// Capacity handler output keys.
+const (
+	KeyAllEstablished   = "all_established"
+	KeyEstablishedCount = "established_count"
+)
+
+// Concurrency handler output keys.
+const (
+	KeyResponseCount = "response_count"
+)
+
+// Subscription extended output keys (additional).
+const (
+	KeySubscriptionIDPresent = "subscription_id_present"
+	KeyPrimingIsPrimingFlag  = "priming_is_priming_flag"
+)
+
+// Save-as output keys -- echoed back so tests can assert the save happened.
+const (
+	KeySaveDelayAs        = "save_delay_as"
+	KeySaveSubscriptionID = "save_subscription_id"
+)
+
+// Queue handler output keys.
+const (
+	KeyQueued             = "queued"
+	KeyDisconnectOccurred = "disconnect_occurred"
+)
+
+// Device handler output keys (has_exposed_device).
+const (
+	KeyHasExposedDevice = "has_exposed_device"
+)
+
+// Parameter keys -- used in step.Params maps for specific handlers.
+const (
+	// General operation params.
+	ParamCommand   = "command"
+	ParamArgs      = "args"
+	ParamParams    = "params"
+	ParamPayload   = "payload"
+	ParamRequests  = "requests"
+	ParamValue     = "value"
+	ParamAttribute = "attribute"
+	ParamName      = "name"
+	ParamType      = "type"
+	ParamAsync     = "async"
+	ParamGraceful  = "graceful"
+	ParamBlock     = "block"
+	ParamTimeout   = "timeout"
+
+	// Zone/connection params.
+	ParamZone                    = "zone"
+	ParamZoneIDRef               = "zone_id_ref"
+	ParamSubscriptionIDRef       = "subscription_id_ref"
+	ParamConnection              = "connection"
+	ParamTransitionToOperational = "transition_to_operational"
+	ParamDisconnectBeforeResponse = "disconnect_before_response"
+
+	// PASE/identity params.
+	ParamPassword       = "password"
+	ParamClientIdentity = "client_identity"
+	ParamServerIdentity = "server_identity"
+	ParamInvalidPoint   = "invalid_point"
+	ParamXValue         = "x_value"
+	ParamEnableKey      = "enable_key"
+
+	// Keepalive/network params.
+	ParamBlockPong  = "block_pong"
+	ParamBlockPongs = "block_pongs"
+	ParamSeq        = "seq"
+
+	// Send raw params.
+	ParamMessageType           = "message_type"
+	ParamMessageID             = "message_id"
+	ParamCBORMap               = "cbor_map"
+	ParamCBORMapStringKeys     = "cbor_map_string_keys"
+	ParamCBORBytesHex          = "cbor_bytes_hex"
+	ParamBytesHex              = "bytes_hex"
+	ParamData                  = "data"
+	ParamRemainingBytes        = "remaining_bytes"
+	ParamFollowedByBytes       = "followed_by_bytes"
+	ParamFollowedByCBORPayload = "followed_by_cbor_payload"
+	ParamPayloadSize           = "payload_size"
+	ParamLengthOverride        = "length_override"
+	ParamValidCBOR             = "valid_cbor"
+
+	// Command queue / multiple params.
+	ParamCommands         = "commands"
+	ParamSaveDelayAs      = "save_delay_as"
+	ParamSaveSubscriptionID = "save_subscription_id"
+	ParamHasExposedDevice = "has_exposed_device"
+	ParamDuration         = "duration"
+	ParamFeatures         = "features"
+
+	// Device state params.
+	ParamSubAction      = "sub_action"
+	ParamOperatingState = "operating_state"
+	ParamTargetState    = "target_state"
+	ParamControlState   = "control_state"
+	ParamProcessState   = "process_state"
+	ParamChanges        = "changes"
+	ParamEndpoints      = "endpoints"
+	ParamAttributes     = "attributes"
+	ParamFaultMessage   = "fault_message"
+	ParamExpectedState  = "expected_state"
+	ParamSimulateNoResponse = "simulate_no_response"
+
+	// Timing/comparison params.
+	ParamLeft             = "left"
+	ParamRight            = "right"
+	ParamOperator         = "operator"
+	ParamValues           = "values"
+	ParamExpression       = "expression"
+	ParamCondition        = "condition"
+	ParamStartKey         = "start_key"
+	ParamEndKey           = "end_key"
+	ParamReference        = "reference"
+	ParamMinDuration      = "min_duration"
+	ParamMaxDuration      = "max_duration"
+	ParamExpectedDuration = "expected_duration"
+	ParamTolerance        = "tolerance"
+	ParamExpectedStatus   = "expected_status"
+	ParamExpectedFields   = "expected_fields"
+	ParamRequestKey       = "request_key"
+	ParamResponseKey      = "response_key"
+	ParamContent          = "content"
+
+	// Network params.
+	ParamIntervalMs    = "interval_ms"
+	ParamOffsetSeconds = "offset_seconds"
+	ParamOffsetDays    = "offset_days"
+
+	// Discovery params.
+	ParamRetry          = "retry"
+	ParamRequiredFields = "required_fields"
+	ParamRequiredKeys   = "required_keys"
+	ParamAdminToken     = "admin_token"
+)
+
+// Internal state keys (not output keys).
+const (
+	StateStartTime   = "start_time"
+	StateEndTime     = "end_time"
+	StatePrimingData      = "_priming_data"
+	StatePrimingAttrCount = "_priming_attr_count"
 )
 
 // Checker registration names -- used in runner's registerHandlers.

@@ -122,15 +122,15 @@ steps:
       busy_error_code: 5
       busy_retry_after_present: true
 
-  - name: Close first connection
+  - name: Close first connection to release commissioning lock
     action: close_connection
     params:
       index: 0
 
-  - name: Wait for RetryAfter duration
+  - name: Wait for cooldown after connection release
     action: wait
     params:
-      duration_ms: "{{ busy_retry_after + 100 }}"
+      duration_ms: "${MASH.S.COMM.CONN_COOLDOWN + 200}"
 
   - name: Commission successfully
     action: commission

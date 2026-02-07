@@ -122,23 +122,51 @@ func (s *ZoneSession) handleRequest(data []byte) {
 	// Decode request
 	req, err := wire.DecodeRequest(data)
 	if err != nil {
+		if s.logger != nil {
+			s.logger.Debug("handleRequest: decode failed", "zoneID", s.zoneID, "error", err)
+		}
 		// Send error response with messageID 0 (unknown)
 		s.sendErrorResponse(0, wire.StatusInvalidParameter, "failed to decode request")
 		return
 	}
 
+	if s.logger != nil {
+		s.logger.Debug("handleRequest: processing",
+			"zoneID", s.zoneID,
+			"messageID", req.MessageID,
+			"op", req.Operation,
+			"endpoint", req.EndpointID,
+			"feature", req.FeatureID)
+	}
+
 	// Process request through handler
 	resp := s.handler.HandleRequest(req)
+
+	if s.logger != nil {
+		s.logger.Debug("handleRequest: response ready",
+			"zoneID", s.zoneID,
+			"messageID", resp.MessageID,
+			"status", resp.Status)
+	}
 
 	// Send response
 	respData, err := wire.EncodeResponse(resp)
 	if err != nil {
+		if s.logger != nil {
+			s.logger.Debug("handleRequest: encode failed", "zoneID", s.zoneID, "error", err)
+		}
 		// Can't encode response - send error with simpler payload
 		s.sendErrorResponse(req.MessageID, wire.StatusBusy, "failed to encode response")
 		return
 	}
 
-	s.conn.Send(respData)
+	if sendErr := s.conn.Send(respData); sendErr != nil {
+		if s.logger != nil {
+			s.logger.Debug("handleRequest: Send failed", "zoneID", s.zoneID, "error", sendErr)
+		}
+	} else if s.logger != nil {
+		s.logger.Debug("handleRequest: response sent", "zoneID", s.zoneID, "len", len(respData))
+	}
 }
 
 // sendErrorResponse sends an error response.
@@ -439,14 +467,24 @@ func (s *ZoneSession) handleRenewalMessage(data []byte, handler *DeviceRenewalHa
 
 // isRenewalMessage checks if data is a renewal message (MsgType 30-33).
 func isRenewalMessage(data []byte) bool {
-	// Quick check: renewal messages have MsgType at CBOR key 1 with value 30-33.
-	// We need to peek at the first integer after key 1 in the CBOR map.
-	// For simplicity, try to decode as a renewal message header.
+	// Renewal messages use CBOR key 1 as MsgType (30-33) and have 2-3 keys.
+	// Regular requests also use key 1 (as messageID) which can collide when
+	// the messageID counter reaches 30-33. To distinguish them, verify that
+	// key 4 (featureID, present in all requests) is absent -- renewal messages
+	// never have key 4.
+	var raw map[uint64]any
+	if err := wire.Unmarshal(data, &raw); err != nil {
+		return false
+	}
+	// Requests always have key 4 (featureID); renewal messages never do.
+	if _, hasKey4 := raw[4]; hasKey4 {
+		return false
+	}
+	// Now safe to try full decode.
 	msg, err := commissioning.DecodeRenewalMessage(data)
 	if err != nil {
 		return false
 	}
-	// If it decoded successfully, it's a renewal message
 	msgType := commissioning.RenewalMessageType(msg)
 	return msgType >= commissioning.MsgCertRenewalRequest && msgType <= commissioning.MsgCertRenewalAck
 }

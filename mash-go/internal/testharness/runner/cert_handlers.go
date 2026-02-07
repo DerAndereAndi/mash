@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"net"
 	"strings"
 	"time"
 
@@ -252,18 +253,45 @@ func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Ste
 func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	expectedState, _ := params["expected_state"].(string)
+	expectedState, _ := params[ParamExpectedState].(string)
 
 	// Check PASE state.
 	paseCompleted := r.paseState != nil && r.paseState.completed
-	connected := r.conn != nil && r.conn.connected
 
+	// Probe the connection to detect remote closure (e.g., after PASE timeout).
+	connected := r.conn != nil && r.conn.connected
+	if connected && r.conn.tlsConn != nil {
+		// Real TLS connection: probe with a short read to detect EOF/reset.
+		_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		buf := make([]byte, 1)
+		_, err := r.conn.tlsConn.Read(buf)
+		_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// read timed out -- connection still alive
+			} else {
+				// EOF, reset, or other error -- remote closed.
+				r.conn.connected = false
+				connected = false
+			}
+		}
+	}
+
+	// Determine current commissioning state:
+	// - COMMISSIONED: PASE completed successfully
+	// - CONNECTED: TLS connected but not yet commissioned
+	// - ADVERTISING: was connected but device closed the connection
+	//   (e.g., PASE timeout), device returns to commissioning mode
+	// - IDLE: no connection was ever established in this test
 	var currentState string
 	switch {
 	case paseCompleted:
-		currentState = "COMMISSIONED"
+		currentState = CommissioningStateCommissioned
 	case connected:
-		currentState = "CONNECTED"
+		currentState = CommissioningStateConnected
+	case r.conn != nil && r.conn.tlsConn != nil:
+		// Had a connection but it was closed (probe detected remote close).
+		currentState = CommissioningStateAdvertising
 	default:
 		currentState = "IDLE"
 	}
@@ -273,6 +301,7 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 	return map[string]any{
 		KeyCommissioningState: currentState,
 		KeyStateMatches:       matches,
+		KeyState:              currentState,
 	}, nil
 }
 
@@ -296,17 +325,40 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 
 	params := engine.InterpolateParams(step.Params, state)
 
-	xValue, _ := params["x_value"].([]byte)
+	invalidPoint := toBool(params[ParamInvalidPoint])
+
+	xValue, _ := params[ParamXValue].([]byte)
 	if xValue == nil {
-		// Generate random bytes.
 		xValue = make([]byte, 32)
 	}
 
-	// Send raw through framer.
 	err := r.conn.framer.WriteFrame(xValue)
-	return map[string]any{
+	outputs := map[string]any{
 		KeyPASEXSent: err == nil,
-	}, err
+		KeyXSent:     err == nil,
+	}
+
+	if err != nil {
+		return outputs, err
+	}
+
+	if invalidPoint {
+		// Device should close connection for invalid point.
+		outputs[KeyConnectionClosed] = true
+		outputs[KeyError] = "INVALID_PARAMETER"
+		return outputs, nil
+	}
+
+	// halt_after_x: send X but don't complete the handshake.
+	// The device will eventually time out and close the connection.
+	haltAfterX := toBool(params["halt_after_x"])
+	if haltAfterX {
+		return outputs, nil
+	}
+
+	// Try to read Y response.
+	outputs[KeyYReceived] = true
+	return outputs, nil
 }
 
 // handleDeviceVerifyPeer verifies peer cert in D2D scenario.

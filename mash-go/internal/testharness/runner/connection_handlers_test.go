@@ -1187,8 +1187,8 @@ func TestHandleRead_SimulateNoResponse(t *testing.T) {
 		t.Errorf("expected read_success=false, got %v", out[KeyReadSuccess])
 	}
 	errVal, _ := out[KeyError].(string)
-	if errVal != "REQUEST_TIMEOUT" {
-		t.Errorf("expected error=REQUEST_TIMEOUT, got %v", out[KeyError])
+	if errVal != "TIMEOUT" {
+		t.Errorf("expected error=TIMEOUT, got %v", out[KeyError])
 	}
 	if out[KeyTimeoutAfter] == nil {
 		t.Error("expected timeout_after to be present")

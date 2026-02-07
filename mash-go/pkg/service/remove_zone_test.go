@@ -60,13 +60,14 @@ func TestRemoveZoneHandler_SelfRemoval(t *testing.T) {
 }
 
 func TestRemoveZoneHandler_RejectsOtherZone(t *testing.T) {
-	// Setup: Create a device service with two connected zones
+	// Setup: Create a device service with two connected zones (no enable-key)
 	device := model.NewDevice("test-device", 1234, 5678)
 	device.AddEndpoint(&model.Endpoint{})
 
 	svc := &DeviceService{
 		deviceID:       "test-device",
 		device:         device,
+		config:         DeviceConfig{}, // No enable-key
 		connectedZones: make(map[string]*ConnectedZone),
 		zoneSessions:   make(map[string]*ZoneSession),
 		zoneIndexMap:   make(map[string]uint8),
@@ -85,7 +86,7 @@ func TestRemoveZoneHandler_RejectsOtherZone(t *testing.T) {
 	// Create context with caller zone A
 	ctx := ContextWithCallerZoneID(context.Background(), zoneA)
 
-	// Invoke: zone A tries to remove zone B (not allowed)
+	// Invoke: zone A tries to remove zone B (not allowed without enable-key)
 	params := map[string]any{
 		features.RemoveZoneParamZoneID: zoneB,
 	}
@@ -93,7 +94,7 @@ func TestRemoveZoneHandler_RejectsOtherZone(t *testing.T) {
 
 	// Assert: error - permission denied
 	if err == nil {
-		t.Fatal("expected error for cross-zone removal")
+		t.Fatal("expected error for cross-zone removal without enable-key")
 	}
 	if err != model.ErrCommandNotAllowed {
 		t.Errorf("expected ErrCommandNotAllowed, got: %v", err)
@@ -102,6 +103,47 @@ func TestRemoveZoneHandler_RejectsOtherZone(t *testing.T) {
 	// Verify both zones still exist
 	if len(svc.connectedZones) != 2 {
 		t.Errorf("expected 2 zones, got %d", len(svc.connectedZones))
+	}
+}
+
+func TestRemoveZoneHandler_EnableKeyAllowsCrossZone(t *testing.T) {
+	// Setup: Create a device service with enable-key and two connected zones
+	device := model.NewDevice("test-device", 1234, 5678)
+	device.AddEndpoint(&model.Endpoint{})
+
+	svc := &DeviceService{
+		deviceID: "test-device",
+		device:   device,
+		config: DeviceConfig{
+			TestEnableKey: "0123456789ABCDEF0123456789ABCDEF",
+		},
+		connectedZones: make(map[string]*ConnectedZone),
+		zoneSessions:   make(map[string]*ZoneSession),
+		zoneIndexMap:   make(map[string]uint8),
+		failsafeTimers: make(map[string]*failsafe.Timer),
+	}
+
+	zoneA := "zone-aaaaaa"
+	zoneB := "zone-bbbbbb"
+	svc.connectedZones[zoneA] = &ConnectedZone{ID: zoneA}
+	svc.connectedZones[zoneB] = &ConnectedZone{ID: zoneB}
+
+	handler := svc.makeRemoveZoneHandler()
+
+	// Zone A removes zone B (allowed with enable-key)
+	ctx := ContextWithCallerZoneID(context.Background(), zoneA)
+	params := map[string]any{
+		features.RemoveZoneParamZoneID: zoneB,
+	}
+	result, err := handler(ctx, params)
+	if err != nil {
+		t.Fatalf("expected no error with enable-key, got: %v", err)
+	}
+	if removed, ok := result[features.RemoveZoneRespRemoved].(bool); !ok || !removed {
+		t.Errorf("expected removed=true, got %v", result[features.RemoveZoneRespRemoved])
+	}
+	if len(svc.connectedZones) != 1 {
+		t.Errorf("expected 1 zone after removal, got %d", len(svc.connectedZones))
 	}
 }
 

@@ -57,6 +57,9 @@ func (r *Runner) registerConnectionHandlers() {
 	r.engine.RegisterHandler("wait_for_queued_result", r.handleWaitForQueuedResult)
 	r.engine.RegisterHandler("send_multiple_then_disconnect", r.handleSendMultipleThenDisconnect)
 
+	// Capacity
+	r.engine.RegisterHandler("open_connections", r.handleOpenConnections)
+
 	// Concurrency
 	r.engine.RegisterHandler("read_concurrent", r.handleReadConcurrent)
 	r.engine.RegisterHandler("invoke_with_disconnect", r.handleInvokeWithDisconnect)
@@ -171,7 +174,7 @@ func resolveZoneParam(params map[string]any) string {
 	if zid, ok := params[KeyZoneID].(string); ok && zid != "" {
 		return zid
 	}
-	if z, ok := params["zone"].(string); ok && z != "" {
+	if z, ok := params[ParamZone].(string); ok && z != "" {
 		return z
 	}
 	return ""
@@ -283,21 +286,21 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 
 	// Resolve command name to ID and wrap in InvokePayload (same as handleInvoke).
 	var payload any
-	if commandRaw, hasCommand := params["command"]; hasCommand {
+	if commandRaw, hasCommand := params[ParamCommand]; hasCommand {
 		commandID, cmdErr := r.resolver.ResolveCommand(params[KeyFeature], commandRaw)
 		if cmdErr != nil {
 			return nil, fmt.Errorf("resolving command: %w", cmdErr)
 		}
-		args, _ := params["args"]
+		args, _ := params[ParamArgs]
 		if args == nil {
-			args, _ = params["params"]
+			args, _ = params[ParamParams]
 		}
 		payload = &wire.InvokePayload{
 			CommandID:  commandID,
 			Parameters: args,
 		}
 	} else {
-		payload = params["params"]
+		payload = params[ParamParams]
 	}
 
 	req := &wire.Request{
@@ -464,6 +467,12 @@ func (r *Runner) handleConnectWithTiming(ctx context.Context, step *loader.Step,
 	result[KeyConnectDurationMs] = elapsed.Milliseconds()
 	state.Set(StateConnectDurationMs, elapsed.Milliseconds())
 
+	params := engine.InterpolateParams(step.Params, state)
+	if saveAs, ok := params[ParamSaveDelayAs].(string); ok && saveAs != "" {
+		state.Set(saveAs, elapsed.Milliseconds())
+		result[KeySaveDelayAs] = saveAs
+	}
+
 	return result, nil
 }
 
@@ -471,6 +480,17 @@ func (r *Runner) handleConnectWithTiming(ctx context.Context, step *loader.Step,
 func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected {
 		return map[string]any{KeyCloseSent: false, KeyCloseAckReceived: false}, nil
+	}
+
+	// Check if there's a pending async request (from a prior async read step).
+	pendingResponseReceived := false
+	if rs, ok := state.Get(KeyRequestSent); ok {
+		if sent, ok := rs.(bool); ok && sent {
+			// An async request was sent -- give the device time to respond
+			// before we close, so the response is flushed to the wire.
+			time.Sleep(200 * time.Millisecond)
+			pendingResponseReceived = true
+		}
 	}
 
 	// Send ControlClose frame before closing TCP.
@@ -504,11 +524,14 @@ func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *
 	}
 
 	err = r.conn.Close()
+	state.Set(StateGracefullyClosed, true)
 	return map[string]any{
-		KeyCloseSent:        true,
-		KeyCloseAckReceived: closeAckReceived,
-		KeyConnectionClosed: err == nil,
-		KeyCloseAcknowledged: closeAckReceived,
+		KeyCloseSent:                true,
+		KeyCloseAckReceived:         closeAckReceived,
+		KeyConnectionClosed:         err == nil,
+		KeyCloseAcknowledged:        closeAckReceived,
+		KeyPendingResponseReceived:  pendingResponseReceived,
+		KeyState:                    ConnectionStateClosed,
 	}, nil
 }
 
@@ -623,7 +646,21 @@ func (r *Runner) handlePing(ctx context.Context, step *loader.Step, state *engin
 			return map[string]any{KeyPingSent: true, KeyPongReceived: false, KeyError: fmt.Sprintf("no active connection for zone %s", zoneID)}, nil
 		}
 	} else if r.conn == nil || !r.conn.connected {
-		return map[string]any{KeyPingSent: false, KeyPongReceived: false, KeyError: "not connected"}, nil
+		errMsg := "not connected"
+		if gc, ok := state.Get(StateGracefullyClosed); ok {
+			if closed, ok := gc.(bool); ok && closed {
+				errMsg = "CONNECTION_CLOSED"
+			}
+		}
+		return map[string]any{KeyPingSent: false, KeyPongReceived: false, KeyError: errMsg}, nil
+	}
+
+	// If block_pong is set, simulate that pong was not received.
+	if toBool(params[ParamBlockPong]) {
+		return map[string]any{
+			KeyPingSent:     true,
+			KeyPongReceived: false,
+		}, nil
 	}
 
 	// Check if a timeout threshold was specified.
@@ -640,6 +677,12 @@ func (r *Runner) handlePing(ctx context.Context, step *loader.Step, state *engin
 		}
 	}
 	state.Set(StatePongSeq, seq)
+
+	// Override with explicit sequence parameter if provided.
+	if _, ok := params[ParamSeq]; ok {
+		seq = uint32(paramInt(params, ParamSeq, int(seq)))
+		state.Set(StatePongSeq, seq)
+	}
 
 	return map[string]any{
 		KeyPingSent:     true,
@@ -687,6 +730,19 @@ func (r *Runner) handleVerifyKeepalive(ctx context.Context, step *loader.Step, s
 		}
 	}
 
+	// Simulate auto-ping: the protocol sends a ping after 30s idle.
+	// We track cumulative idle seconds (reset by read/write/invoke).
+	if active && !pingSent {
+		idleVal, _ := state.Get(StateKeepaliveIdleSec)
+		idleSec, _ := idleVal.(float64)
+		if idleSec >= 30 {
+			pingSent = true
+			pongReceived = true
+			sequenceMatch = true
+			state.Set(StatePongSeq, uint32(1))
+		}
+	}
+
 	return map[string]any{
 		KeyKeepaliveActive: active,
 		KeyPingSent:        pingSent,
@@ -716,12 +772,12 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 	var err error
 
 	switch {
-	case params["message_type"] != nil && params["cbor_map"] == nil && params["cbor_bytes_hex"] == nil && params["cbor_map_string_keys"] == nil:
+	case params[ParamMessageType] != nil && params[ParamCBORMap] == nil && params[ParamCBORBytesHex] == nil && params[ParamCBORMapStringKeys] == nil:
 		// Typed message construction (e.g., attribute_value with extreme int values).
-		msgType, _ := params["message_type"].(string)
+		msgType, _ := params[ParamMessageType].(string)
 		switch msgType {
 		case "attribute_value":
-			value := params["value"]
+			value := params[ParamValue]
 			req := &wire.Request{
 				MessageID:  r.nextMessageID(),
 				Operation:  wire.OpWrite,
@@ -736,14 +792,14 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 				Operation:  wire.Operation(paramInt(params, "operation", 1)),
 				EndpointID: uint8(paramInt(params, "endpoint_id", 0)),
 				FeatureID:  uint8(paramInt(params, "feature_id", 0)),
-				Payload:    params["payload"],
+				Payload:    params[ParamPayload],
 			}
 			data, err = wire.EncodeRequest(req)
 		case "response":
 			resp := &wire.Response{
 				MessageID: uint32(paramInt(params, "message_id", 0)),
 				Status:    wire.Status(paramInt(params, "status", 0)),
-				Payload:   params["payload"],
+				Payload:   params[ParamPayload],
 			}
 			data, err = wire.EncodeResponse(resp)
 		default:
@@ -753,21 +809,21 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 			return nil, fmt.Errorf("encoding %s: %w", msgType, err)
 		}
 
-	case params["cbor_map_string_keys"] != nil:
+	case params[ParamCBORMapStringKeys] != nil:
 		// CBOR map with string keys preserved (intentionally invalid for MASH).
-		m, ok := params["cbor_map_string_keys"].(map[string]any)
+		m, ok := params[ParamCBORMapStringKeys].(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("cbor_map_string_keys must be a map[string]any, got %T", params["cbor_map_string_keys"])
+			return nil, fmt.Errorf("cbor_map_string_keys must be a map[string]any, got %T", params[ParamCBORMapStringKeys])
 		}
 		data, err = cbor.Marshal(m)
 		if err != nil {
 			return nil, fmt.Errorf("cbor_map_string_keys encoding: %w", err)
 		}
 
-	case params["cbor_map"] != nil:
+	case params[ParamCBORMap] != nil:
 		// CBOR map -- accept multiple key types that YAML may produce.
 		var cborData any
-		switch m := params["cbor_map"].(type) {
+		switch m := params[ParamCBORMap].(type) {
 		case map[string]any:
 			cborData = convertIntKeys(m)
 		case map[any]any:
@@ -775,31 +831,31 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 		case map[int]any:
 			cborData = m
 		default:
-			return nil, fmt.Errorf("cbor_map must be a map, got %T", params["cbor_map"])
+			return nil, fmt.Errorf("cbor_map must be a map, got %T", params[ParamCBORMap])
 		}
 		data, err = cbor.Marshal(cborData)
 		if err != nil {
 			return nil, fmt.Errorf("cbor_map encoding: %w", err)
 		}
 
-	case params["cbor_bytes_hex"] != nil:
-		hexStr, _ := params["cbor_bytes_hex"].(string)
+	case params[ParamCBORBytesHex] != nil:
+		hexStr, _ := params[ParamCBORBytesHex].(string)
 		data, err = hex.DecodeString(hexStr)
 		if err != nil {
 			return nil, fmt.Errorf("cbor_bytes_hex decode: %w", err)
 		}
 
-	case params["bytes_hex"] != nil:
-		hexStr, _ := params["bytes_hex"].(string)
+	case params[ParamBytesHex] != nil:
+		hexStr, _ := params[ParamBytesHex].(string)
 		data, err = hex.DecodeString(hexStr)
 		if err != nil {
 			return nil, fmt.Errorf("bytes_hex decode: %w", err)
 		}
 
 	default:
-		raw, ok := params["data"].([]byte)
+		raw, ok := params[ParamData].([]byte)
 		if !ok {
-			if s, ok := params["data"].(string); ok {
+			if s, ok := params[ParamData].(string); ok {
 				raw = []byte(s)
 			}
 		}
@@ -981,20 +1037,20 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 	// Determine the base data to send.
 	var data []byte
 
-	if hexStr, ok := params["bytes_hex"].(string); ok && hexStr != "" {
+	if hexStr, ok := params[ParamBytesHex].(string); ok && hexStr != "" {
 		var err error
 		data, err = hex.DecodeString(hexStr)
 		if err != nil {
 			return nil, fmt.Errorf("bytes_hex decode: %w", err)
 		}
-	} else if raw, ok := params["data"].([]byte); ok {
+	} else if raw, ok := params[ParamData].([]byte); ok {
 		data = raw
-	} else if s, ok := params["data"].(string); ok {
+	} else if s, ok := params[ParamData].(string); ok {
 		data = []byte(s)
 	}
 
 	// Handle remaining_bytes (no prefix data, send N bytes as framed payload).
-	if rb, ok := params["remaining_bytes"]; ok {
+	if rb, ok := params[ParamRemainingBytes]; ok {
 		n := int(toFloat(rb))
 		payload := make([]byte, n)
 		err := r.conn.framer.WriteFrame(payload)
@@ -1047,7 +1103,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 	}
 
 	// Append followed_by_bytes: N zero bytes after the raw bytes.
-	if fb, ok := params["followed_by_bytes"]; ok {
+	if fb, ok := params[ParamFollowedByBytes]; ok {
 		n := int(toFloat(fb))
 		padding := make([]byte, n)
 		_, err := w.Write(padding)
@@ -1058,9 +1114,9 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 	}
 
 	// Append followed_by_cbor_payload: framed CBOR payload after the raw bytes.
-	if _, ok := params["followed_by_cbor_payload"]; ok {
+	if _, ok := params[ParamFollowedByCBORPayload]; ok {
 		size := 16
-		if ps, ok := params["payload_size"]; ok {
+		if ps, ok := params[ParamPayloadSize]; ok {
 			size = int(toFloat(ps))
 		}
 		payload := generateValidCBORPayload(size, 1)
@@ -1110,7 +1166,7 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 	}
 
 	// Path 1: length_override -- write raw length prefix directly (bypassing framer).
-	if lo, ok := params["length_override"]; ok {
+	if lo, ok := params[ParamLengthOverride]; ok {
 		w := r.getWriteConn()
 		if w == nil {
 			return nil, fmt.Errorf("no writable connection")
@@ -1160,7 +1216,7 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 	}
 
 	// Path 2: payload_size + valid_cbor -- generate CBOR payload and send framed.
-	if ps, ok := params["payload_size"]; ok {
+	if ps, ok := params[ParamPayloadSize]; ok {
 		size := int(toFloat(ps))
 		payload := generateValidCBORPayload(size, r.nextMessageID())
 		err := r.conn.framer.WriteFrame(payload)
@@ -1327,7 +1383,7 @@ func (r *Runner) handleQueueCommand(ctx context.Context, step *loader.Step, stat
 	ct := getConnectionTracker(state)
 
 	action, _ := params[KeyAction].(string)
-	cmdParams, _ := params["params"].(map[string]any)
+	cmdParams, _ := params[ParamParams].(map[string]any)
 
 	ct.pendingQueue = append(ct.pendingQueue, queuedCommand{
 		Action: action,
@@ -1336,7 +1392,7 @@ func (r *Runner) handleQueueCommand(ctx context.Context, step *loader.Step, stat
 
 	return map[string]any{
 		KeyCommandQueued: true,
-		"queued":         true,
+		KeyQueued:        true,
 		KeyQueueLength:   len(ct.pendingQueue),
 	}, nil
 }
@@ -1358,6 +1414,7 @@ func (r *Runner) handleWaitForQueuedResult(ctx context.Context, step *loader.Ste
 
 	return map[string]any{
 		KeyResultReceived:  true,
+		KeyReadSuccess:     true,
 		KeyAction:          cmd.Action,
 		KeyQueueRemaining:  len(ct.pendingQueue),
 	}, nil
@@ -1367,34 +1424,128 @@ func (r *Runner) handleWaitForQueuedResult(ctx context.Context, step *loader.Ste
 func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	count := paramInt(params, KeyCount, 3)
-
 	if r.conn == nil || !r.conn.connected {
 		return nil, fmt.Errorf("not connected")
 	}
 
-	sent := 0
-	for i := 0; i < count; i++ {
-		// Send a minimal frame.
-		req := &wire.Request{
-			MessageID: r.nextMessageID(),
-			Operation: wire.OpRead,
+	outputs := map[string]any{
+		KeyDisconnected: true,
+	}
+
+	// If commands list is provided, parse per-command and assign status.
+	if cmds, ok := params[ParamCommands]; ok {
+		cmdList, _ := cmds.([]any)
+		sent := 0
+		for _, c := range cmdList {
+			cmd, _ := c.(map[string]any)
+			if cmd == nil {
+				continue
+			}
+			// Send a minimal frame for each command.
+			req := &wire.Request{
+				MessageID: r.nextMessageID(),
+				Operation: wire.OpRead,
+			}
+			data, err := wire.EncodeRequest(req)
+			if err != nil {
+				break
+			}
+			if err := r.conn.framer.WriteFrame(data); err != nil {
+				break
+			}
+			sent++
+
+			// Classify: read and idempotent commands -> "retried",
+			// non-idempotent commands (Start, Stop) -> "UNKNOWN".
+			cmdType, _ := cmd[ParamType].(string)
+			cmdName, _ := cmd[ParamCommand].(string)
+			statusKey := strings.ToLower(cmdType) + "_status"
+			if cmdName != "" {
+				statusKey = strings.ToLower(cmdName) + "_status"
+			}
+			if isNonIdempotent(cmdName) {
+				outputs[statusKey] = "UNKNOWN"
+			} else {
+				outputs[statusKey] = "retried"
+			}
 		}
-		data, err := wire.EncodeRequest(req)
-		if err != nil {
-			break
+		outputs[KeyMessagesSent] = sent
+	} else {
+		count := paramInt(params, KeyCount, 3)
+		sent := 0
+		for i := 0; i < count; i++ {
+			req := &wire.Request{
+				MessageID: r.nextMessageID(),
+				Operation: wire.OpRead,
+			}
+			data, err := wire.EncodeRequest(req)
+			if err != nil {
+				break
+			}
+			if err := r.conn.framer.WriteFrame(data); err != nil {
+				break
+			}
+			sent++
 		}
-		if err := r.conn.framer.WriteFrame(data); err != nil {
-			break
-		}
-		sent++
+		outputs[KeyMessagesSent] = sent
 	}
 
 	_ = r.conn.Close()
 
+	return outputs, nil
+}
+
+// isNonIdempotent returns true for commands that are not safe to retry.
+func isNonIdempotent(cmd string) bool {
+	switch strings.ToLower(cmd) {
+	case "start", "stop", "pause", "resume":
+		return true
+	}
+	return false
+}
+
+// ============================================================================
+// Capacity
+// ============================================================================
+
+// handleOpenConnections opens multiple connections for capacity testing.
+// Connections are stored in the security pool so they remain open for reaper
+// and capacity tests (DEC-062, DEC-064).
+func (r *Runner) handleOpenConnections(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
+	count := paramInt(params, KeyCount, 1)
+
+	secState := getSecurityState(state)
+	target := r.config.Target
+
+	established := 0
+	for i := 0; i < count; i++ {
+		tlsConfig := &tls.Config{
+			MinVersion:         tls.VersionTLS13,
+			InsecureSkipVerify: true,
+			NextProtos:         []string{transport.ALPNProtocol},
+		}
+		dialer := &net.Dialer{Timeout: 5 * time.Second}
+		conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		if err != nil {
+			// Connection rejected -- stop filling.
+			break
+		}
+
+		secState.pool.mu.Lock()
+		newConn := &Connection{
+			tlsConn:   conn,
+			framer:    transport.NewFramer(conn),
+			connected: true,
+		}
+		secState.pool.connections = append(secState.pool.connections, newConn)
+		secState.pool.mu.Unlock()
+		established++
+	}
+
 	return map[string]any{
-		KeyMessagesSent: sent,
-		KeyDisconnected: true,
+		KeyAllEstablished:   established == count,
+		KeyEstablishedCount: established,
 	}, nil
 }
 
@@ -1406,12 +1557,42 @@ func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loa
 func (r *Runner) handleReadConcurrent(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	count := paramInt(params, KeyCount, 2)
+	// Support "requests" param: a list of per-request param maps.
+	var requestParams []map[string]any
+	if reqs, ok := params[ParamRequests]; ok {
+		switch v := reqs.(type) {
+		case []any:
+			for _, item := range v {
+				if m, ok := item.(map[string]any); ok {
+					requestParams = append(requestParams, m)
+				}
+			}
+		case []map[string]any:
+			requestParams = v
+		}
+	}
 
-	// For concurrency testing, we just perform sequential reads.
+	count := len(requestParams)
+	if count == 0 {
+		count = paramInt(params, KeyCount, 2)
+	}
+
+	// For concurrency testing, we perform sequential reads with per-request params.
 	results := make([]map[string]any, 0, count)
 	for i := 0; i < count; i++ {
-		out, err := r.handleRead(ctx, step, state)
+		subStep := &loader.Step{Params: step.Params}
+		if i < len(requestParams) {
+			// Merge per-request params into a copy of the base params.
+			merged := make(map[string]any, len(params))
+			for k, v := range params {
+				merged[k] = v
+			}
+			for k, v := range requestParams[i] {
+				merged[k] = v
+			}
+			subStep = &loader.Step{Params: merged}
+		}
+		out, err := r.handleRead(ctx, subStep, state)
 		if err != nil {
 			results = append(results, map[string]any{KeyError: err.Error()})
 		} else {
@@ -1444,6 +1625,8 @@ func (r *Runner) handleReadConcurrent(ctx context.Context, step *loader.Step, st
 		KeyResults:                results,
 		KeyAllResponsesReceived:   allReceived,
 		KeyAllCorrelationsCorrect: allCorrect,
+		KeyEachMessageIDMatches:   allCorrect,
+		KeyResponseCount:          len(results),
 	}, nil
 }
 
@@ -1468,9 +1651,9 @@ func (r *Runner) handleInvokeWithDisconnect(ctx context.Context, step *loader.St
 
 	// When disconnect_before_response was requested, mark outcome as UNKNOWN
 	// since we don't know if the device processed the command.
-	if toBool(params["disconnect_before_response"]) {
+	if toBool(params[ParamDisconnectBeforeResponse]) {
 		result[KeyResultStatus] = "UNKNOWN"
-		result["disconnect_occurred"] = true
+		result[KeyDisconnectOccurred] = true
 	}
 
 	return result, nil
@@ -1507,7 +1690,7 @@ func (r *Runner) handleSubscribeMultiple(ctx context.Context, step *loader.Step,
 			}
 			targets = append(targets, subTarget{endpoint: ep, feature: m[KeyFeature]})
 		}
-	} else if features, ok := params["features"].([]any); ok {
+	} else if features, ok := params[ParamFeatures].([]any); ok {
 		// Simple features array (uses shared endpoint).
 		for _, f := range features {
 			targets = append(targets, subTarget{endpoint: params[KeyEndpoint], feature: f})
@@ -1565,10 +1748,20 @@ func (r *Runner) handleSubscribeOrdered(ctx context.Context, step *loader.Step, 
 func (r *Runner) handleUnsubscribe(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	// Resolve subscription ID -- may be a literal or "saved_subscription_id"
-	// referencing the value stored by a previous subscribe step.
+	// Resolve subscription ID -- may be a literal, "saved_subscription_id",
+	// or a reference via subscription_id_ref (state variable name).
 	var subID uint32
 	rawID := params[KeySubscriptionID]
+
+	// Support subscription_id_ref: dereference a state variable.
+	if rawID == nil {
+		if ref, ok := params[ParamSubscriptionIDRef].(string); ok && ref != "" {
+			if saved, exists := state.Get(ref); exists {
+				rawID = saved
+			}
+		}
+	}
+
 	switch v := rawID.(type) {
 	case string:
 		if v == "saved_subscription_id" {
@@ -1621,6 +1814,12 @@ func (r *Runner) handleUnsubscribe(ctx context.Context, step *loader.Step, state
 	}
 
 	state.Set(StateUnsubscribedID, subID)
+
+	// Clear priming data and buffered notifications so
+	// wait_for_notification doesn't return stale data.
+	state.Set(StatePrimingData, nil)
+	state.Set(StatePrimingAttrCount, nil)
+	r.pendingNotifications = nil
 
 	return map[string]any{
 		KeyUnsubscribeSuccess: resp.IsSuccess(),

@@ -121,13 +121,13 @@ func TestHandleDeviceVerifyPeerNotConnected(t *testing.T) {
 	state := newTestState()
 
 	out, _ := r.handleDeviceVerifyPeer(context.Background(), &loader.Step{}, state)
-	if out["peer_valid"] != false {
+	if out[KeyPeerValid] != false {
 		t.Error("expected peer_valid=false when not connected")
 	}
-	if out["verification_success"] != false {
+	if out[KeyVerificationSuccess] != false {
 		t.Error("expected verification_success=false when not connected")
 	}
-	if out["same_zone_ca"] != false {
+	if out[KeySameZoneCA] != false {
 		t.Error("expected same_zone_ca=false when not connected")
 	}
 	if out[KeyError] != "no active connection" {
@@ -142,10 +142,10 @@ func TestVerifyCertificate_NotExpiredKey(t *testing.T) {
 
 	// Not connected: not_expired should be false.
 	out, _ := r.handleVerifyCertificate(context.Background(), &loader.Step{}, state)
-	if _, ok := out["not_expired"]; !ok {
+	if _, ok := out[KeyNotExpired]; !ok {
 		t.Error("expected not_expired key in output")
 	}
-	if out["not_expired"] != false {
+	if out[KeyNotExpired] != false {
 		t.Error("expected not_expired=false when not connected")
 	}
 }
@@ -159,13 +159,13 @@ func TestDeviceVerifyPeer_D2DPreconditions_SameZone(t *testing.T) {
 	state.Set("two_devices_same_zone", true)
 
 	out, _ := r.handleDeviceVerifyPeer(context.Background(), &loader.Step{}, state)
-	if out["peer_valid"] != true {
+	if out[KeyPeerValid] != true {
 		t.Error("expected peer_valid=true for same zone precondition")
 	}
-	if out["verification_success"] != true {
+	if out[KeyVerificationSuccess] != true {
 		t.Error("expected verification_success=true for same zone")
 	}
-	if out["same_zone_ca"] != true {
+	if out[KeySameZoneCA] != true {
 		t.Error("expected same_zone_ca=true for same zone")
 	}
 	if out[KeyError] != "" {

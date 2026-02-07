@@ -185,6 +185,7 @@ func (e *EVSE) setupCommandHandlers() {
 	// Context extractors (ZoneIDFromContext, ZoneTypeFromContext) must be
 	// injected by the caller before limits can be accepted.
 	e.limitResolver = features.NewLimitResolver(e.energyControl)
+	e.limitResolver.MaxConsumption = e.electrical.NominalMaxConsumption()
 	e.limitResolver.Register()
 
 	// Pause handler

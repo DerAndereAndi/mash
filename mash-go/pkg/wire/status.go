@@ -92,3 +92,13 @@ func (s Status) IsSuccess() bool {
 func (s Status) IsError() bool {
 	return s != StatusSuccess
 }
+
+// CommandError is returned by command handlers to indicate a specific
+// wire-level error status. The protocol handler extracts the Status
+// field instead of falling through to the generic StatusInvalidCommand.
+type CommandError struct {
+	Status  Status
+	Message string
+}
+
+func (e *CommandError) Error() string { return e.Message }

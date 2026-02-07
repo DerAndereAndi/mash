@@ -134,6 +134,11 @@ func (e *Engine) Run(ctx context.Context, tc *loader.TestCase) *TestResult {
 		}
 	}
 
+	// Teardown: let the runner close per-test resources (e.g., pool connections).
+	if e.config.TeardownTest != nil {
+		e.config.TeardownTest(testCtx, tc, state)
+	}
+
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime)
 

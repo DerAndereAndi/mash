@@ -20,6 +20,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/internal/testharness/reporter"
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/transport"
@@ -80,6 +81,10 @@ type Runner struct {
 	// pendingNotifications buffers notification frames that arrived while
 	// reading a command response (interleaved with the response).
 	pendingNotifications [][]byte
+
+	// pairingAdvertiser is a real mDNS advertiser used by announce_pairing_request
+	// to advertise _mashp._udp services. Cleaned up in Close().
+	pairingAdvertiser *discovery.MDNSAdvertiser
 }
 
 // Config configures the test runner.
@@ -162,6 +167,37 @@ type Connection struct {
 	pendingNotifications [][]byte
 }
 
+// setReadDeadlineFromContext sets the underlying connection's read deadline
+// from the context's deadline. This prevents reads from blocking indefinitely
+// when the remote end has closed the connection (TCP retransmit timeout can
+// be 90+ seconds).
+func (c *Connection) setReadDeadlineFromContext(ctx context.Context) {
+	if c == nil {
+		return
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return
+	}
+	if c.tlsConn != nil {
+		c.tlsConn.SetReadDeadline(deadline)
+	} else if c.conn != nil {
+		c.conn.SetReadDeadline(deadline)
+	}
+}
+
+// clearReadDeadline removes any read deadline on the underlying connection.
+func (c *Connection) clearReadDeadline() {
+	if c == nil {
+		return
+	}
+	if c.tlsConn != nil {
+		c.tlsConn.SetReadDeadline(time.Time{})
+	} else if c.conn != nil {
+		c.conn.SetReadDeadline(time.Time{})
+	}
+}
+
 // New creates a new test runner.
 func New(config *Config) *Runner {
 	// Create engine with config
@@ -193,6 +229,7 @@ func New(config *Config) *Runner {
 	// Set precondition callback (must be after r is created since it's a method on r).
 	// This works because NewWithConfig stores the *EngineConfig pointer.
 	engineConfig.SetupPreconditions = r.setupPreconditions
+	engineConfig.TeardownTest = r.teardownTest
 
 	// Stream each test result as it completes.
 	engineConfig.OnTestComplete = func(result *engine.TestResult) {
@@ -407,6 +444,10 @@ func (r *Runner) verifyPeerCertAgainstZoneCA(rawCerts [][]byte, _ [][]*x509.Cert
 // connection before closing so the device can re-enter commissioning
 // mode for the next test run.
 func (r *Runner) Close() error {
+	if r.pairingAdvertiser != nil {
+		r.pairingAdvertiser.StopAll()
+		r.pairingAdvertiser = nil
+	}
 	r.closeActiveZoneConns()
 	if r.conn != nil {
 		if r.conn.connected {
@@ -684,7 +725,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 
 	// Record start time for verify_timing.
 	startTime := time.Now()
-	state.Set("start_time", startTime)
+	state.Set(StateStartTime, startTime)
 
 	// When connecting with an operational cert, close the existing zone
 	// connection first so the device has a disconnected zone available to
@@ -703,7 +744,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
-		state.Set("end_time", time.Now())
+		state.Set(StateEndTime, time.Now())
 		errorCode := classifyConnectError(err)
 		alert := extractTLSAlert(err)
 		// Use the classified error code for tls_error (tests expect short
@@ -757,7 +798,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 				// Classify based on what test cert we sent, since the server
 				// can't send a specific reason in TLS 1.3 post-handshake.
 				conn.Close()
-				state.Set("end_time", time.Now())
+				state.Set(StateEndTime, time.Now())
 				tlsError := classifyTestCertRejection(clientCertType, probeErr)
 				// For post-handshake rejection, the probe error is typically
 				// io.EOF which doesn't contain a TLS alert keyword. Use the
@@ -783,7 +824,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}
 
 	// Record end time for verify_timing.
-	state.Set("end_time", time.Now())
+	state.Set(StateEndTime, time.Now())
 
 	// Close the previous TLS connection before replacing it. Without
 	// this, the device still sees the old TCP connection as an active
@@ -879,7 +920,7 @@ func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state 
 	}
 
 	params := engine.InterpolateParams(step.Params, state)
-	graceful, _ := params["graceful"].(bool)
+	graceful, _ := params[ParamGraceful].(bool)
 
 	if graceful {
 		// Delegate to send_close which handles ControlClose + ack.
@@ -889,7 +930,7 @@ func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state 
 		}
 		out[KeyDisconnected] = true
 		// Clear subscription state.
-		state.Set("_priming_data", nil)
+		state.Set(StatePrimingData, nil)
 		r.pendingNotifications = nil
 		return out, nil
 	}
@@ -901,7 +942,7 @@ func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state 
 
 	// Clear subscription state so stale priming data / notifications don't
 	// leak into subsequent steps after the session is gone.
-	state.Set("_priming_data", nil)
+	state.Set(StatePrimingData, nil)
 	r.pendingNotifications = nil
 
 	return map[string]any{KeyDisconnected: true, KeyConnectionClosed: true}, nil
@@ -914,6 +955,17 @@ func (r *Runner) sendRequest(data []byte, op string) (*wire.Response, error) {
 	if err := r.conn.framer.WriteFrame(data); err != nil {
 		r.conn.connected = false
 		return nil, fmt.Errorf("failed to send %s request: %w", op, err)
+	}
+
+	// Set a read deadline so we don't block forever if the device
+	// never responds. Clear it after reading completes.
+	if r.conn.tlsConn != nil {
+		_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		defer func() {
+			if r.conn.tlsConn != nil {
+				_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+			}
+		}()
 	}
 
 	// Read frames until we get a response (skip notifications with messageId=0).
@@ -949,8 +1001,26 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		return nil, fmt.Errorf("not connected")
 	}
 
+	// Clear keepalive idle: message activity resets the ping timer.
+	state.Set(StateKeepaliveIdle, false)
+	state.Set(StateKeepaliveIdleSec, float64(0))
+
 	// Interpolate parameters
 	params := engine.InterpolateParams(step.Params, state)
+
+	// Async mode: fire the read in the background and return immediately.
+	if toBool(params[ParamAsync]) {
+		go func() {
+			// Best-effort: send the request but don't wait for response.
+			asyncStep := *step
+			delete(asyncStep.Params, ParamAsync)
+			_, _ = r.handleRead(ctx, &asyncStep, state)
+		}()
+		return map[string]any{
+			KeyRequestSent: true,
+			KeyReadSuccess: true,
+		}, nil
+	}
 
 	// Resolve endpoint, feature, and attribute names
 	endpointID, err := r.resolver.ResolveEndpoint(params[KeyEndpoint])
@@ -968,7 +1038,7 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 	var attrID uint16
 	var hasAttr bool
 	var attrName string
-	if attrRaw, ok := params["attribute"]; ok && attrRaw != nil {
+	if attrRaw, ok := params[ParamAttribute]; ok && attrRaw != nil {
 		attrID, err = r.resolver.ResolveAttribute(params[KeyFeature], attrRaw)
 		if err != nil {
 			return nil, fmt.Errorf("resolving attribute: %w", err)
@@ -990,7 +1060,7 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 	}
 
 	// RC5b: Override MessageID if specified in params.
-	if mid, ok := params["message_id"]; ok {
+	if mid, ok := params[ParamMessageID]; ok {
 		req.MessageID = uint32(toFloat(mid))
 	}
 
@@ -1012,7 +1082,7 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 	}
 
 	// RC5c: simulate_no_response -- send request but don't wait for response.
-	if toBool(params["simulate_no_response"]) {
+	if toBool(params[ParamSimulateNoResponse]) {
 		if sendErr := r.conn.framer.WriteFrame(data); sendErr != nil {
 			return map[string]any{
 				KeyReadSuccess: false,
@@ -1023,7 +1093,7 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		<-ctx.Done()
 		return map[string]any{
 			KeyReadSuccess:  false,
-			KeyError:        "REQUEST_TIMEOUT",
+			KeyError:        "TIMEOUT",
 			KeyTimeoutAfter: "10s",
 		}, nil
 	}
@@ -1176,7 +1246,7 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 	// value in a WritePayload map (map[uint16]any{attrID: value}) so the
 	// device receives the correct CBOR-encoded structure.
 	var payload any = value
-	if attrRaw, ok := params["attribute"]; ok && attrRaw != nil {
+	if attrRaw, ok := params[ParamAttribute]; ok && attrRaw != nil {
 		attrID, attrErr := r.resolver.ResolveAttribute(params[KeyFeature], attrRaw)
 		if attrErr != nil {
 			return nil, fmt.Errorf("resolving attribute: %w", attrErr)
@@ -1284,7 +1354,7 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 	// Store priming data in state so receive_notification/wait_report can use
 	// it as an initial report if no subsequent notification frame arrives.
 	if primingData != nil {
-		state.Set("_priming_data", primingData)
+		state.Set(StatePrimingData, primingData)
 	}
 
 	// Save subscription metadata in state for later use by unsubscribe
@@ -1292,17 +1362,45 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 	if subscriptionID != nil {
 		state.Set(StateSavedSubscriptionID, subscriptionID)
 	}
+	// Support saving subscription ID under a custom key name.
+	if saveAs, ok := params[ParamSaveSubscriptionID].(string); ok && saveAs != "" && subscriptionID != nil {
+		state.Set(saveAs, subscriptionID)
+	}
 	state.Set(StateSubscribedEndpointID, endpointID)
 	state.Set(StateSubscribedFeatureID, featureID)
 
-	return map[string]any{
-		KeySubscribeSuccess:       resp.IsSuccess(),
-		KeySubscriptionID:         subscriptionID,
-		KeySubscriptionIDReturned: subscriptionID != nil,
-		KeySubscriptionIDSaved:    subscriptionID != nil,
-		KeyPrimingReceived:        primingData != nil,
-		KeyStatus:                 resp.Status,
-	}, nil
+	// Store subscribed attribute names so notification handlers can match.
+	if attrs, ok := params[ParamAttributes]; ok {
+		var attrNames []string
+		switch v := attrs.(type) {
+		case []any:
+			for _, a := range v {
+				if s, ok := a.(string); ok {
+					attrNames = append(attrNames, s)
+				}
+			}
+		case []string:
+			attrNames = v
+		}
+		if len(attrNames) > 0 {
+			state.Set(StateSubscribedAttributes, attrNames)
+		}
+	}
+
+	outputs := map[string]any{
+		KeySubscribeSuccess:         resp.IsSuccess(),
+		KeySubscriptionID:           subscriptionID,
+		KeySubscriptionIDReturned:   subscriptionID != nil,
+		KeySubscriptionIDSaved:      subscriptionID != nil,
+		KeySubscriptionIDPresent:    subscriptionID != nil,
+		KeyPrimingReceived:          primingData != nil,
+		KeyPrimingIsPrimingFlag:     primingData != nil,
+		KeyStatus:                   resp.Status,
+	}
+	if saveAs, ok := params[ParamSaveSubscriptionID].(string); ok && saveAs != "" {
+		outputs[KeySaveSubscriptionID] = saveAs
+	}
+	return outputs, nil
 }
 
 // extractSubscriptionID extracts the subscription ID from a subscribe response
@@ -1353,15 +1451,15 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 
 	// Resolve command name to ID and wrap in InvokePayload.
 	var payload any
-	if commandRaw, hasCommand := params["command"]; hasCommand {
+	if commandRaw, hasCommand := params[ParamCommand]; hasCommand {
 		commandID, cmdErr := r.resolver.ResolveCommand(params[KeyFeature], commandRaw)
 		if cmdErr != nil {
 			return nil, fmt.Errorf("resolving command: %w", cmdErr)
 		}
 		// Read args (primary) or params (fallback) for command parameters.
-		args, _ := params["args"]
+		args, _ := params[ParamArgs]
 		if args == nil {
-			args, _ = params["params"]
+			args, _ = params[ParamParams]
 		}
 		payload = &wire.InvokePayload{
 			CommandID:  commandID,
@@ -1369,7 +1467,7 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 		}
 	} else {
 		// Legacy: raw payload passthrough (no command field).
-		payload = params["params"]
+		payload = params[ParamParams]
 	}
 
 	req := &wire.Request{
@@ -1420,6 +1518,39 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 		flattenInvokeResponse(resp.Payload, outputs)
 	}
 
+	// Update local zone state when RemoveZone succeeds. The response
+	// contains {removed: true} and the args contain the removed zone ID.
+	// Without this, handleCommission's duplicate zone type check would
+	// use stale state and reject a re-commission for the same zone type.
+	if resp.IsSuccess() {
+		if cmdName, ok := params[ParamCommand].(string); ok && strings.EqualFold(cmdName, "RemoveZone") {
+			if argsMap, ok := params[ParamArgs].(map[string]any); ok {
+				if removedID, ok := argsMap["zoneId"].(string); ok && removedID != "" {
+					zs := getZoneState(state)
+					// The zone state may be keyed by label (e.g. "GRID")
+					// or by actual device zone ID. Search by both key and
+					// ZoneID field to find the right entry.
+					var keyToDelete string
+					for key, z := range zs.zones {
+						if key == removedID || z.ZoneID == removedID {
+							keyToDelete = key
+							break
+						}
+					}
+					if keyToDelete != "" {
+						delete(zs.zones, keyToDelete)
+						for i, id := range zs.zoneOrder {
+							if id == keyToDelete {
+								zs.zoneOrder = append(zs.zoneOrder[:i], zs.zoneOrder[i+1:]...)
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	return outputs, nil
 }
 
@@ -1457,13 +1588,24 @@ func flattenInvokeResponse(payload any, outputs map[string]any) {
 
 // Utility handlers
 func (r *Runner) handleWait(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	durationMs := paramFloat(step.Params, "duration_ms", 0)
+	params := engine.InterpolateParamsWithPICS(step.Params, state, r.pics)
+	durationMs := paramFloat(params, "duration_ms", 0)
 	if durationMs <= 0 {
 		// Also accept duration_seconds (used by commissioning window tests).
-		if sec := paramFloat(step.Params, "duration_seconds", 0); sec > 0 {
+		if sec := paramFloat(params, "duration_seconds", 0); sec > 0 {
 			durationMs = sec * 1000
-		} else {
+		}
+		if durationMs <= 0 {
 			durationMs = 1000
+		}
+	}
+
+	// Parse simulated duration from "duration" string param (e.g. "31s").
+	// This is used for keepalive tracking but NOT for actual sleep.
+	simulatedMs := durationMs
+	if durStr, ok := params[ParamDuration].(string); ok && durStr != "" {
+		if d, err := time.ParseDuration(durStr); err == nil {
+			simulatedMs = float64(d.Milliseconds())
 		}
 	}
 
@@ -1472,6 +1614,13 @@ func (r *Runner) handleWait(ctx context.Context, step *loader.Step, state *engin
 		return nil, ctx.Err()
 	case <-time.After(time.Duration(durationMs) * time.Millisecond):
 	}
+
+	// Track cumulative idle seconds for keepalive simulation.
+	// Auto-ping fires after 30s of idle (no message activity).
+	prevIdle, _ := state.Get(StateKeepaliveIdleSec)
+	idleSec, _ := prevIdle.(float64)
+	idleSec += simulatedMs / 1000
+	state.Set(StateKeepaliveIdleSec, idleSec)
 
 	return map[string]any{KeyWaited: true}, nil
 }
@@ -1521,14 +1670,36 @@ func (r *Runner) checkResponseReceived(key string, expected any, state *engine.E
 }
 
 // filterByPattern filters test cases by name pattern.
+// Supports comma-separated patterns (e.g. "TC-CLOSE*,TC-KEEP*").
 func filterByPattern(cases []*loader.TestCase, pattern string) []*loader.TestCase {
+	patterns := strings.Split(pattern, ",")
 	var filtered []*loader.TestCase
 	for _, tc := range cases {
-		if matchPattern(tc.ID, pattern) || matchPattern(tc.Name, pattern) {
-			filtered = append(filtered, tc)
+		for _, p := range patterns {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if matchPattern(tc.ID, p) || matchPattern(tc.Name, p) {
+				filtered = append(filtered, tc)
+				break // avoid duplicates from multiple matching patterns
+			}
 		}
 	}
+	// If pattern had no non-empty segments (e.g. "" or ","), match all.
+	if len(filtered) == 0 && allEmpty(patterns) {
+		return cases
+	}
 	return filtered
+}
+
+func allEmpty(patterns []string) bool {
+	for _, p := range patterns {
+		if strings.TrimSpace(p) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // filterByMode filters test cases based on the runner mode (device/controller).

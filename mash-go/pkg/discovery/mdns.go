@@ -340,8 +340,10 @@ func (a *MDNSAdvertiser) AnnouncePairingRequest(ctx context.Context, info *Pairi
 	txtRecords := EncodePairingRequestTXT(info)
 	txtStrings := TXTRecordsToStrings(txtRecords)
 
-	// Port is always 0 for pairing requests (signaling only)
-	port := 0
+	// Pairing requests are signaling only (no connection). Use port 1
+	// because zeroconf rejects port 0. The port value is never used by
+	// the browsing device; it only reads TXT records.
+	port := 1
 
 	// Get interfaces and options
 	ifaces := a.getInterfaces()

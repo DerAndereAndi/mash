@@ -35,7 +35,7 @@ func (r *Runner) registerControllerHandlers() {
 func (r *Runner) handleControllerAction(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	subAction, _ := params["sub_action"].(string)
+	subAction, _ := params[ParamSubAction].(string)
 	if subAction == "" {
 		subAction, _ = params[KeyAction].(string)
 	}
@@ -102,7 +102,7 @@ func (r *Runner) handleCommissionWithAdmin(ctx context.Context, step *loader.Ste
 	params := engine.InterpolateParams(step.Params, state)
 	cs := getControllerState(state)
 
-	token, _ := params["admin_token"].(string)
+	token, _ := params[ParamAdminToken].(string)
 	deviceID, _ := params[KeyDeviceID].(string)
 	zoneID, _ := params[KeyZoneID].(string)
 
@@ -195,10 +195,15 @@ func (r *Runner) handleVerifyControllerState(ctx context.Context, step *loader.S
 		}
 	}
 
-	return map[string]any{
-		KeyStateValid:  allMatch,
-		KeyDeviceCount: len(cs.devices),
-	}, nil
+	outputs := map[string]any{
+		KeyStateValid:          allMatch,
+		KeyDeviceCount:         len(cs.devices),
+		KeyVerificationSuccess: allMatch,
+	}
+	if _, ok := params[ParamHasExposedDevice]; ok {
+		outputs[KeyHasExposedDevice] = len(cs.devices) > 0
+	}
+	return outputs, nil
 }
 
 // handleSetCommissioningWindowDuration sets the commissioning window duration.
@@ -215,8 +220,9 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 		minutes = toFloat(v) / 60.0
 	}
 
-	// Validate bounds: min 3 minutes (180s), max 180 minutes (10800s).
-	const minMinutes = 3.0
+	// Validate bounds: min 3 seconds (0.05 min), max 180 minutes (10800s).
+	// Device-side enforcement clamps to [3s, 10800s] (test_event_handler.go).
+	const minMinutes = 3.0 / 60.0 // 3 seconds
 	const maxMinutes = 180.0
 	result := "ok"
 	if minutes < minMinutes || minutes > maxMinutes {
@@ -234,7 +240,7 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 	// with an operational TLS session. Errors are logged but not propagated
 	// (simulation state is the source of truth for the test harness).
 	durationSeconds := uint32(minutes * 60)
-	r.sendSetCommWindowDuration(durationSeconds)
+	r.sendSetCommWindowDuration(durationSeconds, state)
 
 	return map[string]any{
 		KeyDurationSet:     true,
@@ -245,9 +251,27 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 }
 
 // sendSetCommWindowDuration sends the setCommissioningWindowDuration command
-// to the real device over an operational zone connection.
-func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32) {
-	if r.conn == nil || !r.conn.connected || !r.conn.operational || r.config.EnableKey == "" {
+// to the real device over an operational zone connection. Falls back to
+// zone connections (from the connection tracker) when r.conn is not
+// available (e.g. after device_zones_full precondition).
+func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine.ExecutionState) {
+	if r.config.EnableKey == "" {
+		return
+	}
+
+	// Find a usable connection: prefer r.conn, fall back to zone connections.
+	conn := r.conn
+	if conn == nil || !conn.connected || !conn.operational {
+		conn = nil
+		ct := getConnectionTracker(state)
+		for _, c := range ct.zoneConnections {
+			if c.connected && c.framer != nil {
+				conn = c
+				break
+			}
+		}
+	}
+	if conn == nil {
 		return
 	}
 
@@ -271,14 +295,14 @@ func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32) {
 		return
 	}
 
-	if err := r.conn.framer.WriteFrame(data); err != nil {
+	if err := conn.framer.WriteFrame(data); err != nil {
 		r.debugf("sendSetCommWindowDuration: write error: %v", err)
 		return
 	}
 
 	// Read the response (may need to skip notifications).
 	for range 5 {
-		respData, readErr := r.conn.framer.ReadFrame()
+		respData, readErr := conn.framer.ReadFrame()
 		if readErr != nil {
 			r.debugf("sendSetCommWindowDuration: read error: %v", readErr)
 			return
@@ -289,7 +313,7 @@ func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32) {
 			return
 		}
 		if msgType == wire.MessageTypeNotification {
-			r.conn.pendingNotifications = append(r.conn.pendingNotifications, respData)
+			conn.pendingNotifications = append(conn.pendingNotifications, respData)
 			continue
 		}
 		// Got the invoke response -- done.
@@ -320,7 +344,7 @@ func (r *Runner) handleRemoveDevice(ctx context.Context, step *loader.Step, stat
 	cs := getControllerState(state)
 
 	deviceID, _ := params[KeyDeviceID].(string)
-	zone, _ := params["zone"].(string)
+	zone, _ := params[ParamZone].(string)
 
 	// Try device-map based removal first.
 	_, existed := cs.devices[deviceID]

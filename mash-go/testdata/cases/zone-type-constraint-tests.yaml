@@ -175,109 +175,72 @@ tags:
   - same-type
 
 ---
-# TC-ZTYPE-004: Max Zones Stops Pairing Request Listening
+# TC-ZTYPE-004: Max Zones Not Advertising Commissioning
 id: TC-ZTYPE-004
-name: Max Zones Stops Pairing Request Listening
+name: Max Zones Not Advertising Commissioning
 description: |
-  When a device has both GRID and LOCAL zones (maximum 2), it stops
-  listening for pairing requests via _mashp._udp. New pairing requests
-  are ignored because the device cannot accept more zones.
+  When a device has all zone slots filled (GRID + LOCAL = 2 non-TEST
+  zones), it does not advertise _mashc._udp. The device is at capacity
+  and should not accept new commissioning attempts.
 
-  This ensures devices at capacity don't waste resources on pairing
-  discovery and don't create false expectations for controllers.
+  TEST zones do not count toward zone limits -- they are a transparent
+  control channel for test-specific communication.
 
 pics_requirements:
   - MASH.S.ZONE.MAX
   - MASH.S.ZONE.GRID
   - MASH.S.ZONE.LOCAL
-  - MASH.S.DISC.PAIRING_REQUEST
 
 preconditions:
-  - device_has_grid_zone: true
-  - device_has_local_zone: true
-  - zone_count: 2                      # At max
+  - two_zones_connected: true
 
 steps:
-  - name: Verify device has both zone types
-    action: list_zones
-    expect:
-      zone_count: 2
-      zones:
-        - zone_type: "GRID"
-        - zone_type: "LOCAL"
-
-  - name: Verify device is NOT listening for pairing requests
-    action: verify_mdns_not_browsing
-    params:
-      service_type: "_mashp._udp"
-    expect:
-      not_browsing: true
-
-  - name: Controller announces pairing request
-    action: announce_pairing_request
-    params:
-      service_type: "_mashp._udp"
-      discriminator: "{{ device_discriminator }}"
-      controller_id: "new-controller"
-    expect:
-      announcement_sent: true
-
-  - name: Wait for potential response
-    action: wait
-    params:
-      duration: "3s"
-
-  - name: Verify device did NOT open commissioning window
+  - name: Verify device is NOT advertising commissioning
     action: verify_mdns_not_advertising
     params:
       service_type: "_mashc._udp"
+      timeout_ms: 3000
     expect:
       not_advertising: true
 
 postconditions:
-  - zone_count_unchanged: true
-  - pairing_request_ignored: true
+  - device_at_max_zones: true
+  - not_advertising_commissioning: true
 
-timeout: "10s"
+timeout: "15s"
 tags:
   - zone
-  - pairing
   - capacity
   - max-zones
+  - commissioning
 
 ---
-# TC-ZTYPE-005: Zone Removal Resumes Listening
+# TC-ZTYPE-005: Zone Removal Auto-Enters Commissioning
 id: TC-ZTYPE-005
-name: Zone Removal Resumes Pairing Request Listening
+name: Zone Removal Auto-Enters Commissioning
 description: |
-  When a device at max capacity (2 zones) has a zone removed, it resumes
-  listening for pairing requests via _mashp._udp. This allows the device
-  to be commissioned by a new controller of the removed zone type.
+  When a zone is removed from a device at max capacity, the device
+  auto-enters commissioning mode and advertises _mashc._udp (DEC-059).
 
-  This enables zone replacement scenarios where a controller is swapped
-  out for another of the same type.
+  Starts at max capacity (GRID + LOCAL), removes LOCAL via GRID
+  connection. The device now has an available zone slot and must
+  become commissionable again.
 
 pics_requirements:
   - MASH.S.ZONE.MAX
   - MASH.S.ZONE.REMOVE
-  - MASH.S.DISC.PAIRING_REQUEST
+  - MASH.S.ZONE.GRID
+  - MASH.S.ZONE.LOCAL
 
 preconditions:
-  - device_has_grid_zone: true
-  - device_has_local_zone: true
-  - zone_count: 2
+  - two_zones_connected: true
 
 steps:
-  - name: Verify device is NOT listening for pairing requests
-    action: verify_mdns_not_browsing
-    params:
-      service_type: "_mashp._udp"
-    expect:
-      not_browsing: true
-
+  # Remove LOCAL zone via GRID connection.
   - name: Remove LOCAL zone
-    action: invoke
+    action: invoke_as_zone
     params:
+      zone: GRID
       endpoint: 0
       feature: DeviceInfo
       command: RemoveZone
@@ -285,47 +248,26 @@ steps:
         zoneId: "{{ local_zone_id }}"
     expect:
       invoke_success: true
-      response:
-        removed: true
 
-  - name: Wait for connection to close and state to update
-    action: wait
+  # Device went from 2 -> 1 non-TEST zones, has an available slot.
+  - name: Verify device is advertising commissioning
+    action: verify_mdns_advertising
     params:
-      duration: "2s"
-
-  - name: Verify device resumed listening for pairing requests
-    action: verify_mdns_browsing
-    params:
-      service_type: "_mashp._udp"
+      service_type: "_mashc._udp"
+      timeout_ms: 5000
     expect:
-      browsing: true
-
-  - name: Verify only GRID zone remains
-    description: Connect as the remaining GRID zone to verify
-    action: connect_as_zone
-    params:
-      zone_id: "{{ grid_zone_id }}"
-    expect:
-      connection_success: true
-
-  - name: Read zone list
-    action: list_zones
-    expect:
-      zone_count: 1
-      zones:
-        - zone_type: "GRID"
+      advertising: true
 
 postconditions:
   - zone_removed: true
-  - pairing_listening_resumed: true
-  - can_accept_new_local_zone: true
+  - commissioning_window_open: true
 
-timeout: "15s"
+timeout: "20s"
 tags:
   - zone
   - removal
-  - pairing
-  - resume
+  - commissioning
+  - auto-entry
 
 ---
 # TC-ZTYPE-006: LOCAL Zone Type Duplicate Rejected

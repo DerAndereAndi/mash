@@ -99,9 +99,10 @@ func (s *DeviceService) makeRemoveZoneHandler() model.CommandHandler {
 			return nil, model.ErrCommandNotAllowed
 		}
 
-		// Validate self-removal only: the caller must be the zone being removed
-		if zoneID != callerZoneID {
-			// Cross-zone removal is not allowed
+		// Validate self-removal only: the caller must be the zone being removed.
+		// Exception: when enable-key is valid, any zone can remove any zone
+		// (needed for test orchestration, e.g. TC-ZTYPE-005/007).
+		if zoneID != callerZoneID && !s.isEnableKeyValid() {
 			return nil, model.ErrCommandNotAllowed
 		}
 

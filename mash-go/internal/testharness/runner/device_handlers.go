@@ -50,7 +50,7 @@ func (r *Runner) registerDeviceHandlers() {
 func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	subAction, _ := params["sub_action"].(string)
+	subAction, _ := params[ParamSubAction].(string)
 	if subAction == "" {
 		// Try action field.
 		subAction, _ = params[KeyAction].(string)
@@ -186,7 +186,7 @@ func (r *Runner) handleDeviceSetValue(ctx context.Context, step *loader.Step, st
 
 	// If attribute+feature+endpoint are provided, invoke TriggerTestEvent on the
 	// device's TestControl feature to change the value.
-	attribute, _ := params["attribute"].(string)
+	attribute, _ := params[ParamAttribute].(string)
 	featureRaw := params[KeyFeature]
 	value := params[KeyValue]
 
@@ -330,7 +330,7 @@ func (r *Runner) handleDeviceSetValuesRapid(ctx context.Context, step *loader.St
 	featureName, _ := params[KeyFeature].(string)
 
 	// Accept "changes" as an array of {attribute, value} maps.
-	changes, ok := params["changes"].([]any)
+	changes, ok := params[ParamChanges].([]any)
 	if !ok {
 		return nil, fmt.Errorf("changes parameter must be an array")
 	}
@@ -341,8 +341,8 @@ func (r *Runner) handleDeviceSetValuesRapid(ctx context.Context, step *loader.St
 		if !ok {
 			continue
 		}
-		attr, _ := cm["attribute"].(string)
-		val := cm["value"]
+		attr, _ := cm[ParamAttribute].(string)
+		val := cm[ParamValue]
 
 		trigger, err := r.resolveTriggerForSetValue(featureName, attr, val)
 		if err != nil {
@@ -389,11 +389,11 @@ func (r *Runner) handleConfigureDevice(ctx context.Context, step *loader.Step, s
 	ds.configured = true
 
 	// Store configuration params.
-	if endpoints, ok := params["endpoints"]; ok {
-		ds.attributes["endpoints"] = endpoints
+	if endpoints, ok := params[ParamEndpoints]; ok {
+		ds.attributes[ParamEndpoints] = endpoints
 	}
-	if features, ok := params["features"]; ok {
-		ds.attributes["features"] = features
+	if features, ok := params[ParamFeatures]; ok {
+		ds.attributes[ParamFeatures] = features
 	}
 
 	return map[string]any{
@@ -408,7 +408,7 @@ func (r *Runner) handleConfigureExposedDevice(ctx context.Context, step *loader.
 	ds := getDeviceState(state)
 
 	ds.configured = true
-	if attrs, ok := params["attributes"].(map[string]any); ok {
+	if attrs, ok := params[ParamAttributes].(map[string]any); ok {
 		for k, v := range attrs {
 			ds.attributes[k] = v
 		}
@@ -424,7 +424,7 @@ func (r *Runner) handleUpdateExposedAttribute(ctx context.Context, step *loader.
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDeviceState(state)
 
-	key, _ := params["attribute"].(string)
+	key, _ := params[ParamAttribute].(string)
 	value := params[KeyValue]
 
 	if key != "" {
@@ -443,7 +443,12 @@ func (r *Runner) handleChangeState(ctx context.Context, step *loader.Step, state
 
 	changed := false
 
-	if s, ok := params["operating_state"].(string); ok {
+	// Accept both "operating_state" and "target_state" as the operating state param.
+	targetState, _ := params[ParamOperatingState].(string)
+	if targetState == "" {
+		targetState, _ = params[ParamTargetState].(string)
+	}
+	if s := targetState; s != "" {
 		ds.operatingState = s
 		state.Set(StateOperatingState, s)
 		changed = true
@@ -458,12 +463,12 @@ func (r *Runner) handleChangeState(ctx context.Context, step *loader.Step, state
 			}
 		}
 	}
-	if s, ok := params["control_state"].(string); ok {
+	if s, ok := params[ParamControlState].(string); ok {
 		ds.controlState = s
 		state.Set(StateControlState, s)
 		changed = true
 	}
-	if s, ok := params["process_state"].(string); ok {
+	if s, ok := params[ParamProcessState].(string); ok {
 		ds.processState = s
 		state.Set(StateProcessState, s)
 		changed = true
@@ -491,7 +496,11 @@ var operatingStateTriggers = map[string]uint64{
 func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *engine.ExecutionState) error {
 	// Try main connection first.
 	if r.conn != nil && r.conn.connected && r.conn.framer != nil {
+		// Set a read deadline from context so a dead connection doesn't
+		// block indefinitely (TCP retransmit timeout can be 90+ seconds).
+		r.conn.setReadDeadlineFromContext(ctx)
 		_, err := r.sendTrigger(ctx, trigger, state)
+		r.conn.clearReadDeadline()
 		if err == nil {
 			r.deviceStateModified = true
 		}
@@ -534,6 +543,10 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 	if err != nil {
 		return fmt.Errorf("encode trigger request: %w", err)
 	}
+
+	// Set read deadline so a dead connection doesn't block indefinitely.
+	conn.setReadDeadlineFromContext(ctx)
+	defer conn.clearReadDeadline()
 
 	if err := conn.framer.WriteFrame(data); err != nil {
 		return fmt.Errorf("send trigger request: %w", err)
@@ -595,7 +608,7 @@ func (r *Runner) handleTriggerFault(ctx context.Context, step *loader.Step, stat
 	ds := getDeviceState(state)
 
 	code := uint32(paramInt(params, KeyFaultCode, 0))
-	message, _ := params["fault_message"].(string)
+	message, _ := params[ParamFaultMessage].(string)
 
 	ds.faults = append(ds.faults, faultEntry{
 		Code:    code,
@@ -668,7 +681,7 @@ func (r *Runner) handleQueryDeviceState(ctx context.Context, step *loader.Step, 
 		KeyEVConnected:      ds.evConnected,
 		KeyCablePluggedIn:   ds.cablePluggedIn,
 		KeyDeviceID:         deviceIDStr,
-		"device_id_present": deviceIDStr != "",
+		KeyDeviceIDPresent: deviceIDStr != "",
 	}, nil
 }
 
@@ -678,17 +691,17 @@ func (r *Runner) handleVerifyDeviceState(ctx context.Context, step *loader.Step,
 	ds := getDeviceState(state)
 
 	allMatch := true
-	if expected, ok := params["operating_state"].(string); ok {
+	if expected, ok := params[ParamOperatingState].(string); ok {
 		if ds.operatingState != expected {
 			allMatch = false
 		}
 	}
-	if expected, ok := params["control_state"].(string); ok {
+	if expected, ok := params[ParamControlState].(string); ok {
 		if ds.controlState != expected {
 			allMatch = false
 		}
 	}
-	if expected, ok := params["process_state"].(string); ok {
+	if expected, ok := params[ParamProcessState].(string); ok {
 		if ds.processState != expected {
 			allMatch = false
 		}

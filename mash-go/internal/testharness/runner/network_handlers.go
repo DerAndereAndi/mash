@@ -27,7 +27,7 @@ func (r *Runner) handleNetworkPartition(ctx context.Context, step *loader.Step, 
 
 	zoneID, _ := params[KeyZoneID].(string)
 	block := true // default: block=true
-	if v, ok := params["block"]; ok {
+	if v, ok := params[ParamBlock]; ok {
 		block = toBool(v)
 	}
 
@@ -63,6 +63,9 @@ func (r *Runner) handleNetworkFilter(ctx context.Context, step *loader.Step, sta
 	params := engine.InterpolateParams(step.Params, state)
 
 	filterType, _ := params[KeyFilterType].(string)
+	if filterType == "" && toBool(params[ParamBlockPongs]) {
+		filterType = NetworkFilterBlockPongs
+	}
 
 	state.Set(StateNetworkFilter, filterType)
 
@@ -108,7 +111,7 @@ func (r *Runner) handleInterfaceFlap(ctx context.Context, step *loader.Step, sta
 	params := engine.InterpolateParams(step.Params, state)
 
 	count := paramInt(params, KeyCount, 3)
-	intervalMs := paramInt(params, "interval_ms", 100)
+	intervalMs := paramInt(params, ParamIntervalMs, 100)
 
 	for i := 0; i < count; i++ {
 		// Down.
@@ -168,10 +171,10 @@ func (r *Runner) handleAdjustClock(ctx context.Context, step *loader.Step, state
 	ct := getConnectionTracker(state)
 
 	offsetMs := int64(paramInt(params, KeyOffsetMs, 0))
-	if s := paramInt(params, "offset_seconds", 0); s != 0 {
+	if s := paramInt(params, ParamOffsetSeconds, 0); s != 0 {
 		offsetMs = int64(s) * 1000
 	}
-	if d := paramInt(params, "offset_days", 0); d > 0 {
+	if d := paramInt(params, ParamOffsetDays, 0); d > 0 {
 		offsetMs = int64(d) * 24 * 60 * 60 * 1000
 	}
 

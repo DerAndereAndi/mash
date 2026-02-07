@@ -152,15 +152,6 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 	subConfig := subscription.DefaultConfig()
 	svc.subscriptionManager = subscription.NewManagerWithConfig(subConfig)
 
-	// When enable-key is valid, disable connection-level security hardening so the test
-	// harness can perform rapid PASE attempts without backoff/cooldown interference.
-	// Protocol-level security (e.g., PASE random delay) remains active.
-	enableKeyValid := config.TestEnableKey != "" && config.TestEnableKey != "00000000000000000000000000000000"
-	if enableKeyValid {
-		svc.config.PASEBackoffEnabled = false
-		svc.config.ConnectionCooldown = 0
-	}
-
 	// Initialize PASE attempt tracker (DEC-047)
 	// Backoff only triggers on failed attempts (wrong setup code), so it
 	// does not slow down normal commissioning cycles that succeed immediately.
@@ -324,9 +315,6 @@ func (s *DeviceService) Start(ctx context.Context) error {
 	// Initialize discovery advertiser if not already set (e.g., by tests)
 	if s.advertiser == nil {
 		advConfig := discovery.DefaultAdvertiserConfig()
-		if s.isEnableKeyValid() {
-			advConfig.Quiet = true
-		}
 		advertiser, err := discovery.NewMDNSAdvertiser(advConfig)
 		if err != nil {
 			s.tlsListener.Close()
@@ -545,26 +533,27 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 		"peerHasCert", peerHasCert,
 		"remoteAddr", tlsConn.RemoteAddr().String())
 
-	if inCommissioningMode && !peerHasCert {
-		s.debugLog("handleConnection: -> commissioning handler")
-		s.handleCommissioningConnection(tlsConn, releaseActiveConn)
-	} else if !peerHasCert && s.isZonesFull() {
-		// Not in commissioning mode but zones are full: route through
-		// handleCommissioningConnection so acceptCommissioningConnection()
-		// sends a proper CommissioningError(ErrCodeBusy, RetryAfter=0).
-		s.debugLog("handleConnection: -> busy rejection (zones full, not commissioning)")
-		s.handleCommissioningConnection(tlsConn, releaseActiveConn)
+	if !peerHasCert {
+		// No client certificate: always route to commissioning handler.
+		// Operational reconnections always present a zone CA-issued client
+		// certificate, so a connection without one is always a commissioning
+		// attempt. The commissioning handler checks slot availability,
+		// cooldown, and PASE backoff -- it does not require the device to
+		// be in commissioning mode (mDNS-advertised).
+		s.debugLog("handleConnection: -> commissioning handler (no client cert)")
+		s.handleCommissioningConnection(conn, tlsConn, releaseActiveConn)
 	} else {
-		// Operational mode - handle reconnection from known zones.
-		// Also used when in commissioning mode but the peer presented
-		// a certificate (indicating an operational reconnection).
-		s.debugLog("handleConnection: -> operational handler")
-		s.handleOperationalConnection(tlsConn, releaseActiveConn)
+		// Client certificate present: operational reconnection from a
+		// known zone. Also valid when in commissioning mode (a zone can
+		// reconnect while commissioning is open for another zone).
+		s.debugLog("handleConnection: -> operational handler (client cert present)")
+		s.handleOperationalConnection(conn, tlsConn, releaseActiveConn)
 	}
 }
 
 // handleOperationalConnection handles a reconnection from a known zone.
-func (s *DeviceService) handleOperationalConnection(conn *tls.Conn, releaseActiveConn func()) {
+// rawConn is the underlying net.Conn from Accept, used for connTracker removal.
+func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.Conn, releaseActiveConn func()) {
 	s.mu.RLock()
 	// Find a known zone that isn't currently connected
 	var targetZoneID string
@@ -654,7 +643,9 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn, releaseActiv
 
 	// DEC-064: Remove from tracker before entering the operational message loop.
 	// Operational connections must not be reaped by the stale connection reaper.
-	s.connTracker.Remove(conn)
+	// Use rawConn (the original net.Conn from Accept) since the tracker keys
+	// on that, not the *tls.Conn wrapper.
+	s.connTracker.Remove(rawConn)
 
 	// DEC-062: Release the connection cap slot before the message loop.
 	// Operational connections are tracked by the zone system and should not
@@ -675,7 +666,7 @@ func (s *DeviceService) handleOperationalConnection(conn *tls.Conn, releaseActiv
 // DEC-061: The commissioning lock is NOT acquired until the first PASERequest
 // message arrives. This prevents idle TLS connections from blocking commissioning.
 // Flow: Create PASE -> WaitForPASERequest (no lock) -> Acquire lock -> CompleteHandshake -> Cert exchange -> Release lock.
-func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn, releaseActiveConn func()) {
+func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tls.Conn, releaseActiveConn func()) {
 	s.debugLog("handleCommissioningConnection: entered", "remoteAddr", conn.RemoteAddr().String())
 
 	// Phase 1: Create PASE session and wait for first message (no lock held)
@@ -875,6 +866,12 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn, releaseAct
 		go func() {
 			s.debugLog("handleCommissioningConnection: auto-reentry goroutine started, sleeping 500ms", "zoneID", zoneID)
 			time.Sleep(500 * time.Millisecond)
+			// Only re-enter commissioning if zone slots are available.
+			// At max capacity the device should not advertise _mashc._udp.
+			if s.isZonesFull() {
+				s.debugLog("handleCommissioningConnection: auto-reentry skipped (zones full)", "zoneID", zoneID)
+				return
+			}
 			s.debugLog("handleCommissioningConnection: auto-reentry goroutine woke up, calling EnterCommissioningMode", "zoneID", zoneID)
 			if err := s.EnterCommissioningMode(); err != nil {
 				s.debugLog("handleCommissioningConnection: auto-reenter failed", "zoneID", zoneID, "error", err)
@@ -891,7 +888,7 @@ func (s *DeviceService) handleCommissioningConnection(conn *tls.Conn, releaseAct
 
 	// Release resources before closing
 	s.releaseCommissioningConnection()
-	s.connTracker.Remove(conn)
+	s.connTracker.Remove(rawConn)
 	releaseActiveConn()
 
 	// Close the commissioning connection
@@ -1063,7 +1060,7 @@ func (s *DeviceService) performCertExchange(conn *framedConnection, zoneID strin
 }
 
 // runZoneMessageLoop reads messages from the connection and dispatches to the session.
-func (s *DeviceService) runZoneMessageLoop(zoneID string, conn *framedConnection, session *ZoneSession) {
+func (s *DeviceService) runZoneMessageLoop(_ string, conn *framedConnection, session *ZoneSession) {
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -1077,7 +1074,36 @@ func (s *DeviceService) runZoneMessageLoop(zoneID string, conn *framedConnection
 			return
 		}
 
-		// Dispatch to session
+		// Handle control messages (Ping/Pong/Close) at the transport level
+		// before dispatching protocol messages to the session.
+		msgType, peekErr := wire.PeekMessageType(data)
+		if peekErr == nil && msgType == wire.MessageTypeControl {
+			if ctrlMsg, decErr := wire.DecodeControlMessage(data); decErr == nil {
+				switch ctrlMsg.Type {
+				case wire.ControlPing:
+					// Respond with pong.
+					pongMsg := &wire.ControlMessage{Type: wire.ControlPong, Sequence: ctrlMsg.Sequence}
+					if pongData, encErr := wire.EncodeControlMessage(pongMsg); encErr == nil {
+						conn.Send(pongData)
+					}
+				case wire.ControlClose:
+					// Acknowledge close and disconnect.
+					closeAck := &wire.ControlMessage{Type: wire.ControlClose}
+					if ackData, encErr := wire.EncodeControlMessage(closeAck); encErr == nil {
+						conn.Send(ackData)
+					}
+					// Brief delay to flush the ack frame before closing.
+					time.Sleep(50 * time.Millisecond)
+					conn.Close()
+					return
+				case wire.ControlPong:
+					// Ignore pongs.
+				}
+				continue
+			}
+		}
+
+		// Dispatch protocol messages to session.
 		session.OnMessage(data)
 	}
 }
@@ -2104,15 +2130,16 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 	// Update pairing request listening state based on zone count
 	s.updatePairingRequestListening()
 
-	// DEC-059: Auto re-enter commissioning mode when last zone is removed.
-	// A device with no zones must become commissionable again.
+	// DEC-059: Auto re-enter commissioning mode when zone slots become available.
+	// After any zone removal, if the device is below max capacity it should
+	// advertise _mashc._udp so new controllers can discover and commission it.
 	s.mu.RLock()
-	noZonesLeft := len(s.connectedZones) == 0
+	hasAvailableSlots := s.nonTestZoneCountLocked() < s.config.MaxZones
 	s.mu.RUnlock()
 	s.debugLog("RemoveZone: auto-reentry check",
 		"zoneID", zoneID,
-		"noZonesLeft", noZonesLeft)
-	if noZonesLeft {
+		"hasAvailableSlots", hasAvailableSlots)
+	if hasAvailableSlots {
 		if err := s.EnterCommissioningMode(); err != nil {
 			s.debugLog("RemoveZone: EnterCommissioningMode failed", "zoneID", zoneID, "error", err)
 		}
@@ -2327,7 +2354,7 @@ func (s *DeviceService) updatePairingRequestListening() {
 	}
 
 	s.mu.RLock()
-	zoneCount := len(s.connectedZones)
+	zoneCount := s.nonTestZoneCountLocked()
 	maxZones := s.config.MaxZones
 	active := s.pairingRequestActive
 	ctx := s.ctx

@@ -106,25 +106,10 @@ func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
 		}
 	}
 
-	// DEC-043/060: Detect test mode from TestControl feature on endpoint 0.
-	// Production MaxZones = 2 (GRID + LOCAL); test mode = 3 (+ TEST).
-	hasTestControl := false
-	for _, ep := range endpoints {
-		if ep.id == 0 {
-			for _, featID := range ep.features {
-				if featID == uint16(model.FeatureTestControl) {
-					hasTestControl = true
-					break
-				}
-			}
-			break
-		}
-	}
-	if hasTestControl {
-		items["MASH.S.ZONE.MAX"] = 3
-	} else {
-		items["MASH.S.ZONE.MAX"] = 2
-	}
+	// DEC-043: MaxZones = 2 (1 GRID + 1 LOCAL). TEST zones are an extra
+	// observer slot that doesn't count against MaxZones (DEC-060), so the
+	// PICS value is always 2 regardless of enable-key / TestControl.
+	items["MASH.S.ZONE.MAX"] = 2
 
 	// Parse use case declarations.
 	useCases := parseAutoPICSUseCases(deviceAttrs[features.DeviceInfoAttrUseCases])
@@ -223,7 +208,11 @@ func (r *Runner) readFeatureGlobals(ctx context.Context, endpointID, featureID u
 	}
 
 	// Parse commandList.
-	if v, ok := attrs[model.AttrIDCommandList].([]any); ok {
+	// CBOR encodes []uint8 as a byte string, so handle both []any and []byte.
+	switch v := attrs[model.AttrIDCommandList].(type) {
+	case []byte:
+		cmdList = append(cmdList, v...)
+	case []any:
 		for _, c := range v {
 			if id, ok := wire.ToUint8Public(c); ok {
 				cmdList = append(cmdList, id)

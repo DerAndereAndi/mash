@@ -238,6 +238,7 @@ func TestHandleGetQRPayload_AutoGenerate(t *testing.T) {
 
 func TestHandleAnnouncePairingRequest(t *testing.T) {
 	r := newTestRunner()
+	defer r.Close()
 	state := newTestState()
 
 	step := &loader.Step{
@@ -267,12 +268,13 @@ func TestHandleAnnouncePairingRequest(t *testing.T) {
 
 func TestHandleAnnouncePairingRequest_AnnouncementSent(t *testing.T) {
 	r := newTestRunner()
+	defer r.Close()
 	state := newTestState()
 
 	step := &loader.Step{
 		Params: map[string]any{
-			"discriminator": float64(5678),
-			KeyZoneID:       "zone-id-123",
+			"discriminator": float64(2048),
+			KeyZoneID:       "b2c3d4e5f6a7b8a1",
 			"zone_name":     "Test Zone",
 		},
 	}
@@ -282,6 +284,43 @@ func TestHandleAnnouncePairingRequest_AnnouncementSent(t *testing.T) {
 	}
 	if out[KeyAnnouncementSent] != true {
 		t.Errorf("expected announcement_sent=true, got %v", out[KeyAnnouncementSent])
+	}
+
+	// Verify advertiser was created on the runner.
+	if r.pairingAdvertiser == nil {
+		t.Error("expected pairingAdvertiser to be set on runner")
+	}
+}
+
+func TestHandleStopPairingRequest(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Announce first to create the advertiser.
+	step := &loader.Step{
+		Params: map[string]any{
+			"discriminator": float64(1234),
+			KeyZoneID:       "a1b2c3d4e5f6a7b8",
+		},
+	}
+	_, err := r.handleAnnouncePairingRequest(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("announce: %v", err)
+	}
+	if r.pairingAdvertiser == nil {
+		t.Fatal("expected advertiser after announce")
+	}
+
+	// Stop should clean up.
+	out, err := r.handleStopPairingRequest(context.Background(), &loader.Step{}, state)
+	if err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	if out["stopped"] != true {
+		t.Error("expected stopped=true")
+	}
+	if r.pairingAdvertiser != nil {
+		t.Error("expected pairingAdvertiser to be nil after stop")
 	}
 }
 

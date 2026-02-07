@@ -473,6 +473,35 @@ func CheckerSaveAs(key string, expected interface{}, state *ExecutionState) *Exp
 	}
 }
 
+// CheckerSaveField saves a specific field from the step output under the given
+// key name. The field to extract is derived from the checker name (e.g.,
+// "save_delay_as" extracts "connect_duration_ms", "save_subscription_id"
+// extracts "subscription_id").
+func checkerSaveField(fieldKey string) func(string, interface{}, *ExecutionState) *ExpectResult {
+	return func(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+		targetKey, ok := expected.(string)
+		if !ok {
+			return &ExpectResult{Key: key, Expected: expected, Passed: false,
+				Message: fmt.Sprintf("%s target must be a string, got %T", key, expected)}
+		}
+		output, exists := state.Get(InternalStepOutput)
+		if !exists {
+			return &ExpectResult{Key: key, Expected: expected, Passed: false, Message: "no step output"}
+		}
+		var val interface{}
+		if m, ok := output.(map[string]any); ok {
+			val = m[fieldKey]
+		}
+		if val == nil {
+			return &ExpectResult{Key: key, Expected: expected, Passed: false,
+				Message: fmt.Sprintf("no %s in output", fieldKey)}
+		}
+		state.Set(targetKey, val)
+		return &ExpectResult{Key: key, Expected: expected, Actual: val, Passed: true,
+			Message: fmt.Sprintf("saved %s as %q", fieldKey, targetKey)}
+	}
+}
+
 // CheckerValueEquals compares the current step's output with a previously saved
 // output (stored via save_as). All keys present in the saved map must match.
 func CheckerValueEquals(key string, expected interface{}, state *ExecutionState) *ExpectResult {
@@ -1323,6 +1352,8 @@ func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameContainsOnly, CheckerContainsOnly)
 	e.RegisterChecker(CheckerNameMapSizeEquals, CheckerMapSizeEquals)
 	e.RegisterChecker(CheckerNameSaveAs, CheckerSaveAs)
+	e.RegisterChecker("save_subscription_id", checkerSaveField("subscription_id"))
+	e.RegisterChecker("save_delay_as", checkerSaveField("connect_duration_ms"))
 	e.RegisterChecker(CheckerNameValueEquals, CheckerValueEquals)
 	e.RegisterChecker(CheckerNameIssuerFingerprintEquals, CheckerIssuerFingerprintEquals)
 

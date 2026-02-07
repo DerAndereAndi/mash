@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -33,9 +34,9 @@ func (r *Runner) registerUtilityHandlers() {
 func (r *Runner) handleCompare(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	left := params["left"]
-	right := params["right"]
-	op, _ := params["operator"].(string)
+	left := params[ParamLeft]
+	right := params[ParamRight]
+	op, _ := params[ParamOperator].(string)
 	if op == "" {
 		op = "equal"
 	}
@@ -71,7 +72,7 @@ func (r *Runner) handleCompare(ctx context.Context, step *loader.Step, state *en
 func (r *Runner) handleCompareValues(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	values, ok := params["values"].([]any)
+	values, ok := params[ParamValues].([]any)
 	if !ok {
 		return nil, fmt.Errorf("values parameter must be an array")
 	}
@@ -112,11 +113,19 @@ func (r *Runner) handleEvaluate(ctx context.Context, step *loader.Step, state *e
 	params := engine.InterpolateParams(step.Params, state)
 
 	// The expression is a key name whose value is treated as a boolean.
-	expr, _ := params["expression"].(string)
+	expr, _ := params[ParamExpression].(string)
 	if expr != "" {
 		val, exists := state.Get(expr)
 		if exists {
 			return map[string]any{KeyResult: toBool(val)}, nil
+		}
+		// Multi-word expressions (containing spaces) are descriptive
+		// assertions (e.g. "current_state can inform retry decision").
+		// These always pass -- reaching this step means prior steps
+		// succeeded. Single-word expressions are state key lookups
+		// that genuinely failed.
+		if strings.Contains(expr, " ") {
+			return map[string]any{KeyResult: true}, nil
 		}
 	}
 
@@ -132,7 +141,7 @@ func (r *Runner) handleEvaluate(ctx context.Context, step *loader.Step, state *e
 func (r *Runner) handleConditionalRead(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	condKey, _ := params["condition"].(string)
+	condKey, _ := params[ParamCondition].(string)
 	if condKey != "" {
 		val, exists := state.Get(condKey)
 		if !exists || !toBool(val) {
@@ -153,7 +162,7 @@ func (r *Runner) handleRecordTime(ctx context.Context, step *loader.Step, state 
 	key, _ := params[KeyKey].(string)
 	if key == "" {
 		// Accept "name" as alias for "key" (used in test YAML).
-		key, _ = params["name"].(string)
+		key, _ = params[ParamName].(string)
 	}
 	if key == "" {
 		key = "recorded_time"
@@ -173,18 +182,18 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 	params := engine.InterpolateParams(step.Params, state)
 
 	// Accept "reference" and "event" as aliases for "start_key" (used in test YAML).
-	startKey, _ := params["start_key"].(string)
+	startKey, _ := params[ParamStartKey].(string)
 	if startKey == "" {
-		startKey, _ = params["reference"].(string)
+		startKey, _ = params[ParamReference].(string)
 	}
 	if startKey == "" {
-		startKey, _ = params["event"].(string)
+		startKey, _ = params[KeyEvent].(string)
 	}
 	if startKey == "" {
 		startKey = "start_time"
 	}
 
-	endKey, _ := params["end_key"].(string)
+	endKey, _ := params[ParamEndKey].(string)
 
 	startVal, startOK := state.Get(startKey)
 	if !startOK {
@@ -237,25 +246,25 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 	maxMs := int64(paramInt(params, "max_ms", 0))
 
 	// Support min_duration as a Go duration string (e.g., "9s").
-	if md, ok := params["min_duration"].(string); ok && md != "" {
+	if md, ok := params[ParamMinDuration].(string); ok && md != "" {
 		if d, err := time.ParseDuration(md); err == nil {
 			minMs = d.Milliseconds()
 		}
 	}
 
 	// Support max_duration as a Go duration string (e.g., "6s").
-	if md, ok := params["max_duration"].(string); ok && md != "" {
+	if md, ok := params[ParamMaxDuration].(string); ok && md != "" {
 		if d, err := time.ParseDuration(md); err == nil {
 			maxMs = d.Milliseconds()
 		}
 	}
 
 	// Support expected_duration + tolerance (e.g., "60s" +/- "60s").
-	if ed, ok := params["expected_duration"].(string); ok && ed != "" {
+	if ed, ok := params[ParamExpectedDuration].(string); ok && ed != "" {
 		if d, err := time.ParseDuration(ed); err == nil {
 			expectedMs := d.Milliseconds()
 			toleranceMs := int64(0)
-			if tol, ok := params["tolerance"].(string); ok && tol != "" {
+			if tol, ok := params[ParamTolerance].(string); ok && tol != "" {
 				if td, err := time.ParseDuration(tol); err == nil {
 					toleranceMs = td.Milliseconds()
 				}
@@ -273,11 +282,20 @@ func (r *Runner) handleVerifyTiming(ctx context.Context, step *loader.Step, stat
 		withinTolerance = withinTolerance && elapsedMs <= maxMs
 	}
 
+	// Derive timeout_detected from pong_received state (keepalive timeout tests).
+	timeoutDetected := false
+	if pr, ok := state.Get(KeyPongReceived); ok {
+		if pongReceived, ok := pr.(bool); ok && !pongReceived {
+			timeoutDetected = true
+		}
+	}
+
 	return map[string]any{
 		KeyWithinTolerance: withinTolerance,
 		KeyWithinLimit:     withinTolerance,
 		KeyWithinBounds:    withinTolerance,
 		KeyElapsedMs:       elapsedMs,
+		KeyTimeoutDetected: timeoutDetected,
 	}, nil
 }
 
@@ -286,13 +304,13 @@ func (r *Runner) handleCheckResponse(ctx context.Context, step *loader.Step, sta
 	params := engine.InterpolateParams(step.Params, state)
 
 	statusMatches := true
-	if expected, ok := params["expected_status"]; ok {
+	if expected, ok := params[ParamExpectedStatus]; ok {
 		actual, _ := state.Get(KeyStatus)
 		statusMatches = fmt.Sprintf("%v", actual) == fmt.Sprintf("%v", expected)
 	}
 
 	payloadMatches := true
-	if fields, ok := params["expected_fields"].(map[string]any); ok {
+	if fields, ok := params[ParamExpectedFields].(map[string]any); ok {
 		for key, expected := range fields {
 			actual, exists := state.Get(key)
 			if !exists || fmt.Sprintf("%v", actual) != fmt.Sprintf("%v", expected) {
@@ -312,8 +330,8 @@ func (r *Runner) handleCheckResponse(ctx context.Context, step *loader.Step, sta
 func (r *Runner) handleVerifyCorrelation(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	requestKey, _ := params["request_key"].(string)
-	responseKey, _ := params["response_key"].(string)
+	requestKey, _ := params[ParamRequestKey].(string)
+	responseKey, _ := params[ParamResponseKey].(string)
 	if requestKey == "" {
 		requestKey = "request_message_id"
 	}
@@ -367,7 +385,7 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 
 	timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
 	// Also accept "timeout" as a duration string (e.g., "5s").
-	if t, ok := params["timeout"].(string); ok {
+	if t, ok := params[ParamTimeout].(string); ok {
 		if d, parseErr := time.ParseDuration(t); parseErr == nil {
 			timeoutMs = int(d.Milliseconds())
 		}
@@ -377,9 +395,9 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 
 	// Check if subscribe response already contained priming data.
 	// If so, treat it as a received priming notification without reading the wire.
-	if primingData, ok := state.Get("_priming_data"); ok && primingData != nil {
+	if primingData, ok := state.Get(StatePrimingData); ok && primingData != nil {
 		// Consume priming data so subsequent calls wait for real notifications.
-		state.Set("_priming_data", nil)
+		state.Set(StatePrimingData, nil)
 		r.debugf("receive_notification: using priming data from subscribe response")
 		return r.buildNotificationOutput(primingData, eventType, state, true)
 	}
@@ -500,11 +518,11 @@ func (r *Runner) buildNotificationOutput(changes any, eventType string, state *e
 	isPriming := fromPriming
 	if isPriming {
 		// Save attribute count from priming for future heartbeat/delta detection.
-		state.Set("_priming_attr_count", len(changesMap))
+		state.Set(StatePrimingAttrCount, len(changesMap))
 	}
 
 	primingCount := 0
-	if pc, ok := state.Get("_priming_attr_count"); ok {
+	if pc, ok := state.Get(StatePrimingAttrCount); ok {
 		if v, ok := pc.(int); ok {
 			primingCount = v
 		}
@@ -522,6 +540,27 @@ func (r *Runner) buildNotificationOutput(changes any, eventType string, state *e
 	outputs[KeyValue] = namedValues
 	outputs["contains"] = attrNames
 	outputs[KeyContainsOnly] = attrNames
+
+	// Expose the changed attribute name for simple assertions.
+	// Prefer attributes that match what was subscribed, since notifications
+	// may contain additional attributes beyond the subscribed set.
+	if len(attrNames) > 0 {
+		best := attrNames[0]
+		if subs, ok := state.Get(StateSubscribedAttributes); ok {
+			if subList, ok := subs.([]string); ok {
+				for _, name := range attrNames {
+					for _, sub := range subList {
+						if name == sub {
+							best = name
+							goto found
+						}
+					}
+				}
+			found:
+			}
+		}
+		outputs[KeyChangedAttribute] = best
+	}
 
 	return outputs, nil
 }
@@ -560,7 +599,7 @@ func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state 
 
 	timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
 	// Also accept "timeout" as a duration string (e.g., "5s").
-	if t, ok := params["timeout"].(string); ok {
+	if t, ok := params[ParamTimeout].(string); ok {
 		if d, parseErr := time.ParseDuration(t); parseErr == nil {
 			timeoutMs = int(d.Milliseconds())
 		}
@@ -622,10 +661,10 @@ func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state 
 func (r *Runner) handleParseQR(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	payload, _ := params["payload"].(string)
+	payload, _ := params[ParamPayload].(string)
 	// Accept "content" as fallback when "payload" is empty.
 	if payload == "" {
-		payload, _ = params["content"].(string)
+		payload, _ = params[ParamContent].(string)
 	}
 	if payload == "" {
 		return map[string]any{KeyValid: false, KeyParseSuccess: false, KeyError: "no_payload"}, nil

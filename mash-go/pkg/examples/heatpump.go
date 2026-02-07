@@ -133,6 +133,7 @@ func (h *HeatPump) setupHeatPumpEndpoint(cfg HeatPumpConfig) {
 
 func (h *HeatPump) setupCommandHandlers() {
 	h.limitResolver = features.NewLimitResolver(h.energyControl)
+	h.limitResolver.MaxConsumption = h.electrical.NominalMaxConsumption()
 	h.limitResolver.Register()
 
 	// Pause handler

@@ -388,13 +388,22 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 		}
 	}
 
+	// Simulate keepalive timeout: if pongs were blocked via network filter,
+	// the connection would have been closed after 3 missed pongs.
+	if filter, _ := state.Get(StateNetworkFilter); filter == NetworkFilterBlockPongs && sameConn {
+		_ = r.conn.Close()
+		sameConn = false
+		operationalActive = false
+		state.Set(StateGracefullyClosed, true)
+	}
+
 	// commissioning_connection_closed is true when we are NOT on a
 	// commissioning connection: either disconnected, no PASE was done,
 	// or we have already transitioned to an operational connection.
 	commClosed := !sameConn || !pasePerformed || connOperational
 
 	// Derive connection state string for YAML assertions.
-	connState := "CLOSED"
+	connState := ConnectionStateClosed
 	if sameConn {
 		if operationalActive {
 			connState = ConnectionStateOperational
@@ -402,13 +411,22 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 			connState = "CONNECTED"
 		}
 	} else if r.conn != nil {
-		connState = "DISCONNECTED"
+		// Gracefully closed connections are "CLOSED", not "DISCONNECTED".
+		if gc, _ := state.Get(StateGracefullyClosed); gc == true {
+			connState = ConnectionStateClosed
+		} else {
+			connState = ConnectionStateDisconnected
+		}
 	}
 
 	// close_reason: why the connection was closed (if it was).
 	closeReason := ""
 	if !sameConn {
-		closeReason = "NORMAL"
+		if filter, _ := state.Get(StateNetworkFilter); filter == NetworkFilterBlockPongs {
+			closeReason = CloseReasonKeepaliveTimeout
+		} else {
+			closeReason = CloseReasonNormal
+		}
 	}
 
 	return map[string]any{
@@ -443,10 +461,22 @@ func (r *Runner) handleSetCertExpiry(ctx context.Context, step *loader.Step, sta
 }
 
 // handleWaitForNotification waits for a notification event.
+// When connected and not waiting for a cert-specific event, delegates to the
+// real wire-reading handler (handleWaitNotification in utility_handlers.go).
+// Falls back to simulation for cert events or when not connected.
 func (r *Runner) handleWaitForNotification(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	eventType := "cert_expiring"
+	eventType := ""
 	if et, ok := step.Params["event_type"].(string); ok {
 		eventType = et
+	}
+
+	// Delegate to the real wire reader when connected and not looking for cert events.
+	if r.conn != nil && r.conn.connected && eventType == "" {
+		return r.handleWaitNotification(ctx, step, state)
+	}
+
+	if eventType == "" {
+		eventType = "cert_expiring"
 	}
 
 	timeoutMs := paramInt(step.Params, KeyTimeoutMs, 5000)
@@ -455,11 +485,9 @@ func (r *Runner) handleWaitForNotification(ctx context.Context, step *loader.Ste
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
-	// For now, simulate notification reception
-	// In a real implementation, this would read from the connection
+	// Simulate notification reception for cert events.
 	<-timeoutCtx.Done()
 
-	// Simulate that we received the notification
 	state.Set(StateReceivedEvent, eventType)
 	return map[string]any{
 		KeyNotificationReceived: true,

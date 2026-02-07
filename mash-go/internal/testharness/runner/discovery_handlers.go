@@ -5,8 +5,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -25,6 +27,7 @@ func (r *Runner) registerDiscoveryHandlers() {
 	r.engine.RegisterHandler("verify_mdns_not_browsing", r.handleVerifyMDNSNotBrowsing)
 	r.engine.RegisterHandler("get_qr_payload", r.handleGetQRPayload)
 	r.engine.RegisterHandler("announce_pairing_request", r.handleAnnouncePairingRequest)
+	r.engine.RegisterHandler("stop_pairing_request", r.handleStopPairingRequest)
 
 	// Replace stubs from runner.go
 	r.engine.RegisterHandler("start_discovery", r.handleStartDiscoveryReal)
@@ -109,6 +112,33 @@ func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params 
 			})
 		}
 
+	case discovery.ServiceTypePairingRequest, ServiceAliasPairingRequest:
+		var mu sync.Mutex
+		err := browser.BrowsePairingRequests(browseCtx, func(svc discovery.PairingRequestService) {
+			mu.Lock()
+			services = append(services, discoveredService{
+				InstanceName:  svc.InstanceName,
+				Host:          svc.Host,
+				Port:          svc.Port,
+				Addresses:     svc.Addresses,
+				ServiceType:   discovery.ServiceTypePairingRequest,
+				Discriminator: svc.Discriminator,
+				TXTRecords: map[string]string{
+					"ZI": svc.ZoneID,
+					"ZN": svc.ZoneName,
+				},
+			})
+			mu.Unlock()
+		})
+		if err != nil {
+			return nil, fmt.Errorf("browse pairing requests: %w", err)
+		}
+		// BrowsePairingRequests is non-blocking; wait for browse timeout.
+		<-browseCtx.Done()
+		// Ensure any in-flight callback has completed.
+		mu.Lock()
+		mu.Unlock()
+
 	default:
 		return nil, fmt.Errorf("unknown service type: %s", serviceType)
 	}
@@ -149,7 +179,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		}
 	}
 	if willAppear, _ := state.Get(PrecondDeviceWillAppearAfterDelay); willAppear == true {
-		retryParam, _ := params["retry"].(bool)
+		retryParam, _ := params[ParamRetry].(bool)
 		if retryParam {
 			ds.services = []discoveredService{{
 				InstanceName: "MASH-SIM-DELAYED",
@@ -405,26 +435,11 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		return r.buildBrowseOutput(ds)
 	}
 
-	// Stub mode: enter_commissioning_mode was called without a device
-	// connection. Return a synthetic commissionable service so that
-	// verify_mdns_advertising sees advertising=true.
-	if active, _ := state.Get(StateCommissioningActive); active == true {
-		requestedType, _ := params[KeyServiceType].(string)
-		if requestedType == "" || requestedType == discovery.ServiceTypeCommissionable || requestedType == ServiceAliasCommissionable {
-			ds.services = []discoveredService{{
-				InstanceName:  "MASH-SIM-COMM",
-				ServiceType:   discovery.ServiceTypeCommissionable,
-				Host:          "device.local",
-				Port:          8443,
-				Addresses:     []string{"192.168.1.10"},
-				Discriminator: 1234,
-				TXTRecords:    map[string]string{"brand": "Test", "model": "Sim"},
-			}}
-			return r.buildBrowseOutput(ds)
-		}
-	}
-
 	// Simulate two devices with the same discriminator.
+	// This must be checked before the commissioning_active stub below,
+	// because the test's device_local_action enter_commissioning_mode step
+	// sets commissioning_active=true and the generic stub would return a
+	// single service, short-circuiting the two-device simulation.
 	retries := 0
 	if twoDevs, _ := state.Get(PrecondTwoDevicesSameDiscriminator); twoDevs == true {
 		disc := uint16(paramInt(params, KeyDiscriminator, 1234))
@@ -449,12 +464,36 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 			},
 		}
 	} else {
+		// Stub mode: enter_commissioning_mode was called without a device
+		// connection. Return a synthetic commissionable service so that
+		// verify_mdns_advertising sees advertising=true.
+		if active, _ := state.Get(StateCommissioningActive); active == true {
+			requestedType, _ := params[KeyServiceType].(string)
+			if requestedType == "" || requestedType == discovery.ServiceTypeCommissionable || requestedType == ServiceAliasCommissionable {
+				ds.services = []discoveredService{{
+					InstanceName:  "MASH-SIM-COMM",
+					ServiceType:   discovery.ServiceTypeCommissionable,
+					Host:          "device.local",
+					Port:          8443,
+					Addresses:     []string{"192.168.1.10"},
+					Discriminator: 1234,
+					TXTRecords: map[string]string{
+						"brand":  "Test",
+						"model":  "Sim",
+						"cat":    "1",
+						"serial": "SIM-0001",
+					},
+				}}
+				return r.buildBrowseOutput(ds)
+			}
+		}
+
 		serviceType, _ := params[KeyServiceType].(string)
 		timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
 
 		// Determine if retry is requested.
 		retryRequested := false
-		if r, ok := params["retry"].(bool); ok {
+		if r, ok := params[ParamRetry].(bool); ok {
 			retryRequested = r
 		}
 
@@ -623,9 +662,17 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		case discovery.ServiceTypeCommissionable:
 			// Discriminator fields.
 			outputs["txt_field_D"] = fmt.Sprintf("%d", first.Discriminator)
-			outputs[KeyTXTDRange] = first.Discriminator <= discovery.MaxDiscriminator
+			if first.Discriminator <= discovery.MaxDiscriminator {
+				outputs[KeyTXTDRange] = "0-4095"
+			} else {
+				outputs[KeyTXTDRange] = fmt.Sprintf("out-of-range(%d)", first.Discriminator)
+			}
 			// Instance name format.
-			outputs[KeyInstanceNamePrefix] = strings.HasPrefix(first.InstanceName, "MASH-")
+			if strings.HasPrefix(first.InstanceName, "MASH-") {
+				outputs[KeyInstanceNamePrefix] = "MASH-"
+			} else {
+				outputs[KeyInstanceNamePrefix] = ""
+			}
 
 		case discovery.ServiceTypeOperational:
 			// Zone/device ID fields from TXT records.
@@ -778,7 +825,15 @@ func (r *Runner) handleVerifyMDNSAdvertising(ctx context.Context, step *loader.S
 
 // handleVerifyMDNSBrowsing verifies browser finds expected services.
 func (r *Runner) handleVerifyMDNSBrowsing(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	return r.handleVerifyMDNSAdvertising(ctx, step, state)
+	result, err := r.handleVerifyMDNSAdvertising(ctx, step, state)
+	if err != nil {
+		return result, err
+	}
+	// Add browsing alias for advertising.
+	if result != nil {
+		result[KeyBrowsing] = result[KeyAdvertising]
+	}
+	return result, nil
 }
 
 // handleVerifyMDNSNotAdvertising verifies device is NOT advertising.
@@ -835,7 +890,7 @@ func (r *Runner) handleGetQRPayload(ctx context.Context, step *loader.Step, stat
 	ds := getDiscoveryState(state)
 
 	// If provided directly.
-	if payload, ok := params["payload"].(string); ok && payload != "" {
+	if payload, ok := params[ParamPayload].(string); ok && payload != "" {
 		ds.qrPayload = payload
 		return map[string]any{
 			KeyQRPayload: payload,
@@ -893,7 +948,7 @@ func (r *Runner) handleGetQRPayload(ctx context.Context, step *loader.Step, stat
 	}, nil
 }
 
-// handleAnnouncePairingRequest triggers commissioner advertisement.
+// handleAnnouncePairingRequest advertises a real _mashp._udp pairing request via mDNS.
 func (r *Runner) handleAnnouncePairingRequest(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
@@ -905,12 +960,48 @@ func (r *Runner) handleAnnouncePairingRequest(ctx context.Context, step *loader.
 	state.Set(StatePairingRequestDiscriminator, int(discriminator))
 	state.Set(StatePairingRequestZoneID, zoneID)
 
+	// Lazy-init the mDNS advertiser on the runner.
+	if r.pairingAdvertiser == nil {
+		adv, err := discovery.NewMDNSAdvertiser(discovery.AdvertiserConfig{})
+		if err != nil {
+			return nil, fmt.Errorf("create pairing advertiser: %w", err)
+		}
+		r.pairingAdvertiser = adv
+	}
+
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "mash-test-runner.local"
+	}
+
+	info := &discovery.PairingRequestInfo{
+		Discriminator: discriminator,
+		ZoneID:        zoneID,
+		ZoneName:      zoneName,
+		Host:          host,
+	}
+
+	if err := r.pairingAdvertiser.AnnouncePairingRequest(ctx, info); err != nil {
+		return nil, fmt.Errorf("announce pairing request: %w", err)
+	}
+
 	return map[string]any{
 		KeyPairingRequestAnnounced: true,
-		KeyAnnouncementSent:        true,
-		KeyDiscriminator:           int(discriminator),
-		KeyZoneID:                  zoneID,
-		KeyZoneName:                zoneName,
+		KeyAnnouncementSent:       true,
+		KeyDiscriminator:          int(discriminator),
+		KeyZoneID:                 zoneID,
+		KeyZoneName:               zoneName,
+	}, nil
+}
+
+// handleStopPairingRequest stops advertising pairing requests via mDNS.
+func (r *Runner) handleStopPairingRequest(_ context.Context, _ *loader.Step, _ *engine.ExecutionState) (map[string]any, error) {
+	if r.pairingAdvertiser != nil {
+		r.pairingAdvertiser.StopAll()
+		r.pairingAdvertiser = nil
+	}
+	return map[string]any{
+		"stopped": true,
 	}, nil
 }
 
@@ -1018,9 +1109,9 @@ func (r *Runner) handleVerifyTXTRecordsReal(ctx context.Context, step *loader.St
 
 	// Check required fields -- accept both "required_fields" and "required_keys".
 	allValid := true
-	fields, ok := params["required_fields"].([]any)
+	fields, ok := params[ParamRequiredFields].([]any)
 	if !ok {
-		fields, ok = params["required_keys"].([]any)
+		fields, ok = params[ParamRequiredKeys].([]any)
 	}
 	if ok {
 		for _, f := range fields {

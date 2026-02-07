@@ -2,10 +2,12 @@ package features
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // testContext creates a context with zone ID and type injected via the
@@ -622,4 +624,74 @@ func TestLimitResolver_NoNotifyWhenNoCallback(t *testing.T) {
 
 	lr.ClearZone("zone-a")
 	// If we reach here without panic, the test passes
+}
+
+func TestLimitResolver_ConstraintValidation(t *testing.T) {
+	lr := newTestResolver()
+	lr.MaxConsumption = 22_000_000 // 22 kW
+	lr.MaxProduction = 10_000_000  // 10 kW
+	ctx := testCtx("zone-A", cert.ZoneTypeLocal)
+
+	// Within range: should succeed.
+	resp, err := lr.HandleSetLimit(ctx, SetLimitRequest{
+		ConsumptionLimit: intPtr(15_000_000),
+	})
+	if err != nil {
+		t.Fatalf("expected success for within-range limit, got error: %v", err)
+	}
+	if !resp.Applied {
+		t.Fatal("expected Applied=true for within-range limit")
+	}
+
+	// Exactly at max: should succeed.
+	resp, err = lr.HandleSetLimit(ctx, SetLimitRequest{
+		ConsumptionLimit: intPtr(22_000_000),
+	})
+	if err != nil {
+		t.Fatalf("expected success for at-max limit, got error: %v", err)
+	}
+	if !resp.Applied {
+		t.Fatal("expected Applied=true for at-max limit")
+	}
+
+	// Above max consumption: should return CommandError with ConstraintError.
+	_, err = lr.HandleSetLimit(ctx, SetLimitRequest{
+		ConsumptionLimit: intPtr(999_999_999_999),
+	})
+	if err == nil {
+		t.Fatal("expected error for above-max consumption limit")
+	}
+	var cmdErr *wire.CommandError
+	if !errors.As(err, &cmdErr) {
+		t.Fatalf("expected *wire.CommandError, got %T: %v", err, err)
+	}
+	if cmdErr.Status != wire.StatusConstraintError {
+		t.Fatalf("expected StatusConstraintError, got %v", cmdErr.Status)
+	}
+
+	// Above max production: should return CommandError with ConstraintError.
+	_, err = lr.HandleSetLimit(ctx, SetLimitRequest{
+		ProductionLimit: intPtr(50_000_000),
+	})
+	if err == nil {
+		t.Fatal("expected error for above-max production limit")
+	}
+	if !errors.As(err, &cmdErr) {
+		t.Fatalf("expected *wire.CommandError, got %T: %v", err, err)
+	}
+	if cmdErr.Status != wire.StatusConstraintError {
+		t.Fatalf("expected StatusConstraintError, got %v", cmdErr.Status)
+	}
+
+	// MaxConsumption=0 disables check: any value should pass.
+	lr.MaxConsumption = 0
+	resp, err = lr.HandleSetLimit(ctx, SetLimitRequest{
+		ConsumptionLimit: intPtr(999_999_999_999),
+	})
+	if err != nil {
+		t.Fatalf("expected success when MaxConsumption=0, got error: %v", err)
+	}
+	if !resp.Applied {
+		t.Fatal("expected Applied=true when MaxConsumption=0")
+	}
 }

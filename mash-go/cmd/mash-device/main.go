@@ -145,7 +145,7 @@ func init() {
 	flag.StringVar(&config.SetupCode, "setup-code", "12345678", "8-digit setup code for commissioning")
 	flag.IntVar(&config.Port, "port", 8443, "Listen port")
 	flag.StringVar(&config.LogLevel, "log-level", "info", "Log level: debug, info, warn, error")
-	flag.BoolVar(&config.Simulate, "simulate", true, "Enable simulation mode with synthetic data")
+	flag.BoolVar(&config.Simulate, "simulate", false, "Enable simulation mode with synthetic data")
 	flag.BoolVar(&config.Interactive, "interactive", false, "Enable interactive command mode")
 
 	flag.StringVar(&config.SerialNumber, "serial", "", "Device serial number (auto-generated if empty)")
@@ -214,6 +214,7 @@ func main() {
 	svcConfig.Categories = []discovery.DeviceCategory{deviceCategory}
 	svcConfig.ListenAddress = fmt.Sprintf(":%d", config.Port)
 	svcConfig.TestEnableKey = config.EnableKey
+	svcConfig.ListenForPairingRequests = true
 	svcConfig.Logger = logger
 
 	// Add TestControl feature to root endpoint.
@@ -252,6 +253,14 @@ func main() {
 	svc, err := service.NewDeviceService(device, svcConfig)
 	if err != nil {
 		log.Fatalf("Failed to create device service: %v", err)
+	}
+
+	// Set up mDNS browser for pairing request listening.
+	browser, err := discovery.NewMDNSBrowser(discovery.DefaultBrowserConfig())
+	if err != nil {
+		log.Printf("Warning: Failed to create mDNS browser: %v", err)
+	} else {
+		svc.SetBrowser(browser)
 	}
 
 	// Register test event trigger handler when enable-key is valid.

@@ -26,8 +26,9 @@ steps:
 
   - name: Wait for stale timeout plus margin
     action: wait
+    timeout: "100s"
     params:
-      duration_ms: "{{ stale_timeout_ms + 5000 }}"
+      duration_ms: "${MASH.S.CONN.STALE_TIMEOUT_MS + 5000}"
 
   - name: Verify connection was closed by device
     action: check_connection_closed
@@ -70,8 +71,9 @@ steps:
 
   - name: Wait past stale timeout
     action: wait
+    timeout: "100s"
     params:
-      duration_ms: "{{ stale_timeout_ms + 5000 }}"
+      duration_ms: "${MASH.S.CONN.STALE_TIMEOUT_MS + 5000}"
 
   - name: Verify operational connection still active
     action: send_ping
@@ -118,8 +120,9 @@ steps:
 
   - name: Wait for stale timeout to reap idle connections
     action: wait
+    timeout: "100s"
     params:
-      duration_ms: "{{ stale_timeout_ms + 5000 }}"
+      duration_ms: "${MASH.S.CONN.STALE_TIMEOUT_MS + 5000}"
 
   - name: Verify new connection is now accepted
     action: open_commissioning_connection
