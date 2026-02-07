@@ -205,10 +205,23 @@ func (r *Runner) currentLevel() int {
 }
 
 // teardownTest is called after each test completes (pass or fail).
-// It closes any per-test resources stored in the execution state, such as
+// It unsubscribes any active subscriptions created during the test and
+// closes per-test resources stored in the execution state, such as
 // security pool connections opened by handleOpenConnections / handleFillConnections.
-// Without this, TCP sockets would leak until GC, consuming device connection slots.
+// Without this cleanup, subscriptions leak between tests (causing stale
+// notifications) and TCP sockets leak until GC (consuming device connection slots).
 func (r *Runner) teardownTest(_ context.Context, _ *loader.TestCase, state *engine.ExecutionState) {
+	// Unsubscribe all active subscriptions created during this test.
+	// This prevents subscription leakage when sessions are reused.
+	if r.conn != nil && r.conn.connected && len(r.activeSubscriptionIDs) > 0 {
+		r.debugf("teardown: unsubscribing %d active subscriptions", len(r.activeSubscriptionIDs))
+		for _, subID := range r.activeSubscriptionIDs {
+			r.sendUnsubscribe(subID)
+		}
+	}
+	r.activeSubscriptionIDs = nil
+	r.pendingNotifications = nil
+
 	if secState, ok := state.Custom["security"].(*securityState); ok && secState.pool != nil {
 		secState.pool.mu.Lock()
 		for _, conn := range secState.pool.connections {
@@ -242,11 +255,19 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	// Clear stale notification buffer from previous tests.
 	r.pendingNotifications = nil
 
-	// Reset device test state if a previous test modified it via triggers.
+	// Reset device test state between tests. This fires when:
+	// (a) a previous test modified device state via triggers, OR
+	// (b) we're reusing a commissioned session (defense-in-depth: clears
+	//     device-side subscriptions even if the runner's teardown unsubscribe
+	//     didn't reach the device).
 	// Use a short timeout -- this is best-effort and must not consume the
 	// test's overall timeout budget (a dead connection can block 90+ seconds).
-	if r.deviceStateModified && r.config.Target != "" && r.config.EnableKey != "" {
-		r.debugf("resetting device test state (previous test modified device)")
+	needsReset := r.deviceStateModified ||
+		(current >= precondLevelCommissioned && needed >= precondLevelCommissioned)
+	if needsReset && r.config.Target != "" && r.config.EnableKey != "" {
+		r.debugf("resetting device test state (modified=%v, reuse=%v)",
+			r.deviceStateModified,
+			current >= precondLevelCommissioned && needed >= precondLevelCommissioned)
 		resetCtx, resetCancel := context.WithTimeout(ctx, 5*time.Second)
 		if err := r.sendTriggerViaZone(resetCtx, features.TriggerResetTestState, state); err != nil {
 			r.debugf("reset trigger failed: %v (continuing)", err)
@@ -284,6 +305,18 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		!hasPrecondition(tc.Preconditions, PrecondDeviceHasGridZone) &&
 		!hasPrecondition(tc.Preconditions, PrecondDeviceHasLocalZone) &&
 		!hasPrecondition(tc.Preconditions, PrecondSessionPreviouslyConnected)
+
+	// Verify session is still healthy before reusing. A previous test may
+	// have corrupted the connection (protocol errors, partial reads, etc.).
+	// If the health check fails, fall through to closeActiveZoneConns.
+	// Only probe real device connections -- stub connections in unit tests
+	// don't have framers and would always fail the probe.
+	if canReuseSession && r.config.Target != "" {
+		if err := r.probeSessionHealth(); err != nil {
+			r.debugf("session health check failed for %s: %v, falling back to fresh commission", tc.ID, err)
+			canReuseSession = false
+		}
+	}
 
 	if !canReuseSession {
 		hadActive := len(r.activeZoneConns) > 0

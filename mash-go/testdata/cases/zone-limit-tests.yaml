@@ -574,6 +574,7 @@ pics_requirements:
 preconditions:
   - session_established: true
   - zone_has_set_values: true
+  - fresh_commission: true
 
 steps:
   - name: Set a limit with long duration

@@ -170,6 +170,15 @@ func (m *SubscriptionManager) GetMatchingInbound(endpointID, featureID uint8, at
 	return matches
 }
 
+// ClearInbound removes all inbound subscriptions.
+// Used by TriggerResetTestState to stop notifications from leaking into the
+// next test when sessions are reused.
+func (m *SubscriptionManager) ClearInbound() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.inbound = make(map[uint32]*Subscription)
+}
+
 // InboundCount returns the number of inbound subscriptions.
 func (m *SubscriptionManager) InboundCount() int {
 	m.mu.RLock()

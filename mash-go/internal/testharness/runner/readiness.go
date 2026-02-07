@@ -29,6 +29,63 @@ func (r *Runner) waitForCommissioningMode(ctx context.Context, timeout time.Dura
 	return fmt.Errorf("timeout waiting for commissioning mode after %v", timeout)
 }
 
+// probeSessionHealth sends a lightweight Read request to DeviceInfo (endpoint 0,
+// feature 0x01) to verify the connection is still alive and the device is
+// responding. Returns nil if the session is healthy, an error otherwise.
+// Used by setupPreconditions to detect corrupted sessions before reuse.
+func (r *Runner) probeSessionHealth() error {
+	if r.conn == nil || !r.conn.connected || r.conn.framer == nil {
+		return fmt.Errorf("no active connection")
+	}
+
+	// Read DeviceInfo (always present on endpoint 0).
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpRead,
+		EndpointID: 0,
+		FeatureID:  0x01, // FeatureDeviceInfo
+	}
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return fmt.Errorf("encode health probe: %w", err)
+	}
+
+	if err := r.conn.framer.WriteFrame(data); err != nil {
+		r.conn.connected = false
+		return fmt.Errorf("send health probe: %w", err)
+	}
+
+	// Short timeout -- we just need to know the connection is alive.
+	if r.conn.tlsConn != nil {
+		_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		defer func() {
+			if r.conn.tlsConn != nil {
+				_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+			}
+		}()
+	}
+
+	// Read response, skipping interleaved notifications (messageId=0).
+	for range 5 {
+		respData, err := r.conn.framer.ReadFrame()
+		if err != nil {
+			r.conn.connected = false
+			return fmt.Errorf("read health probe response: %w", err)
+		}
+		resp, err := wire.DecodeResponse(respData)
+		if err != nil {
+			return fmt.Errorf("decode health probe response: %w", err)
+		}
+		if resp.MessageID == 0 {
+			r.pendingNotifications = append(r.pendingNotifications, respData)
+			continue
+		}
+		r.debugf("probeSessionHealth: device responded (status=%d)", resp.Status)
+		return nil
+	}
+	return fmt.Errorf("health probe: too many interleaved notifications")
+}
+
 // waitForOperationalReady subscribes to DeviceInfo (endpoint 0, feature 0x01)
 // and waits for the priming report. A successful response confirms the
 // device's operational handler is running and processing protocol messages

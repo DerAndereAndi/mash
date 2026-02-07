@@ -386,6 +386,13 @@ func (r *Runner) handleSubscribeAsZone(ctx context.Context, step *loader.Step, s
 
 	subscriptionID := extractSubscriptionID(resp.Payload)
 
+	// Track subscription ID for auto-unsubscribe in teardown.
+	if subscriptionID != nil {
+		if id, ok := wire.ToUint32(subscriptionID); ok {
+			r.trackSubscription(id)
+		}
+	}
+
 	return map[string]any{
 		KeySubscribeSuccess:       resp.IsSuccess(),
 		KeySubscriptionID:         subscriptionID,
@@ -1820,6 +1827,9 @@ func (r *Runner) handleUnsubscribe(ctx context.Context, step *loader.Step, state
 	}
 
 	state.Set(StateUnsubscribedID, subID)
+
+	// Remove from active tracking (test explicitly unsubscribed).
+	r.removeActiveSubscription(subID)
 
 	// Clear priming data and buffered notifications so
 	// wait_for_notification doesn't return stale data.

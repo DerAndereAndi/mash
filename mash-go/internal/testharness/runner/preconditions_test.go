@@ -1115,6 +1115,202 @@ func TestSetupPreconditions_SessionReuse_BackwardsTransitionUnaffected(t *testin
 	}
 }
 
+// Phase 1: Subscription tracking tests.
+
+func TestTrackSubscription(t *testing.T) {
+	r := newTestRunner()
+	r.trackSubscription(1)
+	r.trackSubscription(2)
+
+	if len(r.activeSubscriptionIDs) != 2 {
+		t.Fatalf("expected 2 tracked subs, got %d", len(r.activeSubscriptionIDs))
+	}
+	if r.activeSubscriptionIDs[0] != 1 || r.activeSubscriptionIDs[1] != 2 {
+		t.Errorf("unexpected IDs: %v", r.activeSubscriptionIDs)
+	}
+}
+
+func TestRemoveActiveSubscription(t *testing.T) {
+	r := newTestRunner()
+	r.trackSubscription(10)
+	r.trackSubscription(20)
+	r.trackSubscription(30)
+
+	r.removeActiveSubscription(20)
+
+	if len(r.activeSubscriptionIDs) != 2 {
+		t.Fatalf("expected 2 tracked subs after remove, got %d", len(r.activeSubscriptionIDs))
+	}
+	// Remaining should be 10 and 30.
+	for _, id := range r.activeSubscriptionIDs {
+		if id == 20 {
+			t.Error("expected subscription 20 to be removed")
+		}
+	}
+}
+
+func TestRemoveActiveSubscription_NotFound(t *testing.T) {
+	r := newTestRunner()
+	r.trackSubscription(10)
+
+	// Removing a non-existent ID should be a no-op.
+	r.removeActiveSubscription(99)
+
+	if len(r.activeSubscriptionIDs) != 1 {
+		t.Fatalf("expected 1 tracked sub, got %d", len(r.activeSubscriptionIDs))
+	}
+}
+
+func TestTeardownTest_ClearsTrackingList(t *testing.T) {
+	r := newTestRunner()
+	r.trackSubscription(1)
+	r.trackSubscription(2)
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{ID: "TC-TEST-001"}
+	r.teardownTest(context.Background(), tc, state)
+
+	if len(r.activeSubscriptionIDs) != 0 {
+		t.Errorf("expected empty tracking list after teardown, got %d", len(r.activeSubscriptionIDs))
+	}
+}
+
+func TestTeardownTest_NoUnsubscribeWhenDisconnected(t *testing.T) {
+	r := newTestRunner()
+	r.trackSubscription(1)
+	// conn is not connected (default stub)
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{ID: "TC-TEST-001"}
+
+	// Should not panic or attempt to send on a nil/disconnected conn.
+	r.teardownTest(context.Background(), tc, state)
+
+	if len(r.activeSubscriptionIDs) != 0 {
+		t.Errorf("expected empty tracking list after teardown, got %d", len(r.activeSubscriptionIDs))
+	}
+}
+
+func TestTeardownTest_ClearsPendingNotifications(t *testing.T) {
+	r := newTestRunner()
+	r.pendingNotifications = [][]byte{{1, 2, 3}}
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{ID: "TC-TEST-001"}
+	r.teardownTest(context.Background(), tc, state)
+
+	if len(r.pendingNotifications) != 0 {
+		t.Errorf("expected empty pending notifications after teardown, got %d", len(r.pendingNotifications))
+	}
+}
+
+// Phase 2: Session health check tests.
+
+func TestProbeSessionHealth_NilConnection(t *testing.T) {
+	r := newTestRunner()
+	r.conn = nil
+
+	err := r.probeSessionHealth()
+	if err == nil {
+		t.Fatal("expected error for nil connection")
+	}
+	if err.Error() != "no active connection" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestProbeSessionHealth_DisconnectedConnection(t *testing.T) {
+	r := newTestRunner()
+	// Default stub has connected=false
+
+	err := r.probeSessionHealth()
+	if err == nil {
+		t.Fatal("expected error for disconnected connection")
+	}
+	if err.Error() != "no active connection" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestProbeSessionHealth_NilFramer(t *testing.T) {
+	r := newTestRunner()
+	r.conn.connected = true
+	r.conn.framer = nil
+
+	err := r.probeSessionHealth()
+	if err == nil {
+		t.Fatal("expected error for nil framer")
+	}
+	if err.Error() != "no active connection" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestSetupPreconditions_SessionReuse_FallsBackOnHealthCheckFailure(t *testing.T) {
+	// Commissioned runner with connected=true but no real framer.
+	// probeSessionHealth should fail (nil framer) and canReuseSession
+	// should fall back to closeActiveZoneConns.
+	// Set a target so the health check is actually executed (it's
+	// skipped for stub connections without a target).
+	r := newTestRunner()
+	r.config.Target = "127.0.0.1:9999"
+	r.conn.connected = true
+	r.conn.operational = true
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.activeZoneConns["main-abc123"] = r.conn
+	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID:            "TC-READ-HEALTH-001",
+		Preconditions: []loader.Condition{{PrecondSessionEstablished: true}},
+	}
+
+	// setupPreconditions will try to reuse the session but the health
+	// check fails (stub connection has no framer), so it falls back to
+	// closeActiveZoneConns.
+	_ = r.setupPreconditions(context.Background(), tc, state)
+
+	// activeZoneConns should be emptied because closeActiveZoneConns was called.
+	if len(r.activeZoneConns) != 0 {
+		t.Errorf("expected 0 active zone conns after health check failure, got %d", len(r.activeZoneConns))
+	}
+}
+
+// Phase 3: Broadened reset condition tests.
+
+func TestSetupPreconditions_AlwaysResetsOnReuse(t *testing.T) {
+	// Commissioned runner with deviceStateModified=false.
+	// When both current and needed are level 3, the reset trigger
+	// should still fire (defense-in-depth for device-side subscription clearing).
+	// We can't verify the trigger was sent (no real target), but we can
+	// verify that the broadened condition doesn't break anything.
+	r := newTestRunner()
+	r.conn.connected = true
+	r.conn.operational = true
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.deviceStateModified = false
+	r.activeZoneConns["main-abc123"] = r.conn
+	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID:            "TC-READ-003",
+		Preconditions: []loader.Condition{{PrecondSessionEstablished: true}},
+	}
+
+	// Should succeed without error (no target means reset is skipped).
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Session should still be reusable (no target means health check skipped too).
+	if !r.conn.connected {
+		t.Error("expected connection to remain connected")
+	}
+}
+
 func TestCooldownRemaining(t *testing.T) {
 	tests := []struct {
 		name string

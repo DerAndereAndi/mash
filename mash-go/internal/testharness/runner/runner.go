@@ -82,6 +82,12 @@ type Runner struct {
 	// reading a command response (interleaved with the response).
 	pendingNotifications [][]byte
 
+	// activeSubscriptionIDs tracks subscription IDs created during the
+	// current test. In teardownTest, the runner sends Unsubscribe for each
+	// tracked ID to prevent subscription leakage between tests when
+	// sessions are reused.
+	activeSubscriptionIDs []uint32
+
 	// pairingAdvertiser is a real mDNS advertiser used by announce_pairing_request
 	// to advertise _mashp._udp services. Cleaned up in Close().
 	pairingAdvertiser *discovery.MDNSAdvertiser
@@ -438,6 +444,50 @@ func (r *Runner) verifyPeerCertAgainstZoneCA(rawCerts [][]byte, _ [][]*x509.Cert
 	}
 
 	return nil
+}
+
+// trackSubscription adds a subscription ID to the active tracking list.
+func (r *Runner) trackSubscription(subID uint32) {
+	r.activeSubscriptionIDs = append(r.activeSubscriptionIDs, subID)
+}
+
+// removeActiveSubscription removes a subscription ID from tracking.
+// Called when a test step explicitly unsubscribes so we don't double-unsubscribe.
+func (r *Runner) removeActiveSubscription(subID uint32) {
+	for i, id := range r.activeSubscriptionIDs {
+		if id == subID {
+			r.activeSubscriptionIDs = append(r.activeSubscriptionIDs[:i], r.activeSubscriptionIDs[i+1:]...)
+			return
+		}
+	}
+}
+
+// sendUnsubscribe sends an unsubscribe request for the given subscription ID.
+// This is best-effort cleanup; errors are ignored.
+func (r *Runner) sendUnsubscribe(subID uint32) {
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  0,
+		Payload:    &wire.UnsubscribePayload{SubscriptionID: subID},
+	}
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return
+	}
+	// Best-effort: send and ignore response/errors.
+	if r.conn.framer != nil {
+		_ = r.conn.framer.WriteFrame(data)
+		// Read response with short deadline to drain the frame.
+		if r.conn.tlsConn != nil {
+			_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		}
+		_, _ = r.conn.framer.ReadFrame()
+		if r.conn.tlsConn != nil {
+			_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+		}
+	}
 }
 
 // Close cleans up runner resources. It sends RemoveZone on the main
@@ -1371,6 +1421,13 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 	// it as an initial report if no subsequent notification frame arrives.
 	if primingData != nil {
 		state.Set(StatePrimingData, primingData)
+	}
+
+	// Track subscription ID for auto-unsubscribe in teardown.
+	if subscriptionID != nil {
+		if id, ok := wire.ToUint32(subscriptionID); ok {
+			r.trackSubscription(id)
+		}
 	}
 
 	// Save subscription metadata in state for later use by unsubscribe

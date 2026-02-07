@@ -354,6 +354,33 @@ func TestSubscriptionManager_IDsIncrement(t *testing.T) {
 	}
 }
 
+func TestSubscriptionManager_ClearInbound(t *testing.T) {
+	sm := NewSubscriptionManager()
+
+	// Add several inbound subscriptions.
+	sm.AddInbound(0, 1, nil)
+	sm.AddInbound(1, 2, []uint16{100})
+	sm.AddInbound(0, 3, []uint16{200, 201})
+
+	if sm.InboundCount() != 3 {
+		t.Fatalf("expected 3 inbound, got %d", sm.InboundCount())
+	}
+
+	// Also add an outbound to verify it's unaffected.
+	outID := sm.AddOutbound(0, 1, nil)
+
+	sm.ClearInbound()
+
+	if sm.InboundCount() != 0 {
+		t.Errorf("expected 0 inbound after ClearInbound, got %d", sm.InboundCount())
+	}
+
+	// Outbound should be unaffected.
+	if sm.GetOutbound(outID) == nil {
+		t.Error("expected outbound subscription to survive ClearInbound")
+	}
+}
+
 func TestSubscriptionManager_RemoveDoesNotAffectOther(t *testing.T) {
 	sm := NewSubscriptionManager()
 

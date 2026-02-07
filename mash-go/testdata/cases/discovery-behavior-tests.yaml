@@ -301,6 +301,7 @@ pics_requirements:
 preconditions:
   - device_in_commissioning_mode: true
   - zone_created: true
+  - fresh_commission: true
 
 steps:
   - name: Commission device
@@ -344,6 +345,7 @@ pics_requirements:
 
 preconditions:
   - device_commissioned: true
+  - fresh_commission: true
 
 steps:
   - name: Browse and inspect instance name
@@ -381,6 +383,7 @@ pics_requirements:
 
 preconditions:
   - device_commissioned: true
+  - fresh_commission: true
 
 steps:
   - name: Browse and inspect TXT record

@@ -539,6 +539,50 @@ func TestZoneSession_Write_SendsRequestAndReceivesResponse(t *testing.T) {
 	}
 }
 
+func TestZoneSession_ClearSubscriptions(t *testing.T) {
+	device := createTestDevice()
+	conn := newMockBidirectionalConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	// Create an inbound subscription via handleRequest (subscribe request).
+	subscribeReq := &wire.Request{
+		MessageID:  1,
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  0x01, // DeviceInfo
+	}
+	data, err := wire.EncodeRequest(subscribeReq)
+	if err != nil {
+		t.Fatalf("encode subscribe: %v", err)
+	}
+	session.OnMessage(data)
+
+	if session.SubscriptionCount() == 0 {
+		t.Fatal("expected at least 1 subscription after subscribe request")
+	}
+
+	// ClearSubscriptions should remove inbound subscriptions without closing the session.
+	session.ClearSubscriptions()
+
+	if session.SubscriptionCount() != 0 {
+		t.Errorf("expected 0 subscriptions after ClearSubscriptions, got %d", session.SubscriptionCount())
+	}
+
+	// Session should still be usable (not closed).
+	readReq := &wire.Request{
+		MessageID:  2,
+		Operation:  wire.OpRead,
+		EndpointID: 0,
+		FeatureID:  0x01,
+	}
+	readData, _ := wire.EncodeRequest(readReq)
+	session.OnMessage(readData)
+	// If session was closed, OnMessage would silently return and no response sent.
+	if len(conn.SentMessages()) < 2 {
+		t.Error("expected session to still process requests after ClearSubscriptions")
+	}
+}
+
 func TestZoneSession_Subscribe_TracksInSubscriptionManager(t *testing.T) {
 	device := createTestDevice()
 	conn := newMockBidirectionalConnection()

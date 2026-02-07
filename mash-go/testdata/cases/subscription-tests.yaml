@@ -576,6 +576,7 @@ pics_requirements:
 
 preconditions:
   - session_previously_connected: true
+  - fresh_commission: true
 
 steps:
   - name: Reconnect to device

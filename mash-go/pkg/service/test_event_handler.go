@@ -121,6 +121,13 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 		}
 		// Reset clock offset.
 		s.clockOffset = 0
+		// Clear inbound subscriptions on all active zone sessions to stop
+		// notifications from leaking into the next test.
+		s.mu.Lock()
+		for _, session := range s.zoneSessions {
+			session.ClearSubscriptions()
+		}
+		s.mu.Unlock()
 		return nil
 	default:
 		// Check for parameterized triggers (base + encoded value).

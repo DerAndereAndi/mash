@@ -365,6 +365,14 @@ func (s *ZoneSession) SubscriptionCount() int {
 	return s.handler.SubscriptionCount()
 }
 
+// ClearSubscriptions removes all inbound subscriptions from this session.
+// Unlike Close() which tears down the entire session, this only clears
+// subscriptions while keeping the session alive. Used by TriggerResetTestState
+// to prevent subscription leakage between tests.
+func (s *ZoneSession) ClearSubscriptions() {
+	s.handler.SubscriptionManager().ClearInbound()
+}
+
 // SetOnWrite sets the callback for write operations.
 // The callback receives the endpoint ID, feature ID, and written attributes.
 func (s *ZoneSession) SetOnWrite(cb WriteCallback) {
