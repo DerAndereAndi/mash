@@ -155,7 +155,7 @@ func (r *Runner) readAttributes(ctx context.Context, endpointID, featureID uint8
 		return nil, fmt.Errorf("encode read: %w", err)
 	}
 
-	resp, err := r.sendRequest(data, "auto-pics-read")
+	resp, err := r.sendRequest(data, "auto-pics-read", req.MessageID)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func (r *Runner) readFeatureGlobals(ctx context.Context, endpointID, featureID u
 		return nil, nil, 0, fmt.Errorf("encode read: %w", err)
 	}
 
-	resp, sendErr := r.sendRequest(data, "auto-pics-globals")
+	resp, sendErr := r.sendRequest(data, "auto-pics-globals", req.MessageID)
 	if sendErr != nil {
 		return nil, nil, 0, sendErr
 	}

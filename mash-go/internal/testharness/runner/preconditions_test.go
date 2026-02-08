@@ -1279,12 +1279,10 @@ func TestSetupPreconditions_SessionReuse_FallsBackOnHealthCheckFailure(t *testin
 
 // Phase 3: Broadened reset condition tests.
 
-func TestSetupPreconditions_AlwaysResetsOnReuse(t *testing.T) {
+func TestSetupPreconditions_SessionReuseNoResetWhenUnmodified(t *testing.T) {
 	// Commissioned runner with deviceStateModified=false.
-	// When both current and needed are level 3, the reset trigger
-	// should still fire (defense-in-depth for device-side subscription clearing).
-	// We can't verify the trigger was sent (no real target), but we can
-	// verify that the broadened condition doesn't break anything.
+	// The reset trigger should NOT fire when device state was not modified.
+	// Verify that session reuse works correctly in this case.
 	r := newTestRunner()
 	r.conn.connected = true
 	r.conn.operational = true

@@ -425,50 +425,45 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 		}, nil
 	}
 
-	// Try to read a frame within timeout
-	readCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
-	defer cancel()
-
-	type readResult struct {
-		data []byte
-		err  error
+	// Set a read deadline on the TLS connection so the ReadFrame call
+	// below returns promptly when the timeout expires. Without this,
+	// a goroutine blocked on ReadFrame outlives the context and silently
+	// consumes the next frame on the wire (e.g. a reset trigger response),
+	// causing subsequent operations to time out.
+	timeout := time.Duration(timeoutMs) * time.Millisecond
+	if r.conn.tlsConn != nil {
+		_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(timeout))
+		defer func() {
+			if r.conn.tlsConn != nil {
+				_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+			}
+		}()
 	}
 
-	ch := make(chan readResult, 1)
-	go func() {
-		data, err := r.conn.framer.ReadFrame()
-		ch <- readResult{data, err}
-	}()
-
-	select {
-	case res := <-ch:
-		if res.err != nil {
-			return map[string]any{
-				KeyNotificationReceived: false,
-				KeyError:                res.err.Error(),
-			}, nil
-		}
-		// Decode the notification frame
-		notif, err := wire.DecodeNotification(res.data)
-		if err != nil {
-			// Might be a response or other message - return raw
-			return map[string]any{
-				KeyNotificationReceived: true,
-				KeyNotificationData:     res.data,
-				KeyEventType:            eventType,
-			}, nil
-		}
-		out, outErr := r.buildNotificationOutput(notif.Changes, eventType, state, false)
-		if out != nil {
-			out[KeySubscriptionID] = notif.SubscriptionID
-		}
-		return out, outErr
-	case <-readCtx.Done():
+	data, err := r.conn.framer.ReadFrame()
+	if err != nil {
+		// Timeout or connection error -- no notification arrived.
 		return map[string]any{
 			KeyNotificationReceived: false,
 			KeyEventType:            eventType,
 		}, nil
 	}
+
+	// Decode the notification frame
+	notif, err := wire.DecodeNotification(data)
+	if err != nil {
+		// Might be a response or other message - return raw
+		return map[string]any{
+			KeyNotificationReceived: true,
+			KeyNotificationData:     data,
+			KeyEventType:            eventType,
+		}, nil
+	}
+	out, outErr := r.buildNotificationOutput(notif.Changes, eventType, state, false)
+	if out != nil {
+		out[KeySubscriptionID] = notif.SubscriptionID
+	}
+	return out, outErr
 }
 
 // buildNotificationOutput builds the output map from notification changes.

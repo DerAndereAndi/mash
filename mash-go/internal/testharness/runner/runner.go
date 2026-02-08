@@ -464,7 +464,16 @@ func (r *Runner) removeActiveSubscription(subID uint32) {
 
 // sendUnsubscribe sends an unsubscribe request for the given subscription ID.
 // This is best-effort cleanup; errors are ignored.
-func (r *Runner) sendUnsubscribe(subID uint32) {
+// sendUnsubscribe sends an Unsubscribe request and reads the response,
+// discarding any interleaved notification frames. This acts as a wire-level
+// drain: all stale notifications that arrived before the unsubscribe
+// response are consumed and discarded, leaving the connection clean for the
+// next test. Uses a 2s deadline to avoid blocking if the device is
+// unresponsive.
+func (r *Runner) sendUnsubscribe(conn *Connection, subID uint32) {
+	if conn == nil || !conn.connected || conn.framer == nil {
+		return
+	}
 	req := &wire.Request{
 		MessageID:  r.nextMessageID(),
 		Operation:  wire.OpSubscribe,
@@ -476,17 +485,47 @@ func (r *Runner) sendUnsubscribe(subID uint32) {
 	if err != nil {
 		return
 	}
-	// Best-effort: send and ignore response/errors.
-	if r.conn.framer != nil {
-		_ = r.conn.framer.WriteFrame(data)
-		// Read response with short deadline to drain the frame.
-		if r.conn.tlsConn != nil {
-			_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	if err := conn.framer.WriteFrame(data); err != nil {
+		return
+	}
+
+	// Read frames until the unsubscribe response arrives, discarding any
+	// interleaved notifications. The 2s deadline is set once before the
+	// loop (safe for Go TLS -- the deadline only fires between reads,
+	// not mid-record, because each ReadFrame completes a full framed
+	// message).
+	if conn.tlsConn != nil {
+		_ = conn.tlsConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		defer func() {
+			if conn.tlsConn != nil {
+				_ = conn.tlsConn.SetReadDeadline(time.Time{})
+			}
+		}()
+	}
+	drained := 0
+	for range 20 {
+		respData, err := conn.framer.ReadFrame()
+		if err != nil {
+			break
 		}
-		_, _ = r.conn.framer.ReadFrame()
-		if r.conn.tlsConn != nil {
-			_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+		resp, decErr := wire.DecodeResponse(respData)
+		if decErr != nil {
+			break
 		}
+		if resp.MessageID == 0 {
+			drained++ // Discard stale notification
+			continue
+		}
+		if resp.MessageID != req.MessageID {
+			r.debugf("sendUnsubscribe(%d): discarding orphaned response (got msgID=%d, want %d)", subID, resp.MessageID, req.MessageID)
+			drained++
+			continue
+		}
+		// Got the unsubscribe response -- wire is clean.
+		break
+	}
+	if drained > 0 {
+		r.debugf("sendUnsubscribe(%d): discarded %d stale frames", subID, drained)
 	}
 }
 
@@ -1017,7 +1056,10 @@ func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state 
 // sendRequest sends an encoded request and reads the decoded response.
 // On IO errors (send/receive), the connection is marked as dead so that
 // subsequent tests will reconnect instead of reusing a broken connection.
-func (r *Runner) sendRequest(data []byte, op string) (*wire.Response, error) {
+// The expectedMsgID parameter enables response correlation: only a response
+// whose MessageID matches is accepted. Orphaned responses from previous
+// operations (e.g. simulate_no_response) are discarded with a warning.
+func (r *Runner) sendRequest(data []byte, op string, expectedMsgID uint32) (*wire.Response, error) {
 	if err := r.conn.framer.WriteFrame(data); err != nil {
 		r.conn.connected = false
 		return nil, fmt.Errorf("failed to send %s request: %w", op, err)
@@ -1034,8 +1076,9 @@ func (r *Runner) sendRequest(data []byte, op string) (*wire.Response, error) {
 		}()
 	}
 
-	// Read frames until we get a response (skip notifications with messageId=0).
-	for i := 0; i < 5; i++ {
+	// Read frames until we get a matching response. Skip notifications
+	// (messageId=0) and discard orphaned responses from previous operations.
+	for i := 0; i < 10; i++ {
 		respData, err := r.conn.framer.ReadFrame()
 		if err != nil {
 			r.conn.connected = false
@@ -1055,10 +1098,17 @@ func (r *Runner) sendRequest(data []byte, op string) (*wire.Response, error) {
 			continue
 		}
 
+		// Discard orphaned responses from previous operations (e.g.
+		// simulate_no_response sends a request but never reads the reply).
+		if resp.MessageID != expectedMsgID {
+			r.debugf("sendRequest(%s): discarding orphaned response (got msgID=%d, want %d)", op, resp.MessageID, expectedMsgID)
+			continue
+		}
+
 		return resp, nil
 	}
 
-	return nil, fmt.Errorf("failed to read %s response: too many interleaved notifications", op)
+	return nil, fmt.Errorf("failed to read %s response: too many interleaved frames", op)
 }
 
 // handleRead sends a read request and returns the response.
@@ -1164,7 +1214,7 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		}, nil
 	}
 
-	resp, err := r.sendRequest(data, "read")
+	resp, err := r.sendRequest(data, "read", req.MessageID)
 	if err != nil {
 		return nil, err
 	}
@@ -1333,7 +1383,7 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 		return nil, fmt.Errorf("failed to encode write request: %w", err)
 	}
 
-	resp, err := r.sendRequest(data, "write")
+	resp, err := r.sendRequest(data, "write", req.MessageID)
 	if err != nil {
 		// RC5f: Return output map (not Go error) for EOF/closed so YAML
 		// expectations can check the error.
@@ -1395,7 +1445,7 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 		return nil, fmt.Errorf("failed to encode subscribe request: %w", err)
 	}
 
-	resp, err := r.sendRequest(data, "subscribe")
+	resp, err := r.sendRequest(data, "subscribe", req.MessageID)
 	if err != nil {
 		// Return output map (not Go error) for connection failures so
 		// YAML expectations can check tls_error and error fields.
@@ -1556,7 +1606,7 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 		return nil, fmt.Errorf("failed to encode invoke request: %w", err)
 	}
 
-	resp, err := r.sendRequest(data, "invoke")
+	resp, err := r.sendRequest(data, "invoke", req.MessageID)
 	if err != nil {
 		// Return output map (not Go error) for connection failures so
 		// YAML expectations can check error fields.

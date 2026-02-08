@@ -308,7 +308,7 @@ func (r *Runner) invokeTriggerTestEvent(trigger uint64) (string, error) {
 		return "", fmt.Errorf("failed to encode trigger request: %w", err)
 	}
 
-	resp, err := r.sendRequest(data, "triggerTestEvent")
+	resp, err := r.sendRequest(data, "triggerTestEvent", req.MessageID)
 	if err != nil {
 		r.debugf("invokeTriggerTestEvent: sendRequest error: %v", err)
 		return "", err

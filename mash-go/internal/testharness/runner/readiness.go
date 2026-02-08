@@ -65,8 +65,10 @@ func (r *Runner) probeSessionHealth() error {
 		}()
 	}
 
-	// Read response, skipping interleaved notifications (messageId=0).
-	for range 5 {
+	// Read response, discarding stale notifications (messageId=0) and
+	// orphaned responses from previous operations (mismatched messageId).
+	drained := 0
+	for range 20 {
 		respData, err := r.conn.framer.ReadFrame()
 		if err != nil {
 			r.conn.connected = false
@@ -77,13 +79,21 @@ func (r *Runner) probeSessionHealth() error {
 			return fmt.Errorf("decode health probe response: %w", err)
 		}
 		if resp.MessageID == 0 {
-			r.pendingNotifications = append(r.pendingNotifications, respData)
+			drained++
+			continue // Discard stale notification
+		}
+		if resp.MessageID != req.MessageID {
+			r.debugf("probeSessionHealth: discarding orphaned response (got msgID=%d, want %d)", resp.MessageID, req.MessageID)
+			drained++
 			continue
+		}
+		if drained > 0 {
+			r.debugf("probeSessionHealth: discarded %d stale frames", drained)
 		}
 		r.debugf("probeSessionHealth: device responded (status=%d)", resp.Status)
 		return nil
 	}
-	return fmt.Errorf("health probe: too many interleaved notifications")
+	return fmt.Errorf("health probe: too many interleaved frames (%d discarded)", drained)
 }
 
 // waitForOperationalReady subscribes to DeviceInfo (endpoint 0, feature 0x01)
@@ -129,8 +139,8 @@ func (r *Runner) waitForOperationalReady(timeout time.Duration) error {
 		}()
 	}
 
-	// Read response, skipping any interleaved notifications.
-	for range 5 {
+	// Read response, skipping notifications and orphaned responses.
+	for range 10 {
 		respData, err := r.conn.framer.ReadFrame()
 		if err != nil {
 			r.conn.connected = false
@@ -145,8 +155,12 @@ func (r *Runner) waitForOperationalReady(timeout time.Duration) error {
 			r.pendingNotifications = append(r.pendingNotifications, respData)
 			continue
 		}
+		if resp.MessageID != req.MessageID {
+			r.debugf("waitForOperationalReady: discarding orphaned response (got msgID=%d, want %d)", resp.MessageID, req.MessageID)
+			continue
+		}
 		r.debugf("waitForOperationalReady: device responded (status=%d)", resp.Status)
 		return nil
 	}
-	return fmt.Errorf("readiness probe: too many interleaved notifications")
+	return fmt.Errorf("readiness probe: too many interleaved frames")
 }

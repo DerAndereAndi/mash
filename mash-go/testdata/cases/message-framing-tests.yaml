@@ -98,6 +98,7 @@ pics_requirements:
 
 preconditions:
   - session_established: true
+  - fresh_commission: true
 
 steps:
   - name: Send CBOR map with duplicate key
@@ -445,6 +446,7 @@ pics_requirements:
 
 preconditions:
   - session_established: true
+  - fresh_commission: true
 
 steps:
   - name: Send length prefix declaring 16 bytes then only 5
@@ -801,6 +803,7 @@ pics_requirements:
 
 preconditions:
   - session_established: true
+  - fresh_commission: true
 
 steps:
   - name: Send request with future key 200

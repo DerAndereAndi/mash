@@ -419,9 +419,21 @@ func (r *Runner) handleWaitForNotificationAsZone(ctx context.Context, step *load
 	}
 
 	// Check for notifications buffered by sendTriggerViaZone.
+	// When r.conn and the zone connection are the same object (after
+	// two_zones_connected restores r.conn), sendTrigger buffers
+	// notifications to r.pendingNotifications via sendRequestAndRead.
+	// Check both buffers.
 	if len(conn.pendingNotifications) > 0 {
 		data := conn.pendingNotifications[0]
 		conn.pendingNotifications = conn.pendingNotifications[1:]
+		return map[string]any{
+			KeyNotificationReceived: true,
+			KeyNotificationData:     data,
+		}, nil
+	}
+	if conn == r.conn && len(r.pendingNotifications) > 0 {
+		data := r.pendingNotifications[0]
+		r.pendingNotifications = r.pendingNotifications[1:]
 		return map[string]any{
 			KeyNotificationReceived: true,
 			KeyNotificationData:     data,
@@ -1818,7 +1830,7 @@ func (r *Runner) handleUnsubscribe(ctx context.Context, step *loader.Step, state
 		return nil, fmt.Errorf("failed to encode unsubscribe request: %w", err)
 	}
 
-	resp, err := r.sendRequest(data, "unsubscribe")
+	resp, err := r.sendRequest(data, "unsubscribe", req.MessageID)
 	if err != nil {
 		return map[string]any{
 			KeyUnsubscribeSuccess: false,

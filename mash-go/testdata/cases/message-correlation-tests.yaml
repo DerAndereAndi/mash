@@ -205,6 +205,7 @@ pics_requirements:
 
 preconditions:
   - session_established: true
+  - fresh_commission: true
 
 steps:
   - name: Send request that will fail (invalid endpoint)

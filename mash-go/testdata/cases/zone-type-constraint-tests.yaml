@@ -234,7 +234,6 @@ pics_requirements:
 
 preconditions:
   - two_zones_connected: true
-  - fresh_commission: true
 
 steps:
   # Remove LOCAL zone via GRID connection.

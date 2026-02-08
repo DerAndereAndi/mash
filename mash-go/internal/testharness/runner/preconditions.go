@@ -178,6 +178,16 @@ func hasPrecondition(conditions []loader.Condition, key string) bool {
 	return false
 }
 
+// preconditionValue returns the string value of a precondition key, or "" if not found.
+func preconditionValue(conditions []loader.Condition, key string) string {
+	for _, cond := range conditions {
+		if s, ok := cond[key].(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
 // needsFreshCommission checks if any condition explicitly requests a fresh commissioning cycle.
 func needsFreshCommission(conditions []loader.Condition) bool {
 	return hasPrecondition(conditions, PrecondFreshCommission)
@@ -212,15 +222,24 @@ func (r *Runner) currentLevel() int {
 // notifications) and TCP sockets leak until GC (consuming device connection slots).
 func (r *Runner) teardownTest(_ context.Context, _ *loader.TestCase, state *engine.ExecutionState) {
 	// Unsubscribe all active subscriptions created during this test.
-	// This prevents subscription leakage when sessions are reused.
-	if r.conn != nil && r.conn.connected && len(r.activeSubscriptionIDs) > 0 {
+	// Each sendUnsubscribe reads the response and discards any interleaved
+	// stale notifications, leaving the wire clean for the next test.
+	if len(r.activeSubscriptionIDs) > 0 {
 		r.debugf("teardown: unsubscribing %d active subscriptions", len(r.activeSubscriptionIDs))
 		for _, subID := range r.activeSubscriptionIDs {
-			r.sendUnsubscribe(subID)
+			r.sendUnsubscribe(r.conn, subID)
 		}
 	}
 	r.activeSubscriptionIDs = nil
 	r.pendingNotifications = nil
+	if r.conn != nil {
+		r.conn.pendingNotifications = nil
+	}
+	for _, zc := range r.activeZoneConns {
+		if zc != nil {
+			zc.pendingNotifications = nil
+		}
+	}
 
 	if secState, ok := state.Custom["security"].(*securityState); ok && secState.pool != nil {
 		secState.pool.mu.Lock()
@@ -255,19 +274,11 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	// Clear stale notification buffer from previous tests.
 	r.pendingNotifications = nil
 
-	// Reset device test state between tests. This fires when:
-	// (a) a previous test modified device state via triggers, OR
-	// (b) we're reusing a commissioned session (defense-in-depth: clears
-	//     device-side subscriptions even if the runner's teardown unsubscribe
-	//     didn't reach the device).
-	// Use a short timeout -- this is best-effort and must not consume the
-	// test's overall timeout budget (a dead connection can block 90+ seconds).
-	needsReset := r.deviceStateModified ||
-		(current >= precondLevelCommissioned && needed >= precondLevelCommissioned)
-	if needsReset && r.config.Target != "" && r.config.EnableKey != "" {
-		r.debugf("resetting device test state (modified=%v, reuse=%v)",
-			r.deviceStateModified,
-			current >= precondLevelCommissioned && needed >= precondLevelCommissioned)
+	// Reset device test state between tests when a previous test modified
+	// device state via triggers. Use a short timeout -- this is best-effort
+	// and must not consume the test's overall timeout budget.
+	if r.deviceStateModified && r.config.Target != "" && r.config.EnableKey != "" {
+		r.debugf("resetting device test state")
 		resetCtx, resetCancel := context.WithTimeout(ctx, 5*time.Second)
 		if err := r.sendTriggerViaZone(resetCtx, features.TriggerResetTestState, state); err != nil {
 			r.debugf("reset trigger failed: %v (continuing)", err)
@@ -563,6 +574,17 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 							}
 						}
 					}
+					// Restore the first zone's connection (GRID) to r.conn so
+					// that ensureCommissioned (called later) sees an active
+					// session and does not attempt a third commission on a
+					// device that is already at max capacity. We use the
+					// first zone because tests that disconnect LOCAL expect
+					// GRID (r.conn) to remain alive.
+					firstZone := zones[0]
+					if zc, ok := ct.zoneConnections[firstZone.name]; ok && zc.connected {
+						r.conn = zc
+						r.debugf("two_zones_connected: restored r.conn from zone %s", firstZone.name)
+					}
 					// Reset commission zone type to default.
 					r.commissionZoneType = 0
 				} else {
@@ -750,6 +772,55 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 			r.lastDeviceConnClose = time.Now()
 		}
 		state.Set(StateCommissioningActive, true)
+	}
+
+	// Send control/process state triggers on real devices so the device
+	// matches the simulated preconditions. At baseline these states leaked
+	// from prior tests; with session reuse + fresh zone commissions, the
+	// device starts in AUTONOMOUS and needs an explicit trigger.
+	if r.config.Target != "" && r.config.EnableKey != "" && needed >= precondLevelCommissioned {
+		if csVal := preconditionValue(tc.Preconditions, PrecondControlState); csVal != "" {
+			var trigger uint64
+			switch csVal {
+			case ControlStateControlled:
+				trigger = features.TriggerControlStateControlled
+			case ControlStateFailsafe:
+				trigger = features.TriggerControlStateFailsafe
+			case ControlStateAutonomous:
+				trigger = features.TriggerControlStateAutonomous
+			case ControlStateLimited:
+				trigger = features.TriggerControlStateLimited
+			case ControlStateOverride:
+				trigger = features.TriggerControlStateOverride
+			}
+			if trigger != 0 {
+				trigCtx, trigCancel := context.WithTimeout(ctx, 3*time.Second)
+				if err := r.sendTriggerViaZone(trigCtx, trigger, state); err != nil {
+					r.debugf("control_state trigger failed: %v (continuing)", err)
+				}
+				trigCancel()
+			}
+		}
+		if psVal := preconditionValue(tc.Preconditions, PrecondProcessState); psVal != "" {
+			var trigger uint64
+			switch psVal {
+			case ProcessStateRunning:
+				trigger = features.TriggerProcessStateRunning
+			case ProcessStatePaused:
+				trigger = features.TriggerProcessStatePaused
+			case ProcessStateAvailable:
+				trigger = features.TriggerProcessStateAvailable
+			case ProcessStateNone:
+				trigger = features.TriggerProcessStateNone
+			}
+			if trigger != 0 {
+				trigCtx, trigCancel := context.WithTimeout(ctx, 3*time.Second)
+				if err := r.sendTriggerViaZone(trigCtx, trigger, state); err != nil {
+					r.debugf("process_state trigger failed: %v (continuing)", err)
+				}
+				trigCancel()
+			}
+		}
 	}
 
 	// Post-setup: session_previously_connected disconnects but preserves

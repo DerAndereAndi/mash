@@ -64,7 +64,7 @@ func (r *Runner) handleTriggerTestEvent(ctx context.Context, step *loader.Step, 
 		return nil, fmt.Errorf("failed to encode trigger request: %w", err)
 	}
 
-	resp, err := r.sendRequest(data, "trigger_test_event")
+	resp, err := r.sendRequest(data, "trigger_test_event", req.MessageID)
 	if err != nil {
 		return nil, err
 	}
