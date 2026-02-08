@@ -1503,6 +1503,45 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 		FeatureID:  featureID,
 	}
 
+	// Build subscribe payload with intervals and attribute filter.
+	subPayload := &wire.SubscribePayload{}
+	hasPayload := false
+
+	if _, ok := params["minInterval"]; ok {
+		sec := paramInt(params, "minInterval", 0)
+		subPayload.MinInterval = uint32(sec * 1000) // YAML seconds → wire milliseconds
+		hasPayload = true
+	}
+	if _, ok := params["maxInterval"]; ok {
+		sec := paramInt(params, "maxInterval", 0)
+		subPayload.MaxInterval = uint32(sec * 1000)
+		hasPayload = true
+	}
+
+	// Resolve attribute names to IDs if provided.
+	if attrs, ok := params[ParamAttributes]; ok {
+		var attrList []any
+		switch v := attrs.(type) {
+		case []any:
+			attrList = v
+		case []string:
+			for _, s := range v {
+				attrList = append(attrList, s)
+			}
+		}
+		for _, a := range attrList {
+			attrID, attrErr := r.resolver.ResolveAttribute(params[KeyFeature], a)
+			if attrErr == nil {
+				subPayload.AttributeIDs = append(subPayload.AttributeIDs, attrID)
+				hasPayload = true
+			}
+		}
+	}
+
+	if hasPayload {
+		req.Payload = subPayload
+	}
+
 	data, err := wire.EncodeRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode subscribe request: %w", err)
@@ -1532,8 +1571,23 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 
 	// Store priming data in state so receive_notification/wait_report can use
 	// it as an initial report if no subsequent notification frame arrives.
+	// If a previous subscribe already stored priming data, push both into
+	// the priming queue so each receive_notification can dequeue one.
 	if primingData != nil {
-		state.Set(StatePrimingData, primingData)
+		if existing, ok := state.Get(StatePrimingData); ok && existing != nil {
+			// Move existing priming data into the queue and add new one.
+			var queue []any
+			if q, ok := state.Get(StatePrimingQueue); ok {
+				if qSlice, ok := q.([]any); ok {
+					queue = qSlice
+				}
+			}
+			queue = append(queue, existing, primingData)
+			state.Set(StatePrimingQueue, queue)
+			state.Set(StatePrimingData, nil)
+		} else {
+			state.Set(StatePrimingData, primingData)
+		}
 	}
 
 	// Track subscription ID for auto-unsubscribe in teardown.

@@ -393,6 +393,10 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 
 	eventType, _ := params[KeyEventType].(string)
 
+	// Reset the per-step notification counter so notification_count reflects
+	// only notifications received in THIS step, not cumulatively.
+	state.Set(StateNotificationCounter, 0)
+
 	// Check if a priming queue exists (from subscribe_multiple). Dequeue
 	// one entry at a time so each receive_notification call gets one.
 	if queue, ok := state.Get(StatePrimingQueue); ok {

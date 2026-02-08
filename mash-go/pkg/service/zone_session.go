@@ -56,19 +56,15 @@ func NewZoneSession(zoneID string, conn Sendable, device *model.Device) *ZoneSes
 	handler := NewProtocolHandler(device)
 	handler.SetZoneID(zoneID)
 
-	// Create notification dispatcher for subscription heartbeats and coalescing
+	// Create notification dispatcher for subscription heartbeats and coalescing.
+	// Attribute changes are routed here by DeviceService.notifyZoneSessions
+	// (via featureChangeSubscriber), which covers both protocol Writes and
+	// internal SetAttributeInternal calls (e.g. from TriggerTestEvent).
 	dispatcher := NewNotificationDispatcher(handler)
 	dispatcher.SetProcessingInterval(100 * time.Millisecond)
 	connSender := func(data []byte) error { return conn.Send(data) }
 	dispatcherConnID := dispatcher.RegisterConnection(connSender)
 	dispatcher.Start()
-
-	// Propagate attribute writes to the dispatcher for change notifications
-	handler.SetOnWrite(func(endpointID uint8, featureID uint8, attrs map[uint16]any) {
-		for attrID, val := range attrs {
-			dispatcher.NotifyChange(endpointID, uint16(featureID), attrID, val)
-		}
-	})
 
 	// Create client for bidirectional communication
 	sender := NewTransportRequestSender(conn)
@@ -415,24 +411,10 @@ func (s *ZoneSession) ClearSubscriptions() {
 
 // SetOnWrite sets the callback for write operations.
 // The callback receives the endpoint ID, feature ID, and written attributes.
-// When a dispatcher is active, attribute changes are also forwarded to the
-// dispatcher for subscription notification delivery.
+// Note: subscription notifications are handled by DeviceService.notifyZoneSessions
+// (via featureChangeSubscriber), not by this callback.
 func (s *ZoneSession) SetOnWrite(cb WriteCallback) {
-	if s.dispatcher != nil {
-		dispatcher := s.dispatcher
-		s.handler.SetOnWrite(func(endpointID uint8, featureID uint8, attrs map[uint16]any) {
-			// Forward to dispatcher for subscription notifications
-			for attrID, val := range attrs {
-				dispatcher.NotifyChange(endpointID, uint16(featureID), attrID, val)
-			}
-			// Call external callback
-			if cb != nil {
-				cb(endpointID, featureID, attrs)
-			}
-		})
-	} else {
-		s.handler.SetOnWrite(cb)
-	}
+	s.handler.SetOnWrite(cb)
 }
 
 // SetOnInvoke sets the callback for invoke operations.

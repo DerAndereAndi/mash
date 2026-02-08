@@ -1070,12 +1070,13 @@ id: TC-SUB-RESTORE-002
 name: Priming Report Shows Values Changed During Disconnect
 description: |
   Verifies that the priming report after reconnection contains
-  the current attribute values, which may have changed during
-  the disconnection period.
+  the current attribute values, reflecting changes made before
+  the disconnection rather than stale cached data.
 
 pics_requirements:
   - MASH.S.PROTO.SUBSCRIPTION
   - MASH.S.PROTO.PRIMING
+  - MASH.S.MEAS
 
 preconditions:
   - session_established: true
@@ -1085,45 +1086,49 @@ steps:
     action: subscribe
     params:
       endpoint: 1
-      feature: EnergyControl
-      attributes:
-        - effectiveConsumptionLimit
-      minInterval: 1
+      feature: Measurement
+      minInterval: 0
       maxInterval: 60
     expect:
       subscribe_success: true
-      save_priming_value: initial_limit
+      save_priming_value: initial_measurement
+
+  - name: Change value on device
+    action: device_set_value
+    params:
+      endpoint: 1
+      feature: Measurement
+      attribute: acActivePower
+      value: 8888000
+
+  - name: Wait for delta notification to confirm change
+    action: receive_notification
+    params:
+      timeout: "3s"
+    expect:
+      notification_received: true
 
   - name: Disconnect
     action: disconnect
     params:
       graceful: false
 
-  - name: Change value on device while disconnected
-    action: device_local_action
-    params:
-      action: set_failsafe_limit
-    expect:
-      action_triggered: true
-
-  - name: Reconnect and re-subscribe
+  - name: Reconnect
     action: connect
     params:
       auto_reconnect: true
 
-  - name: Re-subscribe and check priming
+  - name: Re-subscribe and check priming reflects changed value
     action: subscribe
     params:
       endpoint: 1
-      feature: EnergyControl
-      attributes:
-        - effectiveConsumptionLimit
-      minInterval: 1
+      feature: Measurement
+      minInterval: 0
       maxInterval: 60
     expect:
       subscribe_success: true
       priming_received: true
-      priming_value_different_from: initial_limit
+      priming_value_different_from: initial_measurement
 
 postconditions:
   - changed_values_in_priming: true

@@ -360,7 +360,7 @@ steps:
       timeout: "5s"
     expect:
       received_count: 2
-      subscription_ids: [sub1, sub2]
+      all_ids_unique: true
 
 postconditions:
   - multiple_subscriptions_independent: true

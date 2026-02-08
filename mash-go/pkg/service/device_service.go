@@ -1777,42 +1777,8 @@ func (s *DeviceService) notifyZoneSessions(endpointID uint8, featureID uint8, at
 	}
 	s.mu.RUnlock()
 
-	if len(sessions) == 0 {
-		return
-	}
-
-	changes := map[uint16]any{attrID: value}
-	notificationsSent := 0
-
 	for _, session := range sessions {
-		// Get matching subscriptions from this session's handler
-		matchingSubIDs := session.handler.GetMatchingSubscriptions(endpointID, featureID, attrID)
-
-		for _, subID := range matchingSubIDs {
-			notif := &wire.Notification{
-				SubscriptionID: subID,
-				EndpointID:     endpointID,
-				FeatureID:      featureID,
-				Changes:        changes,
-			}
-			// Send notification (log errors but don't fail - zone may have disconnected)
-			if err := session.SendNotification(notif); err != nil {
-				s.debugLog("notifyZoneSessions: failed to send notification",
-					"zoneID", session.ZoneID(),
-					"subscriptionID", subID,
-					"error", err)
-			} else {
-				notificationsSent++
-			}
-		}
-	}
-
-	if notificationsSent > 0 {
-		s.debugLog("notifyZoneSessions: complete",
-			"endpointID", endpointID,
-			"featureID", featureID,
-			"attrID", attrID,
-			"notificationsSent", notificationsSent)
+		session.dispatcher.NotifyChange(endpointID, uint16(featureID), attrID, value)
 	}
 }
 
