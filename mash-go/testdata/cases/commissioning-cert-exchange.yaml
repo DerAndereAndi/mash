@@ -67,6 +67,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - commissioning
   - certificate
   - device-id
@@ -126,6 +127,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - commissioning
   - device-id
   - discovery
@@ -188,6 +190,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - commissioning
   - device-id
   - multi-zone

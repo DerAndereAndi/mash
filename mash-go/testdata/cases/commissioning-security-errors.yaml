@@ -32,6 +32,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - security
   - commissioning
   - error
@@ -84,6 +85,7 @@ postconditions:
 
 timeout: "120s"
 tags:
+  - base-protocol
   - security
   - commissioning
   - timing

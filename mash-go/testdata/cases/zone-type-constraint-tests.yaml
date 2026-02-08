@@ -54,6 +54,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - zone
   - commissioning
   - first-zone
@@ -113,6 +114,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - zone
   - commissioning
   - multi-zone
@@ -168,6 +170,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - zone
   - commissioning
   - constraint
@@ -209,6 +212,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - zone
   - capacity
   - max-zones
@@ -264,6 +268,7 @@ postconditions:
 
 timeout: "20s"
 tags:
+  - base-protocol
   - zone
   - removal
   - commissioning
@@ -319,6 +324,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - zone
   - commissioning
   - constraint
@@ -387,6 +393,7 @@ postconditions:
 
 timeout: "20s"
 tags:
+  - base-protocol
   - zone
   - replacement
   - commissioning

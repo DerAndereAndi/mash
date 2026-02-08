@@ -48,6 +48,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - correlation
   - message-id
   - basic
@@ -83,6 +84,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - correlation
   - message-id
   - validation
@@ -128,6 +130,7 @@ postconditions:
 
 timeout: "15s"                 # Test timeout > request timeout
 tags:
+  - base-protocol
   - correlation
   - timeout
   - client-behavior
@@ -187,6 +190,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - correlation
   - message-id
   - concurrent
@@ -225,6 +229,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - correlation
   - message-id
   - error

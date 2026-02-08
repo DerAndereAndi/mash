@@ -70,6 +70,7 @@ steps:
 
 timeout: "60s"
 tags:
+  - base-protocol
   - commissioning
   - timing
   - DEC-048
@@ -140,6 +141,7 @@ steps:
 
 timeout: "60s"
 tags:
+  - base-protocol
   - commissioning
   - pairing-request
   - timing
@@ -182,6 +184,7 @@ postconditions:
 
 timeout: "1m"
 tags:
+  - base-protocol
   - commissioning
   - timing
   - validation
@@ -225,6 +228,7 @@ postconditions:
 
 timeout: "1m"
 tags:
+  - base-protocol
   - commissioning
   - timing
   - validation
@@ -281,6 +285,7 @@ postconditions:
 
 timeout: "5m"
 tags:
+  - base-protocol
   - commissioning
   - timing
   - security

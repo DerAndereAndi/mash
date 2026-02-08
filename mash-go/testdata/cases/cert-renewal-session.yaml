@@ -69,6 +69,7 @@ postconditions:
 
 timeout: "20s"
 tags:
+  - base-protocol
   - certificate
   - renewal
   - session

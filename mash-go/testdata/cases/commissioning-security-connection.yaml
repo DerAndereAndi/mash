@@ -49,6 +49,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - security
   - commissioning
   - connection
@@ -92,6 +93,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - security
   - commissioning
   - zones
@@ -149,6 +151,7 @@ postconditions:
 
 timeout: "45s"
 tags:
+  - base-protocol
   - security
   - commissioning
   - operational
@@ -196,6 +199,7 @@ postconditions:
 
 timeout: "120s"
 tags:
+  - base-protocol
   - security
   - commissioning
   - timeout
@@ -238,6 +242,7 @@ postconditions:
 
 timeout: "60s"
 tags:
+  - base-protocol
   - security
   - commissioning
   - stress
@@ -291,6 +296,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - security
   - commissioning
   - DEC-061

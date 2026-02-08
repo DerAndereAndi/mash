@@ -34,6 +34,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - security
   - certificate
   - renewal
@@ -94,6 +95,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - security
   - certificate
   - renewal

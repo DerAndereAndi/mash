@@ -72,6 +72,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - certificate
   - grace_period
   - expiry

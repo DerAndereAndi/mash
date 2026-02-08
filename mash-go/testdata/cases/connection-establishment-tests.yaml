@@ -42,6 +42,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - tls
   - commissioning
@@ -78,6 +79,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - tls
   - commissioning
@@ -112,6 +114,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - tls
   - commissioning
@@ -145,6 +148,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - tls
   - commissioning
@@ -191,6 +195,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - connection
   - transition
   - pase
@@ -250,6 +255,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - connection
   - transition
   - mdns
@@ -296,6 +302,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - connection
   - transition
   - instance-name
@@ -336,6 +343,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - connection
   - transition
   - timeout
@@ -394,6 +402,7 @@ postconditions:
 
 timeout: "45s"
 tags:
+  - base-protocol
   - connection
   - e2e
   - commissioning
@@ -434,6 +443,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - connection
   - e2e
   - reconnection
@@ -475,6 +485,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - connection
   - e2e
   - multi-zone
@@ -527,6 +538,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - connection
   - e2e
   - reboot
@@ -561,6 +573,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - ipv6
   - link-local
@@ -594,6 +607,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - ipv6
   - address-selection
@@ -637,6 +651,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - connection
   - ipv6
   - address-change
@@ -680,6 +695,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - ipv6
   - interface
@@ -715,6 +731,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - mdns
   - srv
@@ -749,6 +766,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - mdns
   - aaaa
@@ -785,6 +803,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - mdns
   - aaaa
@@ -838,6 +857,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - connection
   - mdns
   - address-change
@@ -874,6 +894,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - multi-interface
   - mdns
@@ -920,6 +941,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - connection
   - multi-interface
   - failover
@@ -971,6 +993,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - multi-interface
   - debounce
@@ -1005,6 +1028,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - connection
   - multi-interface
   - failover
@@ -1038,6 +1062,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - connection
   - multi-interface
   - negative
@@ -1093,6 +1118,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - multi-interface
   - debounce
@@ -1126,6 +1152,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - multi-interface
   - address-selection
@@ -1165,6 +1192,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - connection
   - multi-interface
   - cache
@@ -1199,6 +1227,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - connection
   - multi-interface
   - cache
@@ -1235,6 +1264,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - connection
   - multi-interface
   - tls
@@ -1269,6 +1299,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - connection
   - not-found
   - negative
@@ -1302,6 +1333,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - connection
   - not-found
   - discriminator
@@ -1336,6 +1368,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - connection
   - not-found
   - address
@@ -1370,6 +1403,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - connection
   - not-found
   - refused
@@ -1404,6 +1438,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - connection
   - not-found
   - retry
@@ -1438,6 +1473,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - connection
   - not-found
   - window

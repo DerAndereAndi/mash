@@ -50,6 +50,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - mDNS
   - basic

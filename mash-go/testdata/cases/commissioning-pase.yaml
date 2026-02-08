@@ -39,6 +39,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - commissioning
   - PASE
   - security

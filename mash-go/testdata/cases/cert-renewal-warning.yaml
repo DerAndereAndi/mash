@@ -54,6 +54,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - certificate
   - expiry
   - notification

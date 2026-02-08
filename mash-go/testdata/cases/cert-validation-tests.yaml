@@ -38,6 +38,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - certificate
   - validation
   - chain
@@ -72,6 +73,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - certificate
   - validation
   - expired
@@ -106,6 +108,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - certificate
   - validation
   - wrong-zone
@@ -147,6 +150,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - certificate
   - validation
   - clock-skew
@@ -189,6 +193,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - certificate
   - validation
   - clock-skew
@@ -223,6 +228,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - certificate
   - validation
   - controller
@@ -257,6 +263,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - certificate
   - validation
   - controller
@@ -292,6 +299,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - certificate
   - validation
   - controller
@@ -327,6 +335,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - certificate
   - validation
   - controller
@@ -367,6 +376,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - certificate
   - validation
   - controller
@@ -406,6 +416,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - certificate
   - validation
   - controller

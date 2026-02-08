@@ -63,6 +63,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - zone
   - limit
   - basic
@@ -136,6 +137,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - zone
   - multi-zone
   - limit
@@ -201,6 +203,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - zone
   - multi-zone
   - production
@@ -266,6 +269,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - zone
   - multi-zone
   - safety
@@ -332,6 +336,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - zone
   - duration
   - expiry
@@ -396,6 +401,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - zone
   - multi-zone
   - setpoint
@@ -478,6 +484,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - zone
   - disconnect
   - resolution
@@ -552,6 +559,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - zone
   - multi-zone
   - asymmetric
@@ -629,6 +637,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - zone
   - reconnect
   - persistence
@@ -707,6 +716,7 @@ postconditions:
 
 timeout: "20s"
 tags:
+  - base-protocol
   - zone
   - capacity
   - limit
@@ -778,6 +788,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - zone
   - clear
   - unlimited

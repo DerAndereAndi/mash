@@ -65,6 +65,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - certificate
   - renewal
   - zone

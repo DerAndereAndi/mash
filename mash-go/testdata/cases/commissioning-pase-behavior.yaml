@@ -40,6 +40,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - commissioning
   - pase
   - success
@@ -78,6 +79,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - commissioning
   - pase
   - negative
@@ -122,6 +124,7 @@ postconditions:
 
 timeout: "45s"
 tags:
+  - base-protocol
   - commissioning
   - pase
   - timeout
@@ -155,6 +158,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - commissioning
   - pase
   - negative
@@ -211,6 +215,7 @@ postconditions:
 
 timeout: "20s"
 tags:
+  - base-protocol
   - commissioning
   - pase
   - security

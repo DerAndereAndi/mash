@@ -46,6 +46,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - zone
   - add
   - direct
@@ -83,6 +84,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - zone
   - add
   - admin
@@ -118,6 +120,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - zone
   - add
   - negative
@@ -163,6 +166,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - zone
   - add
   - discriminator
@@ -220,6 +224,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - zone
   - add
   - multi-zone

@@ -50,6 +50,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - close
   - graceful
   - basic
@@ -93,6 +94,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - close
   - pending
   - graceful
@@ -136,6 +138,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - close
   - timeout
   - force
@@ -169,6 +172,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - close
   - simultaneous
   - edge-case
@@ -222,6 +226,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - inflight
   - queue
   - reconnect
@@ -288,6 +293,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - inflight
   - idempotent
   - retry
@@ -324,6 +330,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - inflight
   - non-idempotent
   - unknown
@@ -382,6 +389,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - inflight
   - read-before-retry
   - pattern
@@ -430,6 +438,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - inflight
   - multiple
   - mixed-types
@@ -467,6 +476,7 @@ postconditions:
 
 timeout: "40s"
 tags:
+  - base-protocol
   - keepalive
   - ping
   - pong
@@ -506,6 +516,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - keepalive
   - timeout
   - pong
@@ -548,6 +559,7 @@ postconditions:
 
 timeout: "120s"
 tags:
+  - base-protocol
   - keepalive
   - missed
   - close
@@ -596,6 +608,7 @@ postconditions:
 
 timeout: "45s"
 tags:
+  - base-protocol
   - keepalive
   - reset
   - activity
@@ -652,6 +665,7 @@ postconditions:
 
 timeout: "20s"
 tags:
+  - base-protocol
   - multi-connection
   - two-zones
   - operational
@@ -685,6 +699,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - multi-connection
   - capacity
   - negative
@@ -745,6 +760,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - multi-connection
   - subscription
   - isolation
@@ -798,6 +814,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - multi-connection
   - partial-loss
   - isolation
@@ -837,6 +854,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - reconnection
   - backoff
   - exponential
@@ -873,6 +891,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - reconnection
   - backoff
   - timing
@@ -927,6 +946,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - reconnection
   - backoff
   - reset
@@ -976,6 +996,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - reconnection
   - cancel
   - disconnected
@@ -1038,6 +1059,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - subscription
   - restore
   - reconnect
@@ -1108,6 +1130,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - subscription
   - restore
   - priming
@@ -1149,6 +1172,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - subscription
   - restore
   - partial-failure
@@ -1193,6 +1217,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - subscription
   - restore
   - priority
@@ -1260,6 +1285,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - subscription
   - restore
   - queue

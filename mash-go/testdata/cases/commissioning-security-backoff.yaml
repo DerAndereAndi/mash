@@ -51,6 +51,7 @@ postconditions:
 
 timeout: "120s"
 tags:
+  - base-protocol
   - security
   - commissioning
   - backoff
@@ -98,6 +99,7 @@ postconditions:
 
 timeout: "180s"
 tags:
+  - base-protocol
   - security
   - commissioning
   - backoff
@@ -151,6 +153,7 @@ postconditions:
 
 timeout: "120s"
 tags:
+  - base-protocol
   - security
   - commissioning
   - backoff

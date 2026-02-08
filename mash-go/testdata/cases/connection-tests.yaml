@@ -52,6 +52,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - tls
   - basic
@@ -91,6 +92,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - keepalive
   - ping
@@ -155,6 +157,7 @@ postconditions:
 
 timeout: "60s"
 tags:
+  - base-protocol
   - connection
   - reconnect
   - backoff
@@ -197,6 +200,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - connection
   - close
   - graceful
@@ -238,6 +242,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - connection
   - timeout
   - error

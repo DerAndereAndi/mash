@@ -42,6 +42,7 @@ postconditions:
 
 timeout: "120s"
 tags:
+  - base-protocol
   - connection
   - reaper
   - slow
@@ -86,6 +87,7 @@ postconditions:
 
 timeout: "120s"
 tags:
+  - base-protocol
   - connection
   - reaper
   - slow
@@ -136,6 +138,7 @@ postconditions:
 
 timeout: "120s"
 tags:
+  - base-protocol
   - connection
   - reaper
   - slow

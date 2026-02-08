@@ -40,6 +40,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - commissioning
   - busy-response
   - DEC-063
@@ -85,6 +86,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - commissioning
   - busy-response
   - cooldown
@@ -144,6 +146,7 @@ postconditions:
 
 timeout: "120s"
 tags:
+  - base-protocol
   - commissioning
   - busy-response
   - retry

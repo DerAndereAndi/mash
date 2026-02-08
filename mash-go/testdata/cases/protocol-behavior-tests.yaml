@@ -40,6 +40,7 @@ postconditions:
 
 timeout: "5s"
 tags:
+  - base-protocol
   - protocol
   - correlation
   - messageId
@@ -78,6 +79,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - protocol
   - correlation
   - negative
@@ -121,6 +123,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - protocol
   - correlation
   - concurrent
@@ -162,6 +165,7 @@ postconditions:
 
 timeout: "40s"
 tags:
+  - base-protocol
   - protocol
   - timeout
   - error
@@ -203,6 +207,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - protocol
   - subscribe
   - priming
@@ -256,6 +261,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - protocol
   - subscribe
   - notification
@@ -315,6 +321,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - protocol
   - unsubscribe
   - negative
@@ -349,6 +356,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - protocol
   - keepalive
   - ping
@@ -400,6 +408,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - protocol
   - reconnection
   - state
@@ -456,6 +465,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - protocol
   - reconnection
   - idempotent
@@ -510,6 +520,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - protocol
   - reconnection
   - non-idempotent
@@ -552,6 +563,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - protocol
   - close
   - graceful

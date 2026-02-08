@@ -79,6 +79,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - discovery
   - mDNS
   - operational

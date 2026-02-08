@@ -49,6 +49,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - commissionable
   - mdns
@@ -100,6 +101,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - discovery
   - commissionable
   - timeout
@@ -144,6 +146,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - discovery
   - commissionable
   - commissioning
@@ -186,6 +189,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - commissionable
   - txt-record
@@ -228,6 +232,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - commissionable
   - conflict
@@ -282,6 +287,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - commissionable
   - operational
@@ -328,6 +334,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - discovery
   - operational
   - commissioning
@@ -365,6 +372,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - operational
   - instance-name
@@ -402,6 +410,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - operational
   - txt-record
@@ -434,6 +443,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - operational
   - multi-zone
@@ -480,6 +490,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - discovery
   - operational
   - zone-removal
@@ -524,6 +535,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - discovery
   - operational
   - zone-removal
@@ -565,6 +577,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - commissioner
   - zone-create
@@ -600,6 +613,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - commissioner
   - txt-record
@@ -649,6 +663,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - commissioner
   - multi-zone
@@ -699,6 +714,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - discovery
   - commissioner
   - device-count
@@ -749,6 +765,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - discovery
   - commissioner
   - zone-delete
@@ -782,6 +799,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - discovery
   - commissioner
   - device-initiated
@@ -816,6 +834,7 @@ postconditions:
 
 timeout: "5s"
 tags:
+  - base-protocol
   - discovery
   - qr
   - parsing
@@ -850,6 +869,7 @@ postconditions:
 
 timeout: "5s"
 tags:
+  - base-protocol
   - discovery
   - qr
   - parsing
@@ -882,6 +902,7 @@ postconditions:
 
 timeout: "5s"
 tags:
+  - base-protocol
   - discovery
   - qr
   - negative
@@ -913,6 +934,7 @@ postconditions:
 
 timeout: "5s"
 tags:
+  - base-protocol
   - discovery
   - qr
   - negative
@@ -945,6 +967,7 @@ postconditions:
 
 timeout: "5s"
 tags:
+  - base-protocol
   - discovery
   - qr
   - negative
@@ -978,6 +1001,7 @@ postconditions:
 
 timeout: "5s"
 tags:
+  - base-protocol
   - discovery
   - qr
   - negative
@@ -1010,6 +1034,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - discriminator
   - collision
@@ -1046,6 +1071,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - discovery
   - discriminator
   - collision
@@ -1086,6 +1112,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - state
   - transition
@@ -1130,6 +1157,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - discovery
   - state
   - timeout
@@ -1182,6 +1210,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - discovery
   - state
   - transition
@@ -1229,6 +1258,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - state
   - multi-zone
@@ -1275,6 +1305,7 @@ postconditions:
 
 timeout: "30s"
 tags:
+  - base-protocol
   - discovery
   - state
   - multi-zone
@@ -1319,6 +1350,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - discovery
   - state
   - zone-removal
@@ -1350,6 +1382,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - discovery
   - browse
   - commissionable
@@ -1381,6 +1414,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - discovery
   - browse
   - operational
@@ -1412,6 +1446,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - discovery
   - browse
   - commissioner
@@ -1445,6 +1480,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - browse
   - discriminator
@@ -1477,6 +1513,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - discovery
   - browse
   - zone-filter
@@ -1510,6 +1547,7 @@ postconditions:
 
 timeout: "15s"
 tags:
+  - base-protocol
   - discovery
   - browse
   - timeout

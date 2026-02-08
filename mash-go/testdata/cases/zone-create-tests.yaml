@@ -53,6 +53,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - zone
   - creation
   - ca
@@ -107,6 +108,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - zone
   - creation
   - uniqueness
@@ -152,6 +154,7 @@ postconditions:
 
 timeout: "10s"
 tags:
+  - base-protocol
   - zone
   - creation
   - metadata
