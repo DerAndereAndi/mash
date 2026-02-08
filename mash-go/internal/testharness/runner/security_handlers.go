@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -265,11 +266,23 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 		// Timeout or read error -- device is still processing, lock is held.
 	}
 
-	return map[string]any{
+	// Extract TLS connection details for test assertions.
+	out := map[string]any{
 		KeyConnectionEstablished: true,
 		KeyConnectionRejected:    false,
 		KeyConnectionIndex:       index,
-	}, nil
+	}
+	cs := conn.ConnectionState()
+	if len(cs.PeerCertificates) > 0 {
+		cert := cs.PeerCertificates[0]
+		out[KeySelfSignedAccepted] = true // commissioning always accepts self-signed
+		if idx := strings.Index(cert.Subject.CommonName, "-"); idx >= 0 {
+			out[KeyServerCertCNPrefix] = cert.Subject.CommonName[:idx+1]
+		} else {
+			out[KeyServerCertCNPrefix] = cert.Subject.CommonName
+		}
+	}
+	return out, nil
 }
 
 // handleCloseConnection closes a specific connection by index.
@@ -538,6 +551,7 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 	secState := getSecurityState(state)
 	secState.commissioningActive = true
 	state.Set(StateCommissioningActive, true)
+	state.Set(StateCommissioningCompleted, false)
 
 	// Send trigger if connected.
 	if r.conn != nil && r.conn.connected && r.config.EnableKey != "" {

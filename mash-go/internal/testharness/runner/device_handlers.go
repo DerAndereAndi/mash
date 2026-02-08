@@ -131,6 +131,8 @@ func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step,
 		result, err = r.handleInterfaceDown(ctx, subStep, state)
 	case "interface_up":
 		result, err = r.handleInterfaceUp(ctx, subStep, state)
+	case "interface_flap":
+		result, err = r.handleInterfaceFlap(ctx, subStep, state)
 	case "change_address":
 		result, err = r.handleChangeAddress(ctx, subStep, state)
 	case "adjust_clock":

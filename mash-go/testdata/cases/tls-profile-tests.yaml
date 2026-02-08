@@ -882,7 +882,7 @@ id: TC-TLS-CTRL-003
 name: Expired Controller Certificate Rejected by Device
 description: |
   Verifies that the device rejects an expired controller certificate
-  with a bad_certificate TLS alert.
+  with a certificate_expired TLS alert.
 
 pics_requirements:
   - MASH.S.TLS.MUTUAL_AUTH_OPERATIONAL=1
@@ -898,7 +898,9 @@ steps:
       alpn: "mash/1"
     expect:
       connected: false
-      tls_alert: bad_certificate
+      # Go crypto/tls sends certificate_expired (not bad_certificate) for
+      # expired certs, which is the RFC 8446 §6.2 correct alert.
+      tls_alert: certificate_expired
 
 postconditions:
   - expired_controller_rejected: true
@@ -1073,7 +1075,9 @@ steps:
       alpn: "mash/1"
     expect:
       connected: false
-      tls_alert: bad_certificate
+      # Go crypto/tls sends certificate_expired for both expired and
+      # not-yet-valid certs (RFC 8446 §6.2).
+      tls_alert: certificate_expired
 
 postconditions:
   - not_yet_valid_rejected: true

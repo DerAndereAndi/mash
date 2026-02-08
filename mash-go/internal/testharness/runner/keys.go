@@ -167,6 +167,7 @@ const (
 	StatePairingRequestZoneID        = "pairing_request_zone_id"
 	StateDeviceWasRemoved            = "device_was_removed"
 	StateCommissioningActive         = "commissioning_active"
+	StateCommissioningCompleted      = "commissioning_completed"
 
 	// Cert handler state.
 	StateExtractedDeviceID = "extracted_device_id"
@@ -289,6 +290,7 @@ const (
 	KeyZoneDisconnected    = "zone_disconnected"
 	KeyBidirectionalActive = "bidirectional_active"
 	KeySequenceRestored    = "sequence_restored"
+	KeyCommandReplayed     = "command_replayed"
 	KeyTLSActive           = "tls_active"
 	KeyVersionMatches      = "version_matches"
 )
@@ -301,6 +303,7 @@ const (
 	KeyAllResponsesReceived   = "all_responses_received"
 	KeyAllCorrelationsCorrect = "all_correlations_correct"
 	KeyEachMessageIDMatches   = "each_message_id_matches"
+	KeyAllPairsMatched        = "all_pairs_matched"
 	KeyChangedAttribute       = "changed_attribute"
 	KeyErrorMessageContains   = "error_message_contains"
 	KeyMessageIDsMatch        = "message_ids_match"
@@ -351,6 +354,8 @@ const (
 	KeySubscriptionIDReturned  = "subscription_id_returned"
 	KeySubscriptionIDsUnique   = "subscription_ids_unique"
 	KeyAllSucceed              = "all_succeed"
+	KeySuccessCount            = "success_count"
+	KeyFailureCount            = "failure_count"
 	KeySubscriptions           = "subscriptions"
 	KeyUnsubscribed            = "unsubscribed"
 	KeyNotificationReceived    = "notification_received"
@@ -917,8 +922,10 @@ const (
 const (
 	StateStartTime   = "start_time"
 	StateEndTime     = "end_time"
-	StatePrimingData      = "_priming_data"
-	StatePrimingAttrCount = "_priming_attr_count"
+	StatePrimingData          = "_priming_data"
+	StatePrimingQueue         = "_priming_queue"
+	StatePrimingAttrCount     = "_priming_attr_count"
+	StateNotificationCounter  = "_notification_counter"
 )
 
 // Checker registration names -- used in runner's registerHandlers.

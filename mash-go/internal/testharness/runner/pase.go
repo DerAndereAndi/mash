@@ -319,6 +319,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// The device is no longer in commissioning mode, so mDNS browse
 	// should no longer return synthetic commissionable services.
 	state.Set(StateCommissioningActive, false)
+	state.Set(StateCommissioningCompleted, true)
 	secState := getSecurityState(state)
 	secState.commissioningActive = false
 
@@ -339,9 +340,18 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 
 	// Register the commissioned zone in the local zone state so that
 	// list_zones, remove_zone, etc. reflect the commissioning result.
+	// Use the real derived zone ID when available for consistency with
+	// preconditions code and to match what the device stores.
+	derivedZoneID := ""
+	if r.paseState != nil && r.paseState.sessionKey != nil {
+		derivedZoneID = deriveZoneIDFromSecret(r.paseState.sessionKey)
+	}
 	if zt, ok := params[KeyZoneType].(string); ok && zt != "" {
 		zs := getZoneState(state)
 		zoneID, _ := params[KeyZoneID].(string)
+		if zoneID == "" && derivedZoneID != "" {
+			zoneID = derivedZoneID
+		}
 		if zoneID == "" {
 			zoneID = strings.ToUpper(zt) // fallback label
 		}
@@ -356,6 +366,22 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			zs.zones[zoneID] = zone
 			zs.zoneOrder = append(zs.zoneOrder, zoneID)
 		}
+
+		// Store the zone ID in typed state keys for interpolation
+		// (e.g., {{ grid_zone_id }}) -- mirrors preconditions.go logic.
+		ztUpper := strings.ToUpper(zt)
+		var stateKey string
+		switch {
+		case ztUpper == ZoneTypeGrid:
+			stateKey = StateGridZoneID
+		case ztUpper == ZoneTypeLocal:
+			stateKey = StateLocalZoneID
+		case ztUpper == ZoneTypeTest:
+			stateKey = StateTestZoneID
+		}
+		if stateKey != "" {
+			state.Set(stateKey, zoneID)
+		}
 	}
 
 	outputs := map[string]any{
@@ -365,9 +391,13 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		KeyKeyLength:          len(sessionKey),
 		KeyKeyNotZero:         !isZeroKey(sessionKey),
 		KeyState:              ConnectionStatePASEVerified,
+		PrecondDeviceInZone:   true,
 	}
 	if deviceID != "" {
 		outputs[KeyDeviceID] = deviceID
+	}
+	if derivedZoneID != "" {
+		outputs[KeyZoneID] = derivedZoneID
 	}
 
 	// When resolving a discriminator collision, a successful PASE handshake

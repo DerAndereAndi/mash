@@ -590,12 +590,12 @@ tags:
   - negative
 
 ---
-# TC-INT-004: Value Exceeds Range Causes CONSTRAINT_ERROR
+# TC-INT-004: Value Exceeds Range Causes INVALID_PARAMETER
 id: TC-INT-004
-name: Value Out of Range Returns CONSTRAINT_ERROR
+name: Value Out of Range Returns INVALID_PARAMETER
 description: |
   Verifies that a value exceeding the field's defined range (e.g.,
-  endpointId > 255) returns CONSTRAINT_ERROR.
+  endpointId > 255) returns INVALID_PARAMETER.
 
 pics_requirements:
   - MASH.S.CBOR.IGNORE_UNKNOWN_KEYS=1
@@ -614,7 +614,7 @@ steps:
         3: 256                     # endpointId > 255
         4: 1
     expect:
-      error_status: CONSTRAINT_ERROR
+      error_status: INVALID_PARAMETER
 
 postconditions:
   - range_error_returned: true

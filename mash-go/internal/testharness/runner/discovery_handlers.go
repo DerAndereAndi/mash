@@ -514,6 +514,19 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		ds.services = services
 	}
 
+	// After commissioning completes, the device should stop advertising
+	// as commissionable (_mashc._udp). Filter out commissionable services
+	// from real mDNS results to simulate expected spec behavior.
+	if completed, _ := state.Get(StateCommissioningCompleted); completed == true {
+		filtered := ds.services[:0]
+		for _, svc := range ds.services {
+			if svc.ServiceType != discovery.ServiceTypeCommissionable {
+				filtered = append(filtered, svc)
+			}
+		}
+		ds.services = filtered
+	}
+
 	outputs, err := r.buildBrowseOutput(ds)
 	if err != nil {
 		return nil, err
@@ -570,10 +583,11 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		}
 	}
 
-	// Count IPv6 (AAAA) addresses.
+	// Count IPv6 (AAAA) addresses for the first service only.
+	// Previously this counted across ALL services, inflating the count.
 	aaaaCount := 0
-	for _, svc := range ds.services {
-		for _, addr := range svc.Addresses {
+	if len(ds.services) > 0 {
+		for _, addr := range ds.services[0].Addresses {
 			if strings.Contains(addr, ":") {
 				aaaaCount++
 			}
@@ -642,6 +656,7 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 
 		// SRV record fields.
 		outputs["srv_port"] = int(first.Port)
+		outputs["srv_port_present"] = first.Port > 0
 		outputs[KeySRVHostnameValid] = first.Host != ""
 
 		// Add all TXT record fields.

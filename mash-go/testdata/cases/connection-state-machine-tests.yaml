@@ -1195,7 +1195,7 @@ steps:
   - name: Establish multiple subscriptions in priority order
     action: subscribe_ordered
     params:
-      order:
+      subscriptions:
         - endpoint: 1
           feature: EnergyControl
           attributes: [controlState]

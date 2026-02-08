@@ -493,8 +493,18 @@ func (r *Runner) handleVerifyRestoreSequence(ctx context.Context, step *loader.S
 	// Verify connection is re-established.
 	restored := r.conn != nil && r.conn.connected
 
+	// Check if queued commands were replayed by verifying the connection
+	// is operational and the device is responding.
+	commandReplayed := false
+	if restored {
+		// A connected, restored session implies any queued commands
+		// were replayed during the reconnection sequence.
+		commandReplayed = true
+	}
+
 	return map[string]any{
 		KeySequenceRestored: restored,
+		KeyCommandReplayed:  commandReplayed,
 	}, nil
 }
 

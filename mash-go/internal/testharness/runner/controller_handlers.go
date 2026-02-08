@@ -127,6 +127,7 @@ func (r *Runner) handleCommissionWithAdmin(ctx context.Context, step *loader.Ste
 		KeyCommissioned:      true,
 		KeyDeviceID:          deviceID,
 		KeyZoneID:            zoneID,
+		PrecondDeviceInZone:  true,
 	}, nil
 }
 

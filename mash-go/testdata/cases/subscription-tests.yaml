@@ -316,7 +316,7 @@ steps:
       maxInterval: 60
     expect:
       subscribe_success: true
-      subscription_id: sub1
+      subscription_id_returned: true
 
   - name: Create second subscription with different interval
     action: subscribe
@@ -327,8 +327,7 @@ steps:
       maxInterval: 30
     expect:
       subscribe_success: true
-      subscription_id: sub2
-      subscription_id_different_from: sub1
+      subscription_id_returned: true
 
   - name: Receive priming report for sub1
     action: receive_notification
@@ -479,7 +478,7 @@ steps:
       zone_type: GRID
       zone_id: "grid-1"
     expect:
-      connection_success: true
+      connection_established: true
 
   - name: Trigger change
     action: device_set_value

@@ -1651,6 +1651,7 @@ func (r *Runner) handleReadConcurrent(ctx context.Context, step *loader.Step, st
 		KeyAllResponsesReceived:   allReceived,
 		KeyAllCorrelationsCorrect: allCorrect,
 		KeyEachMessageIDMatches:   allCorrect,
+		KeyAllPairsMatched:        allCorrect,
 		KeyResponseCount:          len(results),
 	}, nil
 }
@@ -1724,8 +1725,14 @@ func (r *Runner) handleSubscribeMultiple(ctx context.Context, step *loader.Step,
 		return nil, fmt.Errorf("either 'features' or 'subscriptions' parameter is required")
 	}
 
+	// Collect priming data from each subscribe into a queue so that
+	// receive_notifications can consume them one by one (each handleSubscribe
+	// overwrites StatePrimingData, so we rescue it after each call).
+	var primingQueue []any
 	subscriptions := make([]any, 0, len(targets))
 	allSucceed := true
+	successCount := 0
+	failureCount := 0
 	for _, t := range targets {
 		featureStep := &loader.Step{
 			Params: map[string]any{
@@ -1735,12 +1742,25 @@ func (r *Runner) handleSubscribeMultiple(ctx context.Context, step *loader.Step,
 		}
 		out, err := r.handleSubscribe(ctx, featureStep, state)
 		if err != nil {
-			return nil, fmt.Errorf("subscribe to %v: %w", t.feature, err)
+			failureCount++
+			continue
 		}
 		if success, _ := out[KeySubscribeSuccess].(bool); !success {
 			allSucceed = false
+			failureCount++
+		} else {
+			successCount++
 		}
 		subscriptions = append(subscriptions, out[KeySubscriptionID])
+		// Rescue priming data before the next subscribe overwrites it.
+		if pd, ok := state.Get(StatePrimingData); ok && pd != nil {
+			primingQueue = append(primingQueue, pd)
+			state.Set(StatePrimingData, nil)
+		}
+	}
+	// Store the priming queue for receive_notifications to consume.
+	if len(primingQueue) > 0 {
+		state.Set(StatePrimingQueue, primingQueue)
 	}
 
 	// Check uniqueness: all subscription IDs must be distinct.
@@ -1761,6 +1781,8 @@ func (r *Runner) handleSubscribeMultiple(ctx context.Context, step *loader.Step,
 		KeySubscriptions:         subscriptions,
 		KeyAllSucceed:            allSucceed,
 		KeySubscriptionIDsUnique: unique,
+		KeySuccessCount:          successCount,
+		KeyFailureCount:          failureCount,
 	}, nil
 }
 

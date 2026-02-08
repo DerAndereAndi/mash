@@ -115,7 +115,7 @@ steps:
       simulate_no_response: true
     expect:
       timeout_after: "10s"
-      error: REQUEST_TIMEOUT
+      error: TIMEOUT
 
   - name: Verify timeout occurred within bounds
     action: verify_timing

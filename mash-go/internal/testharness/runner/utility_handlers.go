@@ -393,6 +393,21 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 
 	eventType, _ := params[KeyEventType].(string)
 
+	// Check if a priming queue exists (from subscribe_multiple). Dequeue
+	// one entry at a time so each receive_notification call gets one.
+	if queue, ok := state.Get(StatePrimingQueue); ok {
+		if q, ok := queue.([]any); ok && len(q) > 0 {
+			item := q[0]
+			if len(q) == 1 {
+				state.Set(StatePrimingQueue, nil)
+			} else {
+				state.Set(StatePrimingQueue, q[1:])
+			}
+			r.debugf("receive_notification: dequeued priming data from queue (%d remaining)", len(q)-1)
+			return r.buildNotificationOutput(item, eventType, state, true)
+		}
+	}
+
 	// Check if subscribe response already contained priming data.
 	// If so, treat it as a received priming notification without reading the wire.
 	if primingData, ok := state.Get(StatePrimingData); ok && primingData != nil {
@@ -469,9 +484,19 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 // buildNotificationOutput builds the output map from notification changes.
 // It resolves attribute names, determines priming vs delta, etc.
 func (r *Runner) buildNotificationOutput(changes any, eventType string, state *engine.ExecutionState, fromPriming bool) (map[string]any, error) {
+	// Increment notification counter for this test.
+	notifCount := 1
+	if prev, ok := state.Get(StateNotificationCounter); ok {
+		if c, ok := prev.(int); ok {
+			notifCount = c + 1
+		}
+	}
+	state.Set(StateNotificationCounter, notifCount)
+
 	outputs := map[string]any{
 		KeyNotificationReceived: true,
 		KeyEventType:            eventType,
+		KeyNotificationCount:    notifCount,
 	}
 
 	// Get the subscribed feature ID to resolve attribute names.

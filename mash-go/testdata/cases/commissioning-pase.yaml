@@ -28,6 +28,7 @@ steps:
     action: commission
     params:
       setup_code: "12345678"
+      endpoint: 0
     expect:
       session_established: true
       key_length: 32
