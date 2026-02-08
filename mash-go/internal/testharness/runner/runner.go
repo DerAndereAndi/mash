@@ -110,6 +110,16 @@ type Config struct {
 	// Pattern filters test cases by name.
 	Pattern string
 
+	// Files filters which YAML test files to load (comma-separated glob
+	// patterns matched against filename stem, e.g. "protocol-*,connection-*").
+	Files string
+
+	// Tags includes only tests with at least one of these tags (comma-separated).
+	Tags string
+
+	// ExcludeTags excludes tests with any of these tags (comma-separated).
+	ExcludeTags string
+
 	// Timeout is the default test timeout.
 	Timeout time.Duration
 
@@ -275,8 +285,8 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 		}
 	}
 
-	// Load test cases
-	cases, err := loader.LoadDirectory(r.config.TestDir)
+	// Load test cases (optionally filtered by file name pattern).
+	cases, err := loader.LoadDirectoryWithFilter(r.config.TestDir, r.config.Files)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load tests: %w", err)
 	}
@@ -291,8 +301,17 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 		cases = filterByPattern(cases, r.config.Pattern)
 	}
 
+	// Filter by tags if provided
+	if r.config.Tags != "" {
+		cases = filterByTags(cases, r.config.Tags)
+	}
+	if r.config.ExcludeTags != "" {
+		cases = filterByExcludeTags(cases, r.config.ExcludeTags)
+	}
+
 	if len(cases) == 0 {
-		return nil, fmt.Errorf("no test cases found matching pattern %q", r.config.Pattern)
+		return nil, fmt.Errorf("no test cases found matching filters (pattern=%q, files=%q, tags=%q, exclude-tags=%q)",
+			r.config.Pattern, r.config.Files, r.config.Tags, r.config.ExcludeTags)
 	}
 
 	// Sort tests by precondition level to minimize state transitions.
@@ -1858,6 +1877,63 @@ func filterByMode(cases []*loader.TestCase, mode string) []*loader.TestCase {
 		}
 	}
 	return filtered
+}
+
+// filterByTags keeps only tests that have at least one of the specified tags.
+// Tags is a comma-separated string (e.g., "slow,reaper").
+func filterByTags(cases []*loader.TestCase, tags string) []*loader.TestCase {
+	wanted := parseTags(tags)
+	if len(wanted) == 0 {
+		return cases
+	}
+	var filtered []*loader.TestCase
+	for _, tc := range cases {
+		if hasAnyTag(tc.Tags, wanted) {
+			filtered = append(filtered, tc)
+		}
+	}
+	return filtered
+}
+
+// filterByExcludeTags removes tests that have any of the specified tags.
+// Tags is a comma-separated string (e.g., "slow,reaper").
+func filterByExcludeTags(cases []*loader.TestCase, excludeTags string) []*loader.TestCase {
+	excluded := parseTags(excludeTags)
+	if len(excluded) == 0 {
+		return cases
+	}
+	var filtered []*loader.TestCase
+	for _, tc := range cases {
+		if !hasAnyTag(tc.Tags, excluded) {
+			filtered = append(filtered, tc)
+		}
+	}
+	return filtered
+}
+
+// parseTags splits a comma-separated tag string into trimmed non-empty tags.
+func parseTags(tags string) []string {
+	parts := strings.Split(tags, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// hasAnyTag returns true if any of the test's tags appear in the wanted set.
+func hasAnyTag(testTags, wanted []string) bool {
+	for _, t := range testTags {
+		for _, w := range wanted {
+			if t == w {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // matchPattern performs simple glob matching.

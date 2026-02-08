@@ -70,6 +70,17 @@ make features
 make usecases
 ```
 
+### Test Filtering
+
+| Flag | Purpose | Example |
+|------|---------|---------|
+| `-filter` | Filter by test ID glob | `-filter "TC-PROTO*"` |
+| `-files` | Filter by YAML file name | `-files "protocol-*,connection-*"` |
+| `-tags` | Include only tagged tests | `-tags slow` |
+| `-exclude-tags` | Exclude tagged tests | `-exclude-tags slow` |
+
+Filters compose: `-files "protocol-*" -exclude-tags slow` runs protocol tests that aren't tagged slow.
+
 ### Key Packages
 
 | Package | Purpose |

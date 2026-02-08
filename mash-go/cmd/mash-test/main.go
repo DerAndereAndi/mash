@@ -13,6 +13,10 @@
 //	-mode string            Test mode: device, controller (default "device")
 //	-pics string            Path to PICS file for the target
 //	-tests string           Path to test cases directory
+//	-filter string          Filter test cases by ID glob pattern (e.g., 'TC-CERT*')
+//	-files string           Filter test files by name pattern (e.g., 'protocol-*,connection-*')
+//	-tags string            Include only tests with these tags (comma-separated)
+//	-exclude-tags string    Exclude tests with these tags (comma-separated)
 //	-timeout duration       Test timeout (default 30s)
 //	-verbose                Enable verbose output
 //	-json                   Output results as JSON
@@ -42,6 +46,15 @@
 //
 //	# Run specific test pattern with verbose output
 //	mash-test -target localhost:8443 -verbose "EnergyControl.*"
+//
+//	# Run only protocol tests
+//	mash-test -target localhost:8443 -files "protocol-*"
+//
+//	# Exclude slow tests
+//	mash-test -target localhost:8443 -exclude-tags slow
+//
+//	# Run only tests tagged 'connection'
+//	mash-test -target localhost:8443 -tags connection
 package main
 
 import (
@@ -74,6 +87,9 @@ var (
 	debug          = flag.Bool("debug", false, "Enable debug logging (connection lifecycle, precondition transitions, state snapshots)")
 	suiteTimeout   = flag.Duration("suite-timeout", 0, "Suite timeout (0 = auto-calculate from test timeouts)")
 	filter         = flag.String("filter", "", "Filter test cases by ID glob pattern (e.g., 'TC-CERT*' or '*ZONE*')")
+	files          = flag.String("files", "", "Filter test files by name pattern (e.g., 'protocol-*,connection-*')")
+	tags           = flag.String("tags", "", "Include only tests with these tags (comma-separated)")
+	excludeTags    = flag.String("exclude-tags", "", "Exclude tests with these tags (comma-separated)")
 )
 
 func main() {
@@ -135,6 +151,15 @@ func run() int {
 		if pattern != "" {
 			log.Printf("Pattern: %s", pattern)
 		}
+		if *files != "" {
+			log.Printf("Files: %s", *files)
+		}
+		if *tags != "" {
+			log.Printf("Tags: %s", *tags)
+		}
+		if *excludeTags != "" {
+			log.Printf("Exclude-Tags: %s", *excludeTags)
+		}
 		log.Println()
 	}
 
@@ -159,6 +184,9 @@ func run() int {
 		PICSFile:           *pics,
 		TestDir:            *tests,
 		Pattern:            pattern,
+		Files:              *files,
+		Tags:               *tags,
+		ExcludeTags:        *excludeTags,
 		Timeout:            *timeout,
 		Verbose:            *verbose,
 		Output:             os.Stdout,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -83,6 +84,38 @@ func (r *TextReporter) ReportSummary(result *engine.SuiteResult) {
 	if total > 0 {
 		rate := float64(result.PassCount) / float64(total) * 100
 		fmt.Fprintf(r.writer, "Pass Rate: %.1f%%\n", rate)
+	}
+
+	r.reportSlowest(result)
+}
+
+// reportSlowest prints the top 10 slowest non-skipped tests at the end
+// of the suite summary. Only shown when there are 3 or more non-skipped tests.
+func (r *TextReporter) reportSlowest(result *engine.SuiteResult) {
+	var nonSkipped []*engine.TestResult
+	for _, tr := range result.Results {
+		if !tr.Skipped {
+			nonSkipped = append(nonSkipped, tr)
+		}
+	}
+
+	if len(nonSkipped) < 3 {
+		return
+	}
+
+	sort.Slice(nonSkipped, func(i, j int) bool {
+		return nonSkipped[i].Duration > nonSkipped[j].Duration
+	})
+
+	limit := 10
+	if len(nonSkipped) < limit {
+		limit = len(nonSkipped)
+	}
+
+	fmt.Fprintf(r.writer, "\n--- Slowest Tests ---\n")
+	for _, tr := range nonSkipped[:limit] {
+		fmt.Fprintf(r.writer, "  %5.1fs  %s - %s\n",
+			tr.Duration.Seconds(), tr.TestCase.ID, tr.TestCase.Name)
 	}
 }
 

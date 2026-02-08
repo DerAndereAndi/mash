@@ -140,6 +140,86 @@ func TestFilterByPattern_NoDuplicates(t *testing.T) {
 	}
 }
 
+func TestFilterByTags(t *testing.T) {
+	cases := []*loader.TestCase{
+		{ID: "TC-001", Tags: []string{"slow", "connection"}},
+		{ID: "TC-002", Tags: []string{"fast"}},
+		{ID: "TC-003", Tags: []string{"slow", "reaper"}},
+		{ID: "TC-004"}, // no tags
+	}
+
+	// Single tag
+	filtered := filterByTags(cases, "slow")
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2, got %d: %v", len(filtered), ids(filtered))
+	}
+	assertContainsID(t, filtered, "TC-001")
+	assertContainsID(t, filtered, "TC-003")
+
+	// Multiple tags (comma-separated OR)
+	filtered = filterByTags(cases, "fast,reaper")
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2, got %d: %v", len(filtered), ids(filtered))
+	}
+	assertContainsID(t, filtered, "TC-002")
+	assertContainsID(t, filtered, "TC-003")
+
+	// No match
+	filtered = filterByTags(cases, "nonexistent")
+	if len(filtered) != 0 {
+		t.Fatalf("expected 0, got %d", len(filtered))
+	}
+}
+
+func TestFilterByTags_EmptyFilter(t *testing.T) {
+	cases := []*loader.TestCase{
+		{ID: "TC-001", Tags: []string{"slow"}},
+		{ID: "TC-002"},
+	}
+
+	// Empty string returns all
+	filtered := filterByTags(cases, "")
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2, got %d", len(filtered))
+	}
+}
+
+func TestFilterByExcludeTags(t *testing.T) {
+	cases := []*loader.TestCase{
+		{ID: "TC-001", Tags: []string{"slow", "connection"}},
+		{ID: "TC-002", Tags: []string{"fast"}},
+		{ID: "TC-003", Tags: []string{"slow", "reaper"}},
+		{ID: "TC-004"}, // no tags
+	}
+
+	// Exclude slow
+	filtered := filterByExcludeTags(cases, "slow")
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2, got %d: %v", len(filtered), ids(filtered))
+	}
+	assertContainsID(t, filtered, "TC-002")
+	assertContainsID(t, filtered, "TC-004")
+
+	// Exclude multiple (comma-separated OR)
+	filtered = filterByExcludeTags(cases, "slow,fast")
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1, got %d: %v", len(filtered), ids(filtered))
+	}
+	assertContainsID(t, filtered, "TC-004")
+
+	// Exclude nonexistent -- keeps all
+	filtered = filterByExcludeTags(cases, "nonexistent")
+	if len(filtered) != 4 {
+		t.Fatalf("expected 4, got %d", len(filtered))
+	}
+
+	// Empty exclude -- keeps all
+	filtered = filterByExcludeTags(cases, "")
+	if len(filtered) != 4 {
+		t.Fatalf("expected 4, got %d", len(filtered))
+	}
+}
+
 // helpers
 
 func ids(cases []*loader.TestCase) []string {

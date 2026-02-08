@@ -121,6 +121,15 @@ func ParseTestCases(data []byte) ([]*TestCase, error) {
 // LoadDirectory loads all test cases from a directory.
 // Only files with .yaml or .yml extensions are loaded.
 func LoadDirectory(dir string) ([]*TestCase, error) {
+	return LoadDirectoryWithFilter(dir, "")
+}
+
+// LoadDirectoryWithFilter loads test cases from a directory, filtering files
+// by name pattern. The filter is a comma-separated list of glob patterns
+// matched against the filename stem (without extension). For example,
+// "protocol-*,connection-*" loads only files whose stem matches either pattern.
+// An empty filter loads all files (same as LoadDirectory).
+func LoadDirectoryWithFilter(dir, fileFilter string) ([]*TestCase, error) {
 	var cases []*TestCase
 
 	entries, err := os.ReadDir(dir)
@@ -131,6 +140,8 @@ func LoadDirectory(dir string) ([]*TestCase, error) {
 			Cause:   err,
 		}
 	}
+
+	patterns := parseFileFilter(fileFilter)
 
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -143,6 +154,13 @@ func LoadDirectory(dir string) ([]*TestCase, error) {
 			continue
 		}
 
+		if len(patterns) > 0 {
+			stem := strings.TrimSuffix(name, filepath.Ext(name))
+			if !matchesAnyFilePattern(stem, patterns) {
+				continue
+			}
+		}
+
 		path := filepath.Join(dir, name)
 		fileCases, err := LoadTestCases(path)
 		if err != nil {
@@ -153,6 +171,34 @@ func LoadDirectory(dir string) ([]*TestCase, error) {
 	}
 
 	return cases, nil
+}
+
+// parseFileFilter splits a comma-separated filter string into non-empty
+// trimmed patterns.
+func parseFileFilter(filter string) []string {
+	if filter == "" {
+		return nil
+	}
+	parts := strings.Split(filter, ",")
+	var patterns []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			patterns = append(patterns, p)
+		}
+	}
+	return patterns
+}
+
+// matchesAnyFilePattern checks if a filename stem matches any of the given
+// glob patterns using filepath.Match.
+func matchesAnyFilePattern(stem string, patterns []string) bool {
+	for _, p := range patterns {
+		if matched, _ := filepath.Match(p, stem); matched {
+			return true
+		}
+	}
+	return false
 }
 
 // LoadDirectoryRecursive loads all test cases from a directory and subdirectories.

@@ -283,6 +283,103 @@ steps:
 	}
 }
 
+// TestLoadDirectoryWithFilter tests file-path scoping.
+func TestLoadDirectoryWithFilter(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create test files with different names.
+	files := map[string]string{
+		"protocol-behavior-tests.yaml": `
+id: TC-PROTO-001
+name: Protocol Test
+steps:
+  - action: test
+`,
+		"connection-basic-tests.yaml": `
+id: TC-CONN-001
+name: Connection Test
+steps:
+  - action: test
+`,
+		"connection-reaper-tests.yaml": `
+id: TC-CONN-REAP-001
+name: Reaper Test
+steps:
+  - action: test
+`,
+		"energy-control-tests.yaml": `
+id: TC-EC-001
+name: Energy Test
+steps:
+  - action: test
+`,
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatalf("Failed to write %s: %v", name, err)
+		}
+	}
+
+	tests := []struct {
+		name     string
+		filter   string
+		wantIDs  []string
+	}{
+		{
+			name:    "exact stem",
+			filter:  "protocol-behavior-tests",
+			wantIDs: []string{"TC-PROTO-001"},
+		},
+		{
+			name:    "glob wildcard",
+			filter:  "connection-*",
+			wantIDs: []string{"TC-CONN-001", "TC-CONN-REAP-001"},
+		},
+		{
+			name:    "comma-separated patterns",
+			filter:  "protocol-*,energy-*",
+			wantIDs: []string{"TC-PROTO-001", "TC-EC-001"},
+		},
+		{
+			name:    "empty filter loads all",
+			filter:  "",
+			wantIDs: []string{"TC-PROTO-001", "TC-CONN-001", "TC-CONN-REAP-001", "TC-EC-001"},
+		},
+		{
+			name:    "no matches",
+			filter:  "nonexistent-*",
+			wantIDs: []string{},
+		},
+		{
+			name:    "whitespace in patterns trimmed",
+			filter:  " protocol-* , energy-* ",
+			wantIDs: []string{"TC-PROTO-001", "TC-EC-001"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cases, err := loader.LoadDirectoryWithFilter(dir, tt.filter)
+			if err != nil {
+				t.Fatalf("LoadDirectoryWithFilter(%q) error: %v", tt.filter, err)
+			}
+			gotIDs := make(map[string]bool)
+			for _, tc := range cases {
+				gotIDs[tc.ID] = true
+			}
+			for _, wantID := range tt.wantIDs {
+				if !gotIDs[wantID] {
+					t.Errorf("expected %s in results, got %v", wantID, gotIDs)
+				}
+			}
+			if len(cases) != len(tt.wantIDs) {
+				t.Errorf("expected %d cases, got %d", len(tt.wantIDs), len(cases))
+			}
+		})
+	}
+}
+
 // TestLoaderParsePICS tests PICS file parsing.
 func TestLoaderParsePICS(t *testing.T) {
 	pics := `

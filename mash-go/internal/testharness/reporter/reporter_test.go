@@ -3,6 +3,7 @@ package reporter_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -267,6 +268,132 @@ func TestJUnitReporterSingleTest(t *testing.T) {
 	}
 	if !strings.Contains(output, `tests="1"`) {
 		t.Error("Should have 1 test")
+	}
+}
+
+func TestReportSummary_IncludesSlowestTests(t *testing.T) {
+	var buf bytes.Buffer
+	r := reporter.NewTextReporter(&buf, false)
+
+	// Create 15 test results with varying durations.
+	var results []*engine.TestResult
+	for i := range 15 {
+		results = append(results, &engine.TestResult{
+			TestCase: &loader.TestCase{
+				ID:   fmt.Sprintf("TC-%03d", i+1),
+				Name: fmt.Sprintf("Test %d", i+1),
+			},
+			Passed:   true,
+			Duration: time.Duration(i+1) * time.Second,
+		})
+	}
+
+	suite := &engine.SuiteResult{
+		SuiteName: "Slowest Test Suite",
+		Results:   results,
+		PassCount: 15,
+		Duration:  2 * time.Minute,
+	}
+	r.ReportSummary(suite)
+
+	output := buf.String()
+
+	// Should contain the slowest tests section.
+	if !strings.Contains(output, "--- Slowest Tests ---") {
+		t.Fatal("Missing slowest tests section")
+	}
+
+	// Should show the slowest test first (TC-015 at 15s).
+	if !strings.Contains(output, "TC-015") {
+		t.Error("Missing slowest test TC-015")
+	}
+
+	// Should show top 10 only, so TC-005 (5s) should NOT appear (it's rank 11).
+	if strings.Contains(output, "TC-005 ") {
+		t.Error("TC-005 should not appear in top 10")
+	}
+
+	// TC-006 (6s) is rank 10 and should appear.
+	if !strings.Contains(output, "TC-006") {
+		t.Error("Missing TC-006 (rank 10)")
+	}
+}
+
+func TestReportSummary_FewTests_NoSlowestSection(t *testing.T) {
+	var buf bytes.Buffer
+	r := reporter.NewTextReporter(&buf, false)
+
+	suite := &engine.SuiteResult{
+		SuiteName: "Small Suite",
+		Results: []*engine.TestResult{
+			{
+				TestCase: &loader.TestCase{ID: "TC-001", Name: "Test 1"},
+				Passed:   true,
+				Duration: 5 * time.Second,
+			},
+			{
+				TestCase: &loader.TestCase{ID: "TC-002", Name: "Test 2"},
+				Passed:   true,
+				Duration: 3 * time.Second,
+			},
+		},
+		PassCount: 2,
+		Duration:  8 * time.Second,
+	}
+	r.ReportSummary(suite)
+
+	output := buf.String()
+
+	// Fewer than 3 non-skipped tests: no slowest section.
+	if strings.Contains(output, "Slowest Tests") {
+		t.Error("Should not show slowest tests section with fewer than 3 tests")
+	}
+}
+
+func TestReportSummary_SkippedExcludedFromSlowest(t *testing.T) {
+	var buf bytes.Buffer
+	r := reporter.NewTextReporter(&buf, false)
+
+	suite := &engine.SuiteResult{
+		SuiteName: "Mixed Suite",
+		Results: []*engine.TestResult{
+			{
+				TestCase: &loader.TestCase{ID: "TC-001", Name: "Test 1"},
+				Passed:   true,
+				Duration: 5 * time.Second,
+			},
+			{
+				TestCase: &loader.TestCase{ID: "TC-002", Name: "Test 2"},
+				Skipped:  true,
+				Duration: 99 * time.Second,
+			},
+			{
+				TestCase: &loader.TestCase{ID: "TC-003", Name: "Test 3"},
+				Passed:   true,
+				Duration: 3 * time.Second,
+			},
+			{
+				TestCase: &loader.TestCase{ID: "TC-004", Name: "Test 4"},
+				Passed:   true,
+				Duration: 1 * time.Second,
+			},
+		},
+		PassCount: 3,
+		SkipCount: 1,
+		Duration:  10 * time.Second,
+	}
+	r.ReportSummary(suite)
+
+	output := buf.String()
+
+	// Should show slowest section (3 non-skipped tests).
+	if !strings.Contains(output, "--- Slowest Tests ---") {
+		t.Fatal("Missing slowest tests section")
+	}
+
+	// Skipped test should NOT appear in slowest.
+	if strings.Contains(output, "TC-002") {
+		t.Error("Skipped test TC-002 should not appear in slowest tests")
 	}
 }
 
