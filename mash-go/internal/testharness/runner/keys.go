@@ -49,10 +49,21 @@ const (
 
 // Zone management test preconditions (runner-side zone state).
 const (
-	PrecondNoZonesConfigured   = "no_zones_configured"
-	PrecondLocalZoneConfigured = "local_zone_configured"
-	PrecondTwoZonesConfigured  = "two_zones_configured"
-	PrecondSubscriptionActive  = "subscription_active"
+	PrecondNoZonesConfigured      = "no_zones_configured"
+	PrecondLocalZoneConfigured    = "local_zone_configured"
+	PrecondTwoZonesConfigured     = "two_zones_configured"
+	PrecondSubscriptionActive     = "subscription_active"
+	PrecondZoneCount              = "zone_count"
+	PrecondZoneCountAtLeast       = "zone_count_at_least"
+	PrecondNoOtherZonesConnected  = "no_other_zones_connected"
+	PrecondAcceptsSetpoints       = "accepts_setpoints"
+	PrecondTwoZonesWithLimits     = "two_zones_with_limits"
+	PrecondSecondZoneConnected    = "second_zone_connected"
+	PrecondNoExistingLimits       = "no_existing_limits"
+	PrecondZoneHasSetValues       = "zone_has_set_values"
+	PrecondDeviceSupportsProduction = "device_supports_production"
+	PrecondDeviceIsBidirectional  = "device_is_bidirectional"
+	PrecondDeviceSupportsAsymmetric = "device_supports_asymmetric"
 )
 
 // Environment/negative-test preconditions.
@@ -173,9 +184,11 @@ const (
 	StateExtractedDeviceID = "extracted_device_id"
 
 	// Commissioned zone IDs (set by preconditions after commissioning).
-	StateGridZoneID  = "grid_zone_id"
-	StateLocalZoneID = "local_zone_id"
-	StateTestZoneID  = "test_zone_id"
+	StateGridZoneID    = "grid_zone_id"
+	StateLocalZoneID   = "local_zone_id"
+	StateTestZoneID    = "test_zone_id"
+	StateCurrentZoneID = "current_zone_id"
+	StateOtherZoneID   = "other_zone_id"
 
 	// Setup.
 	StateSetupCode = "setup_code"
@@ -290,7 +303,10 @@ const (
 	KeyZoneDisconnected    = "zone_disconnected"
 	KeyBidirectionalActive = "bidirectional_active"
 	KeySequenceRestored    = "sequence_restored"
+	KeySubscriptionsFirst  = "subscriptions_first"
 	KeyCommandReplayed     = "command_replayed"
+	KeyAllSubscribed       = "all_subscribed"
+	KeyOrderPreserved      = "order_preserved"
 	KeyTLSActive           = "tls_active"
 	KeyVersionMatches      = "version_matches"
 )
@@ -939,4 +955,251 @@ const (
 	CheckerMeanDifferenceMsMax   = "mean_difference_ms_max"
 	CheckerValidityDaysMin       = "validity_days_min"
 	CheckerBusyRetryAfterGT      = "busy_retry_after_gt"
+)
+
+// ============================================================================
+// Action constants -- handler names registered with engine.RegisterHandler.
+// Grouped by handler file for discoverability.
+// ============================================================================
+
+// Core actions (runner.go).
+const (
+	ActionConnect    = "connect"
+	ActionDisconnect = "disconnect"
+	ActionRead       = "read"
+	ActionWrite      = "write"
+	ActionSubscribe  = "subscribe"
+	ActionInvoke     = "invoke"
+	ActionWait       = "wait"
+	ActionVerify     = "verify"
+)
+
+// PASE commissioning actions (pase.go).
+const (
+	ActionCommission         = "commission"
+	ActionPASERequest        = "pase_request"
+	ActionPASEReceiveResponse = "pase_receive_response"
+	ActionPASEConfirm        = "pase_confirm"
+	ActionPASEReceiveVerify  = "pase_receive_verify"
+	ActionVerifySessionKey   = "verify_session_key"
+)
+
+// Discovery actions (discovery_handlers.go).
+const (
+	ActionBrowseMDNS              = "browse_mdns"
+	ActionBrowseCommissioners     = "browse_commissioners"
+	ActionReadMDNSTXT             = "read_mdns_txt"
+	ActionVerifyMDNSAdvertising   = "verify_mdns_advertising"
+	ActionVerifyMDNSBrowsing      = "verify_mdns_browsing"
+	ActionVerifyMDNSNotAdvertising = "verify_mdns_not_advertising"
+	ActionVerifyMDNSNotBrowsing   = "verify_mdns_not_browsing"
+	ActionGetQRPayload            = "get_qr_payload"
+	ActionAnnouncePairingRequest  = "announce_pairing_request"
+	ActionStopPairingRequest      = "stop_pairing_request"
+	ActionStartDiscovery          = "start_discovery"
+	ActionStopDiscovery           = "stop_discovery"
+	ActionWaitForDevice           = "wait_for_device"
+	ActionVerifyTXTRecords        = "verify_txt_records"
+)
+
+// Connection actions (connection_handlers.go).
+const (
+	ActionConnectAsController         = "connect_as_controller"
+	ActionConnectAsZone               = "connect_as_zone"
+	ActionReadAsZone                  = "read_as_zone"
+	ActionInvokeAsZone                = "invoke_as_zone"
+	ActionSubscribeAsZone             = "subscribe_as_zone"
+	ActionWaitForNotificationAsZone   = "wait_for_notification_as_zone"
+	ActionConnectWithTiming           = "connect_with_timing"
+	ActionSendClose                   = "send_close"
+	ActionSimultaneousClose           = "simultaneous_close"
+	ActionWaitDisconnect              = "wait_disconnect"
+	ActionCancelReconnect             = "cancel_reconnect"
+	ActionMonitorReconnect            = "monitor_reconnect"
+	ActionDisconnectAndMonitorBackoff = "disconnect_and_monitor_backoff"
+	ActionPing                        = "ping"
+	ActionPingMultiple                = "ping_multiple"
+	ActionVerifyKeepalive             = "verify_keepalive"
+	ActionSendRaw                     = "send_raw"
+	ActionSendRawBytes                = "send_raw_bytes"
+	ActionSendRawFrame                = "send_raw_frame"
+	ActionSendTLSAlert                = "send_tls_alert"
+	ActionQueueCommand                = "queue_command"
+	ActionWaitForQueuedResult         = "wait_for_queued_result"
+	ActionSendMultipleThenDisconnect  = "send_multiple_then_disconnect"
+	ActionOpenConnections             = "open_connections"
+	ActionReadConcurrent              = "read_concurrent"
+	ActionInvokeWithDisconnect        = "invoke_with_disconnect"
+	ActionSubscribeMultiple           = "subscribe_multiple"
+	ActionSubscribeOrdered            = "subscribe_ordered"
+	ActionUnsubscribe                 = "unsubscribe"
+	ActionReceiveNotification         = "receive_notification"
+	ActionReceiveNotifications        = "receive_notifications"
+)
+
+// Security actions (security_handlers.go).
+const (
+	ActionOpenCommissioningConnection = "open_commissioning_connection"
+	ActionCloseConnection             = "close_connection"
+	ActionFloodConnections            = "flood_connections"
+	ActionCheckActiveConnections      = "check_active_connections"
+	ActionCheckConnectionClosed       = "check_connection_closed"
+	ActionCheckMDNSAdvertisement      = "check_mdns_advertisement"
+	ActionConnectOperational          = "connect_operational"
+	ActionEnterCommissioningMode      = "enter_commissioning_mode"
+	ActionExitCommissioningMode       = "exit_commissioning_mode"
+	ActionSendPing                    = "send_ping"
+	ActionReconnectOperational        = "reconnect_operational"
+	ActionPASERequestSlow             = "pase_request_slow"
+	ActionContinueSlowExchange        = "continue_slow_exchange"
+	ActionPASEAttempts                = "pase_attempts"
+	ActionPASEAttemptTimed            = "pase_attempt_timed"
+	ActionPASERequestInvalidPubkey    = "pase_request_invalid_pubkey"
+	ActionPASERequestWrongPassword    = "pase_request_wrong_password"
+	ActionMeasureErrorTiming          = "measure_error_timing"
+	ActionCompareTimingDistributions  = "compare_timing_distributions"
+	ActionFillConnections             = "fill_connections"
+)
+
+// Renewal actions (renewal_handlers.go).
+const (
+	ActionSendRenewalRequest       = "send_renewal_request"
+	ActionReceiveRenewalCSR        = "receive_renewal_csr"
+	ActionSendCertInstall          = "send_cert_install"
+	ActionReceiveRenewalAck        = "receive_renewal_ack"
+	ActionFullRenewalFlow          = "full_renewal_flow"
+	ActionRecordSubscriptionState  = "record_subscription_state"
+	ActionVerifySubscriptionActive = "verify_subscription_active"
+	ActionVerifyConnectionState    = "verify_connection_state"
+	ActionSetCertExpiry            = "set_cert_expiry"
+	ActionWaitForNotification      = "wait_for_notification"
+	ActionVerifyNotificationContent = "verify_notification_content"
+	ActionSimulateCertExpiry       = "simulate_cert_expiry"
+	ActionConnectExpectFailure     = "connect_expect_failure"
+	ActionSetGracePeriod           = "set_grace_period"
+	ActionSimulateTimeAdvance      = "simulate_time_advance"
+	ActionCheckGracePeriodStatus   = "check_grace_period_status"
+)
+
+// Network actions (network_handlers.go).
+const (
+	ActionNetworkPartition = "network_partition"
+	ActionNetworkFilter    = "network_filter"
+	ActionInterfaceDown    = "interface_down"
+	ActionInterfaceUp      = "interface_up"
+	ActionInterfaceFlap    = "interface_flap"
+	ActionChangeAddress    = "change_address"
+	ActionCheckDisplay     = "check_display"
+	ActionAdjustClock      = "adjust_clock"
+)
+
+// Device actions (device_handlers.go).
+const (
+	ActionDeviceLocalAction      = "device_local_action"
+	ActionDeviceSetValue         = "device_set_value"
+	ActionDeviceSetValuesRapid   = "device_set_values_rapid"
+	ActionDeviceTrigger          = "device_trigger"
+	ActionConfigureDevice        = "configure_device"
+	ActionConfigureExposedDevice = "configure_exposed_device"
+	ActionUpdateExposedAttribute = "update_exposed_attribute"
+	ActionChangeState            = "change_state"
+	ActionSetStateDetail         = "set_state_detail"
+	ActionTriggerFault           = "trigger_fault"
+	ActionClearFault             = "clear_fault"
+	ActionQueryDeviceState       = "query_device_state"
+	ActionVerifyDeviceState      = "verify_device_state"
+	ActionSetConnected           = "set_connected"
+	ActionSetDisconnected        = "set_disconnected"
+	ActionSetFailsafeLimit       = "set_failsafe_limit"
+	ActionMakeProcessAvailable   = "make_process_available"
+	ActionStartOperation         = "start_operation"
+	ActionEVConnect              = "ev_connect"
+	ActionEVDisconnect           = "ev_disconnect"
+	ActionEVRequestsCharge       = "ev_requests_charge"
+	ActionPlugInCable            = "plug_in_cable"
+	ActionUnplugCable            = "unplug_cable"
+	ActionUserOverride           = "user_override"
+	ActionFactoryReset           = "factory_reset"
+	ActionPowerCycle             = "power_cycle"
+	ActionPowerOnDevice          = "power_on_device"
+	ActionReboot                 = "reboot"
+	ActionRestart                = "restart"
+)
+
+// Controller actions (controller_handlers.go).
+const (
+	ActionControllerAction                = "controller_action"
+	ActionCommissionWithAdmin             = "commission_with_admin"
+	ActionGetControllerID                 = "get_controller_id"
+	ActionVerifyControllerCert            = "verify_controller_cert"
+	ActionVerifyControllerState           = "verify_controller_state"
+	ActionSetCommissioningWindowDuration  = "set_commissioning_window_duration"
+	ActionGetCommissioningWindowDuration  = "get_commissioning_window_duration"
+	ActionRemoveDevice                    = "remove_device"
+	ActionRenewCert                       = "renew_cert"
+	ActionCheckRenewal                    = "check_renewal"
+)
+
+// Zone actions (zone_handlers.go).
+const (
+	ActionCreateZone                 = "create_zone"
+	ActionAddZone                    = "add_zone"
+	ActionDeleteZone                 = "delete_zone"
+	ActionRemoveZone                 = "remove_zone"
+	ActionGetZone                    = "get_zone"
+	ActionHasZone                    = "has_zone"
+	ActionListZones                  = "list_zones"
+	ActionZoneCount                  = "zone_count"
+	ActionGetZoneMetadata            = "get_zone_metadata"
+	ActionGetZoneCAFingerprint       = "get_zone_ca_fingerprint"
+	ActionVerifyZoneCA               = "verify_zone_ca"
+	ActionVerifyZoneBinding          = "verify_zone_binding"
+	ActionVerifyZoneIDDerivation     = "verify_zone_id_derivation"
+	ActionHighestPriorityZone        = "highest_priority_zone"
+	ActionHighestPriorityConnectedZone = "highest_priority_connected_zone"
+	ActionDisconnectZone             = "disconnect_zone"
+	ActionVerifyOtherZone            = "verify_other_zone"
+	ActionVerifyBidirectionalActive  = "verify_bidirectional_active"
+	ActionVerifyRestoreSequence      = "verify_restore_sequence"
+	ActionVerifyTLSState             = "verify_tls_state"
+)
+
+// Cert actions (cert_handlers.go).
+const (
+	ActionVerifyCertificate        = "verify_certificate"
+	ActionVerifyCertSubject        = "verify_cert_subject"
+	ActionVerifyDeviceCert         = "verify_device_cert"
+	ActionVerifyDeviceCertStore    = "verify_device_cert_store"
+	ActionGetCertFingerprint       = "get_cert_fingerprint"
+	ActionExtractCertDeviceID      = "extract_cert_device_id"
+	ActionVerifyCommissioningState = "verify_commissioning_state"
+	ActionResetPASESession         = "reset_pase_session"
+	ActionSendPASEX                = "send_pase_x"
+	ActionDeviceVerifyPeer         = "device_verify_peer"
+	ActionReceiveCertRenewalAck    = "receive_cert_renewal_ack"
+	ActionReceiveCertRenewalCSR    = "receive_cert_renewal_csr"
+	ActionSendCertRenewalInstall   = "send_cert_renewal_install"
+	ActionSendCertRenewalRequest   = "send_cert_renewal_request"
+	ActionSetCertExpiryDays        = "set_cert_expiry_days"
+)
+
+// Utility actions (utility_handlers.go).
+const (
+	ActionCompare           = "compare"
+	ActionCompareValues     = "compare_values"
+	ActionEvaluate          = "evaluate"
+	ActionConditionalRead   = "conditional_read"
+	ActionRecordTime        = "record_time"
+	ActionVerifyTiming      = "verify_timing"
+	ActionCheckResponse     = "check_response"
+	ActionVerifyCorrelation = "verify_correlation"
+	ActionWaitForState      = "wait_for_state"
+	ActionWaitNotification  = "wait_notification"
+	ActionWaitReport        = "wait_report"
+	ActionParseQR           = "parse_qr"
+)
+
+// Trigger actions (trigger_handlers.go).
+const (
+	ActionTriggerTestEvent = "trigger_test_event"
 )

@@ -75,6 +75,18 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondDeviceIsPausable:      true,
 	PrecondDeviceIsStoppable:     true,
 	PrecondFailsafeDurationShort: true,
+	// Zone limit/removal simulation.
+	PrecondZoneCount:                true,
+	PrecondZoneCountAtLeast:         true,
+	PrecondNoOtherZonesConnected:    true,
+	PrecondAcceptsSetpoints:         true,
+	PrecondTwoZonesWithLimits:       true,
+	PrecondSecondZoneConnected:      true,
+	PrecondNoExistingLimits:         true,
+	PrecondZoneHasSetValues:         true,
+	PrecondDeviceSupportsProduction: true,
+	PrecondDeviceIsBidirectional:    true,
+	PrecondDeviceSupportsAsymmetric: true,
 }
 
 var preconditionKeyLevels = map[string]int{
@@ -142,6 +154,19 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceIsPausable:      precondLevelCommissioned,
 	PrecondDeviceIsStoppable:     precondLevelCommissioned,
 	PrecondFailsafeDurationShort: precondLevelCommissioned,
+
+	// Zone limit/removal test preconditions.
+	PrecondZoneCount:                precondLevelCommissioned,
+	PrecondZoneCountAtLeast:         precondLevelCommissioned,
+	PrecondNoOtherZonesConnected:    precondLevelCommissioned,
+	PrecondAcceptsSetpoints:         precondLevelCommissioned,
+	PrecondTwoZonesWithLimits:       precondLevelCommissioned,
+	PrecondSecondZoneConnected:      precondLevelCommissioned,
+	PrecondNoExistingLimits:         precondLevelCommissioned,
+	PrecondZoneHasSetValues:         precondLevelCommissioned,
+	PrecondDeviceSupportsProduction: precondLevelCommissioned,
+	PrecondDeviceIsBidirectional:    precondLevelCommissioned,
+	PrecondDeviceSupportsAsymmetric: precondLevelCommissioned,
 }
 
 // preconditionLevelFor determines the highest setup level needed for the given conditions.
@@ -172,6 +197,26 @@ func (r *Runner) preconditionLevel(conditions []loader.Condition) int {
 func hasPrecondition(conditions []loader.Condition, key string) bool {
 	for _, cond := range conditions {
 		if b, ok := cond[key].(bool); ok && b {
+			return true
+		}
+	}
+	return false
+}
+
+// hasPreconditionInt checks if a precondition has the given key with an int value >= minVal.
+func hasPreconditionInt(conditions []loader.Condition, key string, minVal int) bool {
+	for _, cond := range conditions {
+		if v, ok := cond[key].(int); ok && v >= minVal {
+			return true
+		}
+	}
+	return false
+}
+
+// hasPreconditionString checks if a precondition has the given key with a non-empty string value.
+func hasPreconditionString(conditions []loader.Condition, key string) bool {
+	for _, cond := range conditions {
+		if s, ok := cond[key].(string); ok && s != "" {
 			return true
 		}
 	}
@@ -292,7 +337,10 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	// verification failures on subsequent connection-level or lower tests.
 	// Skip clearing when the test needs zone connections (two_zones_connected),
 	// since those require the zone CA and controller cert for operational TLS.
-	needsZoneConns := hasPrecondition(tc.Preconditions, PrecondTwoZonesConnected)
+	needsZoneConns := hasPrecondition(tc.Preconditions, PrecondTwoZonesConnected) ||
+		hasPrecondition(tc.Preconditions, PrecondTwoZonesWithLimits) ||
+		hasPreconditionInt(tc.Preconditions, PrecondZoneCountAtLeast, 2) ||
+		hasPreconditionString(tc.Preconditions, PrecondSecondZoneConnected)
 	if needed < precondLevelCommissioned && !needsZoneConns {
 		if r.zoneCA != nil || r.controllerCert != nil || r.zoneCAPool != nil {
 			r.debugf("clearing stale zone CA state (needed=%d < commissioned)", needed)
@@ -385,6 +433,28 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		}
 	}
 
+	// Handle non-boolean preconditions that trigger multi-zone setup.
+	// zone_count_at_least: 2 and second_zone_connected: GRID trigger
+	// the same two_zones_connected behavior.
+	needsMultiZone := false
+	for _, cond := range tc.Preconditions {
+		if v, ok := cond[PrecondZoneCountAtLeast]; ok {
+			if n, ok := v.(int); ok && n >= 2 {
+				needsMultiZone = true
+			}
+		}
+		if v, ok := cond[PrecondSecondZoneConnected]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				needsMultiZone = true
+			}
+		}
+		if v, ok := cond[PrecondTwoZonesWithLimits]; ok {
+			if b, ok := v.(bool); ok && b {
+				needsMultiZone = true
+			}
+		}
+	}
+
 	// Handle preconditions that require special setup.
 	for _, cond := range tc.Preconditions {
 		for key, val := range cond {
@@ -471,6 +541,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 					}
 				}
 			case PrecondTwoZonesConnected:
+				needsMultiZone = false // Already handled inline.
 				ct := getConnectionTracker(state)
 				zones := []struct {
 					name string
@@ -585,6 +656,14 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 						r.conn = zc
 						r.debugf("two_zones_connected: restored r.conn from zone %s", firstZone.name)
 					}
+					// Set current_zone_id (GRID, since r.conn is restored to GRID)
+					// and other_zone_id (LOCAL) for test interpolation.
+					if gridID, ok := state.Get(StateGridZoneID); ok {
+						state.Set(StateCurrentZoneID, gridID)
+					}
+					if localID, ok := state.Get(StateLocalZoneID); ok {
+						state.Set(StateOtherZoneID, localID)
+					}
 					// Reset commission zone type to default.
 					r.commissionZoneType = 0
 				} else {
@@ -694,6 +773,27 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		}
 	}
 
+	// Handle needsMultiZone: set up two_zones_connected when triggered
+	// by zone_count_at_least, second_zone_connected, or two_zones_with_limits.
+	if needsMultiZone {
+		state.Set(PrecondTwoZonesConnected, true)
+		ct := getConnectionTracker(state)
+		if len(ct.zoneConnections) < 2 {
+			// Synthesize zone connections for simulation mode.
+			// Real device mode will be handled by ensureCommissioned + the
+			// two_zones_connected precondition flag in state.
+			if r.config.Target == "" {
+				for _, z := range []string{"GRID", "LOCAL"} {
+					if _, exists := ct.zoneConnections[z]; !exists {
+						dummyConn := &Connection{connected: true}
+						ct.zoneConnections[z] = dummyConn
+						r.activeZoneConns[z] = dummyConn
+					}
+				}
+			}
+		}
+	}
+
 	// If a commissioned session exists but isn't tracked in activeZoneConns,
 	// it was established by a test step (not by ensureCommissioned which calls
 	// transitionToOperational). Such sessions are unreliable: the device may
@@ -741,6 +841,9 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 			if stateKey != "" {
 				state.Set(stateKey, zID)
 			}
+			// Set current_zone_id for test interpolation (e.g. {{ current_zone_id }}).
+			// This is the zone ID of the most recently commissioned zone.
+			state.Set(StateCurrentZoneID, zID)
 			// Patch the simulated zone entry with the real zone ID.
 			if zoneLabel != "" {
 				zs := getZoneState(state)

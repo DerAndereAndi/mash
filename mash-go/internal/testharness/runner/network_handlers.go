@@ -11,14 +11,14 @@ import (
 
 // registerNetworkHandlers registers all network simulation action handlers.
 func (r *Runner) registerNetworkHandlers() {
-	r.engine.RegisterHandler("network_partition", r.handleNetworkPartition)
-	r.engine.RegisterHandler("network_filter", r.handleNetworkFilter)
-	r.engine.RegisterHandler("interface_down", r.handleInterfaceDown)
-	r.engine.RegisterHandler("interface_up", r.handleInterfaceUp)
-	r.engine.RegisterHandler("interface_flap", r.handleInterfaceFlap)
-	r.engine.RegisterHandler("change_address", r.handleChangeAddress)
-	r.engine.RegisterHandler("check_display", r.handleCheckDisplay)
-	r.engine.RegisterHandler("adjust_clock", r.handleAdjustClock)
+	r.engine.RegisterHandler(ActionNetworkPartition, r.handleNetworkPartition)
+	r.engine.RegisterHandler(ActionNetworkFilter, r.handleNetworkFilter)
+	r.engine.RegisterHandler(ActionInterfaceDown, r.handleInterfaceDown)
+	r.engine.RegisterHandler(ActionInterfaceUp, r.handleInterfaceUp)
+	r.engine.RegisterHandler(ActionInterfaceFlap, r.handleInterfaceFlap)
+	r.engine.RegisterHandler(ActionChangeAddress, r.handleChangeAddress)
+	r.engine.RegisterHandler(ActionCheckDisplay, r.handleCheckDisplay)
+	r.engine.RegisterHandler(ActionAdjustClock, r.handleAdjustClock)
 }
 
 // handleNetworkPartition simulates a network partition.

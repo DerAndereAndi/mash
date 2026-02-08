@@ -33,15 +33,15 @@ type PASEState struct {
 // registerPASEHandlers registers all PASE-related action handlers.
 func (r *Runner) registerPASEHandlers() {
 	// Primary commissioning action (recommended)
-	r.engine.RegisterHandler("commission", r.handleCommission)
+	r.engine.RegisterHandler(ActionCommission, r.handleCommission)
 
 	// Legacy granular PASE handlers - these now delegate to commission
 	// for backward compatibility with existing test cases
-	r.engine.RegisterHandler("pase_request", r.handlePASERequest)
-	r.engine.RegisterHandler("pase_receive_response", r.handlePASEReceiveResponse)
-	r.engine.RegisterHandler("pase_confirm", r.handlePASEConfirm)
-	r.engine.RegisterHandler("pase_receive_verify", r.handlePASEReceiveVerify)
-	r.engine.RegisterHandler("verify_session_key", r.handleVerifySessionKey)
+	r.engine.RegisterHandler(ActionPASERequest, r.handlePASERequest)
+	r.engine.RegisterHandler(ActionPASEReceiveResponse, r.handlePASEReceiveResponse)
+	r.engine.RegisterHandler(ActionPASEConfirm, r.handlePASEConfirm)
+	r.engine.RegisterHandler(ActionPASEReceiveVerify, r.handlePASEReceiveVerify)
+	r.engine.RegisterHandler(ActionVerifySessionKey, r.handleVerifySessionKey)
 }
 
 // handleCommission performs the full PASE commissioning handshake.
@@ -345,6 +345,8 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	derivedZoneID := ""
 	if r.paseState != nil && r.paseState.sessionKey != nil {
 		derivedZoneID = deriveZoneIDFromSecret(r.paseState.sessionKey)
+		// Set current_zone_id so tests can reference {{ current_zone_id }}.
+		state.Set(StateCurrentZoneID, derivedZoneID)
 	}
 	if zt, ok := params[KeyZoneType].(string); ok && zt != "" {
 		zs := getZoneState(state)

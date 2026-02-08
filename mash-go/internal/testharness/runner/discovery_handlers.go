@@ -18,22 +18,25 @@ import (
 
 // registerDiscoveryHandlers registers all discovery-related action handlers.
 func (r *Runner) registerDiscoveryHandlers() {
-	r.engine.RegisterHandler("browse_mdns", r.handleBrowseMDNS)
-	r.engine.RegisterHandler("browse_commissioners", r.handleBrowseCommissioners)
-	r.engine.RegisterHandler("read_mdns_txt", r.handleReadMDNSTXT)
-	r.engine.RegisterHandler("verify_mdns_advertising", r.handleVerifyMDNSAdvertising)
-	r.engine.RegisterHandler("verify_mdns_browsing", r.handleVerifyMDNSBrowsing)
-	r.engine.RegisterHandler("verify_mdns_not_advertising", r.handleVerifyMDNSNotAdvertising)
-	r.engine.RegisterHandler("verify_mdns_not_browsing", r.handleVerifyMDNSNotBrowsing)
-	r.engine.RegisterHandler("get_qr_payload", r.handleGetQRPayload)
-	r.engine.RegisterHandler("announce_pairing_request", r.handleAnnouncePairingRequest)
-	r.engine.RegisterHandler("stop_pairing_request", r.handleStopPairingRequest)
+	// Register checkers for discovery output keys that need >= semantics.
+	r.engine.RegisterChecker(KeyAAAACountMin, r.checkAAAACountMin)
+
+	r.engine.RegisterHandler(ActionBrowseMDNS, r.handleBrowseMDNS)
+	r.engine.RegisterHandler(ActionBrowseCommissioners, r.handleBrowseCommissioners)
+	r.engine.RegisterHandler(ActionReadMDNSTXT, r.handleReadMDNSTXT)
+	r.engine.RegisterHandler(ActionVerifyMDNSAdvertising, r.handleVerifyMDNSAdvertising)
+	r.engine.RegisterHandler(ActionVerifyMDNSBrowsing, r.handleVerifyMDNSBrowsing)
+	r.engine.RegisterHandler(ActionVerifyMDNSNotAdvertising, r.handleVerifyMDNSNotAdvertising)
+	r.engine.RegisterHandler(ActionVerifyMDNSNotBrowsing, r.handleVerifyMDNSNotBrowsing)
+	r.engine.RegisterHandler(ActionGetQRPayload, r.handleGetQRPayload)
+	r.engine.RegisterHandler(ActionAnnouncePairingRequest, r.handleAnnouncePairingRequest)
+	r.engine.RegisterHandler(ActionStopPairingRequest, r.handleStopPairingRequest)
 
 	// Replace stubs from runner.go
-	r.engine.RegisterHandler("start_discovery", r.handleStartDiscoveryReal)
-	r.engine.RegisterHandler("stop_discovery", r.handleStopDiscoveryReal)
-	r.engine.RegisterHandler("wait_for_device", r.handleWaitForDeviceReal)
-	r.engine.RegisterHandler("verify_txt_records", r.handleVerifyTXTRecordsReal)
+	r.engine.RegisterHandler(ActionStartDiscovery, r.handleStartDiscoveryReal)
+	r.engine.RegisterHandler(ActionStopDiscovery, r.handleStopDiscoveryReal)
+	r.engine.RegisterHandler(ActionWaitForDevice, r.handleWaitForDeviceReal)
+	r.engine.RegisterHandler(ActionVerifyTXTRecords, r.handleVerifyTXTRecordsReal)
 }
 
 // browseMDNSOnce performs a single mDNS browse pass and returns discovered services.
@@ -150,6 +153,12 @@ func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params 
 func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDiscoveryState(state)
+
+	// Track commissioning completion so buildBrowseOutput can filter
+	// commissionable services from all code paths (simulated and real).
+	if completed, _ := state.Get(StateCommissioningCompleted); completed == true {
+		ds.commissioningCompleted = true
+	}
 
 	// Simulated environment conditions (set via preconditions).
 	if noAdv, _ := state.Get(PrecondNoDevicesAdvertising); noAdv == true {
@@ -514,19 +523,6 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		ds.services = services
 	}
 
-	// After commissioning completes, the device should stop advertising
-	// as commissionable (_mashc._udp). Filter out commissionable services
-	// from real mDNS results to simulate expected spec behavior.
-	if completed, _ := state.Get(StateCommissioningCompleted); completed == true {
-		filtered := ds.services[:0]
-		for _, svc := range ds.services {
-			if svc.ServiceType != discovery.ServiceTypeCommissionable {
-				filtered = append(filtered, svc)
-			}
-		}
-		ds.services = filtered
-	}
-
 	outputs, err := r.buildBrowseOutput(ds)
 	if err != nil {
 		return nil, err
@@ -558,6 +554,18 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 // buildBrowseOutput constructs the standard output map from discovery state.
 // This is shared by simulation paths and the real mDNS browse path.
 func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
+	// After commissioning completes, filter out commissionable services
+	// regardless of which code path populated ds.services (simulated or real).
+	if ds.commissioningCompleted {
+		filtered := ds.services[:0]
+		for _, svc := range ds.services {
+			if svc.ServiceType != discovery.ServiceTypeCommissionable {
+				filtered = append(filtered, svc)
+			}
+		}
+		ds.services = filtered
+	}
+
 	// Compute per-service-type counts.
 	devicesFound := 0
 	controllersFound := 0
@@ -1151,4 +1159,28 @@ func (r *Runner) handleVerifyTXTRecordsReal(ctx context.Context, step *loader.St
 	}
 
 	return outputs, nil
+}
+
+// checkAAAACountMin verifies that the actual AAAA count is >= the expected minimum.
+func (r *Runner) checkAAAACountMin(key string, expected interface{}, state *engine.ExecutionState) *engine.ExpectResult {
+	actual, exists := state.Get(key)
+	if !exists {
+		return &engine.ExpectResult{
+			Key: key, Expected: expected, Passed: false,
+			Message: fmt.Sprintf("key %q not found in outputs", key),
+		}
+	}
+	actualNum, ok1 := engine.ToFloat64(actual)
+	expectedNum, ok2 := engine.ToFloat64(expected)
+	if !ok1 || !ok2 {
+		return &engine.ExpectResult{
+			Key: key, Expected: expected, Actual: actual, Passed: false,
+			Message: fmt.Sprintf("cannot compare non-numeric values: %T and %T", actual, expected),
+		}
+	}
+	passed := actualNum >= expectedNum
+	return &engine.ExpectResult{
+		Key: key, Expected: expected, Actual: actual, Passed: passed,
+		Message: fmt.Sprintf("aaaa_count %v >= %v = %v", actualNum, expectedNum, passed),
+	}
 }

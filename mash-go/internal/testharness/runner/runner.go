@@ -589,21 +589,21 @@ func (c *Connection) Close() error {
 // registerHandlers registers all action handlers with the engine.
 func (r *Runner) registerHandlers() {
 	// Connection handlers
-	r.engine.RegisterHandler("connect", r.handleConnect)
-	r.engine.RegisterHandler("disconnect", r.handleDisconnect)
+	r.engine.RegisterHandler(ActionConnect, r.handleConnect)
+	r.engine.RegisterHandler(ActionDisconnect, r.handleDisconnect)
 
 	// Protocol operation handlers
-	r.engine.RegisterHandler("read", r.handleRead)
-	r.engine.RegisterHandler("write", r.handleWrite)
-	r.engine.RegisterHandler("subscribe", r.handleSubscribe)
-	r.engine.RegisterHandler("invoke", r.handleInvoke)
+	r.engine.RegisterHandler(ActionRead, r.handleRead)
+	r.engine.RegisterHandler(ActionWrite, r.handleWrite)
+	r.engine.RegisterHandler(ActionSubscribe, r.handleSubscribe)
+	r.engine.RegisterHandler(ActionInvoke, r.handleInvoke)
 
 	// PASE commissioning handlers
 	r.registerPASEHandlers()
 
 	// Utility handlers
-	r.engine.RegisterHandler("wait", r.handleWait)
-	r.engine.RegisterHandler("verify", r.handleVerify)
+	r.engine.RegisterHandler(ActionWait, r.handleWait)
+	r.engine.RegisterHandler(ActionVerify, r.handleVerify)
 
 	// Register custom expectation checkers
 	r.engine.RegisterChecker(CheckerConnectionEstablished, r.checkConnectionEstablished)
@@ -829,6 +829,50 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			}
 			tlsConfig.Certificates = []tls.Certificate{testCert}
 		}
+	}
+
+	// If an operational connection is already active (e.g. from precondition
+	// commissioning) and no special cert params are requested, reuse it.
+	// This avoids "zone already connected" rejection from the device.
+	clientCertSpec, _ := step.Params["client_cert"].(string)
+	if !commissioning && clientCertSpec == "" && r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
+		cs := r.conn.tlsConn.ConnectionState()
+		hasPeerCerts := len(cs.PeerCertificates) > 0
+		serverCertCNPrefix := ""
+		serverCertSelfSigned := false
+		if hasPeerCerts {
+			cert := cs.PeerCertificates[0]
+			if idx := strings.Index(cert.Subject.CommonName, "-"); idx >= 0 {
+				serverCertCNPrefix = cert.Subject.CommonName[:idx+1]
+			} else {
+				serverCertCNPrefix = cert.Subject.CommonName
+			}
+			serverCertSelfSigned = bytes.Equal(cert.RawIssuer, cert.RawSubject)
+		}
+		chainValidated := len(cs.VerifiedChains) > 0 || (hasPeerCerts && insecure)
+		presentedClientCert := len(r.conn.tlsConn.ConnectionState().PeerCertificates) > 0
+		return map[string]any{
+			KeyConnectionEstablished:  true,
+			KeyConnected:              true,
+			KeyTLSHandshakeSuccess:    true,
+			KeyTarget:                 target,
+			KeyTLSVersion:             tlsVersionName(cs.Version),
+			KeyNegotiatedVersion:      tlsVersionName(cs.Version),
+			KeyNegotiatedCipher:       tls.CipherSuiteName(cs.CipherSuite),
+			KeyNegotiatedGroup:        curveIDName(cs.CurveID),
+			KeyNegotiatedProtocol:     cs.NegotiatedProtocol,
+			KeyNegotiatedALPN:         cs.NegotiatedProtocol,
+			KeyMutualAuth:             presentedClientCert && hasPeerCerts,
+			KeyControllerCertVerified: presentedClientCert && chainValidated,
+			KeyChainValidated:         chainValidated,
+			KeySelfSignedAccepted:     serverCertSelfSigned && hasPeerCerts,
+			KeyServerCertCNPrefix:     serverCertCNPrefix,
+			KeyServerCertSelfSigned:   serverCertSelfSigned,
+			KeyHasPeerCerts:           hasPeerCerts,
+			KeyFullHandshake:          !cs.DidResume,
+			KeyPSKUsed:                cs.DidResume,
+			KeyEarlyDataAccepted:      false,
+		}, nil
 	}
 
 	// Record start time for verify_timing.

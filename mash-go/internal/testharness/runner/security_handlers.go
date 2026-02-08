@@ -48,32 +48,32 @@ type securityState struct {
 // registerSecurityHandlers registers all security-related action handlers.
 func (r *Runner) registerSecurityHandlers() {
 	// Connection testing handlers
-	r.engine.RegisterHandler("open_commissioning_connection", r.handleOpenCommissioningConnection)
-	r.engine.RegisterHandler("close_connection", r.handleCloseConnection)
-	r.engine.RegisterHandler("flood_connections", r.handleFloodConnections)
-	r.engine.RegisterHandler("check_active_connections", r.handleCheckActiveConnections)
-	r.engine.RegisterHandler("check_connection_closed", r.handleCheckConnectionClosed)
-	r.engine.RegisterHandler("check_mdns_advertisement", r.handleCheckMDNSAdvertisement)
-	r.engine.RegisterHandler("connect_operational", r.handleConnectOperational)
-	r.engine.RegisterHandler("enter_commissioning_mode", r.handleEnterCommissioningMode)
-	r.engine.RegisterHandler("exit_commissioning_mode", r.handleExitCommissioningMode)
-	r.engine.RegisterHandler("send_ping", r.handleSendPing)
-	r.engine.RegisterHandler("reconnect_operational", r.handleReconnectOperational)
-	r.engine.RegisterHandler("pase_request_slow", r.handlePASERequestSlow)
-	r.engine.RegisterHandler("continue_slow_exchange", r.handleContinueSlowExchange)
+	r.engine.RegisterHandler(ActionOpenCommissioningConnection, r.handleOpenCommissioningConnection)
+	r.engine.RegisterHandler(ActionCloseConnection, r.handleCloseConnection)
+	r.engine.RegisterHandler(ActionFloodConnections, r.handleFloodConnections)
+	r.engine.RegisterHandler(ActionCheckActiveConnections, r.handleCheckActiveConnections)
+	r.engine.RegisterHandler(ActionCheckConnectionClosed, r.handleCheckConnectionClosed)
+	r.engine.RegisterHandler(ActionCheckMDNSAdvertisement, r.handleCheckMDNSAdvertisement)
+	r.engine.RegisterHandler(ActionConnectOperational, r.handleConnectOperational)
+	r.engine.RegisterHandler(ActionEnterCommissioningMode, r.handleEnterCommissioningMode)
+	r.engine.RegisterHandler(ActionExitCommissioningMode, r.handleExitCommissioningMode)
+	r.engine.RegisterHandler(ActionSendPing, r.handleSendPing)
+	r.engine.RegisterHandler(ActionReconnectOperational, r.handleReconnectOperational)
+	r.engine.RegisterHandler(ActionPASERequestSlow, r.handlePASERequestSlow)
+	r.engine.RegisterHandler(ActionContinueSlowExchange, r.handleContinueSlowExchange)
 
 	// PASE timing handlers
-	r.engine.RegisterHandler("pase_attempts", r.handlePASEAttempts)
-	r.engine.RegisterHandler("pase_attempt_timed", r.handlePASEAttemptTimed)
+	r.engine.RegisterHandler(ActionPASEAttempts, r.handlePASEAttempts)
+	r.engine.RegisterHandler(ActionPASEAttemptTimed, r.handlePASEAttemptTimed)
 
 	// Error testing handlers
-	r.engine.RegisterHandler("pase_request_invalid_pubkey", r.handlePASERequestInvalidPubkey)
-	r.engine.RegisterHandler("pase_request_wrong_password", r.handlePASERequestWrongPassword)
-	r.engine.RegisterHandler("measure_error_timing", r.handleMeasureErrorTiming)
-	r.engine.RegisterHandler("compare_timing_distributions", r.handleCompareTimingDistributions)
+	r.engine.RegisterHandler(ActionPASERequestInvalidPubkey, r.handlePASERequestInvalidPubkey)
+	r.engine.RegisterHandler(ActionPASERequestWrongPassword, r.handlePASERequestWrongPassword)
+	r.engine.RegisterHandler(ActionMeasureErrorTiming, r.handleMeasureErrorTiming)
+	r.engine.RegisterHandler(ActionCompareTimingDistributions, r.handleCompareTimingDistributions)
 
 	// Connection fill handler for PICS-driven cap tests
-	r.engine.RegisterHandler("fill_connections", r.handleFillConnections)
+	r.engine.RegisterHandler(ActionFillConnections, r.handleFillConnections)
 
 	// Register security-specific checkers
 	r.engine.RegisterChecker(CheckerResponseDelayMsMin, r.checkResponseDelayMin)

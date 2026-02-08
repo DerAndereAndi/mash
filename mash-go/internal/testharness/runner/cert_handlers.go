@@ -17,23 +17,23 @@ import (
 
 // registerCertHandlers registers all certificate and commissioning extension handlers.
 func (r *Runner) registerCertHandlers() {
-	r.engine.RegisterHandler("verify_certificate", r.handleVerifyCertificate)
-	r.engine.RegisterHandler("verify_cert_subject", r.handleVerifyCertSubject)
-	r.engine.RegisterHandler("verify_device_cert", r.handleVerifyDeviceCert)
-	r.engine.RegisterHandler("verify_device_cert_store", r.handleVerifyDeviceCertStore)
-	r.engine.RegisterHandler("get_cert_fingerprint", r.handleGetCertFingerprint)
-	r.engine.RegisterHandler("extract_cert_device_id", r.handleExtractCertDeviceID)
-	r.engine.RegisterHandler("verify_commissioning_state", r.handleVerifyCommissioningState)
-	r.engine.RegisterHandler("reset_pase_session", r.handleResetPASESession)
-	r.engine.RegisterHandler("send_pase_x", r.handleSendPASEX)
-	r.engine.RegisterHandler("device_verify_peer", r.handleDeviceVerifyPeer)
+	r.engine.RegisterHandler(ActionVerifyCertificate, r.handleVerifyCertificate)
+	r.engine.RegisterHandler(ActionVerifyCertSubject, r.handleVerifyCertSubject)
+	r.engine.RegisterHandler(ActionVerifyDeviceCert, r.handleVerifyDeviceCert)
+	r.engine.RegisterHandler(ActionVerifyDeviceCertStore, r.handleVerifyDeviceCertStore)
+	r.engine.RegisterHandler(ActionGetCertFingerprint, r.handleGetCertFingerprint)
+	r.engine.RegisterHandler(ActionExtractCertDeviceID, r.handleExtractCertDeviceID)
+	r.engine.RegisterHandler(ActionVerifyCommissioningState, r.handleVerifyCommissioningState)
+	r.engine.RegisterHandler(ActionResetPASESession, r.handleResetPASESession)
+	r.engine.RegisterHandler(ActionSendPASEX, r.handleSendPASEX)
+	r.engine.RegisterHandler(ActionDeviceVerifyPeer, r.handleDeviceVerifyPeer)
 
 	// Aliases for existing renewal handlers with cert_ prefix.
-	r.engine.RegisterHandler("receive_cert_renewal_ack", r.handleReceiveRenewalAck)
-	r.engine.RegisterHandler("receive_cert_renewal_csr", r.handleReceiveRenewalCSR)
-	r.engine.RegisterHandler("send_cert_renewal_install", r.handleSendCertInstall)
-	r.engine.RegisterHandler("send_cert_renewal_request", r.handleSendRenewalRequest)
-	r.engine.RegisterHandler("set_cert_expiry_days", r.handleSetCertExpiryDays)
+	r.engine.RegisterHandler(ActionReceiveCertRenewalAck, r.handleReceiveRenewalAck)
+	r.engine.RegisterHandler(ActionReceiveCertRenewalCSR, r.handleReceiveRenewalCSR)
+	r.engine.RegisterHandler(ActionSendCertRenewalInstall, r.handleSendCertInstall)
+	r.engine.RegisterHandler(ActionSendCertRenewalRequest, r.handleSendRenewalRequest)
+	r.engine.RegisterHandler(ActionSetCertExpiryDays, r.handleSetCertExpiryDays)
 }
 
 // handleVerifyCertificate verifies a certificate's validity (chain, expiry).

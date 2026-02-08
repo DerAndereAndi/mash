@@ -16,7 +16,7 @@ import (
 
 // registerTriggerHandlers registers test event trigger action handlers.
 func (r *Runner) registerTriggerHandlers() {
-	r.engine.RegisterHandler("trigger_test_event", r.handleTriggerTestEvent)
+	r.engine.RegisterHandler(ActionTriggerTestEvent, r.handleTriggerTestEvent)
 }
 
 // handleTriggerTestEvent sends a triggerTestEvent invoke to the device's

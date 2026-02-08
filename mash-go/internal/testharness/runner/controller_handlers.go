@@ -16,16 +16,16 @@ import (
 
 // registerControllerHandlers registers all controller action handlers.
 func (r *Runner) registerControllerHandlers() {
-	r.engine.RegisterHandler("controller_action", r.handleControllerAction)
-	r.engine.RegisterHandler("commission_with_admin", r.handleCommissionWithAdmin)
-	r.engine.RegisterHandler("get_controller_id", r.handleGetControllerID)
-	r.engine.RegisterHandler("verify_controller_cert", r.handleVerifyControllerCert)
-	r.engine.RegisterHandler("verify_controller_state", r.handleVerifyControllerState)
-	r.engine.RegisterHandler("set_commissioning_window_duration", r.handleSetCommissioningWindowDuration)
-	r.engine.RegisterHandler("get_commissioning_window_duration", r.handleGetCommissioningWindowDuration)
-	r.engine.RegisterHandler("remove_device", r.handleRemoveDevice)
-	r.engine.RegisterHandler("renew_cert", r.handleRenewCert)
-	r.engine.RegisterHandler("check_renewal", r.handleCheckRenewal)
+	r.engine.RegisterHandler(ActionControllerAction, r.handleControllerAction)
+	r.engine.RegisterHandler(ActionCommissionWithAdmin, r.handleCommissionWithAdmin)
+	r.engine.RegisterHandler(ActionGetControllerID, r.handleGetControllerID)
+	r.engine.RegisterHandler(ActionVerifyControllerCert, r.handleVerifyControllerCert)
+	r.engine.RegisterHandler(ActionVerifyControllerState, r.handleVerifyControllerState)
+	r.engine.RegisterHandler(ActionSetCommissioningWindowDuration, r.handleSetCommissioningWindowDuration)
+	r.engine.RegisterHandler(ActionGetCommissioningWindowDuration, r.handleGetCommissioningWindowDuration)
+	r.engine.RegisterHandler(ActionRemoveDevice, r.handleRemoveDevice)
+	r.engine.RegisterHandler(ActionRenewCert, r.handleRenewCert)
+	r.engine.RegisterHandler(ActionCheckRenewal, r.handleCheckRenewal)
 
 	// Custom checkers for controller cert tests.
 	r.engine.RegisterChecker("validity_days_min", r.checkValidityDaysMin)

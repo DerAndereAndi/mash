@@ -8,10 +8,11 @@ import (
 
 // discoveryState holds state for mDNS discovery handlers.
 type discoveryState struct {
-	services  []discoveredService
-	browser   any // *discovery.Browser when real impl used
-	active    bool
-	qrPayload string
+	services              []discoveredService
+	browser               any // *discovery.Browser when real impl used
+	active                bool
+	qrPayload             string
+	commissioningCompleted bool // set when PASE commissioning succeeded
 }
 
 // discoveredService represents a discovered mDNS service.

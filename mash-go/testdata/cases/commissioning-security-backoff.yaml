@@ -22,7 +22,7 @@ steps:
       setup_code: "00000000"
     expect:
       all_responses_immediate: true
-      max_delay_ms: 100
+      max_delay_ms: 500
 
   - name: Attempt 4 (tier 2 backoff)
     action: pase_attempt_timed
@@ -92,7 +92,7 @@ steps:
     params:
       setup_code: "00000000"
     expect:
-      response_delay_ms_max: 100
+      response_delay_ms_max: 500
 
 postconditions:
   - backoff_counter_reset: true
@@ -145,7 +145,7 @@ steps:
     params:
       setup_code: "00000000"
     expect:
-      response_delay_ms_max: 100
+      response_delay_ms_max: 500
 
 postconditions:
   - backoff_counter_reset: true

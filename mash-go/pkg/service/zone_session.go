@@ -30,6 +30,10 @@ type ZoneSession struct {
 	closed  bool
 	logger  *slog.Logger
 
+	// Notification dispatcher for subscription heartbeats and coalescing
+	dispatcher       *NotificationDispatcher
+	dispatcherConnID uint64
+
 	// Protocol logging (optional)
 	protocolLogger log.Logger
 	connID         string
@@ -52,16 +56,32 @@ func NewZoneSession(zoneID string, conn Sendable, device *model.Device) *ZoneSes
 	handler := NewProtocolHandler(device)
 	handler.SetZoneID(zoneID)
 
+	// Create notification dispatcher for subscription heartbeats and coalescing
+	dispatcher := NewNotificationDispatcher(handler)
+	dispatcher.SetProcessingInterval(100 * time.Millisecond)
+	connSender := func(data []byte) error { return conn.Send(data) }
+	dispatcherConnID := dispatcher.RegisterConnection(connSender)
+	dispatcher.Start()
+
+	// Propagate attribute writes to the dispatcher for change notifications
+	handler.SetOnWrite(func(endpointID uint8, featureID uint8, attrs map[uint16]any) {
+		for attrID, val := range attrs {
+			dispatcher.NotifyChange(endpointID, uint16(featureID), attrID, val)
+		}
+	})
+
 	// Create client for bidirectional communication
 	sender := NewTransportRequestSender(conn)
 	client := interaction.NewClient(sender)
 
 	return &ZoneSession{
-		zoneID:  zoneID,
-		conn:    conn,
-		handler: handler,
-		client:  client,
-		sender:  sender,
+		zoneID:           zoneID,
+		conn:             conn,
+		handler:          handler,
+		dispatcher:       dispatcher,
+		dispatcherConnID: dispatcherConnID,
+		client:           client,
+		sender:           sender,
 	}
 }
 
@@ -139,8 +159,18 @@ func (s *ZoneSession) handleRequest(data []byte) {
 			"feature", req.FeatureID)
 	}
 
-	// Process request through handler
-	resp := s.handler.HandleRequest(req)
+	// Intercept subscribe/unsubscribe: delegate to dispatcher for
+	// heartbeat, coalescing, and per-subscription notification delivery.
+	var resp *wire.Response
+	if req.Operation == wire.OpSubscribe && s.dispatcher != nil {
+		if req.FeatureID == 0 {
+			resp = s.dispatcher.HandleUnsubscribe(s.dispatcherConnID, req)
+		} else {
+			resp = s.dispatcher.HandleSubscribe(s.dispatcherConnID, req)
+		}
+	} else {
+		resp = s.handler.HandleRequest(req)
+	}
 
 	if s.logger != nil {
 		s.logger.Debug("handleRequest: response ready",
@@ -362,6 +392,9 @@ func (s *ZoneSession) SetProtocolLogger(logger log.Logger, connectionID string) 
 
 // SubscriptionCount returns the number of active subscriptions.
 func (s *ZoneSession) SubscriptionCount() int {
+	if s.dispatcher != nil {
+		return s.dispatcher.SubscriptionCount()
+	}
 	return s.handler.SubscriptionCount()
 }
 
@@ -370,13 +403,36 @@ func (s *ZoneSession) SubscriptionCount() int {
 // subscriptions while keeping the session alive. Used by TriggerResetTestState
 // to prevent subscription leakage between tests.
 func (s *ZoneSession) ClearSubscriptions() {
-	s.handler.SubscriptionManager().ClearInbound()
+	if s.dispatcher != nil {
+		s.dispatcher.UnregisterConnection(s.dispatcherConnID)
+		// Re-register so the dispatcher is ready for new subscriptions
+		connSender := func(data []byte) error { return s.conn.Send(data) }
+		s.dispatcherConnID = s.dispatcher.RegisterConnection(connSender)
+	} else {
+		s.handler.SubscriptionManager().ClearInbound()
+	}
 }
 
 // SetOnWrite sets the callback for write operations.
 // The callback receives the endpoint ID, feature ID, and written attributes.
+// When a dispatcher is active, attribute changes are also forwarded to the
+// dispatcher for subscription notification delivery.
 func (s *ZoneSession) SetOnWrite(cb WriteCallback) {
-	s.handler.SetOnWrite(cb)
+	if s.dispatcher != nil {
+		dispatcher := s.dispatcher
+		s.handler.SetOnWrite(func(endpointID uint8, featureID uint8, attrs map[uint16]any) {
+			// Forward to dispatcher for subscription notifications
+			for attrID, val := range attrs {
+				dispatcher.NotifyChange(endpointID, uint16(featureID), attrID, val)
+			}
+			// Call external callback
+			if cb != nil {
+				cb(endpointID, featureID, attrs)
+			}
+		})
+	} else {
+		s.handler.SetOnWrite(cb)
+	}
 }
 
 // SetOnInvoke sets the callback for invoke operations.
@@ -395,23 +451,28 @@ func (s *ZoneSession) Close() {
 	}
 	s.closed = true
 
+	// Stop the notification dispatcher
+	if s.dispatcher != nil {
+		s.dispatcher.Stop()
+	}
+
 	// Close the interaction client (cancels pending requests)
 	if s.client != nil {
 		s.client.Close()
 	}
 
 	// Clear all subscriptions for this zone
-	// Note: In a full implementation, we'd also notify the subscription
-	// manager to stop sending notifications to this zone
 	s.clearSubscriptions()
 }
 
 // clearSubscriptions removes all subscriptions from the handler.
 // This is called when the session is closed.
 func (s *ZoneSession) clearSubscriptions() {
-	// The ProtocolHandler doesn't have a ClearAll method,
-	// so we need to track subscription IDs and unsubscribe each
-	// For now, we'll recreate the handler to clear subscriptions
+	if s.dispatcher != nil {
+		s.dispatcher.UnregisterConnection(s.dispatcherConnID)
+		return
+	}
+	// Fallback: recreate handler to clear subscriptions
 	device := s.handler.Device()
 	s.handler = NewProtocolHandler(device)
 	s.handler.SetZoneID(s.zoneID)

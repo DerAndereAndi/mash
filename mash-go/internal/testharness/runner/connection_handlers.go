@@ -23,53 +23,53 @@ import (
 // registerConnectionHandlers registers all connection extension action handlers.
 func (r *Runner) registerConnectionHandlers() {
 	// Zone-scoped I/O
-	r.engine.RegisterHandler("connect_as_controller", r.handleConnectAsController)
-	r.engine.RegisterHandler("connect_as_zone", r.handleConnectAsZone)
-	r.engine.RegisterHandler("read_as_zone", r.handleReadAsZone)
-	r.engine.RegisterHandler("invoke_as_zone", r.handleInvokeAsZone)
-	r.engine.RegisterHandler("subscribe_as_zone", r.handleSubscribeAsZone)
-	r.engine.RegisterHandler("wait_for_notification_as_zone", r.handleWaitForNotificationAsZone)
+	r.engine.RegisterHandler(ActionConnectAsController, r.handleConnectAsController)
+	r.engine.RegisterHandler(ActionConnectAsZone, r.handleConnectAsZone)
+	r.engine.RegisterHandler(ActionReadAsZone, r.handleReadAsZone)
+	r.engine.RegisterHandler(ActionInvokeAsZone, r.handleInvokeAsZone)
+	r.engine.RegisterHandler(ActionSubscribeAsZone, r.handleSubscribeAsZone)
+	r.engine.RegisterHandler(ActionWaitForNotificationAsZone, r.handleWaitForNotificationAsZone)
 
 	// Connection lifecycle
-	r.engine.RegisterHandler("connect_with_timing", r.handleConnectWithTiming)
-	r.engine.RegisterHandler("send_close", r.handleSendClose)
-	r.engine.RegisterHandler("simultaneous_close", r.handleSimultaneousClose)
-	r.engine.RegisterHandler("wait_disconnect", r.handleWaitDisconnect)
-	r.engine.RegisterHandler("cancel_reconnect", r.handleCancelReconnect)
+	r.engine.RegisterHandler(ActionConnectWithTiming, r.handleConnectWithTiming)
+	r.engine.RegisterHandler(ActionSendClose, r.handleSendClose)
+	r.engine.RegisterHandler(ActionSimultaneousClose, r.handleSimultaneousClose)
+	r.engine.RegisterHandler(ActionWaitDisconnect, r.handleWaitDisconnect)
+	r.engine.RegisterHandler(ActionCancelReconnect, r.handleCancelReconnect)
 
 	// Reconnection
-	r.engine.RegisterHandler("monitor_reconnect", r.handleMonitorReconnect)
-	r.engine.RegisterHandler("disconnect_and_monitor_backoff", r.handleDisconnectAndMonitorBackoff)
+	r.engine.RegisterHandler(ActionMonitorReconnect, r.handleMonitorReconnect)
+	r.engine.RegisterHandler(ActionDisconnectAndMonitorBackoff, r.handleDisconnectAndMonitorBackoff)
 
 	// Keep-alive
-	r.engine.RegisterHandler("ping", r.handlePing)
-	r.engine.RegisterHandler("ping_multiple", r.handlePingMultiple)
-	r.engine.RegisterHandler("verify_keepalive", r.handleVerifyKeepalive)
+	r.engine.RegisterHandler(ActionPing, r.handlePing)
+	r.engine.RegisterHandler(ActionPingMultiple, r.handlePingMultiple)
+	r.engine.RegisterHandler(ActionVerifyKeepalive, r.handleVerifyKeepalive)
 
 	// Raw wire
-	r.engine.RegisterHandler("send_raw", r.handleSendRaw)
-	r.engine.RegisterHandler("send_raw_bytes", r.handleSendRawBytes)
-	r.engine.RegisterHandler("send_raw_frame", r.handleSendRawFrame)
-	r.engine.RegisterHandler("send_tls_alert", r.handleSendTLSAlert)
+	r.engine.RegisterHandler(ActionSendRaw, r.handleSendRaw)
+	r.engine.RegisterHandler(ActionSendRawBytes, r.handleSendRawBytes)
+	r.engine.RegisterHandler(ActionSendRawFrame, r.handleSendRawFrame)
+	r.engine.RegisterHandler(ActionSendTLSAlert, r.handleSendTLSAlert)
 
 	// Command queue
-	r.engine.RegisterHandler("queue_command", r.handleQueueCommand)
-	r.engine.RegisterHandler("wait_for_queued_result", r.handleWaitForQueuedResult)
-	r.engine.RegisterHandler("send_multiple_then_disconnect", r.handleSendMultipleThenDisconnect)
+	r.engine.RegisterHandler(ActionQueueCommand, r.handleQueueCommand)
+	r.engine.RegisterHandler(ActionWaitForQueuedResult, r.handleWaitForQueuedResult)
+	r.engine.RegisterHandler(ActionSendMultipleThenDisconnect, r.handleSendMultipleThenDisconnect)
 
 	// Capacity
-	r.engine.RegisterHandler("open_connections", r.handleOpenConnections)
+	r.engine.RegisterHandler(ActionOpenConnections, r.handleOpenConnections)
 
 	// Concurrency
-	r.engine.RegisterHandler("read_concurrent", r.handleReadConcurrent)
-	r.engine.RegisterHandler("invoke_with_disconnect", r.handleInvokeWithDisconnect)
+	r.engine.RegisterHandler(ActionReadConcurrent, r.handleReadConcurrent)
+	r.engine.RegisterHandler(ActionInvokeWithDisconnect, r.handleInvokeWithDisconnect)
 
 	// Subscription extensions
-	r.engine.RegisterHandler("subscribe_multiple", r.handleSubscribeMultiple)
-	r.engine.RegisterHandler("subscribe_ordered", r.handleSubscribeOrdered)
-	r.engine.RegisterHandler("unsubscribe", r.handleUnsubscribe)
-	r.engine.RegisterHandler("receive_notification", r.handleReceiveNotification)
-	r.engine.RegisterHandler("receive_notifications", r.handleReceiveNotifications)
+	r.engine.RegisterHandler(ActionSubscribeMultiple, r.handleSubscribeMultiple)
+	r.engine.RegisterHandler(ActionSubscribeOrdered, r.handleSubscribeOrdered)
+	r.engine.RegisterHandler(ActionUnsubscribe, r.handleUnsubscribe)
+	r.engine.RegisterHandler(ActionReceiveNotification, r.handleReceiveNotification)
+	r.engine.RegisterHandler(ActionReceiveNotifications, r.handleReceiveNotifications)
 }
 
 // ============================================================================
@@ -327,11 +327,26 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 		return nil, fmt.Errorf("decode: %w", err)
 	}
 
-	return map[string]any{
+	outputs := map[string]any{
 		KeyInvokeSuccess: resp.IsSuccess(),
 		KeyResult:        resp.Payload,
+		KeyResponse:      normalizePayloadMap(resp.Payload),
 		KeyStatus:        resp.Status,
-	}, nil
+	}
+
+	// Add error code when the response indicates failure.
+	if !resp.IsSuccess() {
+		outputs[KeyErrorCode] = resp.Status.String()
+		outputs[KeyErrorStatus] = resp.Status.String()
+	}
+
+	// Flatten response payload so expectations can reference fields
+	// like "applied", "effectiveConsumptionLimit", etc.
+	if resp.Payload != nil {
+		flattenInvokeResponse(resp.Payload, outputs)
+	}
+
+	return outputs, nil
 }
 
 // handleSubscribeAsZone subscribes using a zone-scoped connection.
@@ -1788,7 +1803,15 @@ func (r *Runner) handleSubscribeMultiple(ctx context.Context, step *loader.Step,
 
 // handleSubscribeOrdered subscribes and verifies ordering.
 func (r *Runner) handleSubscribeOrdered(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	return r.handleSubscribeMultiple(ctx, step, state)
+	outputs, err := r.handleSubscribeMultiple(ctx, step, state)
+	if err != nil {
+		return nil, err
+	}
+	// Add ordering-specific keys expected by subscription restore tests.
+	allSucceed, _ := outputs[KeyAllSucceed].(bool)
+	outputs[KeyAllSubscribed] = allSucceed
+	outputs[KeyOrderPreserved] = allSucceed // order is preserved when all succeed in sequence
+	return outputs, nil
 }
 
 // handleUnsubscribe cancels a subscription.

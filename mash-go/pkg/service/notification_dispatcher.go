@@ -186,13 +186,8 @@ func (d *NotificationDispatcher) HandleSubscribe(connID uint64, req *wire.Reques
 		}
 	}
 
-	// Parse subscribe payload
-	var subPayload *wire.SubscribePayload
-	if req.Payload != nil {
-		if sp, ok := req.Payload.(*wire.SubscribePayload); ok {
-			subPayload = sp
-		}
-	}
+	// Parse subscribe payload (handles both typed and CBOR-decoded raw maps)
+	subPayload := wire.ExtractSubscribePayload(req.Payload)
 
 	// Extract intervals (default to sensible values)
 	minInterval := time.Duration(1000) * time.Millisecond

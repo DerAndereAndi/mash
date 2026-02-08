@@ -19,26 +19,26 @@ func (r *Runner) registerZoneHandlers() {
 	// Custom checker: save_zone_id saves the zone ID under a target key name.
 	r.engine.RegisterChecker(KeySaveZoneID, r.checkSaveZoneID)
 
-	r.engine.RegisterHandler("create_zone", r.handleCreateZone)
-	r.engine.RegisterHandler("add_zone", r.handleAddZone)
-	r.engine.RegisterHandler("delete_zone", r.handleDeleteZone)
-	r.engine.RegisterHandler("remove_zone", r.handleRemoveZone)
-	r.engine.RegisterHandler("get_zone", r.handleGetZone)
-	r.engine.RegisterHandler("has_zone", r.handleHasZone)
-	r.engine.RegisterHandler("list_zones", r.handleListZones)
-	r.engine.RegisterHandler("zone_count", r.handleZoneCount)
-	r.engine.RegisterHandler("get_zone_metadata", r.handleGetZoneMetadata)
-	r.engine.RegisterHandler("get_zone_ca_fingerprint", r.handleGetZoneCAFingerprint)
-	r.engine.RegisterHandler("verify_zone_ca", r.handleVerifyZoneCA)
-	r.engine.RegisterHandler("verify_zone_binding", r.handleVerifyZoneBinding)
-	r.engine.RegisterHandler("verify_zone_id_derivation", r.handleVerifyZoneIDDerivation)
-	r.engine.RegisterHandler("highest_priority_zone", r.handleHighestPriorityZone)
-	r.engine.RegisterHandler("highest_priority_connected_zone", r.handleHighestPriorityConnectedZone)
-	r.engine.RegisterHandler("disconnect_zone", r.handleDisconnectZone)
-	r.engine.RegisterHandler("verify_other_zone", r.handleVerifyOtherZone)
-	r.engine.RegisterHandler("verify_bidirectional_active", r.handleVerifyBidirectionalActive)
-	r.engine.RegisterHandler("verify_restore_sequence", r.handleVerifyRestoreSequence)
-	r.engine.RegisterHandler("verify_tls_state", r.handleVerifyTLSState)
+	r.engine.RegisterHandler(ActionCreateZone, r.handleCreateZone)
+	r.engine.RegisterHandler(ActionAddZone, r.handleAddZone)
+	r.engine.RegisterHandler(ActionDeleteZone, r.handleDeleteZone)
+	r.engine.RegisterHandler(ActionRemoveZone, r.handleRemoveZone)
+	r.engine.RegisterHandler(ActionGetZone, r.handleGetZone)
+	r.engine.RegisterHandler(ActionHasZone, r.handleHasZone)
+	r.engine.RegisterHandler(ActionListZones, r.handleListZones)
+	r.engine.RegisterHandler(ActionZoneCount, r.handleZoneCount)
+	r.engine.RegisterHandler(ActionGetZoneMetadata, r.handleGetZoneMetadata)
+	r.engine.RegisterHandler(ActionGetZoneCAFingerprint, r.handleGetZoneCAFingerprint)
+	r.engine.RegisterHandler(ActionVerifyZoneCA, r.handleVerifyZoneCA)
+	r.engine.RegisterHandler(ActionVerifyZoneBinding, r.handleVerifyZoneBinding)
+	r.engine.RegisterHandler(ActionVerifyZoneIDDerivation, r.handleVerifyZoneIDDerivation)
+	r.engine.RegisterHandler(ActionHighestPriorityZone, r.handleHighestPriorityZone)
+	r.engine.RegisterHandler(ActionHighestPriorityConnectedZone, r.handleHighestPriorityConnectedZone)
+	r.engine.RegisterHandler(ActionDisconnectZone, r.handleDisconnectZone)
+	r.engine.RegisterHandler(ActionVerifyOtherZone, r.handleVerifyOtherZone)
+	r.engine.RegisterHandler(ActionVerifyBidirectionalActive, r.handleVerifyBidirectionalActive)
+	r.engine.RegisterHandler(ActionVerifyRestoreSequence, r.handleVerifyRestoreSequence)
+	r.engine.RegisterHandler(ActionVerifyTLSState, r.handleVerifyTLSState)
 }
 
 // handleCreateZone creates a new zone with a CA.
@@ -503,8 +503,9 @@ func (r *Runner) handleVerifyRestoreSequence(ctx context.Context, step *loader.S
 	}
 
 	return map[string]any{
-		KeySequenceRestored: restored,
-		KeyCommandReplayed:  commandReplayed,
+		KeySequenceRestored:   restored,
+		KeySubscriptionsFirst: restored, // subscriptions restored before queued commands
+		KeyCommandReplayed:    commandReplayed,
 	}, nil
 }
 

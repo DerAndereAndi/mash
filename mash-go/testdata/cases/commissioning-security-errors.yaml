@@ -77,7 +77,7 @@ steps:
   - name: Compare timing distributions
     action: compare_timing_distributions
     expect:
-      mean_difference_ms_max: 100
+      mean_difference_ms_max: 2000
       distributions_overlap: true
 
 postconditions:

@@ -1222,6 +1222,41 @@ func CheckerSavePrimingValue(key string, expected interface{}, state *ExecutionS
 	}
 }
 
+// CheckerPrimingValueDifferentFrom checks that the current priming data differs
+// from a previously saved value. Used in YAML as: priming_value_different_from: initial_limit
+func CheckerPrimingValueDifferentFrom(key string, expected interface{}, state *ExecutionState) *ExpectResult {
+	savedKey, ok := expected.(string)
+	if !ok {
+		return &ExpectResult{
+			Key: key, Expected: expected, Passed: false,
+			Message: fmt.Sprintf("priming_value_different_from target must be a string, got %T", expected),
+		}
+	}
+
+	savedValue, exists := state.Get(savedKey)
+	if !exists {
+		return &ExpectResult{
+			Key: key, Expected: expected, Passed: false,
+			Message: fmt.Sprintf("no saved value under key %q", savedKey),
+		}
+	}
+
+	currentPriming, exists := state.Get("_priming_data")
+	if !exists || currentPriming == nil {
+		return &ExpectResult{
+			Key: key, Expected: expected, Passed: false,
+			Message: "no current priming data available",
+		}
+	}
+
+	// Compare: different means the test passes.
+	different := fmt.Sprintf("%v", currentPriming) != fmt.Sprintf("%v", savedValue)
+	return &ExpectResult{
+		Key: key, Expected: expected, Actual: currentPriming, Passed: different,
+		Message: fmt.Sprintf("priming value different from saved %q: %v", savedKey, different),
+	}
+}
+
 // CheckerErrorMessageContains checks if the error_message_contains output contains the expected substring.
 // This is used for validating error messages from protocol responses.
 func CheckerErrorMessageContains(key string, expected interface{}, state *ExecutionState) *ExpectResult {
@@ -1382,6 +1417,7 @@ func RegisterEnhancedCheckers(e *Engine) {
 	e.RegisterChecker(CheckerNameValuesValidGridPhases, CheckerValuesValidGridPhases)
 	e.RegisterChecker(CheckerNameArrayNotEmpty, CheckerArrayNotEmpty)
 	e.RegisterChecker(CheckerNameSavePrimingValue, CheckerSavePrimingValue)
+	e.RegisterChecker(CheckerNamePrimingValueDiffFrom, CheckerPrimingValueDifferentFrom)
 	e.RegisterChecker(CheckerNameErrorMessageContains, CheckerErrorMessageContains)
 	e.RegisterChecker(CheckerNameNoError, CheckerNoError)
 	e.RegisterChecker(CheckerNameLatencyUnder, CheckerDurationUnder)

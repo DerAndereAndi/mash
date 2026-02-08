@@ -16,18 +16,18 @@ import (
 
 // registerUtilityHandlers registers utility action handlers.
 func (r *Runner) registerUtilityHandlers() {
-	r.engine.RegisterHandler("compare", r.handleCompare)
-	r.engine.RegisterHandler("compare_values", r.handleCompareValues)
-	r.engine.RegisterHandler("evaluate", r.handleEvaluate)
-	r.engine.RegisterHandler("conditional_read", r.handleConditionalRead)
-	r.engine.RegisterHandler("record_time", r.handleRecordTime)
-	r.engine.RegisterHandler("verify_timing", r.handleVerifyTiming)
-	r.engine.RegisterHandler("check_response", r.handleCheckResponse)
-	r.engine.RegisterHandler("verify_correlation", r.handleVerifyCorrelation)
-	r.engine.RegisterHandler("wait_for_state", r.handleWaitForState)
-	r.engine.RegisterHandler("wait_notification", r.handleWaitNotification)
-	r.engine.RegisterHandler("wait_report", r.handleWaitReport)
-	r.engine.RegisterHandler("parse_qr", r.handleParseQR)
+	r.engine.RegisterHandler(ActionCompare, r.handleCompare)
+	r.engine.RegisterHandler(ActionCompareValues, r.handleCompareValues)
+	r.engine.RegisterHandler(ActionEvaluate, r.handleEvaluate)
+	r.engine.RegisterHandler(ActionConditionalRead, r.handleConditionalRead)
+	r.engine.RegisterHandler(ActionRecordTime, r.handleRecordTime)
+	r.engine.RegisterHandler(ActionVerifyTiming, r.handleVerifyTiming)
+	r.engine.RegisterHandler(ActionCheckResponse, r.handleCheckResponse)
+	r.engine.RegisterHandler(ActionVerifyCorrelation, r.handleVerifyCorrelation)
+	r.engine.RegisterHandler(ActionWaitForState, r.handleWaitForState)
+	r.engine.RegisterHandler(ActionWaitNotification, r.handleWaitNotification)
+	r.engine.RegisterHandler(ActionWaitReport, r.handleWaitReport)
+	r.engine.RegisterHandler(ActionParseQR, r.handleParseQR)
 }
 
 // handleCompare compares two stored values.

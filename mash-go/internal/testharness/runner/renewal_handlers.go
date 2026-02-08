@@ -18,28 +18,28 @@ import (
 // registerRenewalHandlers registers all certificate renewal action handlers.
 func (r *Runner) registerRenewalHandlers() {
 	// Renewal protocol handlers
-	r.engine.RegisterHandler("send_renewal_request", r.handleSendRenewalRequest)
-	r.engine.RegisterHandler("receive_renewal_csr", r.handleReceiveRenewalCSR)
-	r.engine.RegisterHandler("send_cert_install", r.handleSendCertInstall)
-	r.engine.RegisterHandler("receive_renewal_ack", r.handleReceiveRenewalAck)
-	r.engine.RegisterHandler("full_renewal_flow", r.handleFullRenewalFlow)
+	r.engine.RegisterHandler(ActionSendRenewalRequest, r.handleSendRenewalRequest)
+	r.engine.RegisterHandler(ActionReceiveRenewalCSR, r.handleReceiveRenewalCSR)
+	r.engine.RegisterHandler(ActionSendCertInstall, r.handleSendCertInstall)
+	r.engine.RegisterHandler(ActionReceiveRenewalAck, r.handleReceiveRenewalAck)
+	r.engine.RegisterHandler(ActionFullRenewalFlow, r.handleFullRenewalFlow)
 
 	// Session continuity handlers
-	r.engine.RegisterHandler("record_subscription_state", r.handleRecordSubscriptionState)
-	r.engine.RegisterHandler("verify_subscription_active", r.handleVerifySubscriptionActive)
-	r.engine.RegisterHandler("verify_connection_state", r.handleVerifyConnectionState)
+	r.engine.RegisterHandler(ActionRecordSubscriptionState, r.handleRecordSubscriptionState)
+	r.engine.RegisterHandler(ActionVerifySubscriptionActive, r.handleVerifySubscriptionActive)
+	r.engine.RegisterHandler(ActionVerifyConnectionState, r.handleVerifyConnectionState)
 
 	// Certificate expiry/warning handlers
-	r.engine.RegisterHandler("set_cert_expiry", r.handleSetCertExpiry)
-	r.engine.RegisterHandler("wait_for_notification", r.handleWaitForNotification)
-	r.engine.RegisterHandler("verify_notification_content", r.handleVerifyNotificationContent)
+	r.engine.RegisterHandler(ActionSetCertExpiry, r.handleSetCertExpiry)
+	r.engine.RegisterHandler(ActionWaitForNotification, r.handleWaitForNotification)
+	r.engine.RegisterHandler(ActionVerifyNotificationContent, r.handleVerifyNotificationContent)
 
 	// Expiry and grace period handlers
-	r.engine.RegisterHandler("simulate_cert_expiry", r.handleSimulateCertExpiry)
-	r.engine.RegisterHandler("connect_expect_failure", r.handleConnectExpectFailure)
-	r.engine.RegisterHandler("set_grace_period", r.handleSetGracePeriod)
-	r.engine.RegisterHandler("simulate_time_advance", r.handleSimulateTimeAdvance)
-	r.engine.RegisterHandler("check_grace_period_status", r.handleCheckGracePeriodStatus)
+	r.engine.RegisterHandler(ActionSimulateCertExpiry, r.handleSimulateCertExpiry)
+	r.engine.RegisterHandler(ActionConnectExpectFailure, r.handleConnectExpectFailure)
+	r.engine.RegisterHandler(ActionSetGracePeriod, r.handleSetGracePeriod)
+	r.engine.RegisterHandler(ActionSimulateTimeAdvance, r.handleSimulateTimeAdvance)
+	r.engine.RegisterHandler(ActionCheckGracePeriodStatus, r.handleCheckGracePeriodStatus)
 }
 
 // handleSendRenewalRequest sends a CertRenewalRequest to the device.

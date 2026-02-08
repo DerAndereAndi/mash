@@ -43,7 +43,8 @@ steps:
     action: read
     params:
       endpoint: 0
-      feature: 1
+      feature: DeviceInfo
+      attribute: vendorName
     expect:
       read_success: true
 
