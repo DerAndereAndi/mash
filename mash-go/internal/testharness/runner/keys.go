@@ -86,15 +86,16 @@ const (
 
 // Connection/commissioning preconditions.
 const (
-	PrecondDeviceInCommissioningMode = "device_in_commissioning_mode"
-	PrecondDeviceUncommissioned      = "device_uncommissioned"
-	PrecondCommissioningWindowOpen   = "commissioning_window_open"
-	PrecondCommissioningWindowClosed = "commissioning_window_closed"
-	PrecondDeviceConnected           = "device_connected"
-	PrecondTLSConnectionEstablished  = "tls_connection_established"
-	PrecondConnectionEstablished     = "connection_established"
-	PrecondDeviceCommissioned        = "device_commissioned"
-	PrecondSessionEstablished        = "session_established"
+	PrecondDeviceInCommissioningMode  = "device_in_commissioning_mode"
+	PrecondDeviceUncommissioned       = "device_uncommissioned"
+	PrecondCommissioningWindowOpen    = "commissioning_window_open"
+	PrecondCommissioningWindowClosed  = "commissioning_window_closed"
+	PrecondCommissioningWindowAt95s   = "commissioning_window_at_95s"
+	PrecondDeviceConnected            = "device_connected"
+	PrecondTLSConnectionEstablished   = "tls_connection_established"
+	PrecondConnectionEstablished      = "connection_established"
+	PrecondDeviceCommissioned         = "device_commissioned"
+	PrecondSessionEstablished         = "session_established"
 )
 
 // ============================================================================
@@ -179,6 +180,8 @@ const (
 	StateDeviceWasRemoved            = "device_was_removed"
 	StateCommissioningActive         = "commissioning_active"
 	StateCommissioningCompleted      = "commissioning_completed"
+	StateCommWindowStart             = "commissioning_window_start"
+	StateOperationalConnEstablished  = "operational_connection_established"
 
 	// Cert handler state.
 	StateExtractedDeviceID = "extracted_device_id"
@@ -500,6 +503,7 @@ const (
 	KeyConnectedAddressType     = "connected_address_type"
 	KeyNewAddressAnnounced      = "new_address_announced"
 	KeyAddressesFromMultipleIFs = "addresses_from_multiple_interfaces"
+	KeyWindowExpiryWarning      = "window_expiry_warning"
 )
 
 // Renewal handler output keys.

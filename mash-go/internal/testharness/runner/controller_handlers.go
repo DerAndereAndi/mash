@@ -221,9 +221,8 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 		minutes = toFloat(v) / 60.0
 	}
 
-	// Validate bounds: min 3 seconds (0.05 min), max 180 minutes (10800s).
-	// Device-side enforcement clamps to [3s, 10800s] (test_event_handler.go).
-	const minMinutes = 3.0 / 60.0 // 3 seconds
+	// Validate bounds: min 3 minutes (180s, DEC-048), max 180 minutes (10800s).
+	const minMinutes = 3.0 // 3 minutes (DEC-048)
 	const maxMinutes = 180.0
 	result := "ok"
 	if minutes < minMinutes || minutes > maxMinutes {

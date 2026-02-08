@@ -242,35 +242,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
-	// Simulate a device already commissioned into a zone.
-	if inZone, _ := state.Get(PrecondDeviceInZone); inZone == true {
-		serviceType, _ := params[KeyServiceType].(string)
-		switch serviceType {
-		case discovery.ServiceTypeOperational, ServiceAliasOperational:
-			ds.services = []discoveredService{{
-				InstanceName: "a1b2c3d4-00112233",
-				ServiceType:  discovery.ServiceTypeOperational,
-				Host:         "device.local",
-				Port:         8443,
-				Addresses:    []string{"192.168.1.10"},
-				TXTRecords:   map[string]string{"ZI": "a1b2c3d4", "DI": "00112233"},
-			}}
-		default:
-			// Commissionable or unspecified -- return a single commissionable service.
-			ds.services = []discoveredService{{
-				InstanceName:  "MASH-SIM-ZONE",
-				ServiceType:   discovery.ServiceTypeCommissionable,
-				Host:          "device.local",
-				Port:          8443,
-				Addresses:     []string{"192.168.1.10"},
-				Discriminator: 1234,
-				TXTRecords:    map[string]string{"brand": "Test", "model": "Sim"},
-			}}
-		}
-		return r.buildBrowseOutput(ds)
-	}
-
-	// Simulate a device commissioned into two zones.
+	// Simulate a device commissioned into two zones (check before single zone).
 	if inTwoZones, _ := state.Get(PrecondDeviceInTwoZones); inTwoZones == true {
 		serviceType, _ := params[KeyServiceType].(string)
 		switch serviceType {
@@ -296,6 +268,34 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		default:
 			ds.services = []discoveredService{{
 				InstanceName:  "MASH-SIM-TWOZONE",
+				ServiceType:   discovery.ServiceTypeCommissionable,
+				Host:          "device.local",
+				Port:          8443,
+				Addresses:     []string{"192.168.1.10"},
+				Discriminator: 1234,
+				TXTRecords:    map[string]string{"brand": "Test", "model": "Sim"},
+			}}
+		}
+		return r.buildBrowseOutput(ds)
+	}
+
+	// Simulate a device already commissioned into a single zone.
+	if inZone, _ := state.Get(PrecondDeviceInZone); inZone == true {
+		serviceType, _ := params[KeyServiceType].(string)
+		switch serviceType {
+		case discovery.ServiceTypeOperational, ServiceAliasOperational:
+			ds.services = []discoveredService{{
+				InstanceName: "a1b2c3d4-00112233",
+				ServiceType:  discovery.ServiceTypeOperational,
+				Host:         "device.local",
+				Port:         8443,
+				Addresses:    []string{"192.168.1.10"},
+				TXTRecords:   map[string]string{"ZI": "a1b2c3d4", "DI": "00112233"},
+			}}
+		default:
+			// Commissionable or unspecified -- return a single commissionable service.
+			ds.services = []discoveredService{{
+				InstanceName:  "MASH-SIM-ZONE",
 				ServiceType:   discovery.ServiceTypeCommissionable,
 				Host:          "device.local",
 				Port:          8443,
@@ -493,7 +493,11 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 						"serial": "SIM-0001",
 					},
 				}}
-				return r.buildBrowseOutput(ds)
+				out, err := r.buildBrowseOutput(ds)
+				if err == nil {
+					addWindowExpiryWarning(out, state)
+				}
+				return out, err
 			}
 		}
 
@@ -523,6 +527,22 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		ds.services = services
 	}
 
+	// Filter by discriminator when requested. This applies to both simulated
+	// and real mDNS browse results so that browsing with a non-matching
+	// discriminator correctly returns device_found=false.
+	if _, hasDisc := params[KeyDiscriminator]; hasDisc {
+		wantDisc := uint16(paramInt(params, KeyDiscriminator, 0))
+		if wantDisc > 0 {
+			filtered := ds.services[:0]
+			for _, svc := range ds.services {
+				if svc.Discriminator == wantDisc {
+					filtered = append(filtered, svc)
+				}
+			}
+			ds.services = filtered
+		}
+	}
+
 	outputs, err := r.buildBrowseOutput(ds)
 	if err != nil {
 		return nil, err
@@ -547,6 +567,8 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 			}
 		}
 	}
+
+	addWindowExpiryWarning(outputs, state)
 
 	return outputs, nil
 }
@@ -720,6 +742,25 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 	}
 
 	return outputs, nil
+}
+
+// addWindowExpiryWarning sets KeyWindowExpiryWarning in outputs if the
+// commissioning window start time is known and the remaining time is
+// below a 30-second threshold (default window duration: 120s).
+func addWindowExpiryWarning(outputs map[string]any, state *engine.ExecutionState) {
+	v, ok := state.Get(StateCommWindowStart)
+	if !ok {
+		return
+	}
+	startTime, ok := v.(time.Time)
+	if !ok {
+		return
+	}
+	const windowDuration = 120 * time.Second
+	const warningThreshold = 30 * time.Second
+	elapsed := time.Since(startTime)
+	remaining := windowDuration - elapsed
+	outputs[KeyWindowExpiryWarning] = remaining <= warningThreshold
 }
 
 // isValidHex checks whether a string is valid hexadecimal.

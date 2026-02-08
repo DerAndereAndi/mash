@@ -1341,6 +1341,10 @@ func (s *DeviceService) EnterCommissioningMode() error {
 		return ErrNotStarted
 	}
 
+	// DEC-047: Reset PASE backoff when a new commissioning window opens
+	// so controllers get a fresh start without accumulated delays.
+	s.ResetPASETracker()
+
 	if s.discoveryManager != nil {
 		if err := s.discoveryManager.EnterCommissioningMode(s.ctx); err != nil {
 			s.debugLog("EnterCommissioningMode: failed", "error", err)

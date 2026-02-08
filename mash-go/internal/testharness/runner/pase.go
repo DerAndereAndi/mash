@@ -306,6 +306,8 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			r.conn.connected = true
 			r.conn.operational = true
 			state.Set(StateConnection, r.conn)
+			// Record timestamp for verify_timing (TC-TRANS-004).
+			state.Set(StateOperationalConnEstablished, time.Now())
 			// Verify the device is processing protocol messages.
 			if err := r.waitForOperationalReady(2 * time.Second); err != nil {
 				r.debugf("handleCommission: %v (continuing)", err)
@@ -367,6 +369,12 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			}
 			zs.zones[zoneID] = zone
 			zs.zoneOrder = append(zs.zoneOrder, zoneID)
+		}
+
+		// Update multi-zone state so browse_mdns returns the correct
+		// number of operational instances (TC-DSTATE-005, TC-E2E-003).
+		if len(zs.zones) >= 2 {
+			state.Set(PrecondDeviceInTwoZones, true)
 		}
 
 		// Store the zone ID in typed state keys for interpolation

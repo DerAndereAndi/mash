@@ -45,6 +45,8 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondTwoDevicesDifferentZones:    true,
 	PrecondDeviceBCertExpired:          true,
 	PrecondTwoDevicesSameDiscriminator: true,
+	// Commissioning window simulation.
+	PrecondCommissioningWindowAt95s:     true,
 	// Environment / capacity simulation.
 	PrecondDeviceZonesFull:              true,
 	PrecondNoDevicesAdvertising:         true,
@@ -133,6 +135,7 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceUncommissioned:      precondLevelCommissioning,
 	PrecondCommissioningWindowOpen:   precondLevelCommissioning,
 	PrecondCommissioningWindowClosed: precondLevelCommissioning,
+	PrecondCommissioningWindowAt95s:  precondLevelCommissioning,
 	PrecondDeviceConnected:           precondLevelConnected,
 	PrecondTLSConnectionEstablished:  precondLevelConnected,
 	PrecondConnectionEstablished:     precondLevelConnected,
@@ -530,6 +533,28 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 				// with the window closed. This prevents a previous test's
 				// stub-mode commissioning from leaking into this test.
 				state.Set(StateCommissioningActive, false)
+			case PrecondDeviceInZone:
+				// Populate zone state with a LOCAL zone so that handlers like
+				// zone_count return the correct count. Without this, commission
+				// to a second zone (TC-E2E-003) yields count=1 instead of 2.
+				zs := getZoneState(state)
+				if len(zs.zones) == 0 {
+					zoneID := "sim-local-zone"
+					zs.zones[zoneID] = &zoneInfo{
+						ZoneID:         zoneID,
+						ZoneType:       ZoneTypeLocal,
+						Priority:       zonePriority[ZoneTypeLocal],
+						Connected:      true,
+						Metadata:       make(map[string]any),
+						CommissionedAt: time.Now(),
+					}
+					zs.zoneOrder = append(zs.zoneOrder, zoneID)
+					state.Set(StateLocalZoneID, zoneID)
+				}
+			case PrecondCommissioningWindowAt95s:
+				// Simulate 95 seconds elapsed of a 120-second window.
+				// buildBrowseOutput uses this to compute window_expiry_warning.
+				state.Set(StateCommWindowStart, time.Now().Add(-95*time.Second))
 			case PrecondControllerCertNearExpiry:
 				state.Set(StateCertDaysUntilExpiry, 29)
 			case PrecondFiveZonesConnected:
@@ -1141,6 +1166,8 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 		operational: true,
 	}
 	state.Set(StateConnection, r.conn)
+	// Record timestamp for verify_timing (TC-TRANS-004).
+	state.Set(StateOperationalConnEstablished, time.Now())
 
 	// Verify the device is processing protocol messages on this connection.
 	if err := r.waitForOperationalReady(2 * time.Second); err != nil {

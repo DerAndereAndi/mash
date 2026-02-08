@@ -105,6 +105,7 @@ func getSecurityState(state *engine.ExecutionState) *securityState {
 // handleOpenCommissioningConnection opens a new commissioning TLS connection.
 func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	sendPASE, _ := step.Params["send_pase"].(bool)
+	failPASE, _ := step.Params["fail_pase"].(bool)
 
 	// DEC-063: When zones are full and send_pase is requested, connect to the
 	// device, send a PASERequest, and read the CommissioningError busy response.
@@ -135,6 +136,14 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	dialer := &net.Dialer{Timeout: 10 * time.Second}
 	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 	if err != nil {
+		// DEC-063: When send_pase is requested and the TLS connection fails
+		// (e.g., device is in cooldown and may transiently reject), delegate
+		// to handleBusyPASEExchange which has retry logic and will return
+		// the busy response if the device is in cooldown.
+		if sendPASE && !failPASE && isTransientError(err) {
+			r.debugf("open_commissioning_connection: TLS failed with send_pase, delegating to busy exchange: %v", err)
+			return r.handleBusyPASEExchange(step)
+		}
 		out := map[string]any{
 			KeyConnectionEstablished: false,
 			KeyConnectionRejected:    true,
@@ -179,7 +188,6 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	// wait for the device to reject (ErrCodeAuthFailed), and close the
 	// connection. This triggers the device's cooldown period without keeping
 	// the connection in the pool.
-	failPASE, _ := step.Params["fail_pase"].(bool)
 	if sendPASE && failPASE {
 		if err := sendPASERequestRaw(conn); err != nil {
 			conn.Close()
@@ -553,6 +561,12 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 	state.Set(StateCommissioningActive, true)
 	state.Set(StateCommissioningCompleted, false)
 
+	// Record window start time for expiry warning computation.
+	// Only set if not already set by a precondition (e.g., commissioning_window_at_95s).
+	if _, exists := state.Get(StateCommWindowStart); !exists {
+		state.Set(StateCommWindowStart, time.Now())
+	}
+
 	// Send trigger if connected.
 	if r.conn != nil && r.conn.connected && r.config.EnableKey != "" {
 		triggerResult, err := r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
@@ -586,7 +600,28 @@ func (r *Runner) handleExitCommissioningMode(ctx context.Context, step *loader.S
 			triggerResult[KeyCommissioningModeExited] = true
 			return triggerResult, nil
 		}
-		// Fall through to stub if trigger fails.
+		// Fall through to zone connections or stub if trigger fails.
+	}
+
+	// When main connection is unavailable (e.g., after many failed PASE
+	// attempts), try sending the trigger via a zone connection from the
+	// connection tracker. This ensures exit_commissioning_mode reaches the
+	// device even when the harness has no operational main connection.
+	if r.config.EnableKey != "" && (r.conn == nil || !r.conn.connected) {
+		ct := getConnectionTracker(state)
+		for _, zc := range ct.zoneConnections {
+			if zc.connected {
+				saved := r.conn
+				r.conn = zc
+				triggerResult, err := r.sendTrigger(ctx, features.TriggerExitCommissioningMode, state)
+				r.conn = saved
+				if err == nil {
+					triggerResult[KeyCommissioningModeExited] = true
+					return triggerResult, nil
+				}
+				break
+			}
+		}
 	}
 
 	return map[string]any{
@@ -1232,14 +1267,15 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 	}
 
 	// Simulation mode: return expected busy values without connecting.
+	// DEC-063: Device always includes RetryAfter when busy.
 	if target == "" {
 		return map[string]any{
 			KeyConnectionEstablished: false,
 			KeyBusyResponseReceived:  true,
 			KeyBusyErrorCode:         int(commissioning.ErrCodeBusy),
-			KeyBusyRetryAfterValue:   0,
-			KeyBusyRetryAfter:        0,
-			KeyBusyRetryAfterPresent: false,
+			KeyBusyRetryAfterValue:   30,
+			KeyBusyRetryAfter:        30,
+			KeyBusyRetryAfterPresent: true,
 		}, nil
 	}
 

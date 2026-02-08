@@ -270,6 +270,47 @@ func (r *Runner) handleReadAsZone(ctx context.Context, step *loader.Step, state 
 func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
+	// Dummy connections return simulated success data.
+	if dummy, _ := r.isDummyZoneConnection(state, params); dummy != nil {
+		result := map[string]any{
+			KeyInvokeSuccess: true,
+			KeyStatus:        0,
+		}
+		// Handle RemoveZone side effects: update zone state and
+		// re-enter commissioning mode (DEC-059).
+		if cmdName, ok := params[ParamCommand].(string); ok && strings.EqualFold(cmdName, "RemoveZone") {
+			if argsMap, ok := params[ParamArgs].(map[string]any); ok {
+				if removedID, ok := argsMap["zoneId"].(string); ok && removedID != "" {
+					zs := getZoneState(state)
+					var keyToDelete string
+					for key, z := range zs.zones {
+						if key == removedID || z.ZoneID == removedID {
+							keyToDelete = key
+							break
+						}
+					}
+					if keyToDelete != "" {
+						delete(zs.zones, keyToDelete)
+						for i, id := range zs.zoneOrder {
+							if id == keyToDelete {
+								zs.zoneOrder = append(zs.zoneOrder[:i], zs.zoneOrder[i+1:]...)
+								break
+							}
+						}
+					}
+				}
+			}
+			// DEC-059: device auto-enters commissioning when a zone
+			// is removed and capacity is available.
+			state.Set(StateCommissioningActive, true)
+			state.Set(StateCommissioningCompleted, false)
+			if len(getZoneState(state).zones) < 2 {
+				state.Set(PrecondDeviceInTwoZones, false)
+			}
+		}
+		return result, nil
+	}
+
 	conn, _, err := r.getZoneConnection(state, params)
 	if err != nil {
 		return nil, err

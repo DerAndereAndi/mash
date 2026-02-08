@@ -32,6 +32,7 @@ steps:
     params:
       alpn: "mash/1"
       accept_self_signed: true
+      commissioning: true
     expect:
       connected: true
       server_cert_self_signed: true
@@ -327,6 +328,7 @@ steps:
     action: commission
     params:
       setup_code: "12345678"
+      transition_to_operational: true
     expect:
       commission_success: true
 
@@ -385,6 +387,7 @@ steps:
     action: commission
     params:
       setup_code: "12345678"
+      transition_to_operational: true
     expect:
       commission_success: true
 
