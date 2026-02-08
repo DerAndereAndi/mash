@@ -297,6 +297,15 @@ func (s *DeviceService) Start(ctx context.Context) error {
 		Certificates: []tls.Certificate{s.tlsCert},
 		ClientAuth:   tls.RequestClientCert, // Request but don't require; used to distinguish operational reconnections
 		NextProtos:   []string{transport.ALPNProtocol},
+		// Reject connections that don't negotiate the required ALPN protocol.
+		// Go's TLS 1.3 server accepts mismatched ALPN without error by default;
+		// this callback enforces the MASH protocol requirement.
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if cs.NegotiatedProtocol != transport.ALPNProtocol {
+				return fmt.Errorf("unsupported ALPN protocol: %q (expected %q)", cs.NegotiatedProtocol, transport.ALPNProtocol)
+			}
+			return nil
+		},
 	}
 
 	// Start TLS listener
@@ -1344,6 +1353,22 @@ func (s *DeviceService) EnterCommissioningMode() error {
 	// DEC-047: Reset PASE backoff when a new commissioning window opens
 	// so controllers get a fresh start without accumulated delays.
 	s.ResetPASETracker()
+
+	// When no zones are connected, regenerate the self-signed commissioning
+	// certificate so the TLS listener presents CN=MASH-<discriminator>
+	// instead of the operational cert from a previous commissioning cycle.
+	// The zoneCount == 0 guard preserves the operational cert for devices
+	// with existing zones (HandleZoneDisconnect calls this with zones
+	// still registered but disconnected; RemoveZone calls it after
+	// deleting from connectedZones).
+	if zoneCount == 0 && s.config.Discriminator != 0 {
+		if commCert, err := generateSelfSignedCert(s.config.Discriminator); err == nil {
+			s.tlsCert = commCert
+			if s.tlsConfig != nil {
+				s.tlsConfig.Certificates = []tls.Certificate{s.tlsCert}
+			}
+		}
+	}
 
 	if s.discoveryManager != nil {
 		if err := s.discoveryManager.EnterCommissioningMode(s.ctx); err != nil {

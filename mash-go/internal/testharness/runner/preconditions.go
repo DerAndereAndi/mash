@@ -1038,9 +1038,14 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 	}
 
 	// Create a synthetic step to drive handleCommission.
+	// _from_precondition tells handleCommission to skip creating a tracking
+	// connection -- ensureCommissioned calls transitionToOperational after,
+	// which handles the operational connection and zone registration.
 	step := &loader.Step{
 		Action: "commission",
-		Params: map[string]any{},
+		Params: map[string]any{
+			ParamFromPrecondition: true,
+		},
 	}
 
 	// Pass setup_code from config if available.

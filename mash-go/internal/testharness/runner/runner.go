@@ -832,10 +832,15 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}
 
 	// If an operational connection is already active (e.g. from precondition
-	// commissioning) and no special cert params are requested, reuse it.
+	// commissioning) and no special TLS params are requested, reuse it.
 	// This avoids "zone already connected" rejection from the device.
+	// Skip reuse when TLS-affecting params are present (key_exchange_groups,
+	// cert_chain, alpn) since those require a fresh TLS handshake.
 	clientCertSpec, _ := step.Params["client_cert"].(string)
-	if !commissioning && clientCertSpec == "" && r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
+	_, hasCertChain := step.Params["cert_chain"]
+	_, hasKeyGroups := step.Params["key_exchange_groups"]
+	_, hasALPN := step.Params["alpn"]
+	if !commissioning && clientCertSpec == "" && !hasCertChain && !hasKeyGroups && !hasALPN && r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
 		cs := r.conn.tlsConn.ConnectionState()
 		hasPeerCerts := len(cs.PeerCertificates) > 0
 		serverCertCNPrefix := ""
@@ -849,7 +854,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			}
 			serverCertSelfSigned = bytes.Equal(cert.RawIssuer, cert.RawSubject)
 		}
-		chainValidated := len(cs.VerifiedChains) > 0 || (hasPeerCerts && insecure)
+		chainValidated := len(cs.VerifiedChains) > 0 || (hasPeerCerts && (insecure || r.zoneCAPool != nil))
 		presentedClientCert := len(r.conn.tlsConn.ConnectionState().PeerCertificates) > 0
 		return map[string]any{
 			KeyConnectionEstablished:  true,

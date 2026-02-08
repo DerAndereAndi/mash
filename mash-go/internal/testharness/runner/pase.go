@@ -272,15 +272,20 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
-	// Optionally close the commissioning connection and reconnect with
-	// operational TLS (mutual auth, zone CA verified). This implements
-	// the PASE-to-operational transition required by the spec.
-	// Opt-in via transition_to_operational param because multi-zone
-	// preconditions need the commissioning connection to stay open.
+	// DEC-066: the device closes the commissioning connection after cert
+	// exchange, so we must reconnect operationally for cleanup to work.
+	//
+	// Two modes:
+	// 1. Explicit transition (doTransition=true): replaces r.conn with
+	//    operational connection. Used by test steps that need read/write
+	//    after commissioning.
+	// 2. Implicit tracking (real device, no explicit transition): creates
+	//    a SEPARATE operational connection for zone cleanup, leaving r.conn
+	//    unchanged. This avoids the shared-Connection-object bug where
+	//    closeActiveZoneConns would corrupt r.conn.
 	doTransition, _ := params[ParamTransitionToOperational].(bool)
-	if certErr == nil && doTransition {
-		_ = r.conn.Close()
-
+	_, fromPrecondition := params[ParamFromPrecondition]
+	if certErr == nil && (doTransition || (!fromPrecondition && r.config.Target != "")) {
 		target := r.config.Target
 		if t, ok := params[KeyTarget].(string); ok && t != "" {
 			target = t
@@ -300,17 +305,44 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			r.debugf("handleCommission: operational dial attempt %d failed: %v", attempt+1, opErr)
 			time.Sleep(50 * time.Millisecond)
 		}
-		if opErr == nil {
+
+		if opErr == nil && doTransition {
+			// Explicit transition: close commissioning conn, replace r.conn.
+			_ = r.conn.Close()
 			r.conn.tlsConn = opConn
 			r.conn.framer = transport.NewFramer(opConn)
 			r.conn.connected = true
 			r.conn.operational = true
 			state.Set(StateConnection, r.conn)
-			// Record timestamp for verify_timing (TC-TRANS-004).
 			state.Set(StateOperationalConnEstablished, time.Now())
-			// Verify the device is processing protocol messages.
 			if err := r.waitForOperationalReady(2 * time.Second); err != nil {
 				r.debugf("handleCommission: %v (continuing)", err)
+			}
+			if r.paseState != nil && r.paseState.sessionKey != nil {
+				zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+				connKey := "step-" + zoneID
+				r.activeZoneConns[connKey] = r.conn
+				r.activeZoneIDs[connKey] = zoneID
+				r.debugf("handleCommission: transitioned to operational, zone %s", zoneID)
+			}
+		} else if opErr == nil {
+			// Implicit tracking: create a separate Connection for cleanup.
+			// r.conn remains the (dead) commissioning connection so test
+			// steps aren't disrupted by an unexpected operational connection.
+			if r.paseState != nil && r.paseState.sessionKey != nil {
+				zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+				connKey := "step-" + zoneID
+				trackConn := &Connection{
+					tlsConn:     opConn,
+					framer:      transport.NewFramer(opConn),
+					connected:   true,
+					operational: true,
+				}
+				r.activeZoneConns[connKey] = trackConn
+				r.activeZoneIDs[connKey] = zoneID
+				r.debugf("handleCommission: tracking connection for zone %s", zoneID)
+			} else {
+				opConn.Close()
 			}
 		}
 		// If operational reconnect fails, proceed anyway -- the commission

@@ -854,7 +854,8 @@ const (
 	ParamZoneIDRef               = "zone_id_ref"
 	ParamSubscriptionIDRef       = "subscription_id_ref"
 	ParamConnection              = "connection"
-	ParamTransitionToOperational = "transition_to_operational"
+	ParamTransitionToOperational  = "transition_to_operational"
+	ParamFromPrecondition        = "_from_precondition"
 	ParamDisconnectBeforeResponse = "disconnect_before_response"
 
 	// PASE/identity params.
