@@ -203,7 +203,7 @@ postconditions:
 
 timeout: "10s"
 tags:
-  - base-protocol
+  - energy-control
   - zone
   - multi-zone
   - production
@@ -269,7 +269,7 @@ postconditions:
 
 timeout: "10s"
 tags:
-  - base-protocol
+  - energy-control
   - zone
   - multi-zone
   - safety
@@ -336,7 +336,7 @@ postconditions:
 
 timeout: "15s"
 tags:
-  - base-protocol
+  - energy-control
   - zone
   - duration
   - expiry
@@ -559,7 +559,7 @@ postconditions:
 
 timeout: "10s"
 tags:
-  - base-protocol
+  - energy-control
   - zone
   - multi-zone
   - asymmetric
