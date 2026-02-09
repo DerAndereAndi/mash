@@ -20,6 +20,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/duration"
 	"github.com/mash-protocol/mash-go/pkg/failsafe"
+	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/persistence"
@@ -91,6 +92,9 @@ type DeviceService struct {
 
 	// Protocol logger for structured event capture (optional)
 	protocolLogger log.Logger
+
+	// LimitResolver (optional, set by CLI via SetLimitResolver)
+	limitResolver *features.LimitResolver
 
 	// Persistence (optional, set by CLI)
 	certStore  cert.Store
@@ -1826,6 +1830,12 @@ func (s *DeviceService) DiscoveryManager() *discovery.DiscoveryManager {
 }
 
 // SetAdvertiser sets the discovery advertiser (for testing/DI).
+// SetLimitResolver sets the LimitResolver so that TriggerResetTestState and
+// RemoveZone can clear resolver state (limits, timers) alongside attribute state.
+func (s *DeviceService) SetLimitResolver(lr *features.LimitResolver) {
+	s.limitResolver = lr
+}
+
 func (s *DeviceService) SetAdvertiser(advertiser discovery.Advertiser) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2111,6 +2121,11 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 	if zoneIndex, exists := s.zoneIndexMap[zoneID]; exists {
 		s.durationManager.CancelZoneTimers(zoneIndex)
 		delete(s.zoneIndexMap, zoneID)
+	}
+
+	// Clear LimitResolver state for this zone (limits + resolver timers).
+	if s.limitResolver != nil {
+		s.limitResolver.ClearZone(zoneID)
 	}
 
 	// Stop operational mDNS advertising for this zone

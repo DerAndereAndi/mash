@@ -18,6 +18,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/features"
+	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -961,6 +962,16 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		}
 	}
 
+	// Clear device-side limits when test requires no_existing_limits.
+	if r.config.Target != "" && needed >= precondLevelCommissioned &&
+		hasPrecondition(tc.Preconditions, PrecondNoExistingLimits) {
+		clearCtx, clearCancel := context.WithTimeout(ctx, 3*time.Second)
+		if err := r.sendClearLimitInvoke(clearCtx); err != nil {
+			r.debugf("no_existing_limits: ClearLimit failed: %v (continuing)", err)
+		}
+		clearCancel()
+	}
+
 	// Post-setup: session_previously_connected disconnects but preserves
 	// zone crypto state so the test's connect step can reconnect with
 	// operational TLS using the zone CA pool.
@@ -980,6 +991,33 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	}
 
 	return nil
+}
+
+// sendClearLimitInvoke sends a ClearLimit invoke (direction=nil, i.e. clear both)
+// to endpoint 1 / EnergyControl on the device. Used by the no_existing_limits
+// precondition to ensure the device has no stale limits from prior tests.
+func (r *Runner) sendClearLimitInvoke(_ context.Context) error {
+	if r.conn == nil || !r.conn.connected {
+		return fmt.Errorf("no connection for ClearLimit")
+	}
+
+	req := &wire.Request{
+		MessageID:  r.nextMessageID(),
+		Operation:  wire.OpInvoke,
+		EndpointID: 1,
+		FeatureID:  uint8(model.FeatureEnergyControl),
+		Payload: &wire.InvokePayload{
+			CommandID: features.EnergyControlCmdClearLimit,
+		},
+	}
+
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return fmt.Errorf("encode ClearLimit: %w", err)
+	}
+
+	_, err = r.sendRequest(data, "clearLimit", req.MessageID)
+	return err
 }
 
 // ensureConnected checks if already connected; if not, establishes a commissioning TLS connection.

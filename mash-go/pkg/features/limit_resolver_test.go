@@ -626,6 +626,63 @@ func TestLimitResolver_NoNotifyWhenNoCallback(t *testing.T) {
 	// If we reach here without panic, the test passes
 }
 
+func TestLimitResolver_ResetAll(t *testing.T) {
+	lr := newTestResolver()
+
+	// Set limits for two zones: zone-A consumption, zone-B production + consumption.
+	ctxA := testCtx("zone-A", cert.ZoneTypeLocal)
+	ctxB := testCtx("zone-B", cert.ZoneTypeGrid)
+
+	_, _ = lr.HandleSetLimit(ctxA, SetLimitRequest{ConsumptionLimit: intPtr(5000000)})
+	dur := uint32(60)
+	_, _ = lr.HandleSetLimit(ctxB, SetLimitRequest{
+		ConsumptionLimit: intPtr(6000000),
+		ProductionLimit:  intPtr(3000000),
+		Duration:         &dur,
+	})
+
+	// Verify limits are active before reset.
+	if _, ok := lr.ec.EffectiveConsumptionLimit(); !ok {
+		t.Fatal("expected consumption limit before reset")
+	}
+
+	// Track OnZoneMyChange calls.
+	var calls []zoneMyChangeCall
+	lr.OnZoneMyChange = func(zoneID string, changes map[uint16]any) {
+		calls = append(calls, zoneMyChangeCall{zoneID, changes})
+	}
+
+	// Reset all.
+	lr.ResetAll()
+
+	// Effective limits should be cleared.
+	if _, ok := lr.ec.EffectiveConsumptionLimit(); ok {
+		t.Fatal("expected no effective consumption limit after ResetAll")
+	}
+	if _, ok := lr.ec.EffectiveProductionLimit(); ok {
+		t.Fatal("expected no effective production limit after ResetAll")
+	}
+
+	// ControlState should be AUTONOMOUS.
+	if lr.ec.ControlState() != ControlStateAutonomous {
+		t.Fatalf("expected AUTONOMOUS after ResetAll, got %s", lr.ec.ControlState())
+	}
+
+	// OnZoneMyChange should have been called for each zone that had limits.
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 OnZoneMyChange callbacks, got %d", len(calls))
+	}
+	// Both calls should report nil for both directions.
+	for _, c := range calls {
+		if v, ok := c.changes[EnergyControlAttrMyConsumptionLimit]; !ok || v != nil {
+			t.Errorf("zone %s: expected myConsumptionLimit=nil, got %v", c.zoneID, v)
+		}
+		if v, ok := c.changes[EnergyControlAttrMyProductionLimit]; !ok || v != nil {
+			t.Errorf("zone %s: expected myProductionLimit=nil, got %v", c.zoneID, v)
+		}
+	}
+}
+
 func TestLimitResolver_ConstraintValidation(t *testing.T) {
 	lr := newTestResolver()
 	lr.MaxConsumption = 22_000_000 // 22 kW

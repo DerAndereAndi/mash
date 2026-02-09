@@ -281,6 +281,7 @@ func main() {
 		limitResolver.OnZoneMyChange = func(zoneID string, changes map[uint16]any) {
 			svc.NotifyZoneAttributeChange(zoneID, endpointID, featureID, changes)
 		}
+		svc.SetLimitResolver(limitResolver)
 	}
 
 	// Store for simulation

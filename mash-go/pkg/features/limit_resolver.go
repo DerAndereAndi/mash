@@ -297,6 +297,43 @@ func (lr *LimitResolver) HandleClearLimit(ctx context.Context, req ClearLimitReq
 	return nil
 }
 
+// ResetAll clears all zone limits, cancels all timers, and resets the
+// EnergyControl feature to AUTONOMOUS. This is used by TriggerResetTestState
+// to prevent stale timers from prior tests from firing during subsequent tests.
+func (lr *LimitResolver) ResetAll() {
+	lr.mu.Lock()
+
+	// Cancel all timers for all known zones.
+	for _, zoneIdx := range lr.zoneIndexMap {
+		lr.timers.CancelZoneTimers(zoneIdx)
+	}
+
+	// Collect zone IDs that had limits so we can fire callbacks.
+	var zonesWithLimits []string
+	for zoneID := range lr.zoneIndexMap {
+		zonesWithLimits = append(zonesWithLimits, zoneID)
+	}
+
+	// Replace limit maps with fresh instances (clear all zone values).
+	lr.consumptionLimits = zone.NewMultiZoneValue()
+	lr.productionLimits = zone.NewMultiZoneValue()
+
+	// Re-resolve: sets effective limits to nil, state to AUTONOMOUS.
+	lr.resolveAndApply()
+
+	lr.mu.Unlock()
+
+	// Fire callbacks outside the lock to avoid deadlocks.
+	if lr.OnZoneMyChange != nil {
+		for _, zoneID := range zonesWithLimits {
+			lr.OnZoneMyChange(zoneID, map[uint16]any{
+				EnergyControlAttrMyConsumptionLimit: nil,
+				EnergyControlAttrMyProductionLimit:  nil,
+			})
+		}
+	}
+}
+
 // ClearZone removes all limits for a zone (e.g., on disconnect/failsafe).
 func (lr *LimitResolver) ClearZone(zoneID string) {
 	lr.mu.Lock()

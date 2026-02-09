@@ -119,6 +119,10 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 					uint8(features.ProcessStateNone))
 			}
 		}
+		// Reset LimitResolver state (clears per-zone limits, timers, callbacks).
+		if s.limitResolver != nil {
+			s.limitResolver.ResetAll()
+		}
 		// Reset clock offset.
 		s.clockOffset = 0
 		// Clear inbound subscriptions on all active zone sessions to stop

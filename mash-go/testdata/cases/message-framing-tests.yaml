@@ -685,6 +685,7 @@ pics_requirements:
 
 preconditions:
   - session_established: true
+  - no_existing_limits: true
 
 steps:
   - name: Send SetLimit without duration (absent = indefinite)
