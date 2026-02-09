@@ -22,6 +22,14 @@ func (s *DeviceService) registerDeviceCommands() {
 		return
 	}
 
+	// Register a read hook for dynamic attributes (e.g., zoneCount).
+	deviceInfo.SetReadHook(func(ctx context.Context, attrID uint16) (any, bool) {
+		if attrID == features.DeviceInfoAttrZoneCount {
+			return uint8(s.ZoneCount()), true
+		}
+		return nil, false
+	})
+
 	// Register RemoveZone command
 	removeZoneCmd := model.NewCommand(
 		&model.CommandMetadata{
@@ -100,9 +108,10 @@ func (s *DeviceService) makeRemoveZoneHandler() model.CommandHandler {
 		}
 
 		// Validate self-removal only: the caller must be the zone being removed.
-		// Exception: when enable-key is valid, any zone can remove any zone
-		// (needed for test orchestration, e.g. TC-ZTYPE-005/007).
-		if zoneID != callerZoneID && !s.isEnableKeyValid() {
+		// Exception: TEST zones can remove any zone (needed for test
+		// orchestration, e.g. TC-ZTYPE-005/007).
+		callerZoneType := CallerZoneTypeFromContext(ctx)
+		if zoneID != callerZoneID && callerZoneType != cert.ZoneTypeTest {
 			return nil, model.ErrCommandNotAllowed
 		}
 

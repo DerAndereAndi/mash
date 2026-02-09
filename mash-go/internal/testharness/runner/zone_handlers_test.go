@@ -180,11 +180,11 @@ func TestAddZoneAndVerifyBinding(t *testing.T) {
 		t.Error("expected binding_valid=true")
 	}
 
-	// Non-existent device.
-	step = &loader.Step{Params: map[string]any{KeyZoneID: "h1", KeyDeviceID: "dev-999"}}
+	// Non-existent zone.
+	step = &loader.Step{Params: map[string]any{KeyZoneID: "no-such-zone"}}
 	out, _ = r.handleVerifyZoneBinding(context.Background(), step, state)
 	if out[KeyBindingValid] != false {
-		t.Error("expected binding_valid=false for unknown device")
+		t.Error("expected binding_valid=false for unknown zone")
 	}
 }
 

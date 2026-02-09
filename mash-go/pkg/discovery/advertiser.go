@@ -167,6 +167,15 @@ func (m *DiscoveryManager) SetCommissioningWindowDuration(d time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.commissioningWindowDuration = d
+	// Reset active timer with new duration so tests that change the window
+	// duration while commissioning is active see the updated timeout.
+	if (m.state == StateCommissioningOpen || m.state == StateOperationalCommissioning) &&
+		m.commissioningTimer != nil {
+		m.commissioningTimer.Stop()
+		m.commissioningTimer = time.AfterFunc(d, func() {
+			m.exitCommissioningModeInternal(false)
+		})
+	}
 }
 
 // CommissioningWindowDuration returns the current commissioning window duration.

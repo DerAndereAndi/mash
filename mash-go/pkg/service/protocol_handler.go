@@ -647,8 +647,12 @@ func (h *ProtocolHandler) handleInvoke(req *wire.Request) *wire.Response {
 		var cmdErr *wire.CommandError
 		if errors.As(err, &cmdErr) {
 			status = cmdErr.Status
-		} else if err == model.ErrCommandNotFound {
+		} else if errors.Is(err, model.ErrCommandNotFound) {
 			status = wire.StatusInvalidCommand
+		} else if errors.Is(err, model.ErrInvalidParameters) {
+			status = wire.StatusInvalidParameter
+		} else if errors.Is(err, model.ErrCommandNotAllowed) {
+			status = wire.StatusConstraintError
 		}
 		return &wire.Response{
 			MessageID: req.MessageID,

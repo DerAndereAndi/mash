@@ -23,7 +23,27 @@ func (r *Runner) registerTriggerHandlers() {
 // TestControl feature on endpoint 0.
 func (r *Runner) handleTriggerTestEvent(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.conn == nil || !r.conn.connected {
-		// Not connected -- simulate known triggers via state manipulation.
+		// Not connected -- try delivering to the real device via a temporary
+		// zone commission if a target is configured. This covers tests like
+		// TC-MASHC-002 and TC-DSTATE-002 that trigger an event and then
+		// verify mDNS advertisement changes on the real device.
+		if r.config.Target != "" && r.config.EnableKey != "" {
+			params := engine.InterpolateParams(step.Params, state)
+			trigger, parseErr := parseEventTrigger(params[KeyEventTrigger])
+			if parseErr == nil {
+				if result, err := r.deliverTriggerViaTemporaryZone(trigger, state); err == nil {
+					switch trigger {
+					case features.TriggerExitCommissioningMode:
+						state.Set(StateCommissioningActive, false)
+					case features.TriggerEnterCommissioningMode:
+						state.Set(StateCommissioningActive, true)
+					}
+					return result, nil
+				}
+				r.debugf("deliverTriggerViaTemporaryZone failed, falling back to simulation")
+			}
+		}
+		// Fall back to simulating known triggers via state manipulation.
 		return r.simulateTrigger(step, state)
 	}
 

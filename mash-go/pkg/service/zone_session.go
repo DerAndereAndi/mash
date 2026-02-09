@@ -141,8 +141,9 @@ func (s *ZoneSession) handleRequest(data []byte) {
 		if s.logger != nil {
 			s.logger.Debug("handleRequest: decode failed", "zoneID", s.zoneID, "error", err)
 		}
-		// Send error response with messageID 0 (unknown)
-		s.sendErrorResponse(0, wire.StatusInvalidParameter, "failed to decode request")
+		// Send error response with messageID 0 (unknown).
+		// Include details from the decode/validation error.
+		s.sendErrorResponse(0, wire.StatusInvalidParameter, "Missing required field: "+err.Error())
 		return
 	}
 

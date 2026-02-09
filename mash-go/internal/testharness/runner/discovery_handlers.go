@@ -525,7 +525,9 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		// Stub mode: enter_commissioning_mode was called without a device
 		// connection. Return a synthetic commissionable service so that
 		// verify_mdns_advertising sees advertising=true.
-		if active, _ := state.Get(StateCommissioningActive); active == true {
+		// Skip simulation when a real target exists -- real mDNS browse
+		// provides ground truth (e.g. window expiry in TC-COMM-WINDOW tests).
+		if active, _ := state.Get(StateCommissioningActive); active == true && r.config.Target == "" {
 			requestedType, _ := params[KeyServiceType].(string)
 			if requestedType == "" || requestedType == discovery.ServiceTypeCommissionable || requestedType == ServiceAliasCommissionable {
 				ds.services = []discoveredService{{
@@ -542,11 +544,16 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 						"serial": "SIM-0001",
 					},
 				}}
-				out, err := r.buildBrowseOutput(ds)
-				if err == nil {
-					addWindowExpiryWarning(out, state)
+				// Fall through to discriminator filter + standard output.
+				// Only return early when no discriminator filter is active,
+				// to avoid bypassing the DISCRIMINATOR_MISMATCH error code.
+				if _, hasDisc := params[KeyDiscriminator]; !hasDisc {
+					out, err := r.buildBrowseOutput(ds)
+					if err == nil {
+						addWindowExpiryWarning(out, state)
+					}
+					return out, err
 				}
-				return out, err
 			}
 		}
 
@@ -831,6 +838,7 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 			outputs[KeyDeviceIDLength] = len(di)
 			outputs[KeyZoneIDHexValid] = isValidHex(zi)
 			outputs[KeyDeviceIDHexValid] = isValidHex(di)
+			outputs[KeyDeviceID] = di
 			// Instance name format: <zone-id>-<device-id>.
 			if strings.Contains(first.InstanceName, "-") {
 				outputs[KeyInstanceNameFormat] = "<zone-id>-<device-id>"
@@ -952,19 +960,36 @@ func (r *Runner) handleVerifyMDNSAdvertising(ctx context.Context, step *loader.S
 		serviceType = ServiceAliasCommissionable
 	}
 
-	// Perform a short browse.
-	browseStep := &loader.Step{
-		Params: map[string]any{
-			KeyServiceType: serviceType,
-			KeyTimeoutMs:   float64(3000),
-		},
-	}
-	result, err := r.handleBrowseMDNS(ctx, browseStep, state)
-	if err != nil {
-		return map[string]any{KeyAdvertising: false, KeyError: err.Error()}, nil
-	}
+	// Use rapid short-browse retries with exponential backoff (similar to
+	// waitForCommissioningMode). After zone removal, the mDNS service may
+	// take time to register. Short browse windows with fresh zeroconf
+	// resolvers are more reliable at detecting newly registered services.
+	timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
+	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
+	browseMs := 500 // start with short browse windows
+	var result map[string]any
+	var err error
+	found := false
 
-	found := result[KeyServiceCount].(int) > 0
+	for time.Now().Before(deadline) {
+		browseStep := &loader.Step{
+			Params: map[string]any{
+				KeyServiceType: serviceType,
+				KeyTimeoutMs:   float64(browseMs),
+			},
+		}
+		result, err = r.handleBrowseMDNS(ctx, browseStep, state)
+		if err != nil {
+			return map[string]any{KeyAdvertising: false, KeyError: err.Error()}, nil
+		}
+
+		found = result[KeyServiceCount].(int) > 0
+		if found {
+			break
+		}
+		r.debugf("verify_mdns_advertising: browse %dms found nothing, retrying", browseMs)
+		browseMs = min(browseMs*2, 2000) // exponential backoff up to 2s
+	}
 
 	outputs := map[string]any{
 		KeyAdvertising:  found,

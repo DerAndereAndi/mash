@@ -69,6 +69,7 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondDeviceReset:                true,
 	PrecondDeviceHasGridZone:          true,
 	PrecondDeviceHasLocalZone:         true,
+	PrecondDeviceInLocalZone:          true,
 	PrecondSessionPreviouslyConnected: true,
 	// State-machine simulation.
 	PrecondControlState:          true,
@@ -147,6 +148,7 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceReset:                precondLevelCommissioned,
 	PrecondDeviceHasGridZone:          precondLevelCommissioned,
 	PrecondDeviceHasLocalZone:         precondLevelCommissioned,
+	PrecondDeviceInLocalZone:          precondLevelCommissioned,
 	PrecondSessionPreviouslyConnected: precondLevelCommissioned,
 	PrecondFreshCommission:            precondLevelCommissioned,
 
@@ -469,8 +471,16 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		}
 	}
 
+	// If needsMultiZone was set by zone_count_at_least/second_zone_connected
+	// but the test doesn't have an explicit two_zones_connected precondition,
+	// inject it so the commissioning flow below picks it up.
+	preconds := tc.Preconditions
+	if needsMultiZone && !hasPrecondition(tc.Preconditions, PrecondTwoZonesConnected) {
+		preconds = append(preconds, map[string]any{PrecondTwoZonesConnected: true})
+	}
+
 	// Handle preconditions that require special setup.
-	for _, cond := range tc.Preconditions {
+	for _, cond := range preconds {
 		for key, val := range cond {
 			b, ok := val.(bool)
 			if !ok || !b {
@@ -496,6 +506,30 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 				if !hasZoneOfType(zs, ZoneTypeLocal) {
 					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeLocal, KeyZoneID: "LOCAL"}}
 					_, _ = r.handleCreateZone(ctx, step, state)
+				}
+				r.commissionZoneType = cert.ZoneTypeLocal
+			case PrecondDeviceInLocalZone:
+				// Ensure zone crypto state exists for LOCAL and set commission
+				// zone type so the device gets a LOCAL zone.
+				zs := getZoneState(state)
+				if !hasZoneOfType(zs, ZoneTypeLocal) {
+					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeLocal, KeyZoneID: "LOCAL"}}
+					_, _ = r.handleCreateZone(ctx, step, state)
+				}
+				// Pre-populate zone state so zone_count returns the correct
+				// count when the test checks for the existing zone.
+				if len(zs.zones) == 0 {
+					zoneID := "sim-local-zone"
+					zs.zones[zoneID] = &zoneInfo{
+						ZoneID:         zoneID,
+						ZoneType:       ZoneTypeLocal,
+						Priority:       zonePriority[ZoneTypeLocal],
+						Connected:      true,
+						Metadata:       make(map[string]any),
+						CommissionedAt: time.Now(),
+					}
+					zs.zoneOrder = append(zs.zoneOrder, zoneID)
+					state.Set(StateLocalZoneID, zoneID)
 				}
 				r.commissionZoneType = cert.ZoneTypeLocal
 			case PrecondNoZonesConfigured:
@@ -860,7 +894,12 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		// (e.g. {{ grid_zone_id }}, {{ local_zone_id }}).
 		// Also update the simulated zone state entry with the actual
 		// device zone ID so that RemoveZone cleanup can find it.
-		if r.paseState != nil && r.paseState.sessionKey != nil {
+		//
+		// Skip when a multi-zone precondition already set zone IDs
+		// (two_zones_connected, device_zones_full, etc.). In that case
+		// r.paseState holds the LAST zone's key, not the active r.conn
+		// zone, so overwriting StateCurrentZoneID here would be wrong.
+		if !needsZoneConns && r.paseState != nil && r.paseState.sessionKey != nil {
 			zID := deriveZoneIDFromSecret(r.paseState.sessionKey)
 			var stateKey, zoneLabel string
 			switch r.commissionZoneType {
@@ -908,6 +947,10 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 			if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
 				r.debugf("commissioning mode: %v (continuing)", err)
 			}
+			// Wait for any lingering commissioning cooldown to expire so the
+			// first PASE attempt in the test doesn't get a "busy" rejection
+			// that would skew the PASE backoff counter.
+			time.Sleep(1 * time.Second)
 			r.lastDeviceConnClose = time.Now()
 		}
 		state.Set(StateCommissioningActive, true)

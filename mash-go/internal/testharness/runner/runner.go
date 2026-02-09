@@ -954,6 +954,15 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	// clock offset because the device may close the connection for other reasons
 	// (e.g., no disconnected zone to reconnect to), not cert rejection.
 	clientCertType, _ := step.Params["client_cert"].(string)
+	// Also check cert_chain -- extract type from the first chain spec for
+	// probe classification (TC-TLS-ALERT tests use cert_chain, not client_cert).
+	if clientCertType == "" {
+		if chainSpec, ok := step.Params["cert_chain"].([]any); ok && len(chainSpec) > 0 {
+			if name, ok := chainSpec[0].(string); ok {
+				clientCertType = name
+			}
+		}
+	}
 	clockOffset, _ := state.Get(StateClockOffsetMs)
 	hasClockOffset := clockOffset != nil && clockOffset != int64(0) && clockOffset != 0
 	probeForRejection := len(tlsConfig.Certificates) > 0 && clientCertType != "" &&
@@ -1185,6 +1194,15 @@ func (r *Runner) sendRequest(data []byte, op string, expectedMsgID uint32) (*wir
 
 // handleRead sends a read request and returns the response.
 func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// Simulated grace period expiry: the cert has expired past the grace
+	// period, so the connection should be considered dead (TC-CERT-RENEW-5).
+	if expired, _ := state.Get(StateGracePeriodExpired); expired == true {
+		return map[string]any{
+			KeyReadSuccess: false,
+			KeyErrorType:   "grace_period_expired",
+		}, nil
+	}
+
 	if !r.conn.connected {
 		return nil, fmt.Errorf("not connected")
 	}
@@ -1271,7 +1289,9 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 
 	// RC5c: simulate_no_response -- send request but don't wait for response.
 	if toBool(params[ParamSimulateNoResponse]) {
+		state.Set(StateStartTime, time.Now())
 		if sendErr := r.conn.framer.WriteFrame(data); sendErr != nil {
+			state.Set(StateEndTime, time.Now())
 			return map[string]any{
 				KeyReadSuccess: false,
 				KeyError:       sendErr.Error(),
@@ -1279,6 +1299,7 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		}
 		// Wait for context cancellation (step timeout).
 		<-ctx.Done()
+		state.Set(StateEndTime, time.Now())
 		return map[string]any{
 			KeyReadSuccess:  false,
 			KeyError:        "TIMEOUT",
@@ -2219,15 +2240,16 @@ func classifyTestCertRejection(certType string, err error) string {
 		}
 	}
 
-	// Infer from the test cert type we sent.
+	// Infer from the test cert type we sent (supports both client_cert
+	// names like "controller_expired" and cert_chain names like "expired_cert").
 	switch certType {
-	case "controller_expired":
+	case "controller_expired", "expired_cert":
 		return "certificate_expired"
 	case "controller_not_yet_valid":
 		return "certificate_expired"
-	case "controller_wrong_zone":
+	case "controller_wrong_zone", "wrong_zone_cert":
 		return "unknown_ca"
-	case "controller_no_client_auth":
+	case "controller_no_client_auth", "invalid_signature_cert":
 		return "bad_certificate"
 	case "controller_ca_true":
 		return "bad_certificate"

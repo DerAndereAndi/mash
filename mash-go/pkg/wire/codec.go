@@ -256,6 +256,17 @@ func PeekMessageType(data []byte) (MessageType, error) {
 		}
 	}
 
+	// If field 2 is missing/zero but message has endpoint (key 3) and feature (key 4)
+	// fields, treat as a malformed request so DecodeRequest.Validate rejects it
+	// with an appropriate error response.
+	if field2 == 0 {
+		_, hasField3 := rawMsg[3]
+		_, hasField4 := rawMsg[4]
+		if hasField3 && hasField4 {
+			return MessageTypeRequest, nil
+		}
+	}
+
 	// Default to response
 	return MessageTypeResponse, nil
 }

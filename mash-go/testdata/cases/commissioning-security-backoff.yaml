@@ -15,6 +15,9 @@ preconditions:
   - device_in_commissioning_mode: true
 
 steps:
+  - name: Enter fresh commissioning window (resets PASE tracker)
+    action: enter_commissioning_mode
+
   - name: Attempts 1-3 (no backoff expected)
     action: pase_attempts
     params:

@@ -387,6 +387,16 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 		flattenInvokeResponse(resp.Payload, outputs)
 	}
 
+	// DEC-059: When RemoveZone succeeds on a real device, reset
+	// commissioning state so the harness knows the device will
+	// re-enter commissioning mode (e.g. TC-ZTYPE-005).
+	if resp.IsSuccess() {
+		if cmdName, ok := params[ParamCommand].(string); ok && strings.EqualFold(cmdName, "RemoveZone") {
+			state.Set(StateCommissioningActive, true)
+			state.Set(StateCommissioningCompleted, false)
+		}
+	}
+
 	return outputs, nil
 }
 

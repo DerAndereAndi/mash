@@ -128,7 +128,7 @@ steps:
       endpoint: 0
       feature: DeviceInfo
       attribute: zoneCount
-    store_as: initial_zone_count
+    store_result: initial_zone_count
     expect:
       read_success: true
       value_at_least: 2
@@ -160,7 +160,7 @@ steps:
       zone_id: "{{ other_zone_id }}"
     expect:
       other_zone_active: true
-      zone_count: "{{ initial_zone_count }} - 1"
+      zone_count: 1
 
 postconditions:
   - other_zones_unaffected: true

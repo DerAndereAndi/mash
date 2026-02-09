@@ -22,6 +22,7 @@ features:
         - { id: 11, name: hardwareVersion }
         - { id: 30, name: location }
         - { id: 31, name: label }
+        - { id: 32, name: zoneCount }
     commands:
       mandatory:
         - { id: 0x10, name: removeZone }

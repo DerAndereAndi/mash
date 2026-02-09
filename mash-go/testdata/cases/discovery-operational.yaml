@@ -17,7 +17,7 @@ pics_requirements:
 
 preconditions:
   - device_commissioned: true
-  - device_in_zone: true
+  - two_zones_connected: true
 
 steps:
   - name: Verify commissionable service stopped

@@ -151,9 +151,22 @@ func (s *PASEServerSession) WaitForPASERequest(ctx context.Context, conn net.Con
 // the derived shared secret. This method should be called with the
 // commissioning lock held (DEC-061).
 func (s *PASEServerSession) CompleteHandshake(ctx context.Context, conn net.Conn, req *PASERequest) ([]byte, error) {
+	// DEC-047: Record start time for constant-time error responses.
+	// All error paths pad to a minimum floor to prevent timing oracle attacks
+	// that could distinguish invalid_pubkey (early exit) from wrong_password
+	// (full handshake).
+	const minHandshakeDuration = 200 * time.Millisecond
+	handshakeStart := time.Now()
+
 	// Step 2: Process client's public value
 	if err := s.spake.ProcessClientValue(req.PublicValue); err != nil {
-		// Send error response
+		// Pad to minimum duration BEFORE sending the error response.
+		// This keeps the client blocked (waiting for a message) during the
+		// padding period, which prevents timing oracle attacks and ensures the
+		// commissioning lock stays held so the next attempt doesn't overlap.
+		if elapsed := time.Since(handshakeStart); elapsed < minHandshakeDuration {
+			time.Sleep(minHandshakeDuration - elapsed)
+		}
 		errMsg := &CommissioningError{
 			MsgType:   MsgCommissioningError,
 			ErrorCode: ErrCodeInvalidPublicKey,
@@ -190,7 +203,15 @@ func (s *PASEServerSession) CompleteHandshake(ctx context.Context, conn net.Conn
 		errorCode = ErrCodeConfirmFailed
 	}
 
-	// Step 6: Send PASEComplete with our confirmation
+	// Step 6: Send PASEComplete with our confirmation.
+	// On failure, pad BEFORE sending so the client stays blocked during the
+	// padding period (same rationale as the invalid_pubkey path above).
+	if errorCode != ErrCodeSuccess {
+		if elapsed := time.Since(handshakeStart); elapsed < minHandshakeDuration {
+			time.Sleep(minHandshakeDuration - elapsed)
+		}
+	}
+
 	complete := &PASEComplete{
 		MsgType:      MsgPASEComplete,
 		Confirmation: s.spake.Confirmation(),

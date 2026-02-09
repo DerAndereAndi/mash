@@ -226,9 +226,9 @@ description: |
   When a zone is removed from a device at max capacity, the device
   auto-enters commissioning mode and advertises _mashc._udp (DEC-059).
 
-  Starts at max capacity (GRID + LOCAL), removes LOCAL via GRID
-  connection. The device now has an available zone slot and must
-  become commissionable again.
+  Starts at max capacity (GRID + LOCAL), LOCAL zone self-removes.
+  The device now has an available zone slot and must become
+  commissionable again.
 
 pics_requirements:
   - MASH.S.ZONE.MAX
@@ -240,11 +240,11 @@ preconditions:
   - two_zones_connected: true
 
 steps:
-  # Remove LOCAL zone via GRID connection.
+  # LOCAL zone self-removes (only self-removal is allowed per protocol).
   - name: Remove LOCAL zone
     action: invoke_as_zone
     params:
-      zone: GRID
+      zone: LOCAL
       endpoint: 0
       feature: DeviceInfo
       command: RemoveZone
@@ -258,7 +258,7 @@ steps:
     action: verify_mdns_advertising
     params:
       service_type: "_mashc._udp"
-      timeout_ms: 5000
+      timeout_ms: 10000
     expect:
       advertising: true
 

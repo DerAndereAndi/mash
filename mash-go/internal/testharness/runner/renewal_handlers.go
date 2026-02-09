@@ -372,8 +372,16 @@ func (r *Runner) handleVerifySubscriptionActive(ctx context.Context, step *loade
 // If the connection is dead but operational certs are available, it attempts
 // reconnection using mutual TLS (simulating a controller reconnect).
 func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// Check if this connection was gracefully closed. If so, do NOT
+	// auto-reconnect -- the test is verifying that the close stuck.
+	gracefullyClosed := false
+	if gc, ok := state.Get(StateGracefullyClosed); ok {
+		gracefullyClosed, _ = gc.(bool)
+	}
+
 	// If connection is dead but we have operational certs, attempt reconnection.
-	if (r.conn == nil || !r.conn.connected) && r.controllerCert != nil && r.zoneCAPool != nil {
+	// Skip when the connection was gracefully closed (TC-CLOSE tests).
+	if (r.conn == nil || !r.conn.connected) && r.controllerCert != nil && r.zoneCAPool != nil && !gracefullyClosed {
 		r.debugf("verify_connection_state: connection lost, attempting operational reconnection")
 		if err := r.reconnectOperational(); err != nil {
 			r.debugf("verify_connection_state: reconnection failed: %v", err)

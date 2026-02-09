@@ -757,10 +757,12 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	}
 
 	// Phase 2: PASERequest received -- now acquire the commissioning lock
-	if ok, reason := s.acceptCommissioningConnection(); !ok {
-		// DEC-047: Count cooldown/lock rejections as failed attempts.
-		// The client sent a PASERequest, so this is a real attempt.
-		if s.paseTracker != nil {
+	if ok, rejectReason, reason := s.acceptCommissioningConnection(); !ok {
+		// DEC-047: Count cooldown rejections as failed attempts so the
+		// backoff tracker escalates. Skip "already in progress" since
+		// the concurrent PASE will be counted when it completes -- counting
+		// both would double-penalize and mis-align backoff tiers.
+		if s.paseTracker != nil && rejectReason != rejectAlreadyInProgress {
 			s.paseTracker.RecordFailure()
 		}
 		s.debugLog("handleCommissioningConnection: rejected after PASERequest",
@@ -800,6 +802,10 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 			s.debugLog("handleCommissioningConnection: PASE failed (no tracker)",
 				"error", err)
 		}
+		// Brief delay before closing so the error message bytes are fully
+		// delivered to the peer. Without this, the test harness may see an
+		// EOF before reading the CommissioningError frame (TC-ZONE-ADD-003).
+		time.Sleep(100 * time.Millisecond)
 		conn.Close()
 		return
 	}
@@ -2464,13 +2470,22 @@ func (s *DeviceService) updatePairingRequestListening() {
 // The cooldown timer starts when a connection is released (success or failure),
 // not when it is accepted. This prevents legitimate follow-up attempts from
 // being blocked by the cooldown of a still-in-progress connection.
-func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
+// commissioningRejectReason classifies why acceptCommissioningConnection rejected.
+type commissioningRejectReason int
+
+const (
+	rejectAlreadyInProgress commissioningRejectReason = iota + 1
+	rejectCooldown
+	rejectZonesFull
+)
+
+func (s *DeviceService) acceptCommissioningConnection() (bool, commissioningRejectReason, string) {
 	s.connectionMu.Lock()
 	defer s.connectionMu.Unlock()
 
 	// Check 1: Is commissioning already in progress?
 	if s.commissioningConnActive {
-		return false, "commissioning already in progress"
+		return false, rejectAlreadyInProgress, "commissioning already in progress"
 	}
 
 	// Check 2: Connection cooldown (starts at release, not acceptance).
@@ -2481,7 +2496,7 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 	if s.config.ConnectionCooldown > 0 {
 		elapsed := time.Since(s.lastCommissioningAttempt)
 		if elapsed < s.config.ConnectionCooldown {
-			return false, fmt.Sprintf("cooldown active (%s remaining)", s.config.ConnectionCooldown-elapsed)
+			return false, rejectCooldown, fmt.Sprintf("cooldown active (%s remaining)", s.config.ConnectionCooldown-elapsed)
 		}
 	}
 
@@ -2513,19 +2528,19 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 	s.mu.RUnlock()
 
 	if nonTestCount >= maxZones && !enableKeyValid {
-		return false, fmt.Sprintf("zone slots full (%d/%d)", nonTestCount, maxZones)
+		return false, rejectZonesFull, fmt.Sprintf("zone slots full (%d/%d)", nonTestCount, maxZones)
 	}
 
 	// Even with enable-key, reject when all slots (including the TEST slot)
 	// are occupied. The enable-key bypass allows a TEST zone, but if one
 	// already exists alongside full non-test slots, there's truly no room.
 	if totalZoneCount > maxZones {
-		return false, fmt.Sprintf("all zone slots full (%d non-test + %d test)", nonTestCount, totalZoneCount-nonTestCount)
+		return false, rejectZonesFull, fmt.Sprintf("all zone slots full (%d non-test + %d test)", nonTestCount, totalZoneCount-nonTestCount)
 	}
 
 	// Accept the connection (cooldown timestamp is set on release, not here)
 	s.commissioningConnActive = true
-	return true, ""
+	return true, 0, ""
 }
 
 // isZonesFull returns true when all zone slots are occupied.

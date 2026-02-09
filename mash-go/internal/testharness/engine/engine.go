@@ -210,6 +210,20 @@ func (e *Engine) executeStep(ctx context.Context, step *loader.Step, index int, 
 	}
 	state.Set(InternalStepOutput, outputCopy)
 
+	// store_result: save a handler's primary output under a named key.
+	// Looks for common primary output keys (device_id, zone_id, value),
+	// falling back to the full output map.
+	if step.StoreResult != "" {
+		var stored interface{} = outputCopy
+		for _, primaryKey := range []string{"device_id", "zone_id", "value", "result"} {
+			if v, ok := outputs[primaryKey]; ok {
+				stored = v
+				break
+			}
+		}
+		state.Set(step.StoreResult, stored)
+	}
+
 	// Check expectations with PICS-aware interpolation
 	result.Passed = true
 	interpolatedExpect := InterpolateParamsWithPICS(step.Expect, state, e.config.PICS)

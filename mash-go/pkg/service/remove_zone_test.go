@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/failsafe"
 	"github.com/mash-protocol/mash-go/pkg/features"
@@ -106,17 +107,15 @@ func TestRemoveZoneHandler_RejectsOtherZone(t *testing.T) {
 	}
 }
 
-func TestRemoveZoneHandler_EnableKeyAllowsCrossZone(t *testing.T) {
-	// Setup: Create a device service with enable-key and two connected zones
+func TestRemoveZoneHandler_TestZoneAllowsCrossZone(t *testing.T) {
+	// Setup: Create a device service with two connected zones where the
+	// caller is a TEST zone (which is allowed to remove any zone).
 	device := model.NewDevice("test-device", 1234, 5678)
 	device.AddEndpoint(&model.Endpoint{})
 
 	svc := &DeviceService{
-		deviceID: "test-device",
-		device:   device,
-		config: DeviceConfig{
-			TestEnableKey: "0123456789ABCDEF0123456789ABCDEF",
-		},
+		deviceID:       "test-device",
+		device:         device,
 		connectedZones: make(map[string]*ConnectedZone),
 		zoneSessions:   make(map[string]*ZoneSession),
 		zoneIndexMap:   make(map[string]uint8),
@@ -130,14 +129,15 @@ func TestRemoveZoneHandler_EnableKeyAllowsCrossZone(t *testing.T) {
 
 	handler := svc.makeRemoveZoneHandler()
 
-	// Zone A removes zone B (allowed with enable-key)
+	// Zone A (TEST type) removes zone B (allowed for TEST zones)
 	ctx := ContextWithCallerZoneID(context.Background(), zoneA)
+	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeTest)
 	params := map[string]any{
 		features.RemoveZoneParamZoneID: zoneB,
 	}
 	result, err := handler(ctx, params)
 	if err != nil {
-		t.Fatalf("expected no error with enable-key, got: %v", err)
+		t.Fatalf("expected no error for TEST zone cross-removal, got: %v", err)
 	}
 	if removed, ok := result[features.RemoveZoneRespRemoved].(bool); !ok || !removed {
 		t.Errorf("expected removed=true, got %v", result[features.RemoveZoneRespRemoved])

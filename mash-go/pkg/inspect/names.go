@@ -180,6 +180,7 @@ func initNameTables() {
 		"useCases":        features.DeviceInfoAttrUseCases,
 		"location":        features.DeviceInfoAttrLocation,
 		"label":           features.DeviceInfoAttrLabel,
+		"zonecount":       features.DeviceInfoAttrZoneCount,
 	}
 	for k, v := range globalAttrs {
 		deviceInfoAttrs[k] = v

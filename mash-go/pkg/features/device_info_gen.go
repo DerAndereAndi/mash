@@ -23,6 +23,7 @@ const (
 	DeviceInfoAttrUseCases        uint16 = 21
 	DeviceInfoAttrLocation        uint16 = 30
 	DeviceInfoAttrLabel           uint16 = 31
+	DeviceInfoAttrZoneCount       uint16 = 32
 )
 
 // DeviceInfoFeatureRevision is the current revision of the DeviceInfo feature.
@@ -149,6 +150,14 @@ func NewDeviceInfo() *DeviceInfo {
 		Description: "User-assigned name",
 	}))
 
+	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
+		ID:          DeviceInfoAttrZoneCount,
+		Name:        "zoneCount",
+		Type:        model.DataTypeUint8,
+		Access:      model.AccessReadOnly,
+		Description: "Number of zones currently configured on this device",
+	}))
+
 	d := &DeviceInfo{Feature: f}
 	d.addCommands()
 
@@ -267,6 +276,15 @@ func (d *DeviceInfo) Label() (string, bool) {
 		return v, true
 	}
 	return "", false
+}
+
+// ZoneCount returns the number of zones currently configured on this device.
+func (d *DeviceInfo) ZoneCount() uint8 {
+	val, _ := d.ReadAttribute(DeviceInfoAttrZoneCount)
+	if v, ok := val.(uint8); ok {
+		return v
+	}
+	return 0
 }
 
 // SetDeviceID sets the globally unique device identifier.
@@ -451,6 +469,15 @@ func (d *DeviceInfo) SetLabelPtr(v *string) error {
 		return d.ClearLabel()
 	}
 	return d.SetLabel(*v)
+}
+
+// SetZoneCount sets the number of zones currently configured on this device.
+func (d *DeviceInfo) SetZoneCount(zoneCount uint8) error {
+	attr, err := d.GetAttribute(DeviceInfoAttrZoneCount)
+	if err != nil {
+		return err
+	}
+	return attr.SetValueInternal(zoneCount)
 }
 
 // DeviceInfo command IDs.

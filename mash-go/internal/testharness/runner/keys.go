@@ -25,6 +25,7 @@ const (
 	PrecondDeviceReset                = "device_reset"
 	PrecondDeviceHasGridZone          = "device_has_grid_zone"
 	PrecondDeviceHasLocalZone         = "device_has_local_zone"
+	PrecondDeviceInLocalZone          = "device_in_local_zone"
 	PrecondSessionPreviouslyConnected = "session_previously_connected"
 	PrecondFreshCommission            = "fresh_commission"
 )

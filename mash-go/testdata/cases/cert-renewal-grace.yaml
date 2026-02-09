@@ -64,6 +64,10 @@ steps:
 
   - name: Verify connection now fails
     action: read
+    params:
+      endpoint: 0
+      feature: DeviceInfo
+      attribute: vendorName
     expect:
       read_success: false
       error_type: "grace_period_expired"

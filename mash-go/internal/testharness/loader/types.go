@@ -87,6 +87,10 @@ type Step struct {
 
 	// Description explains what this step does.
 	Description string `yaml:"description,omitempty"`
+
+	// StoreResult stores a handler's primary output value (e.g., device_id)
+	// under the given name for later interpolation via {{ name }}.
+	StoreResult string `yaml:"store_result,omitempty"`
 }
 
 // TestSuite represents a collection of test cases.

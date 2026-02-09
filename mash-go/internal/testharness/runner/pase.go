@@ -234,6 +234,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			KeyCommissionSuccess:  false,
 			KeySuccess:            false,
 			KeyError:              errorName,
+			PrecondDeviceInZone:   false,
 		}
 
 		if isPASEProtocolError {

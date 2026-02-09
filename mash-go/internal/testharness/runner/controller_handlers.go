@@ -221,7 +221,13 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 		minutes = toFloat(v) / 60.0
 	}
 
-	// Validate bounds: min 3 minutes (180s, DEC-048), max 180 minutes (10800s).
+	// Send the raw (unclamped) duration to the real device first. The
+	// device has its own bounds check ([3s, 10800s]) via TestControl.
+	rawDurationSeconds := uint32(minutes * 60)
+	r.sendSetCommWindowDuration(rawDurationSeconds, state)
+
+	// Validate bounds for harness simulation: min 3 minutes (180s, DEC-048),
+	// max 180 minutes (10800s).
 	const minMinutes = 3.0 // 3 minutes (DEC-048)
 	const maxMinutes = 180.0
 	result := "ok"
@@ -235,12 +241,6 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 	}
 
 	cs.commissioningWindowDuration = time.Duration(minutes * float64(time.Minute))
-
-	// Dual-mode: also send the real command to the device when connected
-	// with an operational TLS session. Errors are logged but not propagated
-	// (simulation state is the source of truth for the test harness).
-	durationSeconds := uint32(minutes * 60)
-	r.sendSetCommWindowDuration(durationSeconds, state)
 
 	return map[string]any{
 		KeyDurationSet:     true,

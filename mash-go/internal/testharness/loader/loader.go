@@ -288,13 +288,22 @@ func picsToFile(p *pics.PICS) *PICSFile {
 	// Copy entries to Items map
 	for _, entry := range p.Entries {
 		code := entry.Code.String()
-		// Convert Value to appropriate type
+		// Convert Value to appropriate type.
+		// Priority: bool > int (if raw is exactly representable) > string.
 		if entry.Value.IsBool() {
 			pf.Items[code] = entry.Value.Bool
-		} else if entry.Value.Int != 0 || entry.Value.Raw == "0" {
+		} else if (entry.Value.Int != 0 || entry.Value.Raw == "0") &&
+			entry.Value.Raw == fmt.Sprintf("%d", entry.Value.Int) {
+			// Only store as int if the raw value is an exact integer
+			// representation. This prevents "1.3" (parsed as Int=1) from
+			// losing the fractional part.
+			pf.Items[code] = int(entry.Value.Int)
+		} else if entry.Value.String != "" {
+			pf.Items[code] = entry.Value.String
+		} else if entry.Value.Int != 0 {
 			pf.Items[code] = int(entry.Value.Int)
 		} else {
-			pf.Items[code] = entry.Value.String
+			pf.Items[code] = entry.Value.Raw
 		}
 	}
 

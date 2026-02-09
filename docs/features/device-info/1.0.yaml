@@ -101,6 +101,12 @@ attributes:
     nullable: true
     description: "User-assigned name"
 
+  - id: 32
+    name: zoneCount
+    type: uint8
+    access: readOnly
+    description: "Number of zones currently configured on this device"
+
 commands:
   - id: 0x10
     name: removeZone

@@ -193,6 +193,7 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 			conn.Close()
 			return map[string]any{
 				KeyConnectionEstablished: true,
+				KeyPaseFailed:            true,
 				KeyError:                 fmt.Sprintf("send PASERequest: %v", err),
 			}, nil
 		}
@@ -703,6 +704,12 @@ func (r *Runner) deliverTriggerViaTemporaryZone(trigger uint64, state *engine.Ex
 		r.debugf("deliverTriggerViaTemporaryZone: %v (continuing)", err)
 	}
 
+	// Wait for the device's connection cooldown (500ms) to expire. The
+	// commission above set lastCommissioningAttempt; without this wait,
+	// the next PASE attempt (from the same or next test) would hit a
+	// "busy" rejection that incorrectly increments the backoff tracker.
+	time.Sleep(600 * time.Millisecond)
+
 	if triggerErr != nil {
 		return nil, fmt.Errorf("trigger delivery: %w", triggerErr)
 	}
@@ -908,8 +915,19 @@ func (r *Runner) handlePASEAttempts(ctx context.Context, step *loader.Step, stat
 		if delay > maxDelay {
 			maxDelay = delay
 		}
-		if delay > 100*time.Millisecond {
+		// The threshold must be above the constant-time padding (200ms) but
+		// well below the tier 2 backoff (1000ms).
+		if delay > 500*time.Millisecond {
 			allImmediate = false
+		}
+
+		// Wait between attempts so the device finishes processing (constant-time
+		// padding + conn close) and the cooldown period expires. Without this,
+		// the next attempt arrives while the previous one is still holding the
+		// commissioning lock, causing a "busy" rejection that skews the backoff
+		// counter.
+		if i < count-1 {
+			time.Sleep(1 * time.Second)
 		}
 	}
 

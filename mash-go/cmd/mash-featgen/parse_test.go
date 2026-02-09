@@ -340,8 +340,8 @@ func TestParseDeviceInfoFeature(t *testing.T) {
 	if !def.Mandatory {
 		t.Error("mandatory = false, want true")
 	}
-	if len(def.Attributes) != 13 {
-		t.Errorf("len(attributes) = %d, want 13", len(def.Attributes))
+	if len(def.Attributes) != 14 {
+		t.Errorf("len(attributes) = %d, want 14", len(def.Attributes))
 	}
 	if len(def.Commands) != 1 {
 		t.Errorf("len(commands) = %d, want 1", len(def.Commands))

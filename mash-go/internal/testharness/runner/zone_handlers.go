@@ -12,6 +12,9 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/features"
+	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // registerZoneHandlers registers all zone management action handlers.
@@ -352,27 +355,52 @@ func (r *Runner) handleVerifyZoneCA(ctx context.Context, step *loader.Step, stat
 }
 
 // handleVerifyZoneBinding verifies a device is bound to a zone.
+// When called without params, it extracts the zone ID from the most
+// recent mDNS discovery TXT records ("ZI" field) and checks whether
+// that zone ID matches any commissioned zone tracked by the runner.
 func (r *Runner) handleVerifyZoneBinding(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
-	zs := getZoneState(state)
 
+	// Get zone ID from params or from discovered mDNS TXT records.
 	zoneID, _ := params[KeyZoneID].(string)
-	deviceID, _ := params[KeyDeviceID].(string)
-
-	zone, exists := zs.zones[zoneID]
-	if !exists {
-		return map[string]any{KeyBindingValid: false}, nil
+	if zoneID == "" {
+		ds := getDiscoveryState(state)
+		if len(ds.services) > 0 {
+			zoneID, _ = ds.services[0].TXTRecords["ZI"]
+		}
 	}
 
-	found := false
-	for _, d := range zone.DeviceIDs {
-		if d == deviceID {
-			found = true
+	if zoneID == "" {
+		return map[string]any{
+			"zone_id_matches": false,
+			KeyBindingValid:   false,
+		}, nil
+	}
+
+	// Check if the discovered zone ID matches any active zone.
+	zoneMatches := false
+	for _, id := range r.activeZoneIDs {
+		if id == zoneID {
+			zoneMatches = true
 			break
 		}
 	}
 
-	return map[string]any{KeyBindingValid: found}, nil
+	// Also check zone state (covers zones tracked by preconditions).
+	if !zoneMatches {
+		zs := getZoneState(state)
+		for _, z := range zs.zones {
+			if z.ZoneID == zoneID {
+				zoneMatches = true
+				break
+			}
+		}
+	}
+
+	return map[string]any{
+		"zone_id_matches": zoneMatches,
+		KeyBindingValid:   zoneMatches,
+	}, nil
 }
 
 // handleVerifyZoneIDDerivation verifies zone ID derivation from cert.
@@ -460,22 +488,132 @@ func (r *Runner) handleDisconnectZone(ctx context.Context, step *loader.Step, st
 }
 
 // handleVerifyOtherZone verifies another zone's state during multi-zone tests.
+// For real devices, it uses the other zone's connection to read zoneCount.
 func (r *Runner) handleVerifyOtherZone(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
-	zs := getZoneState(state)
-
 	zoneID, _ := params[KeyZoneID].(string)
 
+	// Real device: find the other zone's connection and read zoneCount.
+	if r.config.Target != "" {
+		conn := r.findOtherZoneConn(zoneID)
+		if conn == nil || !conn.connected {
+			return map[string]any{
+				"other_zone_active": false,
+				KeyZoneCount:       0,
+			}, nil
+		}
+
+		// Read zoneCount attribute (endpoint 0, DeviceInfo, attr 32).
+		msgID := r.nextMessageID()
+		req := &wire.Request{
+			MessageID:  msgID,
+			Operation:  wire.OpRead,
+			EndpointID: 0,
+			FeatureID:  uint8(model.FeatureDeviceInfo),
+			Payload:    features.DeviceInfoAttrZoneCount,
+		}
+		data, err := wire.EncodeRequest(req)
+		if err != nil {
+			return nil, fmt.Errorf("encode read request: %w", err)
+		}
+
+		// Send via the other zone's framer.
+		if err := conn.framer.WriteFrame(data); err != nil {
+			return map[string]any{
+				"other_zone_active": false,
+				KeyZoneCount:       0,
+			}, nil
+		}
+		_ = conn.tlsConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		respData, err := conn.framer.ReadFrame()
+		_ = conn.tlsConn.SetReadDeadline(time.Time{})
+		if err != nil {
+			return map[string]any{
+				"other_zone_active": false,
+				KeyZoneCount:       0,
+			}, nil
+		}
+		resp, err := wire.DecodeResponse(respData)
+		if err != nil || !resp.IsSuccess() {
+			return map[string]any{
+				"other_zone_active": false,
+				KeyZoneCount:       0,
+			}, nil
+		}
+
+		// Extract zoneCount from the response payload.
+		// Read responses are map[attrID]value after CBOR round-trip.
+		zoneCount := 0
+		attrKey := uint64(features.DeviceInfoAttrZoneCount)
+		switch m := resp.Payload.(type) {
+		case map[any]any:
+			if v, ok := m[attrKey]; ok {
+				zoneCount = toIntValue(v)
+			}
+		case map[uint64]any:
+			if v, ok := m[attrKey]; ok {
+				zoneCount = toIntValue(v)
+			}
+		}
+
+		return map[string]any{
+			"other_zone_active": true,
+			KeyZoneCount:       zoneCount,
+		}, nil
+	}
+
+	// Simulation: use zone state.
+	zs := getZoneState(state)
 	zone, exists := zs.zones[zoneID]
 	if !exists {
 		return map[string]any{KeyZoneExists: false}, nil
 	}
 
 	return map[string]any{
-		KeyZoneExists: true,
-		KeyZoneType:   zone.ZoneType,
-		KeyConnected:  zone.Connected,
+		KeyZoneExists:       true,
+		"other_zone_active": zone.Connected,
+		KeyZoneType:         zone.ZoneType,
+		KeyConnected:        zone.Connected,
+		KeyZoneCount:        len(zs.zones),
 	}, nil
+}
+
+// toIntValue converts a CBOR-decoded numeric value to int.
+func toIntValue(v any) int {
+	switch n := v.(type) {
+	case uint64:
+		return int(n)
+	case int64:
+		return int(n)
+	case int:
+		return n
+	case float64:
+		return int(n)
+	case uint8:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+// findOtherZoneConn finds a live connection for a zone ID by matching it
+// against the zone IDs stored in r.activeZoneIDs.
+func (r *Runner) findOtherZoneConn(zoneID string) *Connection {
+	for name, id := range r.activeZoneIDs {
+		if id == zoneID {
+			if conn, ok := r.activeZoneConns[name]; ok && conn.connected {
+				return conn
+			}
+		}
+	}
+	// Also check connections stored via ZoneConnectionStateKey.
+	for name, conn := range r.activeZoneConns {
+		if conn.connected && name != "GRID" && name != "main-"+zoneID {
+			// Return any live zone connection that isn't the removed zone.
+			return conn
+		}
+	}
+	return nil
 }
 
 // handleVerifyBidirectionalActive verifies bidirectional communication is active.
