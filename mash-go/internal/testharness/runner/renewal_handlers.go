@@ -3,9 +3,11 @@ package runner
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -13,6 +15,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
+	"github.com/mash-protocol/mash-go/pkg/transport"
 )
 
 // registerRenewalHandlers registers all certificate renewal action handlers.
@@ -366,7 +369,17 @@ func (r *Runner) handleVerifySubscriptionActive(ctx context.Context, step *loade
 }
 
 // handleVerifyConnectionState verifies the connection state.
+// If the connection is dead but operational certs are available, it attempts
+// reconnection using mutual TLS (simulating a controller reconnect).
 func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// If connection is dead but we have operational certs, attempt reconnection.
+	if (r.conn == nil || !r.conn.connected) && r.controllerCert != nil && r.zoneCAPool != nil {
+		r.debugf("verify_connection_state: connection lost, attempting operational reconnection")
+		if err := r.reconnectOperational(); err != nil {
+			r.debugf("verify_connection_state: reconnection failed: %v", err)
+		}
+	}
+
 	sameConn := r.conn != nil && r.conn.connected
 	pasePerformed := r.paseState != nil && r.paseState.completed
 	connOperational := r.conn != nil && r.conn.operational
@@ -439,6 +452,54 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 		KeyState:                         connState,
 		KeyCloseReason:                   closeReason,
 	}, nil
+}
+
+// reconnectOperational dials the device using operational TLS (mutual auth)
+// without performing PASE. Used when the connection was lost but the device
+// is still commissioned (certs are valid).
+func (r *Runner) reconnectOperational() error {
+	// Find the zone ID from a previous commissioning.
+	var zoneID, connKey string
+	for k, zid := range r.activeZoneIDs {
+		zoneID = zid
+		connKey = k
+		break
+	}
+	if zoneID == "" {
+		return fmt.Errorf("no zone ID available for reconnection")
+	}
+
+	tlsConfig := r.operationalTLSConfig()
+	var tlsConn *tls.Conn
+	var dialErr error
+	for attempt := range 3 {
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", r.config.Target, tlsConfig)
+		if dialErr == nil {
+			break
+		}
+		r.debugf("reconnectOperational: dial attempt %d failed: %v", attempt+1, dialErr)
+		time.Sleep(200 * time.Millisecond)
+	}
+	if dialErr != nil {
+		return fmt.Errorf("operational reconnection failed: %w", dialErr)
+	}
+
+	r.conn = &Connection{
+		tlsConn:     tlsConn,
+		framer:      transport.NewFramer(tlsConn),
+		connected:   true,
+		operational: true,
+	}
+
+	if err := r.waitForOperationalReady(2 * time.Second); err != nil {
+		r.debugf("reconnectOperational: %v (continuing)", err)
+	}
+
+	r.activeZoneConns[connKey] = r.conn
+	r.debugf("reconnectOperational: reconnected zone %s", zoneID)
+
+	return nil
 }
 
 // handleSetCertExpiry sets the certificate expiry for testing.

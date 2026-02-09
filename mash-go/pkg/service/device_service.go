@@ -1075,7 +1075,7 @@ func (s *DeviceService) performCertExchange(conn *framedConnection, zoneID strin
 }
 
 // runZoneMessageLoop reads messages from the connection and dispatches to the session.
-func (s *DeviceService) runZoneMessageLoop(_ string, conn *framedConnection, session *ZoneSession) {
+func (s *DeviceService) runZoneMessageLoop(zoneID string, conn *framedConnection, session *ZoneSession) {
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -1121,6 +1121,17 @@ func (s *DeviceService) runZoneMessageLoop(_ string, conn *framedConnection, ses
 
 		// Dispatch protocol messages to session.
 		session.OnMessage(data)
+
+		// If the zone was removed during message processing (e.g. RemoveZone
+		// command), close the connection and exit. The response has already
+		// been sent by OnMessage before we reach this point.
+		s.mu.RLock()
+		_, zoneExists := s.connectedZones[zoneID]
+		s.mu.RUnlock()
+		if !zoneExists {
+			conn.Close()
+			return
+		}
 	}
 }
 
