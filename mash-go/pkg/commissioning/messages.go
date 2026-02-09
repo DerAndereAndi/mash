@@ -175,5 +175,5 @@ type CommissioningError struct {
 	MsgType    uint8  `cbor:"1,keyasint"`
 	ErrorCode  uint8  `cbor:"2,keyasint"`
 	Message    string `cbor:"3,keyasint,omitempty"`
-	RetryAfter uint32 `cbor:"4,keyasint,omitempty"` // Retry hint in milliseconds (DEC-063)
+	RetryAfter uint32 `cbor:"4,keyasint"` // Retry hint in milliseconds (DEC-063); 0 = no retry window
 }

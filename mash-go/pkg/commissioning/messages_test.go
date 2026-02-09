@@ -138,7 +138,7 @@ func TestCommissioningError_BusyWithRetryAfter_RoundTrip(t *testing.T) {
 
 // TestCommissioningError_RetryAfterZero_Omitted verifies that RetryAfter=0
 // is not serialized (omitempty), keeping backward compatibility.
-func TestCommissioningError_RetryAfterZero_Omitted(t *testing.T) {
+func TestCommissioningError_RetryAfterZero_EncodesSmaller(t *testing.T) {
 	errMsg := &commissioning.CommissioningError{
 		MsgType:    commissioning.MsgCommissioningError,
 		ErrorCode:  commissioning.ErrCodeCSRFailed,
@@ -159,7 +159,7 @@ func TestCommissioningError_RetryAfterZero_Omitted(t *testing.T) {
 
 	decodedErr := decoded.(*commissioning.CommissioningError)
 	if decodedErr.RetryAfter != 0 {
-		t.Errorf("RetryAfter: expected 0 (omitted), got %d", decodedErr.RetryAfter)
+		t.Errorf("RetryAfter: expected 0, got %d", decodedErr.RetryAfter)
 	}
 
 	// Verify key 4 is not in the CBOR data by checking encoding size.
@@ -172,7 +172,7 @@ func TestCommissioningError_RetryAfterZero_Omitted(t *testing.T) {
 	}
 	dataWithRetry, _ := commissioning.EncodePASEMessage(withRetry)
 	if len(data) >= len(dataWithRetry) {
-		t.Errorf("Expected omitted RetryAfter to produce smaller encoding: without=%d, with=%d", len(data), len(dataWithRetry))
+		t.Errorf("Expected RetryAfter=0 to produce smaller encoding than RetryAfter=1000: zero=%d, thousand=%d", len(data), len(dataWithRetry))
 	}
 }
 

@@ -265,7 +265,7 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 					KeyBusyErrorCode:         int(errMsg.ErrorCode),
 					KeyBusyRetryAfterValue:   int(errMsg.RetryAfter),
 					KeyBusyRetryAfter:        int(errMsg.RetryAfter),
-					KeyBusyRetryAfterPresent: errMsg.RetryAfter > 0,
+					KeyBusyRetryAfterPresent: true, // always present (omitempty removed from CommissioningError)
 				}, nil
 			}
 			// PASEResponse or other message -- device is proceeding with the
@@ -1431,7 +1431,7 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 			KeyBusyErrorCode:         int(errMsg.ErrorCode),
 			KeyBusyRetryAfterValue:   int(errMsg.RetryAfter),
 			KeyBusyRetryAfter:        int(errMsg.RetryAfter),
-			KeyBusyRetryAfterPresent: errMsg.RetryAfter > 0,
+			KeyBusyRetryAfterPresent: true, // always present (omitempty removed from CommissioningError)
 		}, nil
 	}
 
