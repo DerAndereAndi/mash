@@ -207,3 +207,55 @@ func TestBusyResponse_ZonesFull(t *testing.T) {
 		t.Errorf("RetryAfter: expected 0 when zones full, got %d", errMsg.RetryAfter)
 	}
 }
+
+// TestComputeBusyRetryAfter_Branches tests each branch of computeBusyRetryAfter
+// directly, verifying the DEC-063 contract without network round-trips.
+func TestComputeBusyRetryAfter_Branches(t *testing.T) {
+	t.Run("cooldown active returns remaining ms", func(t *testing.T) {
+		svc := &DeviceService{
+			config: DeviceConfig{ConnectionCooldown: 2 * time.Second},
+		}
+		svc.lastCommissioningAttempt = time.Now().Add(-500 * time.Millisecond) // 500ms ago
+
+		got := svc.computeBusyRetryAfter()
+		// Remaining ~1500ms, allow some slack for test execution.
+		if got < 1000 || got > 1600 {
+			t.Errorf("cooldown: expected ~1500ms, got %d", got)
+		}
+	})
+
+	t.Run("cooldown expired falls through", func(t *testing.T) {
+		svc := &DeviceService{
+			config: DeviceConfig{ConnectionCooldown: 500 * time.Millisecond},
+		}
+		svc.lastCommissioningAttempt = time.Now().Add(-1 * time.Second) // expired
+
+		got := svc.computeBusyRetryAfter()
+		if got != 0 {
+			t.Errorf("expired cooldown: expected 0 (zones-full fallback), got %d", got)
+		}
+	})
+
+	t.Run("commissioning in progress returns handshake timeout", func(t *testing.T) {
+		svc := &DeviceService{
+			config:                  DeviceConfig{HandshakeTimeout: 85 * time.Second},
+			commissioningConnActive: true,
+		}
+
+		got := svc.computeBusyRetryAfter()
+		if got != 85000 {
+			t.Errorf("commissioning active: expected 85000, got %d", got)
+		}
+	})
+
+	t.Run("zones full returns 0 per DEC-063", func(t *testing.T) {
+		svc := &DeviceService{
+			config: DeviceConfig{},
+		}
+
+		got := svc.computeBusyRetryAfter()
+		if got != 0 {
+			t.Errorf("zones full: expected 0 per DEC-063, got %d", got)
+		}
+	})
+}

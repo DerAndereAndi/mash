@@ -2570,10 +2570,10 @@ func (s *DeviceService) computeBusyRetryAfter() uint32 {
 		return uint32(s.config.HandshakeTimeout.Milliseconds())
 	}
 
-	// Zones full or unknown reason. Per DEC-063, always include a non-zero
-	// RetryAfter so clients know the field is valid. 30s is a reasonable
-	// default since the device can't predict when a zone will be freed.
-	return 30000
+	// Zones full or unknown reason. Per DEC-063, RetryAfter is 0 for
+	// zones-full because there is no predictable retry window -- the
+	// controller should not retry until a zone is explicitly decommissioned.
+	return 0
 }
 
 // randomErrorDelay returns a random duration between ErrorDelayMin and ErrorDelayMax.
