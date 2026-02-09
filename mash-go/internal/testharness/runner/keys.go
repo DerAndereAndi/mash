@@ -202,7 +202,8 @@ const (
 	StateOtherZoneID   = "other_zone_id"
 
 	// Setup.
-	StateSetupCode = "setup_code"
+	StateSetupCode           = "setup_code"
+	StateDeviceDiscriminator = "device_discriminator"
 )
 
 // ============================================================================

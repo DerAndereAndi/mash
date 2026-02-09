@@ -60,6 +60,14 @@ func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params 
 			return nil, fmt.Errorf("browse commissionable: %w", err)
 		}
 		for svc := range added {
+			// Store discovered discriminator on runner for {{ device_discriminator }}.
+			if r.discoveredDiscriminator == 0 && svc.Discriminator > 0 {
+				r.discoveredDiscriminator = svc.Discriminator
+			}
+			catParts := make([]string, len(svc.Categories))
+			for i, c := range svc.Categories {
+				catParts[i] = strconv.FormatUint(uint64(c), 10)
+			}
 			services = append(services, discoveredService{
 				InstanceName:  svc.InstanceName,
 				Host:          svc.Host,
@@ -68,9 +76,11 @@ func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params 
 				ServiceType:   discovery.ServiceTypeCommissionable,
 				Discriminator: svc.Discriminator,
 				TXTRecords: map[string]string{
-					"brand": svc.Brand,
-					"model": svc.Model,
-					"DN":    svc.DeviceName,
+					"brand":  svc.Brand,
+					"model":  svc.Model,
+					"DN":     svc.DeviceName,
+					"serial": svc.Serial,
+					"cat":    strings.Join(catParts, ","),
 				},
 			})
 		}

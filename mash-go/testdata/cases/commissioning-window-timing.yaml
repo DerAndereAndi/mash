@@ -122,7 +122,7 @@ steps:
     params:
       service_type: "_mashp._udp"
       discriminator: "{{ device_discriminator }}"
-      controller_id: "{{ controller_id }}"
+      zone_id: "{{ local_zone_id }}"
     expect:
       announcement_sent: true
 

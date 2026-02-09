@@ -476,7 +476,14 @@ func (r *Runner) handleDisconnectZone(ctx context.Context, step *loader.Step, st
 			_ = conn.Close()
 		}
 		delete(ct.zoneConnections, zoneID)
-		return map[string]any{KeyZoneDisconnected: true}, nil
+		return map[string]any{KeyZoneDisconnected: true, KeyConnectionClosed: true}, nil
+	}
+
+	// No tracked zone connection -- fall back to runner's main connection.
+	if zoneID == "" && r.conn != nil && r.conn.connected {
+		_ = r.conn.Close()
+		r.conn.connected = false
+		return map[string]any{KeyZoneDisconnected: true, KeyConnectionClosed: true}, nil
 	}
 
 	// No tracked connection -- check if zone state existed.
@@ -484,7 +491,7 @@ func (r *Runner) handleDisconnectZone(ctx context.Context, step *loader.Step, st
 		return map[string]any{KeyZoneDisconnected: false}, nil
 	}
 
-	return map[string]any{KeyZoneDisconnected: true}, nil
+	return map[string]any{KeyZoneDisconnected: true, KeyConnectionClosed: true}, nil
 }
 
 // handleVerifyOtherZone verifies another zone's state during multi-zone tests.

@@ -324,6 +324,11 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		state.Set(StateSetupCode, r.config.SetupCode)
 	}
 
+	// Populate device_discriminator from auto-PICS discovery.
+	if r.discoveredDiscriminator > 0 {
+		state.Set(StateDeviceDiscriminator, int(r.discoveredDiscriminator))
+	}
+
 	// Compute the needed precondition level early so we can clear stale
 	// zone state before processing special preconditions or connections.
 	needed := r.preconditionLevel(tc.Preconditions)

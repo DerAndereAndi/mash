@@ -12,6 +12,7 @@ import (
 	"io"
 	stdlog "log"
 	"net"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -91,6 +92,10 @@ type Runner struct {
 	// pairingAdvertiser is a real mDNS advertiser used by announce_pairing_request
 	// to advertise _mashp._udp services. Cleaned up in Close().
 	pairingAdvertiser *discovery.MDNSAdvertiser
+
+	// discoveredDiscriminator is the device's discriminator from mDNS.
+	// Set during auto-PICS browse and injected into test state.
+	discoveredDiscriminator uint16
 }
 
 // Config configures the test runner.
@@ -886,13 +891,20 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	startTime := time.Now()
 	state.Set(StateStartTime, startTime)
 
-	// When connecting with an operational cert, close the existing zone
+	// When connecting with an operational cert (or a cert_chain starting
+	// with leaf_cert, which IS the operational cert), close the existing zone
 	// connection first so the device has a disconnected zone available to
 	// reconnect. Without this, the device rejects the new connection with
 	// "no disconnected zones" (not a cert issue) which confuses probing.
 	clientCertParam, _ := step.Params["client_cert"].(string)
+	isOperationalChain := false
+	if chainSpec, ok := step.Params["cert_chain"].([]any); ok && len(chainSpec) > 0 {
+		if name, ok := chainSpec[0].(string); ok && name == "leaf_cert" {
+			isOperationalChain = true
+		}
+	}
 	needsDisconnectWait := false
-	if clientCertParam == "controller_operational" && r.conn != nil && r.conn.tlsConn != nil {
+	if (clientCertParam == "controller_operational" || isOperationalChain) && r.conn != nil && r.conn.tlsConn != nil {
 		_ = r.conn.tlsConn.Close()
 		r.conn.tlsConn = nil
 		r.conn.connected = false
@@ -966,6 +978,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	clockOffset, _ := state.Get(StateClockOffsetMs)
 	hasClockOffset := clockOffset != nil && clockOffset != int64(0) && clockOffset != 0
 	probeForRejection := len(tlsConfig.Certificates) > 0 && clientCertType != "" &&
+		clientCertType != "leaf_cert" &&
 		(clientCertType != "controller_operational" || hasClockOffset)
 	if probeForRejection {
 		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
@@ -1055,6 +1068,12 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		// E.g., "MASH-1234" -> "MASH-", "no-hyphen" -> "no-hyphen".
 		if idx := strings.Index(cert.Subject.CommonName, "-"); idx >= 0 {
 			serverCertCNPrefix = cert.Subject.CommonName[:idx+1]
+			// Store device discriminator from commissioning cert CN (MASH-1234).
+			if r.discoveredDiscriminator == 0 {
+				if d, err := strconv.ParseUint(cert.Subject.CommonName[idx+1:], 10, 16); err == nil {
+					r.discoveredDiscriminator = uint16(d)
+				}
+			}
 		} else {
 			serverCertCNPrefix = cert.Subject.CommonName
 		}
