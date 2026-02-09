@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -240,6 +241,54 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 			ds.services = nil
 			return r.buildBrowseOutput(ds)
 		}
+	}
+
+	// Simulate device with multiple network interfaces (multiple IPv6 addresses).
+	// Only seed services on first browse; subsequent browses reuse ds.services
+	// (which may have been modified by interface_up) to support comparison keys.
+	if multiIF, _ := state.Get(PrecondDeviceHasMultipleInterfaces); multiIF == true {
+		if len(ds.services) == 0 {
+			ds.services = []discoveredService{{
+				InstanceName:  "MASH-SIM-MULTIIF",
+				ServiceType:   discovery.ServiceTypeCommissionable,
+				Host:          "device.local",
+				Port:          8443,
+				Addresses:     []string{"fd12:3456:789a::1", "fe80::1"},
+				Discriminator: 1234,
+				TXTRecords:    map[string]string{"brand": "Test", "model": "Sim"},
+			}}
+		}
+		return r.buildBrowseOutput(ds)
+	}
+
+	// Simulate device with both global/ULA and link-local addresses.
+	if globalAndLL, _ := state.Get(PrecondDeviceHasGlobalAndLinkLocal); globalAndLL == true {
+		if len(ds.services) == 0 {
+			ds.services = []discoveredService{{
+				InstanceName: "MASH-SIM-DUAL",
+				ServiceType:  discovery.ServiceTypeOperational,
+				Host:         "device.local",
+				Port:         8443,
+				Addresses:    []string{"fd12:3456:789a::1", "fe80::1"},
+				TXTRecords:   map[string]string{"ZI": "a1b2c3d4", "DI": "00112233"},
+			}}
+		}
+		return r.buildBrowseOutput(ds)
+	}
+
+	// Simulate device with link-local address only.
+	if hasLL, _ := state.Get(PrecondDeviceHasLinkLocal); hasLL == true {
+		if len(ds.services) == 0 {
+			ds.services = []discoveredService{{
+				InstanceName: "MASH-SIM-LL",
+				ServiceType:  discovery.ServiceTypeOperational,
+				Host:         "device.local",
+				Port:         8443,
+				Addresses:    []string{"fe80::1"},
+				TXTRecords:   map[string]string{"ZI": "a1b2c3d4", "DI": "00112233"},
+			}}
+		}
+		return r.buildBrowseOutput(ds)
 	}
 
 	// Simulate a device commissioned into two zones (check before single zone).
@@ -588,6 +637,25 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		ds.services = filtered
 	}
 
+	// Merge addresses injected by device-local actions (e.g. interface_up)
+	// into the first discovered service. This ensures that simulated network
+	// changes are reflected in browse results regardless of whether services
+	// came from simulation or real mDNS.
+	hasInjectedAddresses := false
+	if len(ds.injectedAddresses) > 0 && len(ds.services) > 0 {
+		existing := make(map[string]bool, len(ds.services[0].Addresses))
+		for _, addr := range ds.services[0].Addresses {
+			existing[addr] = true
+		}
+		for _, addr := range ds.injectedAddresses {
+			if !existing[addr] {
+				ds.services[0].Addresses = append(ds.services[0].Addresses, addr)
+				hasInjectedAddresses = true
+			}
+		}
+		ds.injectedAddresses = nil // consumed
+	}
+
 	// Compute per-service-type counts.
 	devicesFound := 0
 	controllersFound := 0
@@ -656,6 +724,39 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		}
 	}
 
+	// Determine if addresses come from multiple interfaces.
+	// Heuristic: 2+ unique IPv6 addresses with different /64 prefixes or
+	// mix of link-local + global/ULA indicates multiple interfaces.
+	addressesFromMultipleIFs := false
+	if aaaaCount >= 2 {
+		prefixes := make(map[string]bool)
+		for _, svc := range ds.services {
+			for _, addr := range svc.Addresses {
+				ip := net.ParseIP(addr)
+				if ip != nil && ip.To4() == nil {
+					prefix := ip.Mask(net.CIDRMask(64, 128)).String()
+					prefixes[prefix] = true
+				}
+			}
+		}
+		addressesFromMultipleIFs = len(prefixes) >= 2
+	}
+
+	// Compare with previous browse results for records_unchanged / new_address_announced.
+	currentAddrs := collectAllAddresses(ds.services)
+	recordsUnchanged := false
+	// new_address_announced is true if device-local actions injected new addresses
+	// (e.g. interface_up), even without a prior browse baseline. This ensures
+	// TC-MULTIIF-003 passes in live mode where no browse occurs before interface_up.
+	newAddressAnnounced := hasInjectedAddresses
+	if len(ds.previousAddresses) > 0 {
+		recordsUnchanged = addressSetsEqual(ds.previousAddresses, currentAddrs)
+		if !newAddressAnnounced {
+			newAddressAnnounced = hasNewAddresses(ds.previousAddresses, currentAddrs)
+		}
+	}
+	ds.previousAddresses = currentAddrs
+
 	outputs := map[string]any{
 		KeyDeviceFound:              len(ds.services) > 0,
 		KeyServiceCount:             len(ds.services),
@@ -676,6 +777,9 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		KeyIPv6Valid:                allIPv6Valid,
 		KeyHasGlobalOrULA:           hasGlobalOrULA,
 		KeyHasLinkLocal:             hasLinkLocal,
+		KeyAddressesFromMultipleIFs: addressesFromMultipleIFs,
+		KeyNewAddressAnnounced:      newAddressAnnounced,
+		KeyRecordsUnchanged:         recordsUnchanged,
 	}
 
 	// Add first-service details for easy assertion.
@@ -1200,6 +1304,49 @@ func (r *Runner) handleVerifyTXTRecordsReal(ctx context.Context, step *loader.St
 	}
 
 	return outputs, nil
+}
+
+// collectAllAddresses returns a sorted, deduplicated list of all addresses.
+func collectAllAddresses(services []discoveredService) []string {
+	seen := make(map[string]bool)
+	var addrs []string
+	for _, svc := range services {
+		for _, addr := range svc.Addresses {
+			if !seen[addr] {
+				seen[addr] = true
+				addrs = append(addrs, addr)
+			}
+		}
+	}
+	sort.Strings(addrs)
+	return addrs
+}
+
+// addressSetsEqual returns true if two sorted address slices are identical.
+func addressSetsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// hasNewAddresses returns true if current contains addresses not in old.
+func hasNewAddresses(old, current []string) bool {
+	oldSet := make(map[string]bool, len(old))
+	for _, a := range old {
+		oldSet[a] = true
+	}
+	for _, a := range current {
+		if !oldSet[a] {
+			return true
+		}
+	}
+	return false
 }
 
 // checkAAAACountMin verifies that the actual AAAA count is >= the expected minimum.

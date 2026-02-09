@@ -139,6 +139,12 @@ type DeviceConfig struct {
 
 	// Security Hardening (DEC-047)
 
+	// TLSHandshakeTimeout is the maximum time allowed for the TLS handshake to
+	// complete after a TCP connection is accepted. Connections that do not send
+	// a TLS ClientHello within this time are closed, freeing the connection cap
+	// slot. Default: 10s. Set to 0 to disable (not recommended).
+	TLSHandshakeTimeout time.Duration
+
 	// ConnectionCooldown is the minimum time between commissioning connection attempts.
 	// Default: 500ms. Set to 0 to disable cooldown.
 	ConnectionCooldown time.Duration
@@ -326,6 +332,7 @@ func DefaultDeviceConfig() DeviceConfig {
 			MaxRetries:      0, // Unlimited
 		},
 		// Security Hardening (DEC-047, DEC-061)
+		TLSHandshakeTimeout:    10 * time.Second,
 		ConnectionCooldown:      500 * time.Millisecond,
 		PASEFirstMessageTimeout: 5 * time.Second,
 		HandshakeTimeout:        85 * time.Second,

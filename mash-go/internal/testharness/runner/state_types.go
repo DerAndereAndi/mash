@@ -13,6 +13,8 @@ type discoveryState struct {
 	active                bool
 	qrPayload             string
 	commissioningCompleted bool // set when PASE commissioning succeeded
+	previousAddresses     []string // addresses from last browse, for comparison
+	injectedAddresses     []string // addresses announced by device-local actions (e.g. interface_up)
 }
 
 // discoveredService represents a discovered mDNS service.

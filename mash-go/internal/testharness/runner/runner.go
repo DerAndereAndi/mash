@@ -877,6 +877,8 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			KeyFullHandshake:          !cs.DidResume,
 			KeyPSKUsed:                cs.DidResume,
 			KeyEarlyDataAccepted:      false,
+			KeyConnectedAddressType:   classifyRemoteAddress(r.conn.tlsConn.RemoteAddr()),
+			KeyInterfaceCorrect:       true, // reused connection was already validated
 		}, nil
 	}
 
@@ -1082,6 +1084,8 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		KeyFullHandshake:          !cs.DidResume,
 		KeyPSKUsed:                cs.DidResume,
 		KeyEarlyDataAccepted:      false, // Go does not support TLS 1.3 0-RTT
+		KeyConnectedAddressType:   classifyRemoteAddress(conn.RemoteAddr()),
+		KeyInterfaceCorrect:       checkInterfaceCorrect(conn.RemoteAddr(), step.Params),
 	}, nil
 }
 
@@ -2299,4 +2303,42 @@ func classifyConnectError(err error) string {
 	default:
 		return ErrCodeConnectionError
 	}
+}
+
+// classifyRemoteAddress returns "link_local", "global_or_ula", or "ipv4".
+func classifyRemoteAddress(addr net.Addr) string {
+	if addr == nil {
+		return "unknown"
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		host = addr.String()
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return "unknown"
+	}
+	if ip.To4() != nil {
+		return "ipv4"
+	}
+	if ip.IsLinkLocalUnicast() {
+		return "link_local"
+	}
+	return "global_or_ula"
+}
+
+// checkInterfaceCorrect verifies the connected interface matches expectations.
+// For simulation mode (no real interface binding), returns true.
+// For live mode with link-local IPv6, checks that a zone/scope ID is present.
+func checkInterfaceCorrect(addr net.Addr, params map[string]any) bool {
+	if _, hasIF := params["interface_from"]; !hasIF {
+		return true
+	}
+	if addr == nil {
+		return true
+	}
+	if tcpAddr, ok := addr.(*net.TCPAddr); ok && tcpAddr.IP.IsLinkLocalUnicast() {
+		return tcpAddr.Zone != ""
+	}
+	return true
 }

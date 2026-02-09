@@ -990,3 +990,201 @@ func TestHandleBrowseMDNS_AllResultsInZone(t *testing.T) {
 		t.Errorf("expected all_results_in_zone=true, got %v", out[KeyAllResultsInZone])
 	}
 }
+
+// ============================================================================
+// Phase 5: IPv6 / Multi-Interface browse output keys
+// ============================================================================
+
+func TestBrowseMDNS_DeviceHasMultipleInterfaces(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	state.Set(PrecondDeviceHasMultipleInterfaces, true)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if out[KeyAddressesFromMultipleIFs] != true {
+		t.Errorf("expected addresses_from_multiple_interfaces=true, got %v", out[KeyAddressesFromMultipleIFs])
+	}
+	aaaaCount, _ := out[KeyAAAACount].(int)
+	if aaaaCount < 2 {
+		t.Errorf("expected aaaa_count >= 2, got %d", aaaaCount)
+	}
+	if out[KeyHasGlobalOrULA] != true {
+		t.Errorf("expected has_global_or_ula=true, got %v", out[KeyHasGlobalOrULA])
+	}
+	if out[KeyHasLinkLocal] != true {
+		t.Errorf("expected has_link_local=true, got %v", out[KeyHasLinkLocal])
+	}
+}
+
+func TestBrowseMDNS_DeviceHasGlobalAndLinkLocal(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	state.Set(PrecondDeviceHasGlobalAndLinkLocal, true)
+
+	step := &loader.Step{Params: map[string]any{}}
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if out[KeyHasGlobalOrULA] != true {
+		t.Errorf("expected has_global_or_ula=true, got %v", out[KeyHasGlobalOrULA])
+	}
+	if out[KeyHasLinkLocal] != true {
+		t.Errorf("expected has_link_local=true, got %v", out[KeyHasLinkLocal])
+	}
+}
+
+func TestBrowseMDNS_RecordsUnchanged(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	state.Set(PrecondDeviceHasMultipleInterfaces, true)
+
+	step := &loader.Step{Params: map[string]any{}}
+
+	// First browse -- establishes the baseline.
+	out1, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("first browse: %v", err)
+	}
+	if out1[KeyRecordsUnchanged] != false {
+		t.Errorf("expected records_unchanged=false on first browse, got %v", out1[KeyRecordsUnchanged])
+	}
+
+	// Second browse with same data -- records should be unchanged.
+	out2, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("second browse: %v", err)
+	}
+	if out2[KeyRecordsUnchanged] != true {
+		t.Errorf("expected records_unchanged=true on second browse, got %v", out2[KeyRecordsUnchanged])
+	}
+	if out2[KeyNewAddressAnnounced] != false {
+		t.Errorf("expected new_address_announced=false on second browse, got %v", out2[KeyNewAddressAnnounced])
+	}
+}
+
+func TestBrowseMDNS_NewAddressAnnounced(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	state.Set(PrecondDeviceHasMultipleInterfaces, true)
+
+	step := &loader.Step{Params: map[string]any{}}
+
+	// First browse -- establishes the baseline.
+	_, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("first browse: %v", err)
+	}
+
+	// Inject a new address (as handleInterfaceUp does).
+	ds := getDiscoveryState(state)
+	ds.injectedAddresses = append(ds.injectedAddresses, "fd34:5678:abcd::1")
+
+	// Second browse -- should detect the new address via injection.
+	out2, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("second browse: %v", err)
+	}
+	if out2[KeyNewAddressAnnounced] != true {
+		t.Errorf("expected new_address_announced=true after injection, got %v", out2[KeyNewAddressAnnounced])
+	}
+}
+
+// TestBrowseMDNS_InjectedAddresses_NoBaseline verifies that injected addresses
+// trigger new_address_announced=true even without a prior browse establishing
+// previousAddresses. This is the TC-MULTIIF-003 live-mode scenario: interface_up
+// injects an address, the first browse sees it as new.
+func TestBrowseMDNS_InjectedAddresses_NoBaseline(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	ds := getDiscoveryState(state)
+
+	// Seed services as if from a real mDNS browse (no previous browse).
+	ds.services = []discoveredService{{
+		InstanceName: "a1b2c3d4-00112233",
+		ServiceType:  discovery.ServiceTypeOperational,
+		Host:         "device.local",
+		Port:         8443,
+		Addresses:    []string{"fd12:3456:789a::1"},
+		TXTRecords:   map[string]string{"ZI": "a1b2c3d4", "DI": "00112233"},
+	}}
+
+	// Inject an address (as handleInterfaceUp does).
+	ds.injectedAddresses = []string{"fd34:5678:abcd::1"}
+
+	// buildBrowseOutput should detect the injection even without previousAddresses.
+	out, err := r.buildBrowseOutput(ds)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if out[KeyNewAddressAnnounced] != true {
+		t.Errorf("expected new_address_announced=true from injection without baseline, got %v", out[KeyNewAddressAnnounced])
+	}
+
+	// The injected address should be merged into the service.
+	if len(ds.services[0].Addresses) != 2 {
+		t.Errorf("expected 2 addresses after merge, got %d: %v", len(ds.services[0].Addresses), ds.services[0].Addresses)
+	}
+
+	// injectedAddresses should be consumed.
+	if len(ds.injectedAddresses) != 0 {
+		t.Error("expected injectedAddresses to be cleared after merge")
+	}
+}
+
+// TestBrowseMDNS_InterfaceUpThenBrowse verifies the full integration path:
+// handleInterfaceUp injects an address, then buildBrowseOutput detects it.
+func TestBrowseMDNS_InterfaceUpThenBrowse(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Seed services as if the device was already discovered via mDNS.
+	ds := getDiscoveryState(state)
+	ds.services = []discoveredService{{
+		InstanceName: "a1b2c3d4-00112233",
+		ServiceType:  discovery.ServiceTypeOperational,
+		Host:         "device.local",
+		Port:         8443,
+		Addresses:    []string{"fd12:3456:789a::1"},
+		TXTRecords:   map[string]string{"ZI": "a1b2c3d4", "DI": "00112233"},
+	}}
+
+	// Simulate interface_up.
+	upStep := &loader.Step{Params: map[string]any{}}
+	_, err := r.handleInterfaceUp(context.Background(), upStep, state)
+	if err != nil {
+		t.Fatalf("interface_up: %v", err)
+	}
+
+	// Verify injected address is pending.
+	if len(ds.injectedAddresses) != 1 {
+		t.Fatalf("expected 1 injected address, got %d", len(ds.injectedAddresses))
+	}
+
+	// Call buildBrowseOutput (simulates what browse_mdns does).
+	out, err := r.buildBrowseOutput(ds)
+	if err != nil {
+		t.Fatalf("buildBrowseOutput: %v", err)
+	}
+
+	if out[KeyNewAddressAnnounced] != true {
+		t.Errorf("expected new_address_announced=true after interface_up, got %v", out[KeyNewAddressAnnounced])
+	}
+
+	// Verify the injected address was merged.
+	if len(ds.services[0].Addresses) != 2 {
+		t.Errorf("expected 2 addresses, got %d: %v", len(ds.services[0].Addresses), ds.services[0].Addresses)
+	}
+}

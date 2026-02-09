@@ -1490,3 +1490,61 @@ func TestHandleSendRaw_MessageTypeResponse(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Phase 5: Address classification helpers
+// ============================================================================
+
+func TestClassifyRemoteAddress(t *testing.T) {
+	tests := []struct {
+		name string
+		addr net.Addr
+		want string
+	}{
+		{"nil", nil, "unknown"},
+		{"ipv4", &net.TCPAddr{IP: net.ParseIP("192.168.1.10"), Port: 8443}, "ipv4"},
+		{"link_local", &net.TCPAddr{IP: net.ParseIP("fe80::1"), Port: 8443}, "link_local"},
+		{"global_or_ula", &net.TCPAddr{IP: net.ParseIP("fd12:3456:789a::1"), Port: 8443}, "global_or_ula"},
+		{"global_2001", &net.TCPAddr{IP: net.ParseIP("2001:db8::1"), Port: 8443}, "global_or_ula"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyRemoteAddress(tt.addr)
+			if got != tt.want {
+				t.Errorf("classifyRemoteAddress(%v) = %q, want %q", tt.addr, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckInterfaceCorrect(t *testing.T) {
+	// No interface_from param -> always true.
+	got := checkInterfaceCorrect(&net.TCPAddr{IP: net.ParseIP("fe80::1"), Port: 8443}, map[string]any{})
+	if !got {
+		t.Error("expected true when no interface_from param")
+	}
+
+	// With interface_from and link-local + zone -> true.
+	got = checkInterfaceCorrect(
+		&net.TCPAddr{IP: net.ParseIP("fe80::1"), Port: 8443, Zone: "eth0"},
+		map[string]any{"interface_from": "eth0"},
+	)
+	if !got {
+		t.Error("expected true for link-local with zone")
+	}
+
+	// With interface_from but non-link-local -> true (not applicable).
+	got = checkInterfaceCorrect(
+		&net.TCPAddr{IP: net.ParseIP("fd12::1"), Port: 8443},
+		map[string]any{"interface_from": "eth0"},
+	)
+	if !got {
+		t.Error("expected true for non-link-local address")
+	}
+
+	// nil addr -> true.
+	got = checkInterfaceCorrect(nil, map[string]any{"interface_from": "eth0"})
+	if !got {
+		t.Error("expected true for nil addr")
+	}
+}
+

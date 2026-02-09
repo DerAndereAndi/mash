@@ -172,8 +172,8 @@ func TestDeviceServiceRemoveZoneEmitsEvent(t *testing.T) {
 		t.Fatalf("RemoveZone failed: %v", err)
 	}
 
-	// Wait a bit for async event delivery
-	time.Sleep(10 * time.Millisecond)
+	// Wait a bit for async event delivery (goroutine scheduling)
+	time.Sleep(50 * time.Millisecond)
 
 	// Check for EventZoneRemoved
 	var foundRemoved bool

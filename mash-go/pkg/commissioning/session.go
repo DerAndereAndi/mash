@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/fxamacker/cbor/v2"
 )
@@ -293,8 +294,17 @@ func readMessage(conn net.Conn) (interface{}, error) {
 }
 
 // readMessageWithContext reads a message with context cancellation support.
+// It sets a read deadline on the connection to ensure the read goroutine is
+// unblocked when the context expires, preventing goroutine leaks on real
+// (TCP/TLS) connections. The goroutine + select pattern is retained as a
+// fallback for connections where SetReadDeadline is a no-op (e.g. io.Pipe
+// in tests).
 func readMessageWithContext(ctx context.Context, conn net.Conn) (interface{}, error) {
-	// Set up a channel to receive the result
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetReadDeadline(deadline)
+		defer conn.SetReadDeadline(time.Time{})
+	}
+
 	type result struct {
 		msg interface{}
 		err error
@@ -310,6 +320,9 @@ func readMessageWithContext(ctx context.Context, conn net.Conn) (interface{}, er
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case r := <-resultCh:
+		if r.err != nil && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return r.msg, r.err
 	}
 }

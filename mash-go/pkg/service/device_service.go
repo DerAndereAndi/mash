@@ -504,9 +504,19 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 	}
 	defer s.connTracker.Remove(conn) // DEC-064: safety net removal
 
-	// TLS handshake
+	// TLS handshake with per-connection timeout to prevent slowloris-style
+	// attacks from holding cap slots indefinitely.
+	handshakeCtx := s.ctx
+	if s.config.TLSHandshakeTimeout > 0 {
+		var cancel context.CancelFunc
+		handshakeCtx, cancel = context.WithTimeout(s.ctx, s.config.TLSHandshakeTimeout)
+		defer cancel()
+	}
+	s.debugLog("handleConnection: starting TLS handshake",
+		"timeout", s.config.TLSHandshakeTimeout,
+		"remoteAddr", remoteAddr)
 	tlsConn := tls.Server(conn, s.tlsConfig)
-	if err := tlsConn.HandshakeContext(s.ctx); err != nil {
+	if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
 		conn.Close()
 		return
 	}
@@ -517,7 +527,6 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 		tlsConn.Close()
 		return
 	}
-
 	// Check if we're in commissioning mode
 	s.mu.RLock()
 	inCommissioningMode := s.discoveryManager != nil && s.discoveryManager.IsCommissioningMode()
@@ -1142,11 +1151,17 @@ func (s *DeviceService) runZoneMessageLoop(zoneID string, conn *framedConnection
 // handleZoneSessionClose cleans up when a zone session closes.
 func (s *DeviceService) handleZoneSessionClose(zoneID string) {
 	s.mu.Lock()
+	var sessionToClose *ZoneSession
 	if session, exists := s.zoneSessions[zoneID]; exists {
-		session.Close()
+		sessionToClose = session
 		delete(s.zoneSessions, zoneID)
 	}
 	s.mu.Unlock()
+
+	// Close session outside the lock (dispatcher.Stop may block).
+	if sessionToClose != nil {
+		sessionToClose.Close()
+	}
 
 	// Notify disconnect
 	s.HandleZoneDisconnect(zoneID)
@@ -1347,7 +1362,6 @@ func (s *DeviceService) Stop() error {
 // EnterCommissioningMode opens the commissioning window.
 func (s *DeviceService) EnterCommissioningMode() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	var discoveryState string
 	if s.discoveryManager != nil {
@@ -1362,6 +1376,7 @@ func (s *DeviceService) EnterCommissioningMode() error {
 
 	if s.state != StateRunning {
 		s.debugLog("EnterCommissioningMode: rejected - service not running", "state", s.state.String())
+		s.mu.Unlock()
 		return ErrNotStarted
 	}
 
@@ -1385,8 +1400,16 @@ func (s *DeviceService) EnterCommissioningMode() error {
 		}
 	}
 
-	if s.discoveryManager != nil {
-		if err := s.discoveryManager.EnterCommissioningMode(s.ctx); err != nil {
+	// Capture context before releasing lock.
+	ctx := s.ctx
+	dm := s.discoveryManager
+	s.mu.Unlock()
+
+	// Start mDNS commissioning advertising outside the lock because mDNS
+	// operations can take >1s on macOS and would block new connections
+	// from acquiring even a read lock on s.mu.
+	if dm != nil {
+		if err := dm.EnterCommissioningMode(ctx); err != nil {
 			s.debugLog("EnterCommissioningMode: failed", "error", err)
 			return err
 		}
@@ -1400,7 +1423,6 @@ func (s *DeviceService) EnterCommissioningMode() error {
 // ExitCommissioningMode closes the commissioning window.
 func (s *DeviceService) ExitCommissioningMode() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	var discoveryState string
 	if s.discoveryManager != nil {
@@ -1408,15 +1430,20 @@ func (s *DeviceService) ExitCommissioningMode() error {
 	}
 	s.debugLog("ExitCommissioningMode: called", "discoveryState", discoveryState)
 
-	if s.discoveryManager != nil {
-		if err := s.discoveryManager.ExitCommissioningMode(); err != nil {
+	// DEC-047: Reset PASE tracker when commissioning window closes
+	s.ResetPASETracker()
+
+	dm := s.discoveryManager
+	s.mu.Unlock()
+
+	// Stop mDNS commissioning advertising outside the lock because mDNS
+	// operations can take >1s on macOS and would block new connections.
+	if dm != nil {
+		if err := dm.ExitCommissioningMode(); err != nil {
 			s.debugLog("ExitCommissioningMode: failed", "error", err)
 			return err
 		}
 	}
-
-	// DEC-047: Reset PASE tracker when commissioning window closes
-	s.ResetPASETracker()
 
 	s.debugLog("ExitCommissioningMode: success")
 	s.emitEvent(Event{Type: EventCommissioningClosed, Reason: "commissioned"})
@@ -1524,26 +1551,20 @@ func (s *DeviceService) handleZoneConnectInternal(zoneID string, zoneType cert.Z
 		}
 	}
 
-	// Start operational mDNS advertising for this zone
-	// This allows controllers to discover the device for reconnection
+	// Prepare operational advertising info while under lock.
+	var opInfo *discovery.OperationalInfo
 	if s.discoveryManager != nil {
 		port := uint16(0)
 		if s.tlsListener != nil {
 			port = parsePort(s.tlsListener.Addr().String())
 		}
 
-		opInfo := &discovery.OperationalInfo{
+		opInfo = &discovery.OperationalInfo{
 			ZoneID:        zoneID,
 			DeviceID:      deviceID,
 			VendorProduct: fmt.Sprintf("%04x:%04x", s.device.VendorID(), s.device.ProductID()),
 			EndpointCount: uint8(s.device.EndpointCount()),
 			Port:          port,
-		}
-
-		// AddZone is async-safe and will start advertising
-		if err := s.discoveryManager.AddZone(s.ctx, opInfo); err != nil {
-			s.debugLog("HandleZoneConnect: failed to start operational advertising",
-				"zoneID", zoneID, "error", err)
 		}
 	}
 
@@ -1557,7 +1578,18 @@ func (s *DeviceService) handleZoneConnectInternal(zoneID string, zoneType cert.Z
 		s.failsafeTimers[zoneID] = timer
 	}
 
+	ctx := s.ctx
+	dm := s.discoveryManager
 	s.mu.Unlock()
+
+	// Start operational mDNS advertising outside the lock because mDNS
+	// operations can take >1s on macOS and would block new connections.
+	if dm != nil && opInfo != nil {
+		if err := dm.AddZone(ctx, opInfo); err != nil {
+			s.debugLog("HandleZoneConnect: failed to start operational advertising",
+				"zoneID", zoneID, "error", err)
+		}
+	}
 
 	// Only emit EventConnected when an actual connection is established.
 	// For RegisterZoneAwaitingConnection (DEC-066), connected=false and we
@@ -2105,9 +2137,13 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 		return ErrDeviceNotFound
 	}
 
-	// Close zone session if exists
+	// Capture zone session reference and remove from map under lock.
+	// Actual close happens outside the lock to avoid deadlock: session.Close()
+	// calls dispatcher.Stop() which blocks on processWg.Wait(), and the
+	// dispatcher goroutine may be blocked on conn.Send().
+	var sessionToClose *ZoneSession
 	if session, exists := s.zoneSessions[zoneID]; exists {
-		session.Close()
+		sessionToClose = session
 		delete(s.zoneSessions, zoneID)
 	}
 
@@ -2123,22 +2159,35 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 		delete(s.zoneIndexMap, zoneID)
 	}
 
-	// Clear LimitResolver state for this zone (limits + resolver timers).
-	if s.limitResolver != nil {
-		s.limitResolver.ClearZone(zoneID)
+	// Capture limitResolver reference; ClearZone is called outside the lock
+	// because its OnZoneMyChange callback calls NotifyZoneAttributeChange
+	// which acquires s.mu.RLock() -- would deadlock if called under s.mu.Lock().
+	lr := s.limitResolver
+
+	// Remove from connected zones
+	delete(s.connectedZones, zoneID)
+	s.mu.Unlock()
+
+	// Clear LimitResolver state outside the lock.
+	if lr != nil {
+		lr.ClearZone(zoneID)
 	}
 
-	// Stop operational mDNS advertising for this zone
+	// Close the zone session outside the lock. dispatcher.Stop() blocks
+	// on processWg.Wait() which may take time.
+	if sessionToClose != nil {
+		sessionToClose.Close()
+	}
+
+	// Stop operational mDNS advertising for this zone. This happens outside
+	// the lock because mDNS shutdown (sending goodbye packets) can take >1s
+	// and would block new connections from acquiring even a read lock.
 	if s.discoveryManager != nil {
 		if err := s.discoveryManager.RemoveZone(zoneID); err != nil {
 			s.debugLog("RemoveZone: failed to stop operational advertising",
 				"zoneID", zoneID, "error", err)
 		}
 	}
-
-	// Remove from connected zones
-	delete(s.connectedZones, zoneID)
-	s.mu.Unlock()
 
 	// Remove operational cert and Zone CA from cert store so the zone
 	// slot is freed for future commissioning.

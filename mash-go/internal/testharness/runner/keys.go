@@ -29,6 +29,13 @@ const (
 	PrecondFreshCommission            = "fresh_commission"
 )
 
+// IPv6 / multi-interface preconditions.
+const (
+	PrecondDeviceHasGlobalAndLinkLocal = "device_has_global_and_link_local"
+	PrecondDeviceHasLinkLocal          = "device_has_link_local"
+	PrecondDeviceHasMultipleInterfaces = "device_has_multiple_interfaces"
+)
+
 // State-machine simulation preconditions (require commissioned session).
 const (
 	PrecondControlState        = "control_state"
@@ -503,6 +510,8 @@ const (
 	KeyConnectedAddressType     = "connected_address_type"
 	KeyNewAddressAnnounced      = "new_address_announced"
 	KeyAddressesFromMultipleIFs = "addresses_from_multiple_interfaces"
+	KeyInterfaceCorrect         = "interface_correct"
+	KeyRecordsUnchanged         = "records_unchanged"
 	KeyWindowExpiryWarning      = "window_expiry_warning"
 )
 

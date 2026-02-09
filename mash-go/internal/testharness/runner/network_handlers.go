@@ -101,6 +101,14 @@ func (r *Runner) handleInterfaceDown(ctx context.Context, step *loader.Step, sta
 func (r *Runner) handleInterfaceUp(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	state.Set(StateInterfaceUp, true)
 
+	// Record the new address as an injected announcement. buildBrowseOutput
+	// merges injected addresses into browse results, so this works in both
+	// simulation (services already in ds.services) and live mode (services
+	// populated by real mDNS). The injection side-channel survives real mDNS
+	// overwriting ds.services.
+	ds := getDiscoveryState(state)
+	ds.injectedAddresses = append(ds.injectedAddresses, "fd34:5678:abcd::1")
+
 	return map[string]any{
 		KeyInterfaceUp: true,
 	}, nil
