@@ -289,6 +289,16 @@ func (r *Runner) teardownTest(_ context.Context, _ *loader.TestCase, state *engi
 		}
 	}
 
+	// Close connections in a partial/dirty state (e.g., PASE X/Y exchanged
+	// but handshake never completed). Without this, the next test inherits a
+	// socket that the device considers mid-handshake, causing EOF/reset errors.
+	if r.conn != nil && r.conn.connected && (r.paseState == nil || !r.paseState.completed) {
+		r.debugf("teardown: closing connection with incomplete PASE state")
+		_ = r.conn.Close()
+		r.conn.connected = false
+		r.paseState = nil
+	}
+
 	if secState, ok := state.Custom["security"].(*securityState); ok && secState.pool != nil {
 		secState.pool.mu.Lock()
 		for _, conn := range secState.pool.connections {

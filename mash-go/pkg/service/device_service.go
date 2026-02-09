@@ -2425,6 +2425,7 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 
 	s.mu.RLock()
 	nonTestCount := s.nonTestZoneCountLocked()
+	totalZoneCount := len(s.connectedZones)
 	maxZones := s.config.MaxZones
 	// Log zone state for debugging
 	if nonTestCount >= maxZones {
@@ -2438,6 +2439,13 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, string) {
 
 	if nonTestCount >= maxZones && !enableKeyValid {
 		return false, fmt.Sprintf("zone slots full (%d/%d)", nonTestCount, maxZones)
+	}
+
+	// Even with enable-key, reject when all slots (including the TEST slot)
+	// are occupied. The enable-key bypass allows a TEST zone, but if one
+	// already exists alongside full non-test slots, there's truly no room.
+	if totalZoneCount > maxZones {
+		return false, fmt.Sprintf("all zone slots full (%d non-test + %d test)", nonTestCount, totalZoneCount-nonTestCount)
 	}
 
 	// Accept the connection (cooldown timestamp is set on release, not here)
@@ -2551,8 +2559,10 @@ func (s *DeviceService) computeBusyRetryAfter() uint32 {
 		return uint32(s.config.HandshakeTimeout.Milliseconds())
 	}
 
-	// Zones full or unknown reason -- no point retrying
-	return 0
+	// Zones full or unknown reason. Per DEC-063, always include a non-zero
+	// RetryAfter so clients know the field is valid. 30s is a reasonable
+	// default since the device can't predict when a zone will be freed.
+	return 30000
 }
 
 // randomErrorDelay returns a random duration between ErrorDelayMin and ErrorDelayMax.

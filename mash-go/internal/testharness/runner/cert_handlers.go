@@ -339,11 +339,19 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 	}
 
 	if err != nil {
+		// Write failed -- connection is dead, clean up.
+		_ = r.conn.Close()
+		r.conn.connected = false
+		r.paseState = nil
 		return outputs, err
 	}
 
 	if invalidPoint {
-		// Device should close connection for invalid point.
+		// Device closes connection for invalid point -- close our side too
+		// so subsequent tests don't inherit a dead socket.
+		_ = r.conn.Close()
+		r.conn.connected = false
+		r.paseState = nil
 		outputs[KeyConnectionClosed] = true
 		outputs[KeyError] = "INVALID_PARAMETER"
 		return outputs, nil
@@ -351,6 +359,8 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 
 	// halt_after_x: send X but don't complete the handshake.
 	// The device will eventually time out and close the connection.
+	// The connection stays open for the test to observe the timeout.
+	// teardownTest closes it (incomplete PASE state) before the next test.
 	haltAfterX := toBool(params["halt_after_x"])
 	if haltAfterX {
 		return outputs, nil
