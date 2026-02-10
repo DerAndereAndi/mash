@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MASH Test Runner</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <header>
+        <h1>MASH Test Runner</h1>
+        <div id="server-status" class="status-indicator"></div>
+    </header>
+
+    <main>
+        <section id="devices-section" class="panel">
+            <h2>Discovered Devices</h2>
+            <div class="actions">
+                <button id="discover-btn" onclick="discoverDevices()">Discover Devices</button>
+                <span id="discover-status"></span>
+            </div>
+            <div id="devices-list" class="list-container"></div>
+        </section>
+
+        <section id="tests-section" class="panel panel-large">
+            <div class="section-header">
+                <h2>Test Sets</h2>
+                <button id="reload-btn" onclick="reloadTests()" title="Reload test cases from disk">Reload</button>
+            </div>
+            <div class="filter-bar">
+                <input type="text" id="test-filter" placeholder="Filter tests (e.g., TC-READ-*)" onkeyup="filterTests()">
+                <div class="tag-filter-container">
+                    <button id="tag-filter-btn" class="btn-tag-filter" onclick="toggleTagPopover(event)">
+                        <span class="tag-filter-icon">&#9660;</span>
+                        <span id="tag-filter-label">Filter by tag</span>
+                    </button>
+                    <div id="active-tags" class="active-tags"></div>
+                    <div id="tag-popover" class="tag-popover">
+                        <div class="tag-popover-header">
+                            <span>Select tags to filter</span>
+                            <button class="tag-popover-clear" onclick="clearTagFilters()">Clear all</button>
+                        </div>
+                        <div id="tag-popover-list" class="tag-popover-list"></div>
+                    </div>
+                </div>
+                <span id="test-count"></span>
+            </div>
+            <div id="tests-list" class="list-container sets-container"></div>
+        </section>
+
+        <section id="run-section" class="panel">
+            <h2>Run Tests</h2>
+            <form id="run-form" onsubmit="startRun(event)">
+                <div class="form-group">
+                    <label for="target">Target Address</label>
+                    <input type="text" id="target" placeholder="192.168.1.100:8443" required>
+                </div>
+                <div class="form-group">
+                    <label for="pattern">Test Pattern</label>
+                    <input type="text" id="pattern" placeholder="TC-* (optional)">
+                </div>
+                <div class="form-group">
+                    <label for="setup-code">Setup Code</label>
+                    <input type="text" id="setup-code" placeholder="12345678 (optional)">
+                </div>
+                <button type="submit" id="run-btn">Run Tests</button>
+            </form>
+        </section>
+
+        <section id="results-section" class="panel panel-large">
+            <h2>Recent Runs</h2>
+            <div class="actions">
+                <button onclick="loadRuns()">Refresh</button>
+            </div>
+            <div id="runs-list" class="list-container"></div>
+        </section>
+    </main>
+
+    <!-- YAML Viewer Modal -->
+    <div id="yaml-modal" class="modal" onclick="closeYamlModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3><span id="yaml-modal-title">Test YAML</span></h3>
+                <button class="modal-close" onclick="closeYamlModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <pre id="yaml-content" class="yaml-code"></pre>
+            </div>
+            <div class="modal-footer">
+                <button onclick="copyYaml()">Copy to Clipboard</button>
+                <span id="copy-status"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Run Modal -->
+    <div id="run-modal" class="modal modal-large" onclick="closeRunModal(event)">
+        <div class="modal-content modal-content-large" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div class="run-modal-title">
+                    <h3>Test Run <span id="run-modal-id"></span></h3>
+                    <div class="run-modal-meta">
+                        <span><span class="label">Target:</span> <span id="run-modal-target"></span></span>
+                        <span><span class="label">Pattern:</span> <span id="run-modal-pattern"></span></span>
+                        <span><span class="label">Status:</span> <span id="run-modal-status" class="run-status"></span></span>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeRunModal()">&times;</button>
+            </div>
+            <div class="run-modal-stats">
+                <div class="stat-box">
+                    <div class="stat-value passed" id="run-modal-passed">0</div>
+                    <div class="stat-label">Passed</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value failed" id="run-modal-failed">0</div>
+                    <div class="stat-label">Failed</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value skipped" id="run-modal-skipped">0</div>
+                    <div class="stat-label">Skipped</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value total" id="run-modal-total">0</div>
+                    <div class="stat-label">Total</div>
+                </div>
+                <div class="stat-box stat-box-time">
+                    <div class="stat-value" id="run-modal-time">0:00</div>
+                    <div class="stat-label">Elapsed</div>
+                </div>
+            </div>
+            <div class="run-modal-progress">
+                <div class="progress-bar-large">
+                    <div class="progress-fill" id="run-modal-progress-fill" style="width: 0%"></div>
+                </div>
+            </div>
+            <div class="modal-body run-modal-body">
+                <div id="run-modal-log" class="run-log">
+                    <div class="run-log-empty" id="run-modal-empty">
+                        <div class="spinner"></div>
+                        <div>Waiting for test results...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="toggleRunAutoScroll()" id="run-autoscroll-btn">Auto-scroll: ON</button>
+                <button onclick="clearRunLog()">Clear Log</button>
+                <div id="run-modal-complete" class="run-complete-msg"></div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>MASH Protocol Conformance Testing <span id="app-version"></span></p>
+    </footer>
+
+    <script src="/app.js"></script>
+</body>
+</html>

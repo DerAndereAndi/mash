@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Run - MASH</title>
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        body {
+            padding: 1rem;
+        }
+        .run-page {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .run-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid var(--accent-color);
+        }
+        .run-title {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+        .run-title h1 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .run-title h1::before {
+            content: '>';
+            color: var(--accent-color);
+        }
+        .run-meta {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+        .run-meta span {
+            margin-right: 1.5rem;
+        }
+        .run-meta .label {
+            color: var(--text-muted);
+            margin-right: 0.25rem;
+        }
+        .run-meta .value {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            color: var(--text-color);
+        }
+        .run-stats {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+        .stat-box {
+            text-align: center;
+            padding: 0.75rem 1.25rem;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+        }
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+        .stat-value.passed { color: var(--success-color); }
+        .stat-value.failed { color: var(--error-color); }
+        .stat-value.skipped { color: var(--skip-color); }
+        .stat-value.total { color: var(--accent-color); }
+        .stat-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+        .run-progress {
+            margin-bottom: 1.5rem;
+        }
+        .progress-bar-large {
+            height: 12px;
+            background: var(--code-bg);
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+        }
+        .progress-bar-large .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--secondary-color), var(--accent-color));
+            transition: width 0.3s ease;
+        }
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            color: var(--text-muted);
+        }
+        .log-container {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            background: var(--code-bg);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .log-header h2 {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+        .log-header h2::before {
+            content: '//';
+            color: var(--accent-color);
+            margin-right: 0.5rem;
+        }
+        .log-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .log-actions button {
+            padding: 0.3rem 0.6rem;
+            font-size: 0.7rem;
+        }
+        .log-content {
+            height: 500px;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 0.8rem;
+        }
+        .log-entry {
+            display: flex;
+            padding: 0.5rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            gap: 1rem;
+        }
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        .log-entry:nth-child(even) {
+            background: var(--code-bg);
+        }
+        .log-entry.passed {
+            border-left: 3px solid var(--success-color);
+        }
+        .log-entry.failed {
+            border-left: 3px solid var(--error-color);
+            background: var(--error-bg);
+        }
+        .log-entry.skipped {
+            border-left: 3px solid var(--skip-color);
+        }
+        .log-time {
+            color: var(--text-muted);
+            flex-shrink: 0;
+            width: 70px;
+        }
+        .log-status {
+            flex-shrink: 0;
+            width: 50px;
+            font-weight: 600;
+        }
+        .log-status.passed { color: var(--success-color); }
+        .log-status.failed { color: var(--error-color); }
+        .log-status.skipped { color: var(--skip-color); }
+        .log-test {
+            flex: 1;
+            min-width: 0;
+        }
+        .log-test-id {
+            color: var(--accent-color);
+            margin-right: 0.75rem;
+        }
+        .log-test-name {
+            color: var(--text-color);
+        }
+        .log-duration {
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+        .log-error {
+            margin-top: 0.35rem;
+            padding: 0.35rem 0.5rem;
+            background: rgba(220, 38, 38, 0.1);
+            border-radius: 3px;
+            color: var(--error-color);
+            font-size: 0.75rem;
+        }
+        .run-complete {
+            text-align: center;
+            padding: 1rem;
+            background: var(--accent-light);
+            border-radius: 4px;
+            margin-top: 1rem;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+        .run-complete.success {
+            background: var(--success-bg);
+            color: var(--success-color);
+        }
+        .run-complete.failure {
+            background: var(--error-bg);
+            color: var(--error-color);
+        }
+        .empty-log {
+            padding: 3rem;
+            text-align: center;
+            color: var(--text-muted);
+        }
+        .spinner-large {
+            width: 24px;
+            height: 24px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-color);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="run-page">
+        <div class="run-header">
+            <div class="run-title">
+                <h1>Test Run <span id="run-id-short"></span></h1>
+                <div class="run-meta">
+                    <span><span class="label">Target:</span> <span class="value" id="run-target"></span></span>
+                    <span><span class="label">Pattern:</span> <span class="value" id="run-pattern"></span></span>
+                    <span><span class="label">Status:</span> <span class="value" id="run-status"></span></span>
+                </div>
+            </div>
+            <div class="run-stats">
+                <div class="stat-box">
+                    <div class="stat-value passed" id="stat-passed">0</div>
+                    <div class="stat-label">Passed</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value failed" id="stat-failed">0</div>
+                    <div class="stat-label">Failed</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value skipped" id="stat-skipped">0</div>
+                    <div class="stat-label">Skipped</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value total" id="stat-total">0</div>
+                    <div class="stat-label">Total</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="run-progress">
+            <div class="progress-bar-large">
+                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+            <div class="progress-info">
+                <span id="progress-percent">0%</span>
+                <span id="progress-time"></span>
+            </div>
+        </div>
+
+        <div class="log-container">
+            <div class="log-header">
+                <h2>Test Log</h2>
+                <div class="log-actions">
+                    <button onclick="toggleAutoScroll()" id="autoscroll-btn">Auto-scroll: ON</button>
+                    <button onclick="clearLog()">Clear</button>
+                </div>
+            </div>
+            <div class="log-content" id="log-content">
+                <div class="empty-log" id="empty-log">
+                    <div class="spinner-large"></div>
+                    <div>Waiting for test results...</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="run-complete-msg" class="run-complete" style="display: none;"></div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/v1';
+        let runId = null;
+        let eventSource = null;
+        let autoScroll = true;
+        let passCount = 0;
+        let failCount = 0;
+        let skipCount = 0;
+        let totalCount = 0;
+        let expectedTotal = 0;
+        let startTime = Date.now();
+
+        // Get run ID from URL
+        const params = new URLSearchParams(window.location.search);
+        runId = params.get('id');
+
+        if (runId) {
+            document.title = `Run ${runId.substring(0, 8)} - MASH`;
+            document.getElementById('run-id-short').textContent = runId.substring(0, 8) + '...';
+            loadRunInfo();
+            connectToStream();
+        } else {
+            document.getElementById('log-content').innerHTML = '<div class="empty-log">No run ID specified</div>';
+        }
+
+        async function loadRunInfo() {
+            try {
+                const response = await fetch(`${API_BASE}/runs/${runId}`);
+                const data = await response.json();
+
+                document.getElementById('run-target').textContent = data.target || '-';
+                document.getElementById('run-pattern').textContent = data.pattern || 'All tests';
+                updateStatus(data.status);
+
+                if (data.started_at) {
+                    startTime = new Date(data.started_at).getTime();
+                }
+
+                // If run is already complete, load results
+                if (data.status === 'completed' || data.status === 'failed') {
+                    passCount = data.pass_count || 0;
+                    failCount = data.fail_count || 0;
+                    skipCount = data.skip_count || 0;
+                    totalCount = data.total_count || 0;
+                    expectedTotal = totalCount;
+                    updateStats();
+
+                    if (data.results) {
+                        document.getElementById('empty-log').style.display = 'none';
+                        data.results.forEach(result => addLogEntry(result));
+                    }
+
+                    showCompleteMessage();
+                }
+            } catch (error) {
+                console.error('Failed to load run info:', error);
+            }
+        }
+
+        function connectToStream() {
+            eventSource = new EventSource(`${API_BASE}/runs/${runId}/stream`);
+
+            eventSource.addEventListener('result', (event) => {
+                const result = JSON.parse(event.data);
+                document.getElementById('empty-log').style.display = 'none';
+
+                totalCount++;
+                if (result.status === 'passed') passCount++;
+                else if (result.status === 'failed') failCount++;
+                else if (result.status === 'skipped') skipCount++;
+
+                updateStats();
+                addLogEntry(result);
+            });
+
+            eventSource.addEventListener('done', () => {
+                eventSource.close();
+                eventSource = null;
+                updateStatus('completed');
+                showCompleteMessage();
+            });
+
+            eventSource.onerror = () => {
+                if (eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
+            };
+        }
+
+        function updateStatus(status) {
+            const el = document.getElementById('run-status');
+            el.textContent = status.toUpperCase();
+            el.className = 'value status-' + status;
+        }
+
+        function updateStats() {
+            document.getElementById('stat-passed').textContent = passCount;
+            document.getElementById('stat-failed').textContent = failCount;
+            document.getElementById('stat-skipped').textContent = skipCount;
+            document.getElementById('stat-total').textContent = totalCount;
+
+            // Update progress
+            const percent = expectedTotal > 0 ? Math.round((totalCount / expectedTotal) * 100) : 0;
+            document.getElementById('progress-fill').style.width = (expectedTotal > 0 ? percent : totalCount > 0 ? 50 : 0) + '%';
+            document.getElementById('progress-percent').textContent = expectedTotal > 0 ? `${percent}%` : `${totalCount} tests`;
+
+            // Update elapsed time
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            document.getElementById('progress-time').textContent = `${mins}m ${secs}s elapsed`;
+        }
+
+        function addLogEntry(result) {
+            const container = document.getElementById('log-content');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${result.status}`;
+
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+
+            entry.innerHTML = `
+                <span class="log-time">${time}</span>
+                <span class="log-status ${result.status}">${result.status.toUpperCase()}</span>
+                <div class="log-test">
+                    <span class="log-test-id">${result.test_id}</span>
+                    <span class="log-test-name">${result.test_name}</span>
+                    ${result.error ? `<div class="log-error">${result.error}</div>` : ''}
+                </div>
+                <span class="log-duration">${result.duration || ''}</span>
+            `;
+
+            container.appendChild(entry);
+
+            if (autoScroll) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        function showCompleteMessage() {
+            const msg = document.getElementById('run-complete-msg');
+            const success = failCount === 0;
+
+            msg.className = `run-complete ${success ? 'success' : 'failure'}`;
+            msg.innerHTML = success
+                ? `✓ All ${passCount} tests passed` + (skipCount > 0 ? ` (${skipCount} skipped)` : '')
+                : `✗ ${failCount} test(s) failed, ${passCount} passed` + (skipCount > 0 ? `, ${skipCount} skipped` : '');
+            msg.style.display = 'block';
+
+            document.getElementById('progress-fill').style.width = '100%';
+            document.getElementById('progress-percent').textContent = '100%';
+        }
+
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            document.getElementById('autoscroll-btn').textContent = `Auto-scroll: ${autoScroll ? 'ON' : 'OFF'}`;
+        }
+
+        function clearLog() {
+            const container = document.getElementById('log-content');
+            container.innerHTML = '';
+        }
+
+        // Update time every second
+        setInterval(() => {
+            if (document.getElementById('run-status').textContent !== 'COMPLETED' &&
+                document.getElementById('run-status').textContent !== 'FAILED') {
+                const elapsed = Math.round((Date.now() - startTime) / 1000);
+                const mins = Math.floor(elapsed / 60);
+                const secs = elapsed % 60;
+                document.getElementById('progress-time').textContent = `${mins}m ${secs}s elapsed`;
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
