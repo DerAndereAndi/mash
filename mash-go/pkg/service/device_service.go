@@ -696,6 +696,10 @@ func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.
 	// Start message loop - blocks until connection closes
 	s.runZoneMessageLoop(targetZoneID, framedConn, zoneSession)
 
+	// Ensure the TLS connection is closed so the peer receives close_notify.
+	// This is idempotent (framedConnection.Close guards with a bool).
+	framedConn.Close()
+
 	// Clean up on disconnect
 	s.handleZoneSessionClose(targetZoneID)
 }
