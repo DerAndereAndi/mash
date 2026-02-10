@@ -114,7 +114,7 @@ func TestHandlePing(t *testing.T) {
 	}
 
 	// Simulate connected.
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	out, _ = r.handlePing(context.Background(), &loader.Step{}, state)
 	if out["pong_received"] != true {
 		t.Error("expected pong_received=true when connected")
@@ -123,7 +123,7 @@ func TestHandlePing(t *testing.T) {
 
 func TestHandlePing_EnrichedFields(t *testing.T) {
 	r := newTestRunner()
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	state := newTestState()
 
 	// First ping should set pong_seq=1.
@@ -148,7 +148,7 @@ func TestHandlePing_EnrichedFields(t *testing.T) {
 
 func TestHandlePingMultiple(t *testing.T) {
 	r := newTestRunner()
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	state := newTestState()
 
 	step := &loader.Step{Params: map[string]any{"count": float64(5)}}
@@ -170,7 +170,7 @@ func TestHandleVerifyKeepalive(t *testing.T) {
 		t.Error("expected keepalive_active=false when not connected")
 	}
 
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	out, _ = r.handleVerifyKeepalive(context.Background(), &loader.Step{}, state)
 	if out["keepalive_active"] != true {
 		t.Error("expected keepalive_active=true when connected")
@@ -291,7 +291,7 @@ func TestCborEncodeIntKeyMap_StringKeys(t *testing.T) {
 
 func TestHandleSendRaw_EmptyData(t *testing.T) {
 	r := newTestRunner()
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	state := newTestState()
 
 	// No data params at all -> empty message error.
@@ -321,7 +321,7 @@ func TestHandleSendRaw_NotConnected(t *testing.T) {
 
 func TestHandleSendRaw_HexDecode(t *testing.T) {
 	r := newTestRunner()
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	state := newTestState()
 
 	// Invalid hex should error.
@@ -404,7 +404,7 @@ func TestConnectAsZone_StateOutput(t *testing.T) {
 	// Fill up 5 zone connections.
 	ct := getConnectionTracker(state)
 	for i := 0; i < 5; i++ {
-		ct.zoneConnections[fmt.Sprintf("zone%d", i)] = &Connection{connected: true}
+		ct.zoneConnections[fmt.Sprintf("zone%d", i)] = &Connection{state: ConnOperational}
 	}
 
 	// 6th zone should be rejected (C5).
@@ -433,7 +433,7 @@ func TestConnectAsZone_ZoneLimit(t *testing.T) {
 	// With fewer than 5 zones, the limit check should not trigger.
 	// (Connection will still fail due to no real server, but the error
 	// should NOT be MAX_CONNECTIONS_EXCEEDED.)
-	ct.zoneConnections["zone0"] = &Connection{connected: true}
+	ct.zoneConnections["zone0"] = &Connection{state: ConnOperational}
 	step := &loader.Step{Params: map[string]any{
 		KeyZoneID: "zone1",
 		"target":  "127.0.0.1:1",
@@ -451,7 +451,7 @@ func TestPing_ZoneRouting(t *testing.T) {
 
 	// Set up a zone connection in the tracker.
 	ct := getConnectionTracker(state)
-	zoneConn := &Connection{connected: true}
+	zoneConn := &Connection{state: ConnOperational}
 	ct.zoneConnections["zone1"] = zoneConn
 
 	// Ping with connection=zone1 should find the zone connection.
@@ -469,7 +469,7 @@ func TestPing_ZoneRouting(t *testing.T) {
 	}
 
 	// Non-existent zone falls back to main connection.
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	step = &loader.Step{Params: map[string]any{"connection": "nonexistent"}}
 	out, _ = r.handleSendPing(context.Background(), step, state)
 	if out["pong_received"] != true {
@@ -477,7 +477,7 @@ func TestPing_ZoneRouting(t *testing.T) {
 	}
 
 	// No connection at all.
-	r.conn.connected = false
+	r.conn.state = ConnDisconnected
 	step = &loader.Step{Params: map[string]any{"connection": "nonexistent"}}
 	out, _ = r.handleSendPing(context.Background(), step, state)
 	if out["pong_received"] != false {
@@ -488,7 +488,7 @@ func TestPing_ZoneRouting(t *testing.T) {
 // C10: send_ping without connection param uses main connection.
 func TestPing_FallbackToMainConnection(t *testing.T) {
 	r := newTestRunner()
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	state := newTestState()
 
 	// No connection/zone param -> falls back to r.conn.
@@ -505,7 +505,7 @@ func TestSubscribeAsZone_DummyConnection(t *testing.T) {
 
 	// Set up a dummy zone connection (connected but no framer).
 	ct := getConnectionTracker(state)
-	ct.zoneConnections["GRID"] = &Connection{connected: true}
+	ct.zoneConnections["GRID"] = &Connection{state: ConnOperational}
 
 	step := &loader.Step{Params: map[string]any{
 		KeyZoneID:   "GRID",
@@ -530,7 +530,7 @@ func TestReadAsZone_DummyConnection(t *testing.T) {
 
 	// Set up a dummy zone connection (connected but no framer).
 	ct := getConnectionTracker(state)
-	ct.zoneConnections["LOCAL"] = &Connection{connected: true}
+	ct.zoneConnections["LOCAL"] = &Connection{state: ConnOperational}
 
 	step := &loader.Step{Params: map[string]any{
 		KeyZoneID:   "LOCAL",
@@ -552,7 +552,7 @@ func TestWaitForNotificationAsZone_DummyConnection(t *testing.T) {
 
 	// Set up a dummy zone connection (connected but no framer).
 	ct := getConnectionTracker(state)
-	ct.zoneConnections["GRID"] = &Connection{connected: true}
+	ct.zoneConnections["GRID"] = &Connection{state: ConnOperational}
 
 	step := &loader.Step{Params: map[string]any{
 		KeyZoneID: "GRID",
@@ -572,8 +572,8 @@ func TestReadAsZone_AfterOtherZoneDisconnect(t *testing.T) {
 
 	// Set up dummy connections for GRID and LOCAL.
 	ct := getConnectionTracker(state)
-	ct.zoneConnections["GRID"] = &Connection{connected: true}
-	ct.zoneConnections["LOCAL"] = &Connection{connected: true}
+	ct.zoneConnections["GRID"] = &Connection{state: ConnOperational}
+	ct.zoneConnections["LOCAL"] = &Connection{state: ConnOperational}
 
 	// Disconnect GRID.
 	disconnectStep := &loader.Step{Params: map[string]any{"zone": "GRID"}}
@@ -599,7 +599,7 @@ func TestReadAsZone_AfterOtherZoneDisconnect(t *testing.T) {
 
 func TestSubscribeMultiple_NeitherParam(t *testing.T) {
 	r := newTestRunner()
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	state := newTestState()
 
 	step := &loader.Step{Params: map[string]any{
@@ -620,9 +620,9 @@ func newPipedRunner() (*Runner, net.Conn) {
 	client, server := net.Pipe()
 	r := newTestRunner()
 	r.conn = &Connection{
-		conn:      client,
-		framer:    transport.NewFramer(client),
-		connected: true,
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
 	}
 	return r, server
 }

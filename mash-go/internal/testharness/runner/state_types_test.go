@@ -105,7 +105,7 @@ func TestGetConnectionTracker(t *testing.T) {
 	}
 
 	// Mutate and verify persistence.
-	ct.zoneConnections["z1"] = &Connection{connected: true}
+	ct.zoneConnections["z1"] = &Connection{state: ConnTLSConnected}
 	ct2 := getConnectionTracker(state)
 	if _, ok := ct2.zoneConnections["z1"]; !ok {
 		t.Error("expected connection to persist")

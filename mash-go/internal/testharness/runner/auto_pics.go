@@ -24,7 +24,7 @@ const basePICSFilename = "protocol-common.yaml"
 // device-specific capabilities over the wire and merges them on top.
 // The runner must have an active connection (commissioned) before calling this.
 func (r *Runner) buildAutoPICS(ctx context.Context) (*loader.PICSFile, error) {
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		return nil, fmt.Errorf("auto-PICS requires an active connection")
 	}
 

@@ -261,11 +261,11 @@ func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine
 
 	// Find a usable connection: prefer r.conn, fall back to zone connections.
 	conn := r.conn
-	if conn == nil || !conn.connected || !conn.operational {
+	if conn == nil || !conn.isConnected() || !conn.isOperational() {
 		conn = nil
 		ct := getConnectionTracker(state)
 		for _, c := range ct.zoneConnections {
-			if c.connected && c.framer != nil {
+			if c.isConnected() && c.framer != nil {
 				conn = c
 				break
 			}

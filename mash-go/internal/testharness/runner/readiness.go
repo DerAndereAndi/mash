@@ -34,7 +34,7 @@ func (r *Runner) waitForCommissioningMode(ctx context.Context, timeout time.Dura
 // responding. Returns nil if the session is healthy, an error otherwise.
 // Used by setupPreconditions to detect corrupted sessions before reuse.
 func (r *Runner) probeSessionHealth() error {
-	if r.conn == nil || !r.conn.connected || r.conn.framer == nil {
+	if r.conn == nil || !r.conn.isConnected() || r.conn.framer == nil {
 		return fmt.Errorf("no active connection")
 	}
 
@@ -51,7 +51,7 @@ func (r *Runner) probeSessionHealth() error {
 	}
 
 	if err := r.conn.framer.WriteFrame(data); err != nil {
-		r.conn.connected = false
+		r.conn.transitionTo(ConnDisconnected)
 		return fmt.Errorf("send health probe: %w", err)
 	}
 
@@ -71,7 +71,7 @@ func (r *Runner) probeSessionHealth() error {
 	for range 20 {
 		respData, err := r.conn.framer.ReadFrame()
 		if err != nil {
-			r.conn.connected = false
+			r.conn.transitionTo(ConnDisconnected)
 			return fmt.Errorf("read health probe response: %w", err)
 		}
 		resp, err := wire.DecodeResponse(respData)
@@ -105,7 +105,7 @@ func (r *Runner) probeSessionHealth() error {
 // a fixed duration, we perform a protocol-level probe that returns as soon as
 // the device is ready.
 func (r *Runner) waitForOperationalReady(timeout time.Duration) error {
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return fmt.Errorf("not connected")
 	}
 
@@ -125,7 +125,7 @@ func (r *Runner) waitForOperationalReady(timeout time.Duration) error {
 
 	// Send the subscribe frame.
 	if err := r.conn.framer.WriteFrame(data); err != nil {
-		r.conn.connected = false
+		r.conn.transitionTo(ConnDisconnected)
 		return fmt.Errorf("send readiness probe: %w", err)
 	}
 
@@ -143,7 +143,7 @@ func (r *Runner) waitForOperationalReady(timeout time.Duration) error {
 	for range 10 {
 		respData, err := r.conn.framer.ReadFrame()
 		if err != nil {
-			r.conn.connected = false
+			r.conn.transitionTo(ConnDisconnected)
 			return fmt.Errorf("read readiness response: %w", err)
 		}
 		resp, err := wire.DecodeResponse(respData)

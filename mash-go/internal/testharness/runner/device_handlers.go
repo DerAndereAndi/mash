@@ -284,7 +284,7 @@ func (r *Runner) resolveTriggerForSetValue(featureRaw any, attribute string, val
 
 // invokeTriggerTestEvent sends a TriggerTestEvent invoke to the device's TestControl feature.
 func (r *Runner) invokeTriggerTestEvent(trigger uint64) (string, error) {
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		return "", fmt.Errorf("not connected")
 	}
 
@@ -497,12 +497,8 @@ var operatingStateTriggers = map[string]uint64{
 // connection was detached after commissioning.
 func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *engine.ExecutionState) error {
 	// Try main connection first.
-	if r.conn != nil && r.conn.connected && r.conn.framer != nil {
-		// Set a read deadline from context so a dead connection doesn't
-		// block indefinitely (TCP retransmit timeout can be 90+ seconds).
-		r.conn.setReadDeadlineFromContext(ctx)
+	if r.conn != nil && r.conn.isConnected() && r.conn.framer != nil {
 		_, err := r.sendTrigger(ctx, trigger, state)
-		r.conn.clearReadDeadline()
 		if err == nil {
 			r.deviceStateModified = true
 		}
@@ -513,7 +509,7 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 	ct := getConnectionTracker(state)
 	var conn *Connection
 	for _, c := range ct.zoneConnections {
-		if c.connected && c.framer != nil {
+		if c.isConnected() && c.framer != nil {
 			conn = c
 			break
 		}
@@ -942,7 +938,7 @@ func (r *Runner) handleFactoryReset(ctx context.Context, step *loader.Step, stat
 	}
 
 	// Close and reset connection state -- the device is starting fresh.
-	if r.conn != nil && r.conn.connected {
+	if r.conn != nil && r.conn.isConnected() {
 		_ = r.conn.Close()
 	}
 	r.paseState = nil
@@ -962,7 +958,7 @@ func (r *Runner) handlePowerCycle(ctx context.Context, step *loader.Step, state 
 	ds.processState = ProcessStateNone
 
 	// Close connection if any.
-	if r.conn != nil && r.conn.connected {
+	if r.conn != nil && r.conn.isConnected() {
 		_ = r.conn.Close()
 	}
 

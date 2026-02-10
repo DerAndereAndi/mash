@@ -85,7 +85,7 @@ func (r *Runner) snapshot() RunnerSnapshot {
 
 func connSnapshot(c *Connection) ConnSnapshot {
 	return ConnSnapshot{
-		Connected:    c.connected,
+		Connected:    c.isConnected(),
 		HasTLSConn:   c.tlsConn != nil,
 		HasRawConn:   c.conn != nil,
 		HasFramer:    c.framer != nil,

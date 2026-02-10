@@ -119,8 +119,8 @@ func TestCertExchange_FullFlow(t *testing.T) {
 	r := &Runner{
 		config: &Config{},
 		conn: &Connection{
-			framer:    clientFramer,
-			connected: true,
+			framer: clientFramer,
+			state:  ConnTLSConnected,
 		},
 		paseState: &PASEState{
 			sessionKey: []byte("test-session-key-for-zone-deriv"),

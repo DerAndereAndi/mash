@@ -30,7 +30,7 @@ func TestSnapshot_Empty(t *testing.T) {
 
 func TestSnapshot_Connected(t *testing.T) {
 	r := newTestRunner()
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 
 	s := r.snapshot()
 	if !s.MainConn.Connected {
@@ -40,7 +40,7 @@ func TestSnapshot_Connected(t *testing.T) {
 
 func TestSnapshot_Commissioned(t *testing.T) {
 	r := newTestRunner()
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	r.paseState = &PASEState{
 		completed:  true,
 		sessionKey: []byte{1, 2, 3},
@@ -62,8 +62,8 @@ func TestSnapshot_Commissioned(t *testing.T) {
 func TestSnapshot_ActiveZones(t *testing.T) {
 	r := newTestRunner()
 	r.activeZoneIDs = make(map[string]string)
-	r.activeZoneConns["GRID"] = &Connection{connected: true}
-	r.activeZoneConns["LOCAL"] = &Connection{connected: true}
+	r.activeZoneConns["GRID"] = &Connection{state: ConnOperational}
+	r.activeZoneConns["LOCAL"] = &Connection{state: ConnOperational}
 	r.activeZoneIDs["GRID"] = "abc123"
 
 	s := r.snapshot()
@@ -81,7 +81,7 @@ func TestSnapshot_ActiveZones(t *testing.T) {
 func TestSnapshot_PhantomSocket(t *testing.T) {
 	r := newTestRunner()
 	// Simulate the phantom socket bug: connected=false but conn still set.
-	r.conn.connected = false
+	r.conn.state = ConnDisconnected
 	// We can't easily set a real net.Conn, but we can test via ConnSnapshot.
 	snap := RunnerSnapshot{
 		MainConn: ConnSnapshot{
@@ -120,9 +120,9 @@ func TestSnapshot_PhantomZoneSocket(t *testing.T) {
 
 func TestSnapshot_String(t *testing.T) {
 	r := newTestRunner()
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1}}
-	r.activeZoneConns["GRID"] = &Connection{connected: true}
+	r.activeZoneConns["GRID"] = &Connection{state: ConnOperational}
 
 	s := r.snapshot()
 	str := s.String()

@@ -269,8 +269,8 @@ func TestDisconnectZone_ConnectionOnly(t *testing.T) {
 
 	// Set up connections without zone state entries (mimics two_zones_connected).
 	ct := getConnectionTracker(state)
-	ct.zoneConnections["GRID"] = &Connection{connected: true}
-	ct.zoneConnections["LOCAL"] = &Connection{connected: true}
+	ct.zoneConnections["GRID"] = &Connection{state: ConnTLSConnected}
+	ct.zoneConnections["LOCAL"] = &Connection{state: ConnTLSConnected}
 
 	// Disconnect GRID -- should succeed even without zone state.
 	step := &loader.Step{Params: map[string]any{"zone": "GRID"}}

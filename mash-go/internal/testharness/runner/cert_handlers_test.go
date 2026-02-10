@@ -42,35 +42,46 @@ func TestHandleVerifyCommissioningState(t *testing.T) {
 	state := newTestState()
 
 	// IDLE state.
-	step := &loader.Step{Params: map[string]any{"expected_state": "IDLE"}}
+	step := &loader.Step{Params: map[string]any{ParamExpectedState: "IDLE"}}
 	out, _ := r.handleVerifyCommissioningState(context.Background(), step, state)
-	if out["commissioning_state"] != "IDLE" {
-		t.Errorf("expected IDLE, got %v", out["commissioning_state"])
+	if out[KeyCommissioningState] != "IDLE" {
+		t.Errorf("expected IDLE, got %v", out[KeyCommissioningState])
 	}
-	if out["state_matches"] != true {
+	if out[KeyStateMatches] != true {
 		t.Error("expected state_matches=true")
 	}
 
 	// CONNECTED state.
-	r.conn.connected = true
-	step = &loader.Step{Params: map[string]any{"expected_state": "CONNECTED"}}
+	r.conn.state = ConnTLSConnected
+	step = &loader.Step{Params: map[string]any{ParamExpectedState: CommissioningStateConnected}}
 	out, _ = r.handleVerifyCommissioningState(context.Background(), step, state)
-	if out["commissioning_state"] != "CONNECTED" {
-		t.Errorf("expected CONNECTED, got %v", out["commissioning_state"])
+	if out[KeyCommissioningState] != CommissioningStateConnected {
+		t.Errorf("expected %s, got %v", CommissioningStateConnected, out[KeyCommissioningState])
+	}
+
+	// ADVERTISING state: was connected but now disconnected.
+	r.conn.state = ConnDisconnected
+	r.conn.hadConnection = true
+	r.paseState = nil
+	step = &loader.Step{Params: map[string]any{ParamExpectedState: CommissioningStateAdvertising}}
+	out, _ = r.handleVerifyCommissioningState(context.Background(), step, state)
+	if out[KeyCommissioningState] != CommissioningStateAdvertising {
+		t.Errorf("expected %s, got %v", CommissioningStateAdvertising, out[KeyCommissioningState])
 	}
 
 	// COMMISSIONED state.
+	r.conn.hadConnection = false
 	r.paseState = &PASEState{completed: true}
-	step = &loader.Step{Params: map[string]any{"expected_state": "COMMISSIONED"}}
+	step = &loader.Step{Params: map[string]any{ParamExpectedState: CommissioningStateCommissioned}}
 	out, _ = r.handleVerifyCommissioningState(context.Background(), step, state)
-	if out["commissioning_state"] != "COMMISSIONED" {
-		t.Errorf("expected COMMISSIONED, got %v", out["commissioning_state"])
+	if out[KeyCommissioningState] != CommissioningStateCommissioned {
+		t.Errorf("expected %s, got %v", CommissioningStateCommissioned, out[KeyCommissioningState])
 	}
 
 	// Mismatch.
-	step = &loader.Step{Params: map[string]any{"expected_state": "IDLE"}}
+	step = &loader.Step{Params: map[string]any{ParamExpectedState: "IDLE"}}
 	out, _ = r.handleVerifyCommissioningState(context.Background(), step, state)
-	if out["state_matches"] != false {
+	if out[KeyStateMatches] != false {
 		t.Error("expected state_matches=false for mismatch")
 	}
 }
@@ -276,7 +287,7 @@ func TestHandleVerifyCertificate_WithZoneCA(t *testing.T) {
 	defer tlsConn.Close()
 
 	r.conn.tlsConn = tlsConn
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 
 	out, err := r.handleVerifyCertificate(context.Background(), &loader.Step{}, state)
 	if err != nil {

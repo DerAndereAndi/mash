@@ -33,14 +33,14 @@ func (r *Runner) handleNetworkPartition(ctx context.Context, step *loader.Step, 
 
 	if block {
 		// Simulate by closing the connection.
-		if r.conn != nil && r.conn.connected {
+		if r.conn != nil && r.conn.isConnected() {
 			_ = r.conn.Close()
 		}
 
 		// Also close zone-specific connections.
 		ct := getConnectionTracker(state)
 		if zoneID != "" {
-			if conn, ok := ct.zoneConnections[zoneID]; ok && conn.connected {
+			if conn, ok := ct.zoneConnections[zoneID]; ok && conn.isConnected() {
 				_ = conn.Close()
 				delete(ct.zoneConnections, zoneID)
 			}
@@ -78,13 +78,13 @@ func (r *Runner) handleNetworkFilter(ctx context.Context, step *loader.Step, sta
 // handleInterfaceDown simulates network interface going down.
 func (r *Runner) handleInterfaceDown(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Simulate by closing all connections.
-	if r.conn != nil && r.conn.connected {
+	if r.conn != nil && r.conn.isConnected() {
 		_ = r.conn.Close()
 	}
 
 	ct := getConnectionTracker(state)
 	for id, conn := range ct.zoneConnections {
-		if conn.connected {
+		if conn.isConnected() {
 			_ = conn.Close()
 		}
 		delete(ct.zoneConnections, id)
@@ -123,7 +123,7 @@ func (r *Runner) handleInterfaceFlap(ctx context.Context, step *loader.Step, sta
 
 	for i := 0; i < count; i++ {
 		// Down.
-		if r.conn != nil && r.conn.connected {
+		if r.conn != nil && r.conn.isConnected() {
 			_ = r.conn.Close()
 		}
 
@@ -150,7 +150,7 @@ func (r *Runner) handleChangeAddress(ctx context.Context, step *loader.Step, sta
 	state.Set(StateDeviceAddress, newAddress)
 
 	// Close existing connections (address changed).
-	if r.conn != nil && r.conn.connected {
+	if r.conn != nil && r.conn.isConnected() {
 		_ = r.conn.Close()
 	}
 

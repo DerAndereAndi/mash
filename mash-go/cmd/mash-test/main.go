@@ -90,6 +90,8 @@ var (
 	files          = flag.String("files", "", "Filter test files by name pattern (e.g., 'protocol-*,connection-*')")
 	tags           = flag.String("tags", "", "Include only tests with these tags (comma-separated)")
 	excludeTags    = flag.String("exclude-tags", "", "Exclude tests with these tags (comma-separated)")
+	shuffle        = flag.Bool("shuffle", false, "Randomize test order within each precondition level")
+	shuffleSeed    = flag.Int64("shuffle-seed", 0, "Seed for shuffle randomization (0 = auto-generate)")
 )
 
 func main() {
@@ -199,6 +201,8 @@ func run() int {
 		AutoPICS:           autoPICS,
 		Debug:              *debug,
 		SuiteTimeout:       *suiteTimeout,
+		Shuffle:            *shuffle,
+		ShuffleSeed:        *shuffleSeed,
 	}
 	// Only set logger when non-nil to avoid typed-nil interface issue.
 	if protocolLogger != nil {

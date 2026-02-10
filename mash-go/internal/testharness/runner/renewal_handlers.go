@@ -47,7 +47,7 @@ func (r *Runner) registerRenewalHandlers() {
 
 // handleSendRenewalRequest sends a CertRenewalRequest to the device.
 func (r *Runner) handleSendRenewalRequest(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -101,7 +101,7 @@ func (r *Runner) handleSendRenewalRequest(ctx context.Context, step *loader.Step
 
 // handleReceiveRenewalCSR receives and validates a CertRenewalCSR from the device.
 func (r *Runner) handleReceiveRenewalCSR(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -165,7 +165,7 @@ func (r *Runner) handleReceiveRenewalCSR(ctx context.Context, step *loader.Step,
 
 // handleSendCertInstall signs the pending CSR and sends the new certificate.
 func (r *Runner) handleSendCertInstall(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -244,7 +244,7 @@ func (r *Runner) handleSendCertInstall(ctx context.Context, step *loader.Step, s
 
 // handleReceiveRenewalAck receives and validates a CertRenewalAck from the device.
 func (r *Runner) handleReceiveRenewalAck(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -381,16 +381,16 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 
 	// If connection is dead but we have operational certs, attempt reconnection.
 	// Skip when the connection was gracefully closed (TC-CLOSE tests).
-	if (r.conn == nil || !r.conn.connected) && r.controllerCert != nil && r.zoneCAPool != nil && !gracefullyClosed {
+	if (r.conn == nil || !r.conn.isConnected()) && r.controllerCert != nil && r.zoneCAPool != nil && !gracefullyClosed {
 		r.debugf("verify_connection_state: connection lost, attempting operational reconnection")
 		if err := r.reconnectOperational(); err != nil {
 			r.debugf("verify_connection_state: reconnection failed: %v", err)
 		}
 	}
 
-	sameConn := r.conn != nil && r.conn.connected
+	sameConn := r.conn != nil && r.conn.isConnected()
 	pasePerformed := r.paseState != nil && r.paseState.completed
-	connOperational := r.conn != nil && r.conn.operational
+	connOperational := r.conn != nil && r.conn.isOperational()
 	operationalActive := sameConn && pasePerformed && connOperational
 
 	// Check mutual TLS (verified chains present).
@@ -494,10 +494,9 @@ func (r *Runner) reconnectOperational() error {
 	}
 
 	r.conn = &Connection{
-		tlsConn:     tlsConn,
-		framer:      transport.NewFramer(tlsConn),
-		connected:   true,
-		operational: true,
+		tlsConn: tlsConn,
+		framer:  transport.NewFramer(tlsConn),
+		state:   ConnOperational,
 	}
 
 	if err := r.waitForOperationalReady(2 * time.Second); err != nil {
@@ -540,7 +539,7 @@ func (r *Runner) handleWaitForNotification(ctx context.Context, step *loader.Ste
 	}
 
 	// Delegate to the real wire reader when connected and not looking for cert events.
-	if r.conn != nil && r.conn.connected && eventType == "" {
+	if r.conn != nil && r.conn.isConnected() && eventType == "" {
 		return r.handleWaitNotification(ctx, step, state)
 	}
 

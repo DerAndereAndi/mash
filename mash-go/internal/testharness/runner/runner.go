@@ -79,6 +79,14 @@ type Runner struct {
 	// Used by setupPreconditions to send TriggerResetTestState between tests.
 	deviceStateModified bool
 
+	// suiteZoneID is the zone ID from suite-level commissioning.
+	// When set, closeActiveZoneConns skips this zone between tests.
+	suiteZoneID string
+
+	// suiteZoneKey is the key in activeZoneConns for the suite zone
+	// (typically "main-" + suiteZoneID).
+	suiteZoneKey string
+
 	// pendingNotifications buffers notification frames that arrived while
 	// reading a command response (interleaved with the response).
 	pendingNotifications [][]byte
@@ -166,26 +174,94 @@ type Config struct {
 	// its capabilities to build a PICS file dynamically.
 	AutoPICS bool
 
+	// Shuffle randomizes test order within each precondition level.
+	// When true, a random seed is used and printed for reproducibility.
+	// When ShuffleSeed is set, that seed is used instead.
+	Shuffle bool
+
+	// ShuffleSeed is the seed for shuffle randomization.
+	// 0 means auto-generate from current time.
+	ShuffleSeed int64
+
 	// ProtocolLogger receives structured protocol events for debugging.
 	// Set to nil to disable protocol logging.
 	ProtocolLogger log.Logger
 }
 
+// ConnState represents the connection lifecycle state.
+type ConnState int
+
+const (
+	// ConnDisconnected means no socket resources are held.
+	ConnDisconnected ConnState = iota
+	// ConnTLSConnected means commissioning TLS is active (pre-PASE or during PASE).
+	ConnTLSConnected
+	// ConnOperational means operational TLS is active (post-commissioning, zone CA verified).
+	ConnOperational
+)
+
 // Connection represents a connection to the target.
 type Connection struct {
-	conn      net.Conn
-	tlsConn   *tls.Conn
-	framer    *transport.Framer
-	connected bool
+	conn   net.Conn
+	tlsConn *tls.Conn
+	framer  *transport.Framer
+	state   ConnState
 
-	// operational indicates this connection was established with operational
-	// TLS (zone CA-verified, mutual auth) after commissioning completed.
-	operational bool
+	// hadConnection is set to true when the connection enters any connected
+	// state (TLS or operational). It is NOT cleared on disconnect -- only
+	// explicitly during teardown. This allows verify_commissioning_state to
+	// distinguish "had a connection that was closed" (ADVERTISING) from
+	// "never connected" (IDLE).
+	hadConnection bool
 
 	// pendingNotifications buffers notifications that were read while
 	// waiting for an invoke response (e.g. during sendTriggerViaZone).
 	// handleWaitForNotificationAsZone drains this before reading the wire.
 	pendingNotifications [][]byte
+}
+
+// transitionTo changes the connection state. Any transition to ConnDisconnected
+// closes the underlying socket but does NOT nil the connection/framer pointers.
+// This is critical: handlers spawn goroutines that hold references to r.conn.framer
+// for async reads. If transitionTo nilled the framer, those goroutines would
+// panic on nil dereference. Instead, the closed socket causes ReadFrame/WriteFrame
+// to return an error, which is the safe way to signal goroutines.
+//
+// Pointers are nilled explicitly by clearConnectionRefs() which is called from
+// disconnectConnection/ensureDisconnected (full cleanup paths) and at connection
+// replacement points where a new Connection struct is created.
+func (c *Connection) transitionTo(newState ConnState) {
+	if newState == ConnDisconnected && c.state != ConnDisconnected {
+		if c.tlsConn != nil {
+			c.tlsConn.Close()
+		}
+		if c.conn != nil {
+			c.conn.Close()
+		}
+	}
+	if newState != ConnDisconnected {
+		c.hadConnection = true
+	}
+	c.state = newState
+}
+
+// clearConnectionRefs nils the connection/framer pointers after the socket
+// has been closed. Call this only from full-cleanup paths (disconnectConnection,
+// ensureDisconnected) where no goroutine could still be referencing the framer.
+func (c *Connection) clearConnectionRefs() {
+	c.tlsConn = nil
+	c.conn = nil
+	c.framer = nil
+}
+
+// isConnected returns true if the connection is in any connected state.
+func (c *Connection) isConnected() bool {
+	return c.state != ConnDisconnected
+}
+
+// isOperational returns true if the connection is in the operational state.
+func (c *Connection) isOperational() bool {
+	return c.state == ConnOperational
 }
 
 // setReadDeadlineFromContext sets the underlying connection's read deadline
@@ -284,6 +360,7 @@ func (r *Runner) nextMessageID() uint32 {
 // Run executes all matching test cases and returns the suite result.
 func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 	// Auto-PICS: discover device capabilities before loading tests.
+	// This runs first because PICS data influences test filtering.
 	if r.config.AutoPICS {
 		if err := r.runAutoPICS(ctx); err != nil {
 			return nil, fmt.Errorf("auto-PICS discovery failed: %w", err)
@@ -322,9 +399,32 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 	// Sort tests by precondition level to minimize state transitions.
 	SortByPreconditionLevel(cases)
 
+	// Shuffle within precondition levels if requested.
+	if r.config.Shuffle {
+		seed := r.config.ShuffleSeed
+		if seed == 0 {
+			seed = time.Now().UnixNano()
+		}
+		ShuffleWithinLevels(cases, seed)
+		stdlog.Printf("Shuffle: seed=%d", seed)
+	}
+
+	// Suite setup: commission once before any test runs if L3 tests exist.
+	// If autoPICS already established a suite zone, skip this.
+	if r.suiteZoneID == "" && needsSuiteCommissioning(cases, r) {
+		if err := r.commissionSuiteZone(ctx); err != nil {
+			stdlog.Printf("Suite commissioning failed: %v (tests will commission lazily)", err)
+		}
+	}
+
 	// Run the test suite
 	result := r.engine.RunSuite(ctx, cases)
 	result.SuiteName = fmt.Sprintf("MASH Conformance Tests (%s)", r.config.Target)
+
+	// Suite teardown: remove the suite zone and close all connections.
+	if r.suiteZoneKey != "" {
+		r.removeSuiteZone()
+	}
 
 	// Report summary only -- individual tests were already streamed via OnTestComplete.
 	r.reporter.ReportSummary(result)
@@ -332,8 +432,56 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 	return result, nil
 }
 
-// runAutoPICS commissions the device, reads its capabilities, builds a PICS
-// file, and then disconnects so tests can manage their own connections.
+// needsSuiteCommissioning returns true if the test suite contains any test
+// that requires a commissioned device (level 3), and the runner has a target.
+func needsSuiteCommissioning(cases []*loader.TestCase, r *Runner) bool {
+	if r.config.Target == "" {
+		return false
+	}
+	for _, tc := range cases {
+		if r.preconditionLevel(tc.Preconditions) >= precondLevelCommissioned {
+			return true
+		}
+	}
+	return false
+}
+
+// commissionSuiteZone performs one-time suite-level commissioning.
+func (r *Runner) commissionSuiteZone(ctx context.Context) error {
+	r.debugf("commissionSuiteZone: commissioning device for suite")
+	state := engine.NewExecutionState(ctx)
+
+	if err := r.ensureCommissioned(ctx, state); err != nil {
+		return fmt.Errorf("suite commissioning: %w", err)
+	}
+
+	r.recordSuiteZone()
+	r.debugf("commissionSuiteZone: suite zone established (id=%s key=%s)", r.suiteZoneID, r.suiteZoneKey)
+	return nil
+}
+
+// recordSuiteZone captures the current commissioned zone as the suite zone.
+func (r *Runner) recordSuiteZone() {
+	if r.paseState == nil || r.paseState.sessionKey == nil {
+		return
+	}
+	zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+	connKey := "main-" + zoneID
+	r.suiteZoneID = zoneID
+	r.suiteZoneKey = connKey
+}
+
+// removeSuiteZone sends RemoveZone for the suite zone and clears all state.
+func (r *Runner) removeSuiteZone() {
+	r.debugf("removeSuiteZone: tearing down suite zone %s", r.suiteZoneID)
+	r.sendRemoveZone()
+	r.closeAllZoneConns()
+	r.ensureDisconnected()
+}
+
+// runAutoPICS commissions the device, reads its capabilities, and builds a
+// PICS file. The commissioned session is preserved as the suite zone so
+// L3 tests can reuse it without re-commissioning.
 func (r *Runner) runAutoPICS(ctx context.Context) error {
 	state := engine.NewExecutionState(ctx)
 
@@ -369,21 +517,10 @@ func (r *Runner) runAutoPICS(ctx context.Context) error {
 		_, _ = r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
 	}
 
-	// Send RemoveZone so the device drops our auto-PICS zone, then
-	// disconnect. The trigger above ensures commissioning mode persists
-	// even if stale zones remain after our zone is removed.
-	r.debugf("auto-PICS: sending RemoveZone and disconnecting")
-	r.debugSnapshot("auto-PICS BEFORE cleanup")
-	r.sendRemoveZone()
-	r.ensureDisconnected()
-	r.debugSnapshot("auto-PICS AFTER cleanup")
-
-	// DEC-065: The auto-PICS commissioning triggers a connection cooldown
-	// (500ms) on the device. Wait for it to expire so subsequent test steps
-	// that attempt commissioning don't hit a stale cooldown rejection.
-	const autoPICSCooldownWait = 550 * time.Millisecond
-	r.debugf("auto-PICS: waiting %s for connection cooldown to expire", autoPICSCooldownWait)
-	time.Sleep(autoPICSCooldownWait)
+	// Keep the auto-PICS session as the suite zone. Run() will check
+	// needsSuiteCommissioning and skip if suiteZoneID is already set.
+	r.recordSuiteZone()
+	r.debugf("auto-PICS: preserving session as suite zone (id=%s)", r.suiteZoneID)
 
 	return nil
 }
@@ -495,7 +632,7 @@ func (r *Runner) removeActiveSubscription(subID uint32) {
 // next test. Uses a 2s deadline to avoid blocking if the device is
 // unresponsive.
 func (r *Runner) sendUnsubscribe(conn *Connection, subID uint32) {
-	if conn == nil || !conn.connected || conn.framer == nil {
+	if conn == nil || !conn.isConnected() || conn.framer == nil {
 		return
 	}
 	req := &wire.Request{
@@ -563,7 +700,7 @@ func (r *Runner) Close() error {
 	}
 	r.closeActiveZoneConns()
 	if r.conn != nil {
-		if r.conn.connected {
+		if r.conn.isConnected() {
 			r.sendRemoveZone()
 		}
 		return r.conn.Close()
@@ -574,20 +711,7 @@ func (r *Runner) Close() error {
 // Close closes the connection. It is idempotent: calling Close on an
 // already-closed connection is a no-op.
 func (c *Connection) Close() error {
-	c.connected = false
-	if c.tlsConn != nil {
-		err := c.tlsConn.Close()
-		c.tlsConn = nil
-		c.conn = nil
-		c.framer = nil
-		return err
-	}
-	if c.conn != nil {
-		err := c.conn.Close()
-		c.conn = nil
-		c.framer = nil
-		return err
-	}
+	c.transitionTo(ConnDisconnected)
 	return nil
 }
 
@@ -845,7 +969,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	_, hasCertChain := step.Params["cert_chain"]
 	_, hasKeyGroups := step.Params["key_exchange_groups"]
 	_, hasALPN := step.Params["alpn"]
-	if !commissioning && clientCertSpec == "" && !hasCertChain && !hasKeyGroups && !hasALPN && r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
+	if !commissioning && clientCertSpec == "" && !hasCertChain && !hasKeyGroups && !hasALPN && r.conn != nil && r.conn.isConnected() && r.conn.tlsConn != nil {
 		cs := r.conn.tlsConn.ConnectionState()
 		hasPeerCerts := len(cs.PeerCertificates) > 0
 		serverCertCNPrefix := ""
@@ -905,9 +1029,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}
 	needsDisconnectWait := false
 	if (clientCertParam == "controller_operational" || isOperationalChain) && r.conn != nil && r.conn.tlsConn != nil {
-		_ = r.conn.tlsConn.Close()
-		r.conn.tlsConn = nil
-		r.conn.connected = false
+		r.conn.transitionTo(ConnDisconnected)
 		needsDisconnectWait = true
 	}
 
@@ -1046,7 +1168,8 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	}
 	r.conn.tlsConn = conn
 	r.conn.framer = transport.NewFramer(conn)
-	r.conn.connected = true
+	r.conn.state = ConnTLSConnected
+	r.conn.hadConnection = true
 
 	// Set up protocol logging if configured
 	if r.config.ProtocolLogger != nil {
@@ -1135,7 +1258,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 // handleDisconnect closes the connection. If graceful=true, sends a
 // ControlClose frame and waits for acknowledgement before closing TCP.
 func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return map[string]any{KeyDisconnected: true, KeyConnectionClosed: true, KeyCloseAcknowledged: true}, nil
 	}
 
@@ -1175,15 +1298,27 @@ func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state 
 // whose MessageID matches is accepted. Orphaned responses from previous
 // operations (e.g. simulate_no_response) are discarded with a warning.
 func (r *Runner) sendRequest(data []byte, op string, expectedMsgID uint32) (*wire.Response, error) {
+	return r.sendRequestWithDeadline(context.Background(), data, op, expectedMsgID)
+}
+
+// sendRequestWithDeadline is like sendRequest but respects the context deadline
+// for the read timeout. Used by callers that need a shorter timeout than the
+// default 30 seconds (e.g., sendTriggerViaZone during test setup).
+func (r *Runner) sendRequestWithDeadline(ctx context.Context, data []byte, op string, expectedMsgID uint32) (*wire.Response, error) {
 	if err := r.conn.framer.WriteFrame(data); err != nil {
-		r.conn.connected = false
+		r.conn.transitionTo(ConnDisconnected)
 		return nil, fmt.Errorf("failed to send %s request: %w", op, err)
 	}
 
 	// Set a read deadline so we don't block forever if the device
-	// never responds. Clear it after reading completes.
+	// never responds. Use context deadline if available, otherwise 30s.
+	// Clear it after reading completes.
 	if r.conn.tlsConn != nil {
-		_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		deadline := time.Now().Add(30 * time.Second)
+		if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+			deadline = ctxDeadline
+		}
+		_ = r.conn.tlsConn.SetReadDeadline(deadline)
 		defer func() {
 			if r.conn.tlsConn != nil {
 				_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
@@ -1196,7 +1331,7 @@ func (r *Runner) sendRequest(data []byte, op string, expectedMsgID uint32) (*wir
 	for i := 0; i < 10; i++ {
 		respData, err := r.conn.framer.ReadFrame()
 		if err != nil {
-			r.conn.connected = false
+			r.conn.transitionTo(ConnDisconnected)
 			return nil, fmt.Errorf("failed to read %s response: %w", op, err)
 		}
 
@@ -1237,7 +1372,7 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		}, nil
 	}
 
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1465,7 +1600,7 @@ func isEmptyValue(v any) bool {
 
 // handleWrite sends a write request.
 func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1542,7 +1677,7 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 
 // handleSubscribe sends a subscribe request.
 func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1735,7 +1870,7 @@ func extractPrimingData(payload any) any {
 
 // handleInvoke sends an invoke request.
 func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 

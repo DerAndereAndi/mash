@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
+	mathrand "math/rand"
 	"net"
 	"sort"
 	"strings"
@@ -253,13 +253,34 @@ func SortByPreconditionLevel(cases []*loader.TestCase) {
 	})
 }
 
+// ShuffleWithinLevels randomizes the order of test cases within each
+// precondition level group. Cases must already be sorted by level.
+// The seed is used for reproducibility.
+func ShuffleWithinLevels(cases []*loader.TestCase, seed int64) {
+	rng := mathrand.New(mathrand.NewSource(seed))
+	i := 0
+	for i < len(cases) {
+		level := preconditionLevelFor(cases[i].Preconditions)
+		j := i + 1
+		for j < len(cases) && preconditionLevelFor(cases[j].Preconditions) == level {
+			j++
+		}
+		// Shuffle cases[i:j]
+		group := cases[i:j]
+		rng.Shuffle(len(group), func(a, b int) {
+			group[a], group[b] = group[b], group[a]
+		})
+		i = j
+	}
+}
+
 // currentLevel returns the runner's current precondition level based on connection
 // and commissioning state.
 func (r *Runner) currentLevel() int {
 	if r.paseState != nil && r.paseState.completed {
 		return precondLevelCommissioned
 	}
-	if r.conn != nil && r.conn.connected {
+	if r.conn != nil && r.conn.isConnected() {
 		return precondLevelConnected
 	}
 	return precondLevelNone
@@ -295,17 +316,34 @@ func (r *Runner) teardownTest(_ context.Context, _ *loader.TestCase, state *engi
 	// Close connections in a partial/dirty state (e.g., PASE X/Y exchanged
 	// but handshake never completed). Without this, the next test inherits a
 	// socket that the device considers mid-handshake, causing EOF/reset errors.
-	if r.conn != nil && r.conn.connected && (r.paseState == nil || !r.paseState.completed) {
+	if r.conn != nil && r.conn.isConnected() && (r.paseState == nil || !r.paseState.completed) {
 		r.debugf("teardown: closing connection with incomplete PASE state")
-		_ = r.conn.Close()
-		r.conn.connected = false
+		r.conn.transitionTo(ConnDisconnected)
 		r.paseState = nil
+	}
+
+	// Clear stale PASE state from failed handshakes. When a test triggers a
+	// PASE failure (e.g., wrong setup code), handleCommission closes the
+	// connection but paseState remains set with completed=false. Clear it
+	// here so the next test starts clean. No sleep needed -- the PASE retry
+	// logic in pase.go handles "commissioning already in progress" (error
+	// code 5) with proper backoff if the device still has a defunct session.
+	if r.paseState != nil && !r.paseState.completed {
+		r.debugf("teardown: clearing incomplete PASE state")
+		r.paseState = nil
+	}
+
+	// Reset hadConnection so the next test starts with a clean signal.
+	// verify_commissioning_state uses this to distinguish ADVERTISING
+	// (had a connection) from IDLE (never connected).
+	if r.conn != nil {
+		r.conn.hadConnection = false
 	}
 
 	if secState, ok := state.Custom["security"].(*securityState); ok && secState.pool != nil {
 		secState.pool.mu.Lock()
 		for _, conn := range secState.pool.connections {
-			if conn.connected {
+			if conn.isConnected() {
 				_ = conn.Close()
 			}
 		}
@@ -345,16 +383,19 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	// this before ensureCommissioned is called.
 	r.commissionZoneType = 0
 
-	// Reset device test state between tests when a previous test modified
-	// device state via triggers. Use a short timeout -- this is best-effort
-	// and must not consume the test's overall timeout budget.
-	if r.deviceStateModified && r.config.Target != "" && r.config.EnableKey != "" {
-		r.debugf("resetting device test state")
-		resetCtx, resetCancel := context.WithTimeout(ctx, 5*time.Second)
-		if err := r.sendTriggerViaZone(resetCtx, features.TriggerResetTestState, state); err != nil {
-			r.debugf("reset trigger failed: %v (continuing)", err)
+	// Always reset device test state between tests to prevent state
+	// contamination. triggerResetTestState resets attributes, measurements,
+	// control state, limits, clock offset, and per-zone subscriptions
+	// without removing zones or certificates.
+	if r.config.Target != "" && r.config.EnableKey != "" {
+		if r.conn != nil && r.conn.isConnected() && r.conn.isOperational() {
+			r.debugf("resetting device test state")
+			resetCtx, resetCancel := context.WithTimeout(ctx, 5*time.Second)
+			if err := r.sendTriggerViaZone(resetCtx, features.TriggerResetTestState, state); err != nil {
+				r.debugf("reset trigger failed: %v (continuing)", err)
+			}
+			resetCancel()
 		}
-		resetCancel()
 		r.deviceStateModified = false
 	}
 
@@ -377,8 +418,8 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		r.issuedDeviceCert = nil
 	}
 
-	// Close stale zone connections from previous tests so the device marks
-	// those zones as disconnected and can accept new connections.
+	// Close stale non-suite zone connections from previous tests so the
+	// device marks those zones as disconnected.
 	// When both the current and needed level are "commissioned" and no
 	// incompatible preconditions are present, skip the teardown to reuse
 	// the existing operational session (saves ~1.5s per test).
@@ -393,13 +434,22 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 
 	// Verify session is still healthy before reusing. A previous test may
 	// have corrupted the connection (protocol errors, partial reads, etc.).
-	// If the health check fails, fall through to closeActiveZoneConns.
-	// Only probe real device connections -- stub connections in unit tests
-	// don't have framers and would always fail the probe.
+	// If the health check fails, try to reconnect to the suite zone first
+	// before falling back to full recommission.
 	if canReuseSession && r.config.Target != "" {
 		if err := r.probeSessionHealth(); err != nil {
-			r.debugf("session health check failed for %s: %v, falling back to fresh commission", tc.ID, err)
-			canReuseSession = false
+			r.debugf("session health check failed for %s: %v", tc.ID, err)
+			if r.suiteZoneID != "" {
+				r.debugf("attempting reconnect to suite zone %s", r.suiteZoneID)
+				if reconnErr := r.reconnectToZone(state); reconnErr != nil {
+					r.debugf("reconnect failed: %v, falling back to fresh commission", reconnErr)
+					canReuseSession = false
+				} else {
+					r.debugf("reconnected to suite zone %s", r.suiteZoneID)
+				}
+			} else {
+				canReuseSession = false
+			}
 		}
 	}
 
@@ -408,43 +458,41 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		if hadActive {
 			r.debugf("closing %d stale zone connections", len(r.activeZoneConns))
 		}
-		r.closeActiveZoneConns()
+		// fresh_commission requires full zone removal including suite zone.
+		if needsFreshCommission(tc.Preconditions) && r.suiteZoneID != "" {
+			r.debugf("fresh_commission: removing suite zone %s", r.suiteZoneID)
+			r.closeAllZoneConns()
+			r.ensureDisconnected()
+		} else {
+			r.closeActiveZoneConns()
+		}
 	} else {
 		r.debugf("reusing session for %s (skipping closeActiveZoneConns)", tc.ID)
 	}
-	// No explicit sleep needed here: subsequent steps use mDNS polling
-	// (waitForCommissioningMode) or protocol probes (waitForOperationalReady)
-	// to detect when the device is ready.
 
-	// Force-close any stale main connection whose socket is still open
-	// despite being marked as disconnected. A failed request sets
-	// connected=false without closing the socket, leaving the device
-	// zone active and preventing commissioning mode.
-	if r.conn != nil && !r.conn.connected && (r.conn.tlsConn != nil || r.conn.conn != nil) {
-		r.debugf("closing phantom main socket (connected=false but socket open)")
-		_ = r.conn.Close()
-		// Reset PASE state so ensureCommissioned performs a fresh PASE
-		// handshake on the new connection instead of assuming the old
-		// session is still valid.
-		r.paseState = nil
-		if r.config.Target != "" {
-			r.lastDeviceConnClose = time.Now()
-		}
-	}
-
-	// DEC-059: On backward transition from commissioned, send RemoveZone
-	// so the device re-enters commissioning mode before we disconnect.
-	// This must happen before special precondition handlers (e.g.,
-	// PrecondTwoZonesConnected) that need the device in commissioning mode.
+	// DEC-059: On backward transition from commissioned, disconnect but
+	// keep the suite zone alive. Use disconnectConnection (not ensureDisconnected)
+	// to preserve crypto material for later reconnection.
 	if current >= precondLevelCommissioned && needed <= precondLevelCommissioning {
-		r.debugf("backward transition: sending RemoveZone (current=%d -> needed=%d)", current, needed)
-		r.sendRemoveZone()
+		if r.suiteZoneID != "" {
+			// Disconnect without removing zone. Device sees zone as
+			// disconnected, enabling commissioning mode (enable-key behavior).
+			r.debugf("backward transition: disconnecting (keep suite zone %s)", r.suiteZoneID)
+			r.disconnectConnection()
+		} else {
+			r.debugf("backward transition: sending RemoveZone (current=%d -> needed=%d)", current, needed)
+			r.sendRemoveZone()
+		}
 	}
 
 	// Backwards transition: disconnect to give the device a clean state.
 	if needed < current && needed <= precondLevelCommissioning {
 		r.debugf("backward transition: disconnecting (current=%d -> needed=%d)", current, needed)
-		r.ensureDisconnected()
+		if r.suiteZoneID != "" {
+			r.disconnectConnection()
+		} else {
+			r.ensureDisconnected()
+		}
 		if r.config.Target != "" {
 			r.lastDeviceConnClose = time.Now()
 		}
@@ -617,7 +665,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 				ct := getConnectionTracker(state)
 				for _, name := range []string{"GRID", "BUILDING", "HOME", "USER1", "USER2"} {
 					if _, exists := ct.zoneConnections[name]; !exists {
-						ct.zoneConnections[name] = &Connection{connected: true}
+						ct.zoneConnections[name] = &Connection{state: ConnOperational}
 					}
 				}
 			case PrecondTwoZonesConnected:
@@ -656,7 +704,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 						// synchronously process zone removal and re-enter
 						// commissioning mode. Without this, the device relies
 						// on async TCP disconnect detection which is slower.
-						if r.conn != nil && r.conn.connected && r.paseState != nil && r.paseState.completed {
+						if r.conn != nil && r.conn.isConnected() && r.paseState != nil && r.paseState.completed {
 							r.debugf("two_zones_connected: sending RemoveZone before disconnect (zone %d)", i)
 							r.sendRemoveZone()
 						}
@@ -732,7 +780,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 					// first zone because tests that disconnect LOCAL expect
 					// GRID (r.conn) to remain alive.
 					firstZone := zones[0]
-					if zc, ok := ct.zoneConnections[firstZone.name]; ok && zc.connected {
+					if zc, ok := ct.zoneConnections[firstZone.name]; ok && zc.isConnected() {
 						r.conn = zc
 						r.debugf("two_zones_connected: restored r.conn from zone %s", firstZone.name)
 					}
@@ -752,7 +800,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 						if _, exists := ct.zoneConnections[z.name]; exists {
 							continue
 						}
-						dummyConn := &Connection{connected: true}
+						dummyConn := &Connection{state: ConnOperational}
 						ct.zoneConnections[z.name] = dummyConn
 						r.activeZoneConns[z.name] = dummyConn
 					}
@@ -790,7 +838,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 						}
 						r.debugf("device_zones_full: commissioning zone %s (type=%d)", z.name, z.zt)
 
-						if r.conn != nil && r.conn.connected && r.paseState != nil && r.paseState.completed {
+						if r.conn != nil && r.conn.isConnected() && r.paseState != nil && r.paseState.completed {
 							r.debugf("device_zones_full: sending RemoveZone before disconnect (zone %d)", i)
 							r.sendRemoveZone()
 						}
@@ -865,7 +913,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 			if r.config.Target == "" {
 				for _, z := range []string{"GRID", "LOCAL"} {
 					if _, exists := ct.zoneConnections[z]; !exists {
-						dummyConn := &Connection{connected: true}
+						dummyConn := &Connection{state: ConnOperational}
 						ct.zoneConnections[z] = dummyConn
 						r.activeZoneConns[z] = dummyConn
 					}
@@ -957,10 +1005,9 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 			if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
 				r.debugf("commissioning mode: %v (continuing)", err)
 			}
-			// Wait for any lingering commissioning cooldown to expire so the
-			// first PASE attempt in the test doesn't get a "busy" rejection
-			// that would skew the PASE backoff counter.
-			time.Sleep(1 * time.Second)
+			// No cooldown sleep needed: the PASE retry logic in pase.go
+			// handles "busy" rejections by reading the retry_after field
+			// from the error response and waiting the exact duration.
 			r.lastDeviceConnClose = time.Now()
 		}
 		state.Set(StateCommissioningActive, true)
@@ -1050,7 +1097,7 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 // to endpoint 1 / EnergyControl on the device. Used by the no_existing_limits
 // precondition to ensure the device has no stale limits from prior tests.
 func (r *Runner) sendClearLimitInvoke(_ context.Context) error {
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return fmt.Errorf("no connection for ClearLimit")
 	}
 
@@ -1075,7 +1122,7 @@ func (r *Runner) sendClearLimitInvoke(_ context.Context) error {
 
 // ensureConnected checks if already connected; if not, establishes a commissioning TLS connection.
 func (r *Runner) ensureConnected(ctx context.Context, state *engine.ExecutionState) error {
-	if r.conn != nil && r.conn.connected {
+	if r.conn != nil && r.conn.isConnected() {
 		return nil
 	}
 
@@ -1104,7 +1151,7 @@ func (r *Runner) ensureConnected(ctx context.Context, state *engine.ExecutionSta
 // ensureCommissioned checks if already commissioned; if not, connects and performs PASE.
 func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.ExecutionState) error {
 	// Track whether we already had a live connection before ensureConnected.
-	wasConnected := r.conn != nil && r.conn.connected
+	wasConnected := r.conn != nil && r.conn.isConnected()
 
 	r.debugf("ensureCommissioned: wasConnected=%v paseState=%v paseCompleted=%v",
 		wasConnected,
@@ -1156,6 +1203,8 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 
 	_, err := r.handleCommission(ctx, step, state)
 	if err != nil {
+		classified := classifyPASEError(err)
+
 		// DEC-065: If the device rejects with a cooldown error, wait for the
 		// remaining cooldown and retry once. This handles transitions between
 		// auto-PICS discovery and test execution where the cooldown from the
@@ -1177,16 +1226,16 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 			return r.transitionToOperational(state)
 		}
 
-		// Zone slots full or transient errors: retry after disconnect + delay.
-		// The device auto-evicts disconnected zones in test mode when slots
-		// are full, so a simple retry after reconnecting should succeed.
+		// Device errors (wrong setup code, zone type exists) are not retryable.
+		if Category(classified) == ErrCatDevice {
+			return fmt.Errorf("precondition commission rejected by device: %w", err)
+		}
 
-		// On transient errors (EOF, connection reset, broken pipe, zone slots full), retry
-		// up to 2 times after a short delay. The device may still be
-		// cycling its commissioning window in test mode, especially after
-		// zone removals that trigger mDNS and file I/O operations.
+		// Infrastructure errors (network, zone slots full via auto-evict): retry
+		// after disconnect + delay. The device may still be cycling its
+		// commissioning window in test mode, especially after zone removals.
 		const maxRetries = 2
-		if isTransientError(err) || isZoneSlotsFull(err) {
+		if Category(classified) == ErrCatInfrastructure {
 			for retry := 1; retry <= maxRetries; retry++ {
 				r.ensureDisconnected()
 				time.Sleep(1 * time.Second)
@@ -1200,12 +1249,15 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 					}
 					return r.transitionToOperational(state)
 				}
-				if !isTransientError(err) && !isZoneSlotsFull(err) {
+				retryClassified := classifyPASEError(err)
+				if Category(retryClassified) != ErrCatInfrastructure {
 					break
 				}
 			}
 			return fmt.Errorf("precondition commission failed after %d retries: %w", maxRetries, err)
 		}
+
+		// Protocol errors: fail immediately.
 		return fmt.Errorf("precondition commission failed: %w", err)
 	}
 
@@ -1266,10 +1318,9 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 
 	// Create new connection wrapper
 	r.conn = &Connection{
-		tlsConn:     tlsConn,
-		framer:      transport.NewFramer(tlsConn),
-		connected:   true,
-		operational: true,
+		tlsConn: tlsConn,
+		framer:  transport.NewFramer(tlsConn),
+		state:   ConnOperational,
 	}
 	state.Set(StateConnection, r.conn)
 	// Record timestamp for verify_timing (TC-TRANS-004).
@@ -1285,6 +1336,56 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 	r.activeZoneConns[connKey] = r.conn
 	r.activeZoneIDs[connKey] = zoneID
 	r.debugf("transitionToOperational: reconnected and registered zone %s in activeZoneConns", zoneID)
+
+	return nil
+}
+
+// reconnectToZone re-establishes an operational TLS connection to an existing
+// suite zone using stored crypto material. No PASE/cert exchange needed.
+// Returns an error if the reconnection fails.
+func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
+	if r.suiteZoneID == "" {
+		return fmt.Errorf("no suite zone to reconnect to")
+	}
+	if r.zoneCAPool == nil || r.controllerCert == nil {
+		return fmt.Errorf("no crypto material for reconnection")
+	}
+
+	r.debugf("reconnectToZone: reconnecting to zone %s", r.suiteZoneID)
+
+	tlsConfig := r.operationalTLSConfig()
+	var tlsConn *tls.Conn
+	var dialErr error
+	for attempt := range 3 {
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", r.config.Target, tlsConfig)
+		if dialErr == nil {
+			break
+		}
+		r.debugf("reconnectToZone: dial attempt %d failed: %v", attempt+1, dialErr)
+		time.Sleep(50 * time.Millisecond)
+	}
+	if dialErr != nil {
+		return fmt.Errorf("reconnectToZone failed: %w", dialErr)
+	}
+
+	r.conn = &Connection{
+		tlsConn: tlsConn,
+		framer:  transport.NewFramer(tlsConn),
+		state:   ConnOperational,
+	}
+	state.Set(StateConnection, r.conn)
+
+	// Verify the device accepts us on this connection.
+	if err := r.waitForOperationalReady(2 * time.Second); err != nil {
+		r.debugf("reconnectToZone: readiness check failed: %v", err)
+		r.conn.transitionTo(ConnDisconnected)
+		return fmt.Errorf("reconnectToZone readiness failed: %w", err)
+	}
+
+	// Re-register in activeZoneConns.
+	r.activeZoneConns[r.suiteZoneKey] = r.conn
+	r.debugf("reconnectToZone: reconnected to zone %s", r.suiteZoneID)
 
 	return nil
 }
@@ -1315,70 +1416,59 @@ func cooldownRemaining(err error) time.Duration {
 	return d + 50*time.Millisecond
 }
 
-// isZoneSlotsFull returns true if the error indicates the device rejected
-// commissioning because all zone slots are occupied.
-func isZoneSlotsFull(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "zone slots full")
-}
-
-// isTransientError returns true for IO-level errors that may resolve on retry.
+// isTransientError returns true for errors that may resolve on retry.
+// Checks for classified infrastructure errors first, then falls back to
+// IO-level pattern matching for unclassified errors.
 func isTransientError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if err == io.EOF || err == io.ErrUnexpectedEOF {
-		return true
+	// Classified errors: only infrastructure is retryable.
+	var ce *ClassifiedError
+	if errors.As(err, &ce) {
+		return ce.Category == ErrCatInfrastructure
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "EOF") ||
-		strings.Contains(msg, "connection reset") ||
-		strings.Contains(msg, "broken pipe") ||
-		strings.Contains(msg, "connection refused") ||
-		strings.Contains(msg, "deadline exceeded") ||
-		isNetError(err)
+	// Unclassified: fall back to IO pattern matching.
+	return isIOError(err)
 }
 
-// isNetError checks if the error is a network-level error.
-func isNetError(err error) bool {
-	var netErr *net.OpError
-	return errors.As(err, &netErr)
-}
-
-// ensureDisconnected closes any existing connection for a clean start.
-// closeActiveZoneConns closes all runner-tracked zone connections from
-// previous tests. This ensures the device marks those zones as disconnected
-// and can accept new connections.
+// closeActiveZoneConns closes runner-tracked zone connections from previous
+// tests. The suite zone (if any) is preserved -- only non-suite connections
+// are removed. Use closeAllZoneConns for full cleanup (suite teardown).
 func (r *Runner) closeActiveZoneConns() {
+	r.closeActiveZoneConnsExcept(r.suiteZoneKey)
+}
+
+// closeAllZoneConns closes ALL zone connections including the suite zone.
+// Used during suite teardown and fresh_commission precondition.
+func (r *Runner) closeAllZoneConns() {
+	r.closeActiveZoneConnsExcept("")
+}
+
+// closeActiveZoneConnsExcept closes all runner-tracked zone connections
+// except the one matching exceptKey.
+func (r *Runner) closeActiveZoneConnsExcept(exceptKey string) {
 	closedAny := false
 	for id, conn := range r.activeZoneConns {
-		r.debugf("closeActiveZoneConns: zone %s (connected=%v tls=%v raw=%v)",
-			id, conn.connected, conn.tlsConn != nil, conn.conn != nil)
+		if exceptKey != "" && id == exceptKey {
+			r.debugf("closeActiveZoneConns: keeping suite zone %s", id)
+			continue
+		}
+		r.debugf("closeActiveZoneConns: zone %s (state=%v tls=%v raw=%v)",
+			id, conn.state, conn.tlsConn != nil, conn.conn != nil)
 		// Send explicit RemoveZone before closing so the device can
 		// synchronously process the zone removal and re-enter commissioning
-		// mode quickly. Without this, the device relies on async TCP
-		// disconnect detection which is much slower and each premature
-		// PASE attempt further delays recovery.
-		// Try to send RemoveZone even on "dead" connections (connected=false).
-		// TCP is full-duplex: a read failure doesn't always mean the write
-		// side is dead. If the write fails, no harm done.
+		// mode quickly.
 		if conn.framer != nil {
 			if zoneID, ok := r.activeZoneIDs[id]; ok {
-				r.debugf("closeActiveZoneConns: sending RemoveZone for zone %s (zoneID=%s, connected=%v)", id, zoneID, conn.connected)
+				r.debugf("closeActiveZoneConns: sending RemoveZone for zone %s (zoneID=%s, state=%v)", id, zoneID, conn.state)
 				r.sendRemoveZoneOnConn(conn, zoneID)
 			}
 		}
-		// Always close the underlying socket, even if connected was set
-		// to false by a failed request. Without this, the device still
-		// sees an active TCP connection and the zone remains "active",
-		// preventing it from re-entering commissioning mode.
 		if conn.tlsConn != nil || conn.conn != nil {
 			closedAny = true
 		}
-		// Send ControlClose before TCP close so the device's message
-		// loop exits immediately instead of waiting for TCP timeout.
+		// Send ControlClose before TCP close.
 		if conn.framer != nil {
 			closeMsg := &wire.ControlMessage{Type: wire.ControlClose}
 			if closeData, err := wire.EncodeControlMessage(closeMsg); err == nil {
@@ -1386,29 +1476,25 @@ func (r *Runner) closeActiveZoneConns() {
 			}
 		}
 		_ = conn.Close()
+		conn.clearConnectionRefs()
 		delete(r.activeZoneConns, id)
 		delete(r.activeZoneIDs, id)
 	}
-	// Clear PASE state when any zone connections were closed.
-	// The runner must re-commission for the next test. Without this,
-	// ensureCommissioned sees paseState.completed=true and skips
-	// commissioning, but the connection is already closed.
 	if closedAny {
 		r.paseState = nil
 		r.lastDeviceConnClose = time.Now()
 	}
 }
 
-func (r *Runner) ensureDisconnected() {
-	// Always close the socket, not just when connected=true. A failed
-	// request sets connected=false without closing the underlying TCP
-	// socket, which leaves a phantom zone on the device.
+// disconnectConnection closes the TCP connection but preserves crypto material
+// (zoneCA, controllerCert, zoneCAPool) and suite zone identity. Used for L3->L1
+// transitions where the connection will be re-established later.
+func (r *Runner) disconnectConnection() {
 	if r.conn != nil {
-		if r.conn.connected || r.conn.tlsConn != nil || r.conn.conn != nil {
-			r.debugf("ensureDisconnected: closing (connected=%v tls=%v raw=%v)",
-				r.conn.connected, r.conn.tlsConn != nil, r.conn.conn != nil)
-			// Send ControlClose before TCP close so the device's message
-			// loop exits immediately instead of waiting for TCP timeout.
+		if r.conn.isConnected() || r.conn.tlsConn != nil || r.conn.conn != nil {
+			r.debugf("disconnectConnection: closing (state=%v tls=%v raw=%v)",
+				r.conn.state, r.conn.tlsConn != nil, r.conn.conn != nil)
+			// Send ControlClose before TCP close.
 			if r.conn.framer != nil {
 				closeMsg := &wire.ControlMessage{Type: wire.ControlClose}
 				if closeData, err := wire.EncodeControlMessage(closeMsg); err == nil {
@@ -1417,19 +1503,32 @@ func (r *Runner) ensureDisconnected() {
 			}
 		}
 		_ = r.conn.Close()
+		// Nil pointers after close. This is the full-cleanup path --
+		// no goroutines should be referencing this connection's framer
+		// because disconnectConnection is called between tests, not
+		// mid-handler.
+		r.conn.clearConnectionRefs()
 	}
 	r.paseState = nil
+}
+
+// ensureDisconnected closes the connection AND clears all crypto material.
+// Used when abandoning the suite zone entirely (suite teardown, fresh_commission).
+func (r *Runner) ensureDisconnected() {
+	r.disconnectConnection()
 	r.zoneCA = nil
 	r.controllerCert = nil
 	r.zoneCAPool = nil
 	r.issuedDeviceCert = nil
+	r.suiteZoneID = ""
+	r.suiteZoneKey = ""
 }
 
 // sendRemoveZone sends a RemoveZone invoke to the device so it re-enters
 // commissioning mode (DEC-059). Errors are ignored because the device may
 // have already closed the connection.
 func (r *Runner) sendRemoveZone() {
-	if r.conn == nil || !r.conn.connected || r.conn.framer == nil {
+	if r.conn == nil || !r.conn.isConnected() || r.conn.framer == nil {
 		return
 	}
 	if r.paseState == nil || !r.paseState.completed || r.paseState.sessionKey == nil {

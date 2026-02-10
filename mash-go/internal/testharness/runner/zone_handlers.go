@@ -472,7 +472,7 @@ func (r *Runner) handleDisconnectZone(ctx context.Context, step *loader.Step, st
 	// Close tracked connection regardless of zone state.
 	ct := getConnectionTracker(state)
 	if conn, ok := ct.zoneConnections[zoneID]; ok {
-		if conn.connected {
+		if conn.isConnected() {
 			_ = conn.Close()
 		}
 		delete(ct.zoneConnections, zoneID)
@@ -480,9 +480,9 @@ func (r *Runner) handleDisconnectZone(ctx context.Context, step *loader.Step, st
 	}
 
 	// No tracked zone connection -- fall back to runner's main connection.
-	if zoneID == "" && r.conn != nil && r.conn.connected {
+	if zoneID == "" && r.conn != nil && r.conn.isConnected() {
 		_ = r.conn.Close()
-		r.conn.connected = false
+		r.conn.transitionTo(ConnDisconnected)
 		return map[string]any{KeyZoneDisconnected: true, KeyConnectionClosed: true}, nil
 	}
 
@@ -503,7 +503,7 @@ func (r *Runner) handleVerifyOtherZone(ctx context.Context, step *loader.Step, s
 	// Real device: find the other zone's connection and read zoneCount.
 	if r.config.Target != "" {
 		conn := r.findOtherZoneConn(zoneID)
-		if conn == nil || !conn.connected {
+		if conn == nil || !conn.isConnected() {
 			return map[string]any{
 				"other_zone_active": false,
 				KeyZoneCount:       0,
@@ -608,14 +608,14 @@ func toIntValue(v any) int {
 func (r *Runner) findOtherZoneConn(zoneID string) *Connection {
 	for name, id := range r.activeZoneIDs {
 		if id == zoneID {
-			if conn, ok := r.activeZoneConns[name]; ok && conn.connected {
+			if conn, ok := r.activeZoneConns[name]; ok && conn.isConnected() {
 				return conn
 			}
 		}
 	}
 	// Also check connections stored via ZoneConnectionStateKey.
 	for name, conn := range r.activeZoneConns {
-		if conn.connected && name != "GRID" && name != "main-"+zoneID {
+		if conn.isConnected() && name != "GRID" && name != "main-"+zoneID {
 			// Return any live zone connection that isn't the removed zone.
 			return conn
 		}
@@ -626,7 +626,7 @@ func (r *Runner) findOtherZoneConn(zoneID string) *Connection {
 // handleVerifyBidirectionalActive verifies bidirectional communication is active.
 func (r *Runner) handleVerifyBidirectionalActive(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Check connection is alive.
-	active := r.conn != nil && r.conn.connected
+	active := r.conn != nil && r.conn.isConnected()
 
 	return map[string]any{
 		KeyBidirectionalActive: active,
@@ -636,7 +636,7 @@ func (r *Runner) handleVerifyBidirectionalActive(ctx context.Context, step *load
 // handleVerifyRestoreSequence verifies restore sequence after reconnection.
 func (r *Runner) handleVerifyRestoreSequence(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Verify connection is re-established.
-	restored := r.conn != nil && r.conn.connected
+	restored := r.conn != nil && r.conn.isConnected()
 
 	// Check if queued commands were replayed by verifying the connection
 	// is operational and the device is responding.
@@ -658,7 +658,7 @@ func (r *Runner) handleVerifyRestoreSequence(ctx context.Context, step *loader.S
 func (r *Runner) handleVerifyTLSState(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
+	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
 		return map[string]any{
 			KeyTLSActive:  false,
 			KeyTLSVersion: 0,

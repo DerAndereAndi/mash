@@ -437,7 +437,7 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 		// Not a valid notification -- ignore and continue to wire read.
 	}
 
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return map[string]any{
 			KeyNotificationReceived: false,
 			KeyError:                "not connected",
@@ -639,7 +639,7 @@ func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state 
 		}, nil
 	}
 
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return map[string]any{
 			KeyReportReceived: false,
 			KeyError:          "not connected",

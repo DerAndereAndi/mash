@@ -22,7 +22,7 @@ func (r *Runner) registerTriggerHandlers() {
 // handleTriggerTestEvent sends a triggerTestEvent invoke to the device's
 // TestControl feature on endpoint 0.
 func (r *Runner) handleTriggerTestEvent(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		// Not connected -- try delivering to the real device via a temporary
 		// zone commission if a target is configured. This covers tests like
 		// TC-MASHC-002 and TC-DSTATE-002 that trigger an event and then
@@ -84,7 +84,7 @@ func (r *Runner) handleTriggerTestEvent(ctx context.Context, step *loader.Step, 
 		return nil, fmt.Errorf("failed to encode trigger request: %w", err)
 	}
 
-	resp, err := r.sendRequest(data, "trigger_test_event", req.MessageID)
+	resp, err := r.sendRequestWithDeadline(ctx, data, "trigger_test_event", req.MessageID)
 	if err != nil {
 		return nil, err
 	}

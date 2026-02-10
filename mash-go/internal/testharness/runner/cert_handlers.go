@@ -38,7 +38,7 @@ func (r *Runner) registerCertHandlers() {
 
 // handleVerifyCertificate verifies a certificate's validity (chain, expiry).
 func (r *Runner) handleVerifyCertificate(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
+	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
 		return map[string]any{
 			KeyCertValid:  false,
 			KeyChainValid: false,
@@ -90,7 +90,7 @@ func (r *Runner) handleVerifyCertSubject(ctx context.Context, step *loader.Step,
 	var cert *x509.Certificate
 	if r.issuedDeviceCert != nil {
 		cert = r.issuedDeviceCert
-	} else if r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
+	} else if r.conn != nil && r.conn.isConnected() && r.conn.tlsConn != nil {
 		cs := r.conn.tlsConn.ConnectionState()
 		if len(cs.PeerCertificates) > 0 {
 			cert = cs.PeerCertificates[0]
@@ -142,7 +142,7 @@ func (r *Runner) handleVerifyDeviceCert(ctx context.Context, step *loader.Step, 
 	if r.issuedDeviceCert != nil {
 		deviceCert = r.issuedDeviceCert
 		hasOperationalCert = true
-	} else if r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
+	} else if r.conn != nil && r.conn.isConnected() && r.conn.tlsConn != nil {
 		cs := r.conn.tlsConn.ConnectionState()
 		if len(cs.PeerCertificates) > 0 {
 			deviceCert = cs.PeerCertificates[0]
@@ -174,7 +174,7 @@ func (r *Runner) handleVerifyDeviceCertStore(ctx context.Context, step *loader.S
 	hasCerts := false
 	certCount := 0
 
-	if r.conn != nil && r.conn.connected && r.conn.tlsConn != nil {
+	if r.conn != nil && r.conn.isConnected() && r.conn.tlsConn != nil {
 		tlsState := r.conn.tlsConn.ConnectionState()
 		hasCerts = len(tlsState.PeerCertificates) > 0
 		certCount = len(tlsState.PeerCertificates)
@@ -203,7 +203,7 @@ func (r *Runner) handleGetCertFingerprint(ctx context.Context, step *loader.Step
 	}
 
 	// Fall back to TLS peer cert.
-	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
+	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
 		return map[string]any{KeyFingerprint: ""}, nil
 	}
 
@@ -223,7 +223,7 @@ func (r *Runner) handleGetCertFingerprint(ctx context.Context, step *loader.Step
 
 // handleExtractCertDeviceID extracts device ID from cert CN.
 func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
+	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
 		return map[string]any{KeyDeviceID: "", KeyExtracted: false}, nil
 	}
 
@@ -259,7 +259,7 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 	paseCompleted := r.paseState != nil && r.paseState.completed
 
 	// Probe the connection to detect remote closure (e.g., after PASE timeout).
-	connected := r.conn != nil && r.conn.connected
+	connected := r.conn != nil && r.conn.isConnected()
 	if connected && r.conn.tlsConn != nil {
 		// Real TLS connection: probe with a short read to detect EOF/reset.
 		_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
@@ -271,7 +271,7 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 				// read timed out -- connection still alive
 			} else {
 				// EOF, reset, or other error -- remote closed.
-				r.conn.connected = false
+				r.conn.transitionTo(ConnDisconnected)
 				connected = false
 			}
 		}
@@ -281,7 +281,7 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 	// - COMMISSIONED: PASE completed successfully
 	// - CONNECTED: TLS connected but not yet commissioned
 	// - ADVERTISING: was connected but device closed the connection
-	//   (e.g., PASE timeout), device returns to commissioning mode
+	//   (e.g., PASE timeout or failure), device returns to commissioning mode
 	// - IDLE: no connection was ever established in this test
 	var currentState string
 	switch {
@@ -289,8 +289,11 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 		currentState = CommissioningStateCommissioned
 	case connected:
 		currentState = CommissioningStateConnected
-	case r.conn != nil && r.conn.tlsConn != nil:
-		// Had a connection but it was closed (probe detected remote close).
+	case r.conn != nil && r.conn.hadConnection:
+		// Had a commissioning connection that is now closed. The device
+		// returns to ADVERTISING after PASE failure/timeout.
+		// hadConnection survives transitionTo(ConnDisconnected) which
+		// nils tlsConn -- it tracks connection history, not current state.
 		currentState = CommissioningStateAdvertising
 	default:
 		currentState = "IDLE"
@@ -319,7 +322,7 @@ func (r *Runner) handleResetPASESession(ctx context.Context, step *loader.Step, 
 
 // handleSendPASEX sends a raw PASE X value (for error testing).
 func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -340,8 +343,7 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 
 	if err != nil {
 		// Write failed -- connection is dead, clean up.
-		_ = r.conn.Close()
-		r.conn.connected = false
+		r.conn.transitionTo(ConnDisconnected)
 		r.paseState = nil
 		return outputs, err
 	}
@@ -349,8 +351,7 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 	if invalidPoint {
 		// Device closes connection for invalid point -- close our side too
 		// so subsequent tests don't inherit a dead socket.
-		_ = r.conn.Close()
-		r.conn.connected = false
+		r.conn.transitionTo(ConnDisconnected)
 		r.paseState = nil
 		outputs[KeyConnectionClosed] = true
 		outputs[KeyError] = "INVALID_PARAMETER"
@@ -373,7 +374,7 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 
 // handleDeviceVerifyPeer verifies peer cert in D2D scenario.
 func (r *Runner) handleDeviceVerifyPeer(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
+	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
 		// No active TLS connection -- check D2D precondition state
 		// to simulate the verification result.
 		// Check expired first: it's more specific than same_zone (a test can

@@ -162,7 +162,7 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	secState.pool.mu.Lock()
 	hasExisting := false
 	for _, c := range secState.pool.connections {
-		if c.connected && !c.operational {
+		if c.isConnected() && !c.isOperational() {
 			hasExisting = true
 			break
 		}
@@ -220,16 +220,16 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	// Store in pool
 	secState.pool.mu.Lock()
 	newConn := &Connection{
-		tlsConn:   conn,
-		framer:    transport.NewFramer(conn),
-		connected: true,
+		tlsConn: conn,
+		framer:  transport.NewFramer(conn),
+		state:   ConnTLSConnected,
 	}
 	secState.pool.connections = append(secState.pool.connections, newConn)
 	index := len(secState.pool.connections) - 1
 	secState.pool.mu.Unlock()
 
 	// Also set as main connection if not already connected
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		r.conn = newConn
 	}
 
@@ -257,7 +257,7 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 				conn.Close()
 				secState.pool.mu.Lock()
 				if index < len(secState.pool.connections) {
-					secState.pool.connections[index].connected = false
+					secState.pool.connections[index].transitionTo(ConnDisconnected)
 				}
 				secState.pool.mu.Unlock()
 				return map[string]any{
@@ -308,7 +308,7 @@ func (r *Runner) handleCloseConnection(ctx context.Context, step *loader.Step, s
 	}
 
 	conn := secState.pool.connections[index]
-	if conn.connected {
+	if conn.isConnected() {
 		_ = conn.Close()
 	}
 
@@ -335,7 +335,7 @@ func (r *Runner) handleCheckConnectionClosed(ctx context.Context, step *loader.S
 	conn := secState.pool.connections[index]
 	secState.pool.mu.Unlock()
 
-	if !conn.connected || conn.tlsConn == nil {
+	if !conn.isConnected() || conn.tlsConn == nil {
 		return map[string]any{
 			KeyConnectionClosed: true,
 			KeyIndex:            index,
@@ -350,7 +350,7 @@ func (r *Runner) handleCheckConnectionClosed(ctx context.Context, step *loader.S
 
 	closed := err != nil // EOF, reset, or timeout all indicate closure
 	if closed {
-		conn.connected = false
+		conn.transitionTo(ConnDisconnected)
 	}
 
 	return map[string]any{
@@ -367,7 +367,7 @@ func (r *Runner) handleCheckActiveConnections(ctx context.Context, step *loader.
 	secState.pool.mu.Lock()
 	count := 0
 	for _, c := range secState.pool.connections {
-		if c.connected {
+		if c.isConnected() {
 			count++
 		}
 	}
@@ -534,10 +534,9 @@ func (r *Runner) handleConnectOperational(ctx context.Context, step *loader.Step
 	secState := getSecurityState(state)
 	secState.pool.mu.Lock()
 	newConn := &Connection{
-		tlsConn:     conn,
-		framer:      transport.NewFramer(conn),
-		connected:   true,
-		operational: true,
+		tlsConn: conn,
+		framer:  transport.NewFramer(conn),
+		state:   ConnOperational,
 	}
 	secState.pool.connections = append(secState.pool.connections, newConn)
 	secState.pool.mu.Unlock()
@@ -569,7 +568,7 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 	}
 
 	// Send trigger if connected.
-	if r.conn != nil && r.conn.connected && r.config.EnableKey != "" {
+	if r.conn != nil && r.conn.isConnected() && r.config.EnableKey != "" {
 		triggerResult, err := r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
 		if err == nil {
 			triggerResult[KeyCommissioningModeEntered] = true
@@ -582,7 +581,7 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 	// When no connection is available, deliver the trigger via a temporary
 	// zone. This handles backoff tests where only raw PASE attempts were
 	// made and the harness has no operational connection.
-	if r.config.EnableKey != "" && r.config.Target != "" && (r.conn == nil || !r.conn.connected) {
+	if r.config.EnableKey != "" && r.config.Target != "" && (r.conn == nil || !r.conn.isConnected()) {
 		if triggerResult, err := r.deliverTriggerViaTemporaryZone(features.TriggerEnterCommissioningMode, state); err == nil {
 			// Restore commissioning state that handleCommission changed.
 			secState.commissioningActive = true
@@ -611,7 +610,7 @@ func (r *Runner) handleExitCommissioningMode(ctx context.Context, step *loader.S
 	state.Set(StateCommissioningActive, false)
 
 	// Send trigger if connected.
-	if r.conn != nil && r.conn.connected && r.config.EnableKey != "" {
+	if r.conn != nil && r.conn.isConnected() && r.config.EnableKey != "" {
 		triggerResult, err := r.sendTrigger(ctx, features.TriggerExitCommissioningMode, state)
 		if err == nil {
 			triggerResult[KeyCommissioningModeExited] = true
@@ -624,10 +623,10 @@ func (r *Runner) handleExitCommissioningMode(ctx context.Context, step *loader.S
 	// attempts), try sending the trigger via a zone connection from the
 	// connection tracker. This ensures exit_commissioning_mode reaches the
 	// device even when the harness has no operational main connection.
-	if r.config.EnableKey != "" && (r.conn == nil || !r.conn.connected) {
+	if r.config.EnableKey != "" && (r.conn == nil || !r.conn.isConnected()) {
 		ct := getConnectionTracker(state)
 		for _, zc := range ct.zoneConnections {
-			if zc.connected {
+			if zc.isConnected() {
 				saved := r.conn
 				r.conn = zc
 				triggerResult, err := r.sendTrigger(ctx, features.TriggerExitCommissioningMode, state)
@@ -644,7 +643,7 @@ func (r *Runner) handleExitCommissioningMode(ctx context.Context, step *loader.S
 	// Last resort: deliver the trigger via a temporary zone when no
 	// connections exist. Commissions with correct setup code, sends
 	// trigger, then tears down. Accepts backoff delay from prior failures.
-	if r.config.EnableKey != "" && r.config.Target != "" && (r.conn == nil || !r.conn.connected) {
+	if r.config.EnableKey != "" && r.config.Target != "" && (r.conn == nil || !r.conn.isConnected()) {
 		if triggerResult, err := r.deliverTriggerViaTemporaryZone(features.TriggerExitCommissioningMode, state); err == nil {
 			secState.commissioningActive = false
 			state.Set(StateCommissioningActive, false)
@@ -738,7 +737,7 @@ func (r *Runner) handleSendPing(ctx context.Context, step *loader.Step, state *e
 	var conn *Connection
 	if connName != "" {
 		ct := getConnectionTracker(state)
-		if c, ok := ct.zoneConnections[connName]; ok && c.connected {
+		if c, ok := ct.zoneConnections[connName]; ok && c.isConnected() {
 			conn = c
 		}
 		// Fall back to state-based lookup.
@@ -749,11 +748,11 @@ func (r *Runner) handleSendPing(ctx context.Context, step *loader.Step, state *e
 		}
 	}
 	// Fall back to the runner's main connection.
-	if conn == nil && r.conn != nil && r.conn.connected {
+	if conn == nil && r.conn != nil && r.conn.isConnected() {
 		conn = r.conn
 	}
 
-	if conn == nil || !conn.connected {
+	if conn == nil || !conn.isConnected() {
 		return map[string]any{
 			KeyPongReceived: false,
 			KeyError:        "connection not found or not connected",
@@ -777,7 +776,7 @@ func (r *Runner) handleReconnectOperational(ctx context.Context, step *loader.St
 
 	// Close existing connection if any
 	if c, ok := state.Get(ZoneConnectionStateKey(zoneID)); ok {
-		if conn, ok := c.(*Connection); ok && conn.connected {
+		if conn, ok := c.(*Connection); ok && conn.isConnected() {
 			_ = conn.Close()
 		}
 	}
@@ -861,7 +860,7 @@ func (r *Runner) handleContinueSlowExchange(ctx context.Context, step *loader.St
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue // read timed out -- connection still alive
 				}
-				r.conn.connected = false
+				r.conn.transitionTo(ConnDisconnected)
 				return map[string]any{
 					KeyConnectionClosedByDevice: true,
 					KeyTotalDurationMs:          time.Since(start).Milliseconds(),
@@ -1297,14 +1296,14 @@ func (r *Runner) handleFillConnections(ctx context.Context, step *loader.Step, s
 
 		secState.pool.mu.Lock()
 		newConn := &Connection{
-			tlsConn:   conn,
-			framer:    transport.NewFramer(conn),
-			connected: true,
+			tlsConn: conn,
+			framer:  transport.NewFramer(conn),
+			state:   ConnTLSConnected,
 		}
 		secState.pool.connections = append(secState.pool.connections, newConn)
 		secState.pool.mu.Unlock()
 
-		if !r.conn.connected {
+		if !r.conn.isConnected() {
 			r.conn = newConn
 		}
 		opened++

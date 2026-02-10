@@ -24,7 +24,7 @@ func TestStateIsolation_CommissionedToCommissioning(t *testing.T) {
 	r := newTestRunner()
 
 	// Simulate test A completing with a commissioned connection.
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	r.paseState = &PASEState{
 		completed:  true,
 		sessionKey: []byte{0xDE, 0xAD},
@@ -72,7 +72,7 @@ func TestStateIsolation_CommissionedToTwoZones(t *testing.T) {
 	r := newTestRunner()
 
 	// Simulate test A completing with a commissioned connection.
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	r.paseState = &PASEState{
 		completed:  true,
 		sessionKey: []byte{0xDE, 0xAD},
@@ -132,8 +132,8 @@ func TestStateIsolation_TwoZonesToCommissioning(t *testing.T) {
 	r := newTestRunner()
 
 	// Simulate two_zones_connected state from a previous test.
-	r.activeZoneConns["GRID"] = &Connection{connected: true}
-	r.activeZoneConns["LOCAL"] = &Connection{connected: true}
+	r.activeZoneConns["GRID"] = &Connection{state: ConnOperational}
+	r.activeZoneConns["LOCAL"] = &Connection{state: ConnOperational}
 	r.activeZoneIDs = map[string]string{"GRID": "aabbccdd", "LOCAL": "11223344"}
 	r.zoneCA = &cert.ZoneCA{}
 	r.zoneCAPool = x509.NewCertPool()
@@ -180,8 +180,8 @@ func TestStateIsolation_TwoZonesToTwoZones(t *testing.T) {
 	r := newTestRunner()
 
 	// Simulate first test's two_zones_connected state.
-	oldGrid := &Connection{connected: true}
-	oldLocal := &Connection{connected: true}
+	oldGrid := &Connection{state: ConnOperational}
+	oldLocal := &Connection{state: ConnOperational}
 	r.activeZoneConns["GRID"] = oldGrid
 	r.activeZoneConns["LOCAL"] = oldLocal
 	r.activeZoneIDs = map[string]string{"GRID": "aabbccdd", "LOCAL": "11223344"}
@@ -201,10 +201,10 @@ func TestStateIsolation_TwoZonesToTwoZones(t *testing.T) {
 	}
 
 	// Old connections should be closed.
-	if oldGrid.connected {
+	if oldGrid.isConnected() {
 		t.Error("old GRID connection should be closed")
 	}
-	if oldLocal.connected {
+	if oldLocal.isConnected() {
 		t.Error("old LOCAL connection should be closed")
 	}
 
@@ -223,7 +223,7 @@ func TestStateIsolation_PhantomSocketCleanup(t *testing.T) {
 
 	// Simulate the phantom socket bug: sendRequest set connected=false
 	// but didn't close the socket.
-	r.conn.connected = false
+	r.conn.state = ConnDisconnected
 	// We can't set a real net.Conn in unit tests, but we can verify
 	// the detection logic via snapshot.
 
@@ -252,7 +252,7 @@ func TestStateIsolation_ZoneCAPreservedForTwoZones(t *testing.T) {
 	r := newTestRunner()
 
 	// Simulate commissioned state with zone CA.
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1}}
 	r.zoneCAPool = x509.NewCertPool()
 
@@ -296,7 +296,7 @@ func TestStateIsolation_ThreeTestSequence(t *testing.T) {
 	r := newTestRunner()
 
 	// --- Test A: session_established (level 3) ---
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{0xAB}}
 	r.zoneCA = &cert.ZoneCA{}
 	r.controllerCert = &cert.OperationalCert{}
@@ -399,7 +399,7 @@ func TestStateIsolation_FourMultiZoneTests(t *testing.T) {
 		// For commissioned tests, simulate the connection being established
 		// (since we have no real target, ensureCommissioned would fail).
 		if tt.precond == PrecondSessionEstablished {
-			r.conn.connected = true
+			r.conn.state = ConnOperational
 			r.paseState = &PASEState{completed: true, sessionKey: []byte{byte(i)}}
 		}
 
@@ -424,7 +424,7 @@ func TestStateIsolation_FourMultiZoneTests(t *testing.T) {
 
 		// Verify old zone connections were closed.
 		for _, c := range oldZoneConns {
-			if c.connected {
+			if c.isConnected() {
 				t.Errorf("%s: old zone connection should be closed", tt.id)
 			}
 		}
@@ -448,7 +448,7 @@ func TestStateIsolation_DebugEnabled(t *testing.T) {
 	r.config.Debug = true
 
 	// Simulate commissioned state.
-	r.conn.connected = true
+	r.conn.state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1}}
 
 	// Backward transition with debug enabled.

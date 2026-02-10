@@ -92,7 +92,7 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	// two_zones_connected) instead of creating a duplicate connection
 	// that would overwrite the precondition's PASE connection and
 	// leak its zone ID mapping needed for RemoveZone on teardown.
-	if existing, ok := ct.zoneConnections[zoneID]; ok && existing.connected {
+	if existing, ok := ct.zoneConnections[zoneID]; ok && existing.isConnected() {
 		return map[string]any{
 			KeyConnectionEstablished: true,
 			KeyZoneID:                zoneID,
@@ -150,9 +150,9 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	}
 
 	newConn := &Connection{
-		tlsConn:   conn,
-		framer:    transport.NewFramer(conn),
-		connected: true,
+		tlsConn: conn,
+		framer:  transport.NewFramer(conn),
+		state:   ConnTLSConnected,
 	}
 
 	ct.zoneConnections[zoneID] = newConn
@@ -185,7 +185,7 @@ func (r *Runner) getZoneConnection(state *engine.ExecutionState, params map[stri
 	ct := getConnectionTracker(state)
 
 	conn, ok := ct.zoneConnections[zoneID]
-	if !ok || !conn.connected {
+	if !ok || !conn.isConnected() {
 		return nil, zoneID, fmt.Errorf("no active connection for zone %s", zoneID)
 	}
 	if conn.framer == nil {
@@ -202,7 +202,7 @@ func (r *Runner) isDummyZoneConnection(state *engine.ExecutionState, params map[
 	ct := getConnectionTracker(state)
 
 	conn, ok := ct.zoneConnections[zoneID]
-	if ok && conn.connected && conn.framer == nil {
+	if ok && conn.isConnected() && conn.framer == nil {
 		return conn, zoneID
 	}
 	return nil, zoneID
@@ -563,7 +563,7 @@ func (r *Runner) handleConnectWithTiming(ctx context.Context, step *loader.Step,
 
 // handleSendClose sends a ControlClose frame then closes the TCP connection.
 func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return map[string]any{KeyCloseSent: false, KeyCloseAckReceived: false}, nil
 	}
 
@@ -601,8 +601,9 @@ func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *
 		err  error
 	}
 	ch := make(chan readResult, 1)
+	framer := r.conn.framer // capture locally -- r.conn may be replaced
 	go func() {
-		d, e := r.conn.framer.ReadFrame()
+		d, e := framer.ReadFrame()
 		ch <- readResult{d, e}
 	}()
 
@@ -628,7 +629,7 @@ func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *
 
 // handleSimultaneousClose sends close while reading for close from peer.
 func (r *Runner) handleSimultaneousClose(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return map[string]any{KeyCloseSent: false, KeyBothCloseReceived: false}, nil
 	}
 
@@ -648,7 +649,7 @@ func (r *Runner) handleWaitDisconnect(ctx context.Context, step *loader.Step, st
 
 	timeoutMs := paramInt(params, KeyTimeoutMs, 10000)
 
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return map[string]any{KeyDisconnected: true}, nil
 	}
 
@@ -656,8 +657,9 @@ func (r *Runner) handleWaitDisconnect(ctx context.Context, step *loader.Step, st
 	defer cancel()
 
 	ch := make(chan error, 1)
+	framer := r.conn.framer // capture locally -- r.conn may be replaced
 	go func() {
-		_, err := r.conn.framer.ReadFrame()
+		_, err := framer.ReadFrame()
 		ch <- err
 	}()
 
@@ -665,7 +667,7 @@ func (r *Runner) handleWaitDisconnect(ctx context.Context, step *loader.Step, st
 	case err := <-ch:
 		// EOF or error means disconnected.
 		if err != nil {
-			r.conn.connected = false
+			r.conn.transitionTo(ConnDisconnected)
 			return map[string]any{KeyDisconnected: true}, nil
 		}
 		return map[string]any{KeyDisconnected: false}, nil
@@ -704,7 +706,7 @@ func (r *Runner) handleMonitorReconnect(ctx context.Context, step *loader.Step, 
 func (r *Runner) handleDisconnectAndMonitorBackoff(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ct := getConnectionTracker(state)
 
-	if r.conn != nil && r.conn.connected {
+	if r.conn != nil && r.conn.isConnected() {
 		_ = r.conn.Close()
 	}
 
@@ -731,12 +733,12 @@ func (r *Runner) handlePing(ctx context.Context, step *loader.Step, state *engin
 	// Check for zone-scoped connection first.
 	if zoneID := resolveZoneParam(params); zoneID != "" {
 		ct := getConnectionTracker(state)
-		if conn, ok := ct.zoneConnections[zoneID]; ok && conn.connected {
+		if conn, ok := ct.zoneConnections[zoneID]; ok && conn.isConnected() {
 			// Zone connection exists and is alive -- pong succeeds.
 		} else {
 			return map[string]any{KeyPingSent: true, KeyPongReceived: false, KeyError: fmt.Sprintf("no active connection for zone %s", zoneID)}, nil
 		}
-	} else if r.conn == nil || !r.conn.connected {
+	} else if r.conn == nil || !r.conn.isConnected() {
 		errMsg := "not connected"
 		if gc, ok := state.Get(StateGracefullyClosed); ok {
 			if closed, ok := gc.(bool); ok && closed {
@@ -807,7 +809,7 @@ func (r *Runner) handlePingMultiple(ctx context.Context, step *loader.Step, stat
 
 // handleVerifyKeepalive verifies keep-alive is active.
 func (r *Runner) handleVerifyKeepalive(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	active := r.conn != nil && r.conn.connected
+	active := r.conn != nil && r.conn.isConnected()
 
 	// Check if a ping has been sent by looking at pong sequence state.
 	pingSent := false
@@ -855,7 +857,7 @@ func (r *Runner) handleVerifyKeepalive(ctx context.Context, step *loader.Step, s
 func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -961,7 +963,7 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 		}, nil
 	}
 
-	r.debugf("handleSendRaw: about to write %d bytes, conn.connected=%v", len(data), r.conn.connected)
+	r.debugf("handleSendRaw: about to write %d bytes, conn.state=%v", len(data), r.conn.state)
 	err = r.conn.framer.WriteFrame(data)
 	if err != nil {
 		return map[string]any{
@@ -984,8 +986,9 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 		err  error
 	}
 	ch := make(chan readResult, 1)
+	framer := r.conn.framer // capture locally -- r.conn may be replaced
 	go func() {
-		d, e := r.conn.framer.ReadFrame()
+		d, e := framer.ReadFrame()
 		ch <- readResult{d, e}
 	}()
 
@@ -1116,7 +1119,7 @@ func normalizeMapKeys(m map[any]any) map[any]any {
 func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1153,7 +1156,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 		}
 		outputs := map[string]any{
 			KeyRawBytesSent: true,
-			KeyConnectionOpen: r.conn.connected,
+			KeyConnectionOpen: r.conn.isConnected(),
 		}
 		// Try to read framed response.
 		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -1163,8 +1166,9 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 			err  error
 		}
 		ch := make(chan rr, 1)
+		framer := r.conn.framer // capture locally -- r.conn may be replaced
 		go func() {
-			d, e := r.conn.framer.ReadFrame()
+			d, e := framer.ReadFrame()
 			ch <- rr{d, e}
 		}()
 		select {
@@ -1190,7 +1194,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 
 	outputs := map[string]any{
 		KeyRawBytesSent:   true,
-		KeyConnectionOpen: r.conn.connected,
+		KeyConnectionOpen: r.conn.isConnected(),
 	}
 
 	// Append followed_by_bytes: N zero bytes after the raw bytes.
@@ -1226,8 +1230,9 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 			err  error
 		}
 		ch := make(chan rr, 1)
+		framer := r.conn.framer // capture locally -- r.conn may be replaced
 		go func() {
-			d, e := r.conn.framer.ReadFrame()
+			d, e := framer.ReadFrame()
 			ch <- rr{d, e}
 		}()
 		select {
@@ -1252,7 +1257,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1278,15 +1283,16 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 		defer cancel()
 
 		ch := make(chan error, 1)
+		framer := r.conn.framer // capture locally -- r.conn may be replaced
 		go func() {
-			_, err := r.conn.framer.ReadFrame()
+			_, err := framer.ReadFrame()
 			ch <- err
 		}()
 
 		select {
 		case err := <-ch:
 			if err != nil {
-				r.conn.connected = false
+				r.conn.transitionTo(ConnDisconnected)
 				return map[string]any{
 					KeyConnectionClosed: true,
 					KeyError:            "FATAL",
@@ -1298,7 +1304,7 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 				KeyResponseReceived: true,
 			}, nil
 		case <-readCtx.Done():
-			r.conn.connected = false
+			r.conn.transitionTo(ConnDisconnected)
 			return map[string]any{
 				KeyConnectionClosed: true,
 				KeyError:            "FATAL",
@@ -1333,8 +1339,9 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 			err  error
 		}
 		ch := make(chan readResult, 1)
+		framer := r.conn.framer // capture locally -- r.conn may be replaced
 		go func() {
-			d, e := r.conn.framer.ReadFrame()
+			d, e := framer.ReadFrame()
 			ch <- readResult{d, e}
 		}()
 
@@ -1409,7 +1416,7 @@ func generateValidCBORPayload(targetSize int, messageID uint32) []byte {
 // side open, then attempts a short read to detect the peer's close_notify. An
 // io.EOF on read indicates the peer responded with close_notify before closing.
 func (r *Runner) handleSendTLSAlert(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.connected || r.conn.tlsConn == nil {
+	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1436,11 +1443,7 @@ func (r *Runner) handleSendTLSAlert(ctx context.Context, step *loader.Step, stat
 	peerCloseNotify := isEOFOrCloseNotify(readErr)
 
 	// Clean up connection state.
-	_ = r.conn.tlsConn.Close()
-	r.conn.connected = false
-	r.conn.tlsConn = nil
-	r.conn.conn = nil
-	r.conn.framer = nil
+	r.conn.transitionTo(ConnDisconnected)
 
 	return map[string]any{
 		KeyAlertSent:        true,
@@ -1515,7 +1518,7 @@ func (r *Runner) handleWaitForQueuedResult(ctx context.Context, step *loader.Ste
 func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.connected {
+	if r.conn == nil || !r.conn.isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1625,9 +1628,9 @@ func (r *Runner) handleOpenConnections(ctx context.Context, step *loader.Step, s
 
 		secState.pool.mu.Lock()
 		newConn := &Connection{
-			tlsConn:   conn,
-			framer:    transport.NewFramer(conn),
-			connected: true,
+			tlsConn: conn,
+			framer:  transport.NewFramer(conn),
+			state:   ConnTLSConnected,
 		}
 		secState.pool.connections = append(secState.pool.connections, newConn)
 		secState.pool.mu.Unlock()
@@ -1905,7 +1908,7 @@ func (r *Runner) handleUnsubscribe(ctx context.Context, step *loader.Step, state
 		}, nil
 	}
 
-	if !r.conn.connected {
+	if !r.conn.isConnected() {
 		return map[string]any{
 			KeyUnsubscribeSuccess: false,
 			KeyError:              "not connected",
