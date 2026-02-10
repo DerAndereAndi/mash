@@ -340,6 +340,11 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	// Clear stale notification buffer from previous tests.
 	r.pendingNotifications = nil
 
+	// Reset commission zone type to default (LOCAL) between tests.
+	// Precondition handlers (e.g. device_has_grid_zone) will override
+	// this before ensureCommissioned is called.
+	r.commissionZoneType = 0
+
 	// Reset device test state between tests when a previous test modified
 	// device state via triggers. Use a short timeout -- this is best-effort
 	// and must not consume the test's overall timeout budget.

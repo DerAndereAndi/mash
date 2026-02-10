@@ -2373,11 +2373,14 @@ func (s *DeviceService) runPairingRequestListener(ctx context.Context) {
 	s.mu.RUnlock()
 
 	if browser == nil {
+		s.mu.Lock()
+		s.pairingRequestActive = false
+		s.mu.Unlock()
 		return
 	}
 
-	// BrowsePairingRequests calls the callback for each discovered pairing request
-	// It blocks until the context is cancelled
+	// BrowsePairingRequests spawns background goroutines and returns immediately.
+	// We block on ctx.Done() so pairingRequestActive stays true until cancelled.
 	err := browser.BrowsePairingRequests(ctx, func(svc discovery.PairingRequestService) {
 		s.handlePairingRequestDiscovered(svc, discriminator)
 	})
@@ -2385,6 +2388,9 @@ func (s *DeviceService) runPairingRequestListener(ctx context.Context) {
 	if err != nil && err != context.Canceled {
 		s.debugLog("runPairingRequestListener: browse error", "error", err)
 	}
+
+	// Wait for cancellation (browse is non-blocking)
+	<-ctx.Done()
 
 	// Mark as inactive when browsing stops
 	s.mu.Lock()

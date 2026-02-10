@@ -125,6 +125,10 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 		}
 		// Reset clock offset.
 		s.clockOffset = 0
+		// Reset commissioning window duration to configured default.
+		if s.discoveryManager != nil && s.config.CommissioningWindowDuration > 0 {
+			s.discoveryManager.SetCommissioningWindowDuration(s.config.CommissioningWindowDuration)
+		}
 		// Clear inbound subscriptions on all active zone sessions to stop
 		// notifications from leaking into the next test.
 		s.mu.Lock()

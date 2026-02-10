@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
@@ -539,6 +540,44 @@ func TestTriggerResetTestState_ClearsClockOffset(t *testing.T) {
 	}
 	if svc.clockOffset != 0 {
 		t.Errorf("clockOffset = %v after reset, want 0", svc.clockOffset)
+	}
+}
+
+func TestTriggerResetTestState_ResetsCommissioningWindowDuration(t *testing.T) {
+	svc := newDeviceServiceWithAllFeatures(t)
+	ctx := context.Background()
+
+	// Set up a mock advertiser so SetAdvertiser creates a DiscoveryManager.
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	dm := svc.DiscoveryManager()
+	if dm == nil {
+		t.Fatal("DiscoveryManager is nil after SetAdvertiser")
+	}
+
+	// Verify the config default was applied.
+	configDefault := svc.config.CommissioningWindowDuration
+	if configDefault == 0 {
+		t.Fatal("config.CommissioningWindowDuration should be non-zero")
+	}
+
+	// Set a non-default commissioning window duration.
+	dm.SetCommissioningWindowDuration(20 * time.Second)
+	if dm.CommissioningWindowDuration() != 20*time.Second {
+		t.Fatal("CommissioningWindowDuration not set to 20s")
+	}
+
+	// Reset test state.
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+
+	// Verify commissioning window duration was restored to the config default.
+	got := dm.CommissioningWindowDuration()
+	if got != configDefault {
+		t.Errorf("CommissioningWindowDuration = %v after reset, want %v", got, configDefault)
 	}
 }
 
