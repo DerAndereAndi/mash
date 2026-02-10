@@ -980,6 +980,21 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	probeForRejection := len(tlsConfig.Certificates) > 0 && clientCertType != "" &&
 		clientCertType != "leaf_cert" &&
 		(clientCertType != "controller_operational" || hasClockOffset)
+	// Also probe for deep chains (3+ certs) -- the device rejects chain depth > 2.
+	if !probeForRejection {
+		if chainSpec, ok := step.Params["cert_chain"].([]any); ok && len(chainSpec) > 2 {
+			probeForRejection = true
+			clientCertType = "deep_chain"
+		}
+	}
+	// Also probe when ALPN is null (no ALPN extension sent) -- the device
+	// rejects connections without the required ALPN protocol post-handshake.
+	if !probeForRejection {
+		if val, hasALPN := step.Params["alpn"]; hasALPN && val == nil {
+			probeForRejection = true
+			clientCertType = "no_alpn"
+		}
+	}
 	if probeForRejection {
 		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		probe := make([]byte, 1)
@@ -2278,6 +2293,10 @@ func classifyTestCertRejection(certType string, err error) string {
 		// A valid operational cert rejected post-handshake is typically
 		// due to clock skew making the cert appear expired or not-yet-valid.
 		return "certificate_expired"
+	case "deep_chain":
+		return "chain_too_deep"
+	case "no_alpn":
+		return "no_application_protocol"
 	default:
 		return "certificate_rejected"
 	}

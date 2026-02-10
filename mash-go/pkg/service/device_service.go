@@ -294,22 +294,17 @@ func (s *DeviceService) Start(ctx context.Context) error {
 		s.deviceID = ""
 	}
 
-	// Create TLS config for commissioning (no client cert required)
+	// Create TLS config for commissioning (no client cert required).
+	// Note: Go's TLS 1.3 ALPN negotiation natively rejects mismatched protocols
+	// (client sends ALPN but no match) with no_application_protocol alert.
+	// Missing ALPN (client sends no ALPN extension) is caught post-handshake
+	// by transport.VerifyConnection in handleConnection.
 	s.tlsConfig = &tls.Config{
 		MinVersion:   tls.VersionTLS13,
 		MaxVersion:   tls.VersionTLS13,
 		Certificates: []tls.Certificate{s.tlsCert},
 		ClientAuth:   tls.RequestClientCert, // Request but don't require; used to distinguish operational reconnections
 		NextProtos:   []string{transport.ALPNProtocol},
-		// Reject connections that don't negotiate the required ALPN protocol.
-		// Go's TLS 1.3 server accepts mismatched ALPN without error by default;
-		// this callback enforces the MASH protocol requirement.
-		VerifyConnection: func(cs tls.ConnectionState) error {
-			if cs.NegotiatedProtocol != transport.ALPNProtocol {
-				return fmt.Errorf("unsupported ALPN protocol: %q (expected %q)", cs.NegotiatedProtocol, transport.ALPNProtocol)
-			}
-			return nil
-		},
 	}
 
 	// Start TLS listener
@@ -545,6 +540,14 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 	// because TLS 1.3 client cert verification happens after the handshake
 	// completes from the client's point of view.
 	if peerHasCert {
+		// MASH spec: certificate chain depth must not exceed 2
+		// (Zone CA + leaf). Reject deeper chains immediately.
+		if len(state.PeerCertificates) > 2 {
+			s.debugLog("handleConnection: certificate chain too long",
+				"depth", len(state.PeerCertificates))
+			tlsConn.Close()
+			return
+		}
 		if err := s.verifyClientCert(state.PeerCertificates[0]); err != nil {
 			s.debugLog("handleConnection: client cert rejected",
 				"cn", state.PeerCertificates[0].Subject.CommonName,
