@@ -385,17 +385,17 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 
 	// Always reset device test state between tests to prevent state
 	// contamination. triggerResetTestState resets attributes, measurements,
-	// control state, limits, clock offset, and per-zone subscriptions
-	// without removing zones or certificates.
+	// control state, limits, clock offset, PASE backoff, cooldown timer,
+	// and per-zone subscriptions without removing zones or certificates.
+	// The suite zone (ZoneTypeTest) is always connected, so
+	// sendTriggerViaZone will find it via activeZoneConns.
 	if r.config.Target != "" && r.config.EnableKey != "" {
-		if r.conn != nil && r.conn.isConnected() && r.conn.isOperational() {
-			r.debugf("resetting device test state")
-			resetCtx, resetCancel := context.WithTimeout(ctx, 5*time.Second)
-			if err := r.sendTriggerViaZone(resetCtx, features.TriggerResetTestState, state); err != nil {
-				r.debugf("reset trigger failed: %v (continuing)", err)
-			}
-			resetCancel()
+		r.debugf("resetting device test state")
+		resetCtx, resetCancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := r.sendTriggerViaZone(resetCtx, features.TriggerResetTestState, state); err != nil {
+			r.debugf("reset trigger failed: %v (continuing)", err)
 		}
+		resetCancel()
 		r.deviceStateModified = false
 	}
 
@@ -470,15 +470,18 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		r.debugf("reusing session for %s (skipping closeActiveZoneConns)", tc.ID)
 	}
 
-	// DEC-059: On backward transition from commissioned, disconnect but
-	// keep the suite zone alive. Use disconnectConnection (not ensureDisconnected)
-	// to preserve crypto material for later reconnection.
+	// DEC-059: On backward transition from commissioned, prepare for
+	// commissioning-level tests. The suite zone (ZoneTypeTest) stays
+	// connected -- it doesn't count against MaxZones and is transparent
+	// to device logic.
 	if current >= precondLevelCommissioned && needed <= precondLevelCommissioning {
 		if r.suiteZoneID != "" {
-			// Disconnect without removing zone. Device sees zone as
-			// disconnected, enabling commissioning mode (enable-key behavior).
-			r.debugf("backward transition: disconnecting (keep suite zone %s)", r.suiteZoneID)
-			r.disconnectConnection()
+			// Detach r.conn from the suite zone without closing the TCP
+			// connection. The suite zone stays alive in activeZoneConns
+			// for trigger delivery.
+			r.debugf("backward transition: detaching r.conn (suite zone %s stays connected)", r.suiteZoneID)
+			r.conn = &Connection{}
+			r.paseState = nil
 		} else {
 			r.debugf("backward transition: sending RemoveZone (current=%d -> needed=%d)", current, needed)
 			r.sendRemoveZone()
@@ -489,7 +492,9 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	if needed < current && needed <= precondLevelCommissioning {
 		r.debugf("backward transition: disconnecting (current=%d -> needed=%d)", current, needed)
 		if r.suiteZoneID != "" {
-			r.disconnectConnection()
+			// Suite zone stays connected; just detach r.conn.
+			r.conn = &Connection{}
+			r.paseState = nil
 		} else {
 			r.ensureDisconnected()
 		}
@@ -709,12 +714,15 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 							r.sendRemoveZone()
 						}
 
-						// Reset connection and PASE state for fresh commission.
-						// Save and restore the accumulated zone CA pool so
-						// that earlier zones' CAs survive across commissions.
+						// Clear connection and crypto for the next commission,
+						// but preserve suite zone state so closeActiveZoneConns
+						// continues to protect the suite zone connection.
 						savedPool := r.zoneCAPool
-						r.ensureDisconnected()
+						r.disconnectConnection()
+						r.zoneCA = nil
+						r.controllerCert = nil
 						r.zoneCAPool = savedPool
+						r.issuedDeviceCert = nil
 
 						// Set zone type so performCertExchange generates the
 						// correct Zone CA (GRID vs LOCAL).
@@ -821,14 +829,14 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 					}
 
 					// In test mode the device allows 3 zones (GRID + LOCAL + TEST,
-					// DEC-043/DEC-060), so we must fill all three slots.
+					// DEC-043/DEC-060). The suite zone fills the TEST slot,
+					// so we only need to commission GRID + LOCAL.
 					zones := []struct {
 						name string
 						zt   cert.ZoneType
 					}{
 						{"GRID", cert.ZoneTypeGrid},
 						{"LOCAL", cert.ZoneTypeLocal},
-						{"TEST", cert.ZoneTypeTest},
 					}
 
 					for i, z := range zones {
@@ -843,9 +851,15 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 							r.sendRemoveZone()
 						}
 
+						// Clear connection and crypto for the next commission,
+						// but preserve suite zone state so closeActiveZoneConns
+						// continues to protect the suite zone connection.
 						savedPool := r.zoneCAPool
-						r.ensureDisconnected()
+						r.disconnectConnection()
+						r.zoneCA = nil
+						r.controllerCert = nil
 						r.zoneCAPool = savedPool
+						r.issuedDeviceCert = nil
 
 						r.commissionZoneType = z.zt
 						if err := r.ensureCommissioned(ctx, state); err != nil {
@@ -870,8 +884,6 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 								stateKey = StateGridZoneID
 							case cert.ZoneTypeLocal:
 								stateKey = StateLocalZoneID
-							case cert.ZoneTypeTest:
-								stateKey = StateTestZoneID
 							}
 							if stateKey != "" {
 								state.Set(stateKey, zID)
@@ -1004,7 +1016,13 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		// disconnect and reconnect for a clean TLS session.
 		if current > precondLevelConnected {
 			r.debugf("downgrading from commissioned to connected for %s", tc.ID)
-			r.ensureDisconnected()
+			if r.suiteZoneID != "" {
+				// Preserve suite zone; just detach r.conn.
+				r.conn = &Connection{}
+				r.paseState = nil
+			} else {
+				r.ensureDisconnected()
+			}
 		}
 		r.debugf("ensuring connected for %s", tc.ID)
 		setupErr = r.ensureConnected(ctx, state)
@@ -1013,7 +1031,18 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		}
 	case precondLevelCommissioning:
 		r.debugf("ensuring commissioning mode for %s", tc.ID)
-		r.ensureDisconnected()
+		if r.suiteZoneID != "" {
+			// Suite zone is alive in activeZoneConns -- only detach
+			// r.conn (backward transition already did this, but guard
+			// in case we arrive here without hitting that block).
+			r.debugf("preserving suite zone %s during commissioning setup", r.suiteZoneID)
+			if r.conn != nil && r.conn.isConnected() {
+				r.conn = &Connection{}
+			}
+			r.paseState = nil
+		} else {
+			r.ensureDisconnected()
+		}
 		// Wait for device to re-enter commissioning mode (mDNS advertisement).
 		if r.config.Target != "" {
 			if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
@@ -1226,7 +1255,13 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 		if wait := cooldownRemaining(err); wait > 0 {
 			r.debugf("ensureCommissioned: cooldown active, waiting %s", wait.Round(time.Millisecond))
 			time.Sleep(wait)
-			r.ensureDisconnected()
+			// Clear connection but preserve suite zone state so multi-zone
+			// precondition loops don't lose the suite zone on retry.
+			r.disconnectConnection()
+			r.zoneCA = nil
+			r.controllerCert = nil
+			r.zoneCAPool = nil
+			r.issuedDeviceCert = nil
 			if connErr := r.ensureConnected(ctx, state); connErr != nil {
 				return fmt.Errorf("precondition commission cooldown retry connect failed: %w", connErr)
 			}
@@ -1251,7 +1286,12 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 		const maxRetries = 2
 		if Category(classified) == ErrCatInfrastructure {
 			for retry := 1; retry <= maxRetries; retry++ {
-				r.ensureDisconnected()
+				// Clear connection but preserve suite zone state.
+				r.disconnectConnection()
+				r.zoneCA = nil
+				r.controllerCert = nil
+				r.zoneCAPool = nil
+				r.issuedDeviceCert = nil
 				time.Sleep(1 * time.Second)
 				if connErr := r.ensureConnected(ctx, state); connErr != nil {
 					return fmt.Errorf("precondition commission retry %d connect failed: %w", retry, connErr)

@@ -433,6 +433,107 @@ func TestRunSuiteAutoCalculatesTimeout(t *testing.T) {
 }
 
 // TestRunSuiteExplicitTimeout verifies that an explicit suite timeout is respected.
+// TestStoreResult_FlattenedKeys verifies that store_result creates prefixed
+// state keys for each output field (e.g., "zone1_result_zone_id").
+func TestStoreResult_FlattenedKeys(t *testing.T) {
+	e := engine.New()
+
+	e.RegisterHandler("multi_output", func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"zone_id":   "abc123",
+			"device_id": "dev456",
+			"success":   true,
+		}, nil
+	})
+
+	e.RegisterHandler("check_state", func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]interface{}, error) {
+		// Verify flattened keys exist.
+		zoneID, ok := state.Get("result1_zone_id")
+		if !ok {
+			return nil, errors.New("result1_zone_id not found in state")
+		}
+		if zoneID != "abc123" {
+			return nil, errors.New("result1_zone_id has wrong value")
+		}
+		deviceID, ok := state.Get("result1_device_id")
+		if !ok {
+			return nil, errors.New("result1_device_id not found in state")
+		}
+		if deviceID != "dev456" {
+			return nil, errors.New("result1_device_id has wrong value")
+		}
+		// Verify primary value (first match: device_id).
+		primary, ok := state.Get("result1")
+		if !ok {
+			return nil, errors.New("result1 not found in state")
+		}
+		if primary != "dev456" {
+			return nil, errors.New("result1 primary should be device_id value")
+		}
+		return map[string]interface{}{"ok": true}, nil
+	})
+
+	tc := &loader.TestCase{
+		ID:   "TC-STORE",
+		Name: "Store Result Flattened Keys",
+		Steps: []loader.Step{
+			{
+				Action:      "multi_output",
+				StoreResult: "result1",
+			},
+			{
+				Action: "check_state",
+				Expect: map[string]interface{}{"ok": true},
+			},
+		},
+	}
+
+	result := e.Run(context.Background(), tc)
+	if !result.Passed {
+		t.Errorf("expected test to pass, got error: %v", result.Error)
+	}
+}
+
+// TestStoreResult_FlattenedKeysUsedInInterpolation verifies that flattened
+// store_result keys can be referenced via {{ name_key }} interpolation.
+func TestStoreResult_FlattenedKeysUsedInInterpolation(t *testing.T) {
+	e := engine.New()
+
+	e.RegisterHandler("produce", func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]interface{}, error) {
+		return map[string]interface{}{
+			"zone_id": "zone-abc",
+			"value":   42,
+		}, nil
+	})
+
+	e.RegisterHandler("consume", func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]interface{}, error) {
+		params := engine.InterpolateParams(step.Params, state)
+		zid, _ := params["target"].(string)
+		if zid != "zone-abc" {
+			return nil, errors.New("interpolation of z1_zone_id failed: got " + zid)
+		}
+		return map[string]interface{}{"ok": true}, nil
+	})
+
+	tc := &loader.TestCase{
+		ID:   "TC-INTERP",
+		Name: "Interpolate Flattened Keys",
+		Steps: []loader.Step{
+			{Action: "produce", StoreResult: "z1"},
+			{
+				Action: "consume",
+				Params: map[string]interface{}{"target": "{{ z1_zone_id }}"},
+				Expect: map[string]interface{}{"ok": true},
+			},
+		},
+	}
+
+	result := e.Run(context.Background(), tc)
+	if !result.Passed {
+		t.Errorf("expected test to pass, got error: %v", result.Error)
+	}
+}
+
 func TestRunSuiteExplicitTimeout(t *testing.T) {
 	config := engine.DefaultConfig()
 	config.SuiteTimeout = 50 * time.Millisecond

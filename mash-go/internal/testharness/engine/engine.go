@@ -212,7 +212,9 @@ func (e *Engine) executeStep(ctx context.Context, step *loader.Step, index int, 
 
 	// store_result: save a handler's primary output under a named key.
 	// Looks for common primary output keys (device_id, zone_id, value),
-	// falling back to the full output map.
+	// falling back to the full output map. Also flattens all output keys
+	// into prefixed state keys (e.g., store_result: "zone1_result" with
+	// output {zone_id: "abc"} creates state key "zone1_result_zone_id").
 	if step.StoreResult != "" {
 		var stored interface{} = outputCopy
 		for _, primaryKey := range []string{"device_id", "zone_id", "value", "result"} {
@@ -222,6 +224,12 @@ func (e *Engine) executeStep(ctx context.Context, step *loader.Step, index int, 
 			}
 		}
 		state.Set(step.StoreResult, stored)
+
+		// Flatten output keys so multi-step tests can reference
+		// individual fields (e.g., {{ zone1_result_zone_id }}).
+		for k, v := range outputs {
+			state.Set(step.StoreResult+"_"+k, v)
+		}
 	}
 
 	// Check expectations with PICS-aware interpolation

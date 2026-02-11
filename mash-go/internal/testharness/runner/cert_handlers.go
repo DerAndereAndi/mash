@@ -222,14 +222,30 @@ func (r *Runner) handleGetCertFingerprint(ctx context.Context, step *loader.Step
 }
 
 // handleExtractCertDeviceID extracts device ID from cert CN.
+// When a zone_id parameter is provided, the handler looks up the
+// zone-specific connection from activeZoneConns instead of using r.conn.
+// This is required for multi-zone tests where each zone has a different
+// operational certificate (and therefore a different device ID).
 func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
-		return map[string]any{KeyDeviceID: "", KeyExtracted: false}, nil
+	params := engine.InterpolateParams(step.Params, state)
+	notFound := map[string]any{KeyDeviceID: "", KeyExtracted: false}
+
+	conn := r.conn
+	if zoneID, ok := params[KeyZoneID].(string); ok && zoneID != "" {
+		conn = r.findZoneConn(zoneID)
+		if conn == nil {
+			r.debugf("extract_cert_device_id: no connection found for zone %s", zoneID)
+			return notFound, nil
+		}
 	}
 
-	tlsState := r.conn.tlsConn.ConnectionState()
+	if conn == nil || !conn.isConnected() || conn.tlsConn == nil {
+		return notFound, nil
+	}
+
+	tlsState := conn.tlsConn.ConnectionState()
 	if len(tlsState.PeerCertificates) == 0 {
-		return map[string]any{KeyDeviceID: "", KeyExtracted: false}, nil
+		return notFound, nil
 	}
 
 	cert := tlsState.PeerCertificates[0]
@@ -247,6 +263,19 @@ func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Ste
 		KeyDeviceID:  deviceID,
 		KeyExtracted: true,
 	}, nil
+}
+
+// findZoneConn looks up a zone connection by zone ID from activeZoneConns.
+// It checks activeZoneIDs (connKey -> zoneID) to find the matching connKey.
+func (r *Runner) findZoneConn(zoneID string) *Connection {
+	for connKey, id := range r.activeZoneIDs {
+		if id == zoneID {
+			if conn, ok := r.activeZoneConns[connKey]; ok {
+				return conn
+			}
+		}
+	}
+	return nil
 }
 
 // handleVerifyCommissioningState verifies the commissioning state machine.

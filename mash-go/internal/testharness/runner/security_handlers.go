@@ -685,9 +685,16 @@ func (r *Runner) deliverTriggerViaTemporaryZone(trigger uint64, state *engine.Ex
 		r.debugf("deliverTriggerViaTemporaryZone: trigger failed: %v", triggerErr)
 	}
 
-	// Clean up: close all zone connections (sends RemoveZone + ControlClose).
+	// Clean up: close temporary zone connections (sends RemoveZone +
+	// ControlClose). The suite zone (if any) is preserved.
 	r.closeActiveZoneConns()
-	r.ensureDisconnected()
+	if r.suiteZoneID != "" {
+		// Preserve suite zone state; just detach r.conn from the temp zone.
+		r.conn = &Connection{}
+		r.paseState = nil
+	} else {
+		r.ensureDisconnected()
+	}
 
 	// Wait for device to return to commissioning mode after zone removal.
 	if err := r.waitForCommissioningMode(commCtx, 3*time.Second); err != nil {

@@ -502,13 +502,18 @@ func needsSuiteCommissioning(cases []*loader.TestCase, r *Runner) bool {
 }
 
 // commissionSuiteZone performs one-time suite-level commissioning.
+// The suite zone is commissioned as ZoneTypeTest so it doesn't count
+// against the device's MaxZones and is transparent to device logic.
 func (r *Runner) commissionSuiteZone(ctx context.Context) error {
 	r.debugf("commissionSuiteZone: commissioning device for suite")
 	state := engine.NewExecutionState(ctx)
 
+	r.commissionZoneType = cert.ZoneTypeTest
 	if err := r.ensureCommissioned(ctx, state); err != nil {
+		r.commissionZoneType = 0
 		return fmt.Errorf("suite commissioning: %w", err)
 	}
+	r.commissionZoneType = 0
 
 	r.recordSuiteZone()
 	r.debugf("commissionSuiteZone: suite zone established (id=%s key=%s)", r.suiteZoneID, r.suiteZoneKey)
@@ -540,10 +545,14 @@ func (r *Runner) removeSuiteZone() {
 func (r *Runner) runAutoPICS(ctx context.Context) error {
 	state := engine.NewExecutionState(ctx)
 
-	// Commission the device to establish a session.
+	// Commission the device as ZoneTypeTest so the suite zone doesn't
+	// count against MaxZones and is transparent to device logic.
+	r.commissionZoneType = cert.ZoneTypeTest
 	if err := r.ensureCommissioned(ctx, state); err != nil {
+		r.commissionZoneType = 0
 		return fmt.Errorf("commissioning for auto-PICS: %w", err)
 	}
+	r.commissionZoneType = 0
 
 	pf, err := r.buildAutoPICS(ctx)
 	if err != nil {

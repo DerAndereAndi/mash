@@ -505,13 +505,22 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 		return err
 	}
 
-	// Find any zone connection to use.
+	// Find any zone connection to use: per-test tracker first, then
+	// runner-level activeZoneConns (which includes the suite zone).
 	ct := getConnectionTracker(state)
 	var conn *Connection
 	for _, c := range ct.zoneConnections {
 		if c.isConnected() && c.framer != nil {
 			conn = c
 			break
+		}
+	}
+	if conn == nil {
+		for _, c := range r.activeZoneConns {
+			if c.isConnected() && c.framer != nil {
+				conn = c
+				break
+			}
 		}
 	}
 	if conn == nil {

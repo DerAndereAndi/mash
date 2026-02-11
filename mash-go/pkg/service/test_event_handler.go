@@ -129,6 +129,13 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 		if s.discoveryManager != nil && s.config.CommissioningWindowDuration > 0 {
 			s.discoveryManager.SetCommissioningWindowDuration(s.config.CommissioningWindowDuration)
 		}
+		// Reset PASE backoff counter so timing-sensitive tests start clean.
+		s.ResetPASETracker()
+		// Clear connection cooldown timer so cooldown tests are hermetic.
+		s.connectionMu.Lock()
+		s.lastCommissioningAttempt = time.Time{}
+		s.commissioningConnActive = false
+		s.connectionMu.Unlock()
 		// Clear inbound subscriptions on all active zone sessions to stop
 		// notifications from leaking into the next test.
 		s.mu.Lock()

@@ -305,6 +305,138 @@ func TestHandleVerifyCertificate_WithZoneCA(t *testing.T) {
 	}
 }
 
+func TestFindZoneConn(t *testing.T) {
+	r := newTestRunner()
+	r.activeZoneIDs = make(map[string]string)
+
+	connA := &Connection{state: ConnOperational}
+	connB := &Connection{state: ConnOperational}
+
+	r.activeZoneConns["step-zone1"] = connA
+	r.activeZoneIDs["step-zone1"] = "zone1"
+	r.activeZoneConns["step-zone2"] = connB
+	r.activeZoneIDs["step-zone2"] = "zone2"
+
+	// Found.
+	if got := r.findZoneConn("zone1"); got != connA {
+		t.Error("expected connA for zone1")
+	}
+	if got := r.findZoneConn("zone2"); got != connB {
+		t.Error("expected connB for zone2")
+	}
+
+	// Not found.
+	if got := r.findZoneConn("nonexistent"); got != nil {
+		t.Error("expected nil for nonexistent zone")
+	}
+}
+
+func TestHandleExtractCertDeviceID_ZoneAware(t *testing.T) {
+	r := newTestRunner()
+	r.activeZoneIDs = make(map[string]string)
+	state := newTestState()
+
+	// Generate two zone CAs and device certs with different device IDs.
+	zoneCA1, err := cert.GenerateZoneCA("zone1", cert.ZoneTypeLocal)
+	if err != nil {
+		t.Fatalf("generate zone CA 1: %v", err)
+	}
+	zoneCA2, err := cert.GenerateZoneCA("zone2", cert.ZoneTypeGrid)
+	if err != nil {
+		t.Fatalf("generate zone CA 2: %v", err)
+	}
+
+	makeTLSPair := func(zoneCA *cert.ZoneCA, deviceID string) (*tls.Conn, func()) {
+		kp, err := cert.GenerateKeyPair()
+		if err != nil {
+			t.Fatalf("generate key pair: %v", err)
+		}
+		csrDER, err := cert.CreateCSR(kp, &cert.CSRInfo{
+			Identity: cert.DeviceIdentity{DeviceID: deviceID},
+			ZoneID:   "zone",
+		})
+		if err != nil {
+			t.Fatalf("create CSR: %v", err)
+		}
+		devCert, err := cert.SignCSR(zoneCA, csrDER)
+		if err != nil {
+			t.Fatalf("sign CSR: %v", err)
+		}
+
+		serverTLS := tls.Certificate{
+			Certificate: [][]byte{devCert.Raw},
+			PrivateKey:  kp.PrivateKey,
+		}
+		listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
+			Certificates: []tls.Certificate{serverTLS},
+			MinVersion:   tls.VersionTLS13,
+		})
+		if err != nil {
+			t.Fatalf("listen: %v", err)
+		}
+		go func() {
+			conn, _ := listener.Accept()
+			if conn != nil {
+				buf := make([]byte, 1)
+				conn.Read(buf)
+				conn.Close()
+			}
+		}()
+		tlsConn, err := tls.Dial("tcp", listener.Addr().String(), &tls.Config{
+			InsecureSkipVerify: true,
+			MinVersion:         tls.VersionTLS13,
+		})
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		return tlsConn, func() { tlsConn.Close(); listener.Close() }
+	}
+
+	tls1, cleanup1 := makeTLSPair(zoneCA1, "mash-device-dev111")
+	defer cleanup1()
+	tls2, cleanup2 := makeTLSPair(zoneCA2, "mash-device-dev222")
+	defer cleanup2()
+
+	conn1 := &Connection{tlsConn: tls1, state: ConnOperational}
+	conn2 := &Connection{tlsConn: tls2, state: ConnOperational}
+
+	r.activeZoneConns["step-z1"] = conn1
+	r.activeZoneIDs["step-z1"] = "z1"
+	r.activeZoneConns["step-z2"] = conn2
+	r.activeZoneIDs["step-z2"] = "z2"
+	r.conn = conn2 // r.conn points to zone 2
+
+	// Extract from zone 1 via zone_id parameter.
+	state.Set("my_zone", "z1")
+	step := &loader.Step{Params: map[string]any{"zone_id": "{{ my_zone }}"}}
+	out, err := r.handleExtractCertDeviceID(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["device_id"] != "dev111" {
+		t.Errorf("expected dev111 from zone 1, got %v", out["device_id"])
+	}
+
+	// Extract from zone 2 via zone_id parameter.
+	state.Set("my_zone", "z2")
+	out, err = r.handleExtractCertDeviceID(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["device_id"] != "dev222" {
+		t.Errorf("expected dev222 from zone 2, got %v", out["device_id"])
+	}
+
+	// Without zone_id, falls back to r.conn (zone 2).
+	out, err = r.handleExtractCertDeviceID(context.Background(), &loader.Step{}, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["device_id"] != "dev222" {
+		t.Errorf("expected dev222 from r.conn fallback, got %v", out["device_id"])
+	}
+}
+
 func TestHandleVerifyDeviceCert_NotConnected(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
