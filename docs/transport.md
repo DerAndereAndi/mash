@@ -139,19 +139,20 @@ MASH uses length-prefix for simplicity and efficiency on constrained devices.
 - Connection stays open for the session lifetime
 - Automatic reconnection on disconnect
 
-### 5.3 Ports (DEC-067)
+### 5.3 Port and ALPN Routing (DEC-067)
 
-MASH uses two distinct TCP ports:
+MASH uses a single TCP port (default 8443) with ALPN-based routing to distinguish commissioning from operational connections:
 
-| Port Type | Default | Purpose | TLS Config | Lifecycle |
-|-----------|---------|---------|------------|-----------|
-| Operational | 8443 | Zone connections (Read/Write/Subscribe/Invoke) | Mutual TLS with operational certs | Listening when at least one zone exists |
-| Commissioning | 8444 | PASE handshake + certificate exchange | Self-signed server cert, no client cert required | Open only during commissioning window |
+| Connection Type | ALPN Protocol | TLS Config | Purpose |
+|-----------------|---------------|------------|---------|
+| Commissioning | `mash-comm/1` | Self-signed server cert, `NoClientCert` | PASE handshake + certificate exchange |
+| Operational | `mash/1` | Mutual TLS with operational certs | Zone connections (Read/Write/Subscribe/Invoke) |
 
-- Operational port (8443) is advertised in `_mash._tcp` mDNS records
-- Commissioning port (8444) is advertised in `_mash-comm._tcp` mDNS records
-- Both ports are configurable per device implementation
-- An uncommissioned device with zero zones only has the commissioning port open
+The server uses Go's `GetConfigForClient` callback to inspect the ALPN in `ClientHelloInfo.SupportedProtos` and return the appropriate `tls.Config` before the handshake completes. This prevents operational certificates from being exposed to unauthenticated commissioning peers.
+
+- Both `_mash._tcp` and `_mash-comm._tcp` mDNS records advertise port 8443
+- When the commissioning window is closed, `mash-comm/1` connections are rejected at the TLS layer
+- The listener starts when first needed (commissioning or zones) and stops when both are inactive
 
 ### 5.4 Connection Limits (DEC-047)
 
@@ -162,10 +163,10 @@ Connection limits are derived from zone capacity to ensure predictable resource 
 | Connection Type | Maximum | Derivation |
 |-----------------|---------|------------|
 | Operational | max_zones | One per paired zone |
-| Commissioning | 1 | Single concurrent (commissioning port) |
+| Commissioning | 1 | Single concurrent (ALPN: `mash-comm/1`) |
 | **Total** | max_zones + 1 | Maximum simultaneous |
 
-Connection caps are enforced per-port: the commissioning port allows 1 concurrent connection, the operational port allows up to max_zones.
+Connection caps are enforced per-ALPN: `mash-comm/1` allows 1 concurrent connection, `mash/1` allows up to max_zones.
 
 **Example (typical device, max_zones=2):**
 - 2 operational connections (GRID zone + LOCAL zone)

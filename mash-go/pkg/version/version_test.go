@@ -124,8 +124,11 @@ func TestMajorFromALPN(t *testing.T) {
 	}{
 		{"mash/1", 1, false},
 		{"mash/2", 2, false},
+		{"mash-comm/1", 1, false},
+		{"mash-comm/2", 2, false},
 		{"http/1.1", 0, true},
 		{"mash/", 0, true},
+		{"mash-comm/", 0, true},
 		{"", 0, true},
 		{"mash/abc", 0, true},
 	}

@@ -893,9 +893,9 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 						r.conn = &Connection{}
 
 						// DEC-067: After commissioning, the commissioning
-						// window closes and its TCP listener stops. Trigger
-						// re-entering commissioning mode on a tracked zone
-						// connection so the port is open for the next zone.
+						// window closes. Trigger re-entering commissioning
+						// mode on a tracked zone connection so the device
+						// accepts mash-comm/1 connections for the next zone.
 						if i < len(zones)-1 {
 							for _, tracked := range ct.zoneConnections {
 								if tracked != nil && tracked.isConnected() {
@@ -1355,7 +1355,7 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 	r.debugf("transitionToOperational: reconnecting with operational TLS")
 
 	tlsConfig := r.operationalTLSConfig()
-	target := r.getOperationalTarget(nil)
+	target := r.getTarget(nil)
 	var tlsConn *tls.Conn
 	var dialErr error
 	for attempt := range 3 {
@@ -1409,7 +1409,7 @@ func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
 	r.debugf("reconnectToZone: reconnecting to zone %s", r.suiteZoneID)
 
 	tlsConfig := r.operationalTLSConfig()
-	target := r.getOperationalTarget(nil)
+	target := r.getTarget(nil)
 	var tlsConn *tls.Conn
 	var dialErr error
 	for attempt := range 3 {

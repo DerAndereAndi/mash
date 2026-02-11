@@ -160,9 +160,9 @@ Example: MASH:1:1234:12345678:0x1234:0x5678
 ```
 Controller                         Device
      │                               │
-     │◄── mDNS: _mash-comm._tcp ────┤  Commissioning port (8444)
+     │◄── mDNS: _mash-comm._tcp ────┤  Port 8443 (same as operational)
      │                               │
-     │── TCP Connect (port 8444) ──►│  Commissioning listener
+     │── TLS (ALPN: mash-comm/1) ──►│  GetConfigForClient → NoClientCert
      │                               │
      │◄── TLS: self-signed cert ────┤  Stable cert (generated once)
      │                               │
@@ -175,9 +175,9 @@ Controller                         Device
      │                               │
      │◄── Cert Install Ack ─────────┤
      │                               │
-     │   [Commissioning Conn Closed] │  Device closes port 8444 connection
+     │   [Commissioning Conn Closed] │  Device closes commissioning connection
      │                               │
-     │── TCP Connect (port 8443) ──►│  Operational listener
+     │── TLS (ALPN: mash/1) ───────►│  GetConfigForClient → mutual TLS
      │◄── Mutual TLS ──────────────►│  Operational certificates
      │                               │
 ```
@@ -247,20 +247,19 @@ indefinitely:
 - No certificate rotation logic needed for commissioning
 - SPAKE2+ provides authentication; commissioning cert only enables TLS handshake
 
-### 4.7 Port Separation (DEC-067)
+### 4.7 ALPN-Based Connection Routing (DEC-067)
 
-The device uses separate ports for commissioning and operational connections:
+The device uses a single port (8443) with ALPN-based routing to isolate commissioning and operational TLS configurations:
 
-| Port | Default | TLS ClientAuth | Certificate |
-|------|---------|----------------|-------------|
-| Commissioning | 8444 | `NoClientCert` | Self-signed (stable) |
-| Operational | 8443 | `RequireAndVerifyClientCert` | Zone CA-signed |
+| ALPN Protocol | TLS ClientAuth | Certificate | When Available |
+|---------------|----------------|-------------|----------------|
+| `mash-comm/1` | `NoClientCert` | Self-signed (stable) | Commissioning window open |
+| `mash/1` | `RequireAndVerifyClientCert` | Zone CA-signed | At least one zone exists |
 
-- The commissioning listener is created by `EnterCommissioningMode()` and destroyed by
-  `ExitCommissioningMode()`.
-- The operational listener is created when the first zone is registered and remains open
-  until the device has zero zones.
-- An uncommissioned device only has the commissioning port open.
+- `GetConfigForClient` inspects the ALPN in `ClientHelloInfo.SupportedProtos` and returns
+  the appropriate `tls.Config` before the handshake completes.
+- When the commissioning window is closed, `mash-comm/1` connections are rejected at the
+  TLS layer (`GetConfigForClient` returns an error).
 - Operational certificates are never exposed to unauthenticated commissioning peers.
 
 ---

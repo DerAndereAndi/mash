@@ -23,11 +23,8 @@ const (
 	// Domain is the mDNS domain.
 	Domain = "local"
 
-	// DefaultPort is the default MASH operational port.
+	// DefaultPort is the default MASH port (commissioning and operational share the same port).
 	DefaultPort = 8443
-
-	// DefaultCommissioningPort is the default MASH commissioning port (DEC-067).
-	DefaultCommissioningPort = 8444
 )
 
 // TXT record key constants.

@@ -110,7 +110,7 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 		}, nil
 	}
 
-	target := r.getOperationalTarget(params)
+	target := r.getTarget(params)
 
 	// When no Zone CA exists, default to InsecureSkipVerify since there's
 	// no trusted root to verify against.
@@ -1607,7 +1607,7 @@ func (r *Runner) handleOpenConnections(ctx context.Context, step *loader.Step, s
 	count := paramInt(params, KeyCount, 1)
 
 	secState := getSecurityState(state)
-	target := r.getCommissioningTarget(params)
+	target := r.getTarget(params)
 
 	established := 0
 	for i := 0; i < count; i++ {

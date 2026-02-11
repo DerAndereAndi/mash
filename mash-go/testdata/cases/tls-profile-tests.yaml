@@ -886,13 +886,13 @@ tags:
   - session-ticket
 
 ---
-# TC-TLS-COMM-PORT-001: Commissioning Port Accepts Without Client Cert (DEC-067)
-id: TC-TLS-COMM-PORT-001
-name: Commissioning Port Accepts Without Client Cert
+# TC-TLS-COMM-ALPN-001: Commissioning ALPN Accepted Without Client Cert (DEC-067)
+id: TC-TLS-COMM-ALPN-001
+name: Commissioning ALPN Accepted Without Client Cert
 description: |
-  DEC-067: Verifies that the commissioning port (NoClientCert TLS config)
+  DEC-067: Verifies that the commissioning ALPN (mash-comm/1, NoClientCert TLS config)
   accepts connections without a client certificate. Security on the
-  commissioning port comes from SPAKE2+ (PASE), not certificate verification.
+  commissioning path comes from SPAKE2+ (PASE), not certificate verification.
 
 pics_requirements:
   - MASH.S.COMM
@@ -923,13 +923,13 @@ tags:
   - DEC-067
 
 ---
-# TC-TLS-OP-PORT-001: Operational Port Requires Client Cert (DEC-067)
-id: TC-TLS-OP-PORT-001
-name: Operational Port Requires Client Cert
+# TC-TLS-OP-ALPN-001: Operational ALPN Requires Client Cert (DEC-067)
+id: TC-TLS-OP-ALPN-001
+name: Operational ALPN Requires Client Cert
 description: |
-  DEC-067: Verifies that the operational port uses RequireAndVerifyClientCert.
+  DEC-067: Verifies that the operational ALPN (mash/1) uses RequireAndVerifyClientCert.
   A connection with valid zone CA-signed credentials succeeds, confirming
-  mutual TLS is enforced on the operational port.
+  mutual TLS is enforced on the operational path.
 
 pics_requirements:
   - MASH.S.COMM

@@ -52,7 +52,8 @@ items:
   # ==========================================================================
 
   MASH.S.TLS.VERSION: "1.3"                # TLS version (quoted to avoid float truncation)
-  MASH.S.TLS.ALPN: mash/1                  # ALPN protocol
+  MASH.S.TLS.ALPN: mash/1                  # ALPN protocol (operational)
+  MASH.S.TLS.ALPN_COMM: mash-comm/1        # ALPN protocol (commissioning)
   MASH.S.TLS.CS_AES_128_GCM: 1            # AES-128-GCM cipher suite
   MASH.S.TLS.CS_AES_256_GCM: 1            # AES-256-GCM cipher suite
   MASH.S.TLS.KX_X25519: 1                 # X25519 key exchange

@@ -61,11 +61,10 @@ id: TC-SEC-CONN-002
 name: Commissioning Blocked When Zones Full
 description: |
   Verifies device rejects commissioning when all zone slots are filled.
-  DEC-067: With separate ports, the commissioning TCP listener is closed
-  when the commissioning window is closed. When zones are full and no
-  window is open, the commissioning port is unreachable at the transport
-  level (connection refused). Step 1 verifies no mDNS advertisement,
-  step 2 verifies the commissioning port is closed.
+  DEC-067: When zones are full and no commissioning window is open,
+  mash-comm/1 connections are rejected at the TLS layer (GetConfigForClient
+  returns an error). Step 1 verifies no mDNS advertisement,
+  step 2 verifies commissioning connections are rejected.
 
 pics_requirements:
   - MASH.S.COMM.HARDENING
@@ -80,7 +79,7 @@ steps:
     expect:
       commissionable: false
 
-  - name: Verify commissioning port unreachable (DEC-067)
+  - name: Verify commissioning connection rejected (DEC-067)
     action: open_commissioning_connection
     expect:
       connection_established: false

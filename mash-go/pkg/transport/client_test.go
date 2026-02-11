@@ -254,6 +254,11 @@ func TestClientCommissioningMode(t *testing.T) {
 	if state.Version != tls.VersionTLS13 {
 		t.Errorf("Expected TLS 1.3, got version %x", state.Version)
 	}
+
+	// Should negotiate commissioning ALPN
+	if state.NegotiatedProtocol != transport.ALPNCommissioningProtocol {
+		t.Errorf("Expected ALPN %q, got %q", transport.ALPNCommissioningProtocol, state.NegotiatedProtocol)
+	}
 }
 
 // TestClientReconnection verifies the client can reconnect after disconnection.
@@ -397,7 +402,7 @@ func startTestServer(t *testing.T, cert tls.Certificate, tlsVersion uint16) net.
 		MinVersion:   tlsVersion,
 		MaxVersion:   tlsVersion,
 		Certificates: []tls.Certificate{cert},
-		NextProtos:   []string{transport.ALPNProtocol},
+		NextProtos:   []string{transport.ALPNProtocol, transport.ALPNCommissioningProtocol},
 		ClientAuth:   tls.NoClientCert,
 	}
 

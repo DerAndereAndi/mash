@@ -478,7 +478,7 @@ func (r *Runner) reconnectOperational() error {
 	}
 
 	tlsConfig := r.operationalTLSConfig()
-	target := r.getOperationalTarget(nil)
+	target := r.getTarget(nil)
 	var tlsConn *tls.Conn
 	var dialErr error
 	for attempt := range 3 {

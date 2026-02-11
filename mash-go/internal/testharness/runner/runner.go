@@ -109,21 +109,11 @@ type Runner struct {
 // Config configures the test runner.
 type Config struct {
 	// Target is the address of the device/controller under test (host:port).
-	// The host is extracted into TargetHost. The port from Target is not used
-	// for dialing -- CommissioningPort and OperationalPort are used instead.
 	Target string
 
 	// TargetHost is the hostname/IP extracted from Target (without port).
 	// Populated automatically during New() from Target.
 	TargetHost string
-
-	// CommissioningPort is the port for commissioning connections (DEC-067).
-	// Default: 8444.
-	CommissioningPort int
-
-	// OperationalPort is the port for operational connections (DEC-067).
-	// Default: 8443.
-	OperationalPort int
 
 	// Mode is "device" or "controller".
 	Mode string
@@ -326,7 +316,7 @@ func New(config *Config) *Runner {
 		}
 	}
 
-	// Extract hostname from Target for DEC-067 port separation.
+	// Extract hostname from Target.
 	if config.Target != "" && config.TargetHost == "" {
 		host, _, err := net.SplitHostPort(config.Target)
 		if err != nil {
@@ -382,32 +372,11 @@ func (r *Runner) nextMessageID() uint32 {
 	return atomic.AddUint32(&r.messageID, 1)
 }
 
-// getCommissioningTarget returns the host:port for commissioning connections (DEC-067).
-// Checks params for overrides, then constructs from TargetHost + CommissioningPort.
-func (r *Runner) getCommissioningTarget(params map[string]any) string {
-	if t, ok := params["commissioning_target"].(string); ok && t != "" {
-		return t
-	}
+// getTarget returns the host:port for connections.
+// Checks params for overrides, then falls back to config.Target.
+func (r *Runner) getTarget(params map[string]any) string {
 	if t, ok := params[KeyTarget].(string); ok && t != "" {
 		return t
-	}
-	if r.config.TargetHost != "" {
-		return net.JoinHostPort(r.config.TargetHost, strconv.Itoa(r.config.CommissioningPort))
-	}
-	return r.config.Target
-}
-
-// getOperationalTarget returns the host:port for operational connections (DEC-067).
-// Checks params for overrides, then constructs from TargetHost + OperationalPort.
-func (r *Runner) getOperationalTarget(params map[string]any) string {
-	if t, ok := params["operational_target"].(string); ok && t != "" {
-		return t
-	}
-	if t, ok := params[KeyTarget].(string); ok && t != "" {
-		return t
-	}
-	if r.config.TargetHost != "" {
-		return net.JoinHostPort(r.config.TargetHost, strconv.Itoa(r.config.OperationalPort))
 	}
 	return r.config.Target
 }
@@ -842,13 +811,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		commissioning = c
 	}
 
-	// DEC-067: Use port-aware default target.
-	var target string
-	if commissioning {
-		target = r.getCommissioningTarget(step.Params)
-	} else {
-		target = r.getOperationalTarget(step.Params)
-	}
+	target := r.getTarget(step.Params)
 	// Also construct from host + port when specified (overrides above).
 	if h, ok := step.Params["host"].(string); ok && h != "" {
 		port := 8443

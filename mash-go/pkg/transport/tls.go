@@ -12,8 +12,13 @@ import (
 
 // TLS constants for MASH protocol.
 const (
-	// ALPN protocol identifier for MASH.
+	// ALPN protocol identifier for MASH operational connections.
 	ALPNProtocol = "mash/1"
+
+	// ALPNCommissioningProtocol is the ALPN protocol identifier for commissioning.
+	// Commissioning connections use this ALPN; the server routes them via
+	// GetConfigForClient to a NoClientCert TLS config.
+	ALPNCommissioningProtocol = "mash-comm/1"
 
 	// DefaultPort is the default MASH port.
 	DefaultPort = 8443
@@ -155,8 +160,8 @@ func NewCommissioningTLSConfig() *tls.Config {
 		// Security is provided by SPAKE2+ (PASE)
 		InsecureSkipVerify: true,
 
-		// ALPN protocol
-		NextProtos: version.SupportedALPNProtocols(),
+		// Commissioning ALPN protocol
+		NextProtos: []string{ALPNCommissioningProtocol},
 
 		// Curve preferences
 		CurvePreferences: []tls.CurveID{
@@ -178,12 +183,13 @@ func VerifyTLS13(state tls.ConnectionState) error {
 }
 
 // VerifyALPN checks that the negotiated ALPN protocol is a supported MASH version.
+// Accepts both operational (mash/N) and commissioning (mash-comm/N) protocols.
 func VerifyALPN(state tls.ConnectionState) error {
-	if !slices.Contains(version.SupportedALPNProtocols(), state.NegotiatedProtocol) {
-		return fmt.Errorf("ALPN protocol %q is not a supported MASH version %v",
-			state.NegotiatedProtocol, version.SupportedALPNProtocols())
+	proto := state.NegotiatedProtocol
+	if slices.Contains(version.SupportedALPNProtocols(), proto) || proto == ALPNCommissioningProtocol {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("ALPN protocol %q is not a supported MASH version", proto)
 }
 
 // VerifyConnection performs standard MASH connection verification.

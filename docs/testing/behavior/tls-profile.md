@@ -656,37 +656,37 @@ Pinning protects against compromised Zone CA issuing rogue certificates.
 
 ---
 
-## 19. Port-Specific TLS Configurations (DEC-067)
+## 19. ALPN-Routed TLS Configurations (DEC-067)
 
-### 19.1 Commissioning Port TLS Config
+### 19.1 Commissioning TLS Config (ALPN: `mash-comm/1`)
 
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
-| Default port | 8444 | Separate from operational traffic |
+| Port | 8443 (shared) | Single port, routed by ALPN |
 | Server certificate | Self-signed, stable (generated once) | Enables TLS handshake; auth via PASE |
 | Client certificate | Not required | Controller has no cert yet |
 | ClientAuth mode | `NoClientCert` | No mutual TLS during commissioning |
 | `InsecureSkipVerify` | Controller uses `true` | Self-signed cert acceptance |
-| ALPN | `mash/1` | Same as operational |
+| ALPN | `mash-comm/1` | Commissioning protocol identifier |
 
-### 19.2 Operational Port TLS Config
+### 19.2 Operational TLS Config (ALPN: `mash/1`)
 
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
-| Default port | 8443 | Standard operational port |
+| Port | 8443 (shared) | Single port, routed by ALPN |
 | Server certificate | Operational cert signed by Zone CA | Mutual authentication |
 | Client certificate | Required | Controller presents operational cert |
 | ClientAuth mode | `RequireAndVerifyClientCert` | Strict mutual TLS |
 | Certificate validation | Verify against Zone CA pool | Zone membership enforcement |
 | ALPN | `mash/1` | Protocol version negotiation |
 
-### 19.3 Port Isolation Benefits
+### 19.3 ALPN Routing Benefits
 
 - Operational certificates never exposed to unauthenticated commissioning peers
-- Commissioning and operational TLS configs are completely independent
+- `GetConfigForClient` returns different `tls.Config` per ALPN before handshake completes
 - No post-handshake routing heuristics needed
-- Commissioning listener starts/stops with commissioning window
-- Operational port remains stable regardless of commissioning state
+- When commissioning window is closed, `mash-comm/1` is rejected at TLS layer
+- Single listener simplifies lifecycle and is embedded-friendly
 
 ---
 

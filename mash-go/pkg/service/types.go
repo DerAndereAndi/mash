@@ -85,14 +85,10 @@ func (s ServiceState) String() string {
 
 // DeviceConfig configures a DeviceService.
 type DeviceConfig struct {
-	// OperationalListenAddress is the address for operational connections (DEC-067).
-	// Default: ":8443". The operational listener is started when zones exist.
+	// OperationalListenAddress is the address for the unified TLS listener.
+	// Default: ":8443". A single listener handles both commissioning (mash-comm/1 ALPN)
+	// and operational (mash/1 ALPN) connections via GetConfigForClient routing.
 	OperationalListenAddress string
-
-	// CommissioningListenAddress is the address for commissioning connections (DEC-067).
-	// Default: ":8444". The commissioning listener is created/destroyed with the
-	// commissioning window.
-	CommissioningListenAddress string
 
 	// ListenAddress is deprecated. If set and OperationalListenAddress is empty,
 	// it is used as OperationalListenAddress for backward compatibility.
@@ -330,7 +326,6 @@ type BackoffConfig struct {
 func DefaultDeviceConfig() DeviceConfig {
 	return DeviceConfig{
 		OperationalListenAddress:    ":8443",
-		CommissioningListenAddress:  ":8444",
 		MaxZones:                    2, // 1 GRID + 1 LOCAL
 		FailsafeTimeout:             2 * time.Hour,
 		HeartbeatInterval:           30 * time.Second,

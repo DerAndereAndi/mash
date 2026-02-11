@@ -146,8 +146,8 @@ func TestNewCommissioningTLSConfig(t *testing.T) {
 		t.Errorf("MinVersion = %d, want TLS 1.3 (%d)", tlsConfig.MinVersion, tls.VersionTLS13)
 	}
 
-	// Check ALPN uses version.SupportedALPNProtocols()
-	wantProtos := version.SupportedALPNProtocols()
+	// Check ALPN uses the commissioning protocol
+	wantProtos := []string{ALPNCommissioningProtocol}
 	if !slices.Equal(tlsConfig.NextProtos, wantProtos) {
 		t.Errorf("NextProtos = %v, want %v", tlsConfig.NextProtos, wantProtos)
 	}

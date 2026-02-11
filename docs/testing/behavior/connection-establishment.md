@@ -42,7 +42,7 @@ _mash-comm._tcp.local.  PTR  MASH-1234._mash-comm._tcp.local.
 
 **SRV Record:**
 ```
-MASH-1234._mash-comm._tcp.local.  SRV  0 0 8444 evse-001.local.
+MASH-1234._mash-comm._tcp.local.  SRV  0 0 8443 evse-001.local.
 ```
 
 **TXT Record:**
@@ -83,7 +83,7 @@ A1B2C3D4E5F6A7B8-F9E8D7C6B5A49382._mash._tcp.local.  TXT  "ZI=A1B2C3D4E5F6A7B8" 
 |-------|-------|-------------|
 | Priority | 0 | Single instance, no failover |
 | Weight | 0 | No load balancing |
-| Port | 8443 | MASH operational port (commissioning uses 8444) |
+| Port | 8443 | MASH port (commissioning and operational, routed by ALPN) |
 | Target | hostname.local | Device hostname |
 
 ### 2.3 Address Records

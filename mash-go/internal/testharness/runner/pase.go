@@ -127,7 +127,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		conn = r.conn.tlsConn
 	} else {
 		// Create new commissioning connection
-		target := r.getCommissioningTarget(params)
+		target := r.getTarget(params)
 
 		r.debugf("handleCommission: dialing new commissioning connection to %s", target)
 		tlsConfig := transport.NewCommissioningTLSConfig()
@@ -174,7 +174,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			time.Sleep(wait)
 
 			// Reconnect and retry PASE.
-			target := r.getCommissioningTarget(params)
+			target := r.getTarget(params)
 			tlsConfig := transport.NewCommissioningTLSConfig()
 			dialer := &net.Dialer{Timeout: 10 * time.Second}
 			tlsConn, retryErr := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
@@ -210,7 +210,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			r.conn.transitionTo(ConnDisconnected)
 			time.Sleep(500 * time.Millisecond)
 
-			target := r.getCommissioningTarget(params)
+			target := r.getTarget(params)
 			tlsConfig := transport.NewCommissioningTLSConfig()
 			dialer := &net.Dialer{Timeout: 10 * time.Second}
 			tlsConn, retryErr := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
@@ -315,7 +315,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	doTransition, _ := params[ParamTransitionToOperational].(bool)
 	_, fromPrecondition := params[ParamFromPrecondition]
 	if certErr == nil && (doTransition || (!fromPrecondition && r.config.Target != "")) {
-		target := r.getOperationalTarget(params)
+		target := r.getTarget(params)
 
 		// Retry the dial briefly in case the device hasn't registered the
 		// zone as awaiting reconnection yet.

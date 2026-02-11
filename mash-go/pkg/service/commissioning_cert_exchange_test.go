@@ -534,9 +534,8 @@ func TestDEC066_OperationalReconnection(t *testing.T) {
 		t.Error("Zone should be registered as disconnected after commissioning (DEC-066)")
 	}
 
-	// DEC-067: After commissioning, the device's operational listener is on a
-	// different port than the commissioning listener. Update the controller's
-	// stored address to the operational port for reconnection.
+	// After commissioning, verify the device's operational address is available
+	// for reconnection.
 	opAddr := deviceSvc.OperationalAddr()
 	if opAddr == nil {
 		t.Fatal("Device operational address is nil after commissioning")

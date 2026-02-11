@@ -292,13 +292,13 @@ tags:
   - DEC-048
 
 ---
-# TC-COMM-PORT-001: Commissioning Port Opens With Window (DEC-067)
-id: TC-COMM-PORT-001
-name: Commissioning Port Opens With Window
+# TC-COMM-ALPN-001: Commissioning ALPN Opens With Window (DEC-067)
+id: TC-COMM-ALPN-001
+name: Commissioning ALPN Opens With Window
 description: |
-  DEC-067: Verifies that the commissioning port becomes reachable when the
-  commissioning window opens. The commissioning TCP listener is created by
-  EnterCommissioningMode and destroyed by ExitCommissioningMode.
+  DEC-067: Verifies that the commissioning ALPN (mash-comm/1) is accepted
+  when the commissioning window is open. The device routes mash-comm/1
+  connections via GetConfigForClient when commissioningOpen is true.
 
 pics_requirements:
   - MASH.S.COMM
@@ -327,13 +327,13 @@ tags:
   - DEC-067
 
 ---
-# TC-COMM-PORT-002: Commissioning Port Closes With Window (DEC-067)
-id: TC-COMM-PORT-002
-name: Commissioning Port Closes With Window
+# TC-COMM-ALPN-002: Commissioning ALPN Closes With Window (DEC-067)
+id: TC-COMM-ALPN-002
+name: Commissioning ALPN Closes With Window
 description: |
-  DEC-067: Verifies that the commissioning port becomes unreachable after
-  the commissioning window closes. With separate ports, closing the window
-  destroys the TCP listener, so connections are refused at transport level.
+  DEC-067: Verifies that mash-comm/1 connections are rejected after the
+  commissioning window closes. The TLS handshake fails because
+  GetConfigForClient returns an error when commissioningOpen is false.
 
 pics_requirements:
   - MASH.S.COMM

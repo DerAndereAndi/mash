@@ -3724,39 +3724,38 @@ Operational Connection (persistent):
 
 ---
 
-### DEC-067: Separate Commissioning Port and Stable Commissioning Certificate
+### DEC-067: Single-Port ALPN-Based Commissioning Routing and Stable Certificate
 
-**Date:** 2026-02-10
+**Date:** 2026-02-11
 **Status:** Accepted
 
 **Context:**
-The current implementation uses a single TLS listener for both commissioning and operational connections. Routing is determined post-handshake by checking whether the peer presented a client certificate:
+The original implementation used a single TLS listener for both commissioning and operational connections. Routing was determined post-handshake by checking whether the peer presented a client certificate:
 
 - No client cert → commissioning handler (PASE flow)
 - Client cert present → operational handler (zone reconnect)
 
-This creates several problems:
+This created several problems:
 
-1. **Certificate leakage:** After commissioning a first zone, the device presents its operational certificate (signed by Zone CA) to all new connections -- including commissioning attempts for a second zone. The commissioner must use `InsecureSkipVerify: true`, but the operational cert is still exposed to an unauthenticated peer.
+1. **Certificate leakage:** After commissioning a first zone, the device presents its operational certificate (signed by Zone CA) to all new connections -- including commissioning attempts for a second zone. The commissioner uses `InsecureSkipVerify: true`, but the operational cert is still exposed to an unauthenticated peer.
 2. **TLS config coupling:** The shared listener uses `ClientAuth: RequestClientCert` (request but don't require) as a routing workaround, preventing strict mutual TLS enforcement on operational connections.
 3. **Wasteful cert regeneration:** The device regenerates a fresh ECDSA P-256 key pair and self-signed certificate on every commissioning window open. On resource-constrained devices (ESP32 at 240 MHz), P-256 key generation takes 200-500ms per invocation -- unnecessary overhead since security comes from PASE, not the commissioning certificate.
 
 **Decision:**
 Two changes:
 
-**1. Separate commissioning and operational ports.**
-The device MUST listen on two distinct TCP ports:
+**1. ALPN-based routing on a single port.**
+The device uses a single TCP port with ALPN protocol negotiation to distinguish commissioning from operational connections:
 
-| Port | Purpose | TLS Config | Lifecycle |
-|------|---------|------------|-----------|
-| Commissioning port | PASE handshake + cert exchange | Self-signed server cert, no client cert required | Open only during commissioning window |
-| Operational port | Zone connections (Read/Write/Subscribe/Invoke) | Operational cert, mutual TLS required (`RequireAndVerifyClientCert`) | Always listening (when at least one zone exists) |
-
-mDNS advertises the two ports as distinct service types:
-- `_mash-comm._tcp` with the commissioning port (only while commissioning window is open)
-- `_mash._tcp` with the operational port (while zones exist)
-
-An uncommissioned device with zero zones only has the commissioning port open.
+| Aspect | Value |
+|--------|-------|
+| Port | 8443 (single port for both) |
+| Commissioning ALPN | `mash-comm/1` |
+| Operational ALPN | `mash/1` |
+| Routing mechanism | `GetConfigForClient` inspects `ClientHelloInfo.SupportedProtos` |
+| Commissioning gate | `atomic.Bool` checked in callback; rejects `mash-comm/1` when window closed |
+| Listener lifecycle | Start when first needed (commissioning OR zones), stop when both inactive |
+| mDNS | `_mash-comm._tcp` and `_mash._tcp` both advertise port 8443 |
 
 **2. Stable commissioning certificate.**
 The device SHOULD generate its self-signed commissioning certificate once and reuse it indefinitely:
@@ -3766,22 +3765,31 @@ The device SHOULD generate its self-signed commissioning certificate once and re
 - **No regeneration required:** The commissioner uses `InsecureSkipVerify: true` and all authentication comes from PASE (SPAKE2+). Neither the key material, the CN, nor the validity period of the commissioning certificate is security-relevant. The discriminator is discovered via mDNS TXT records, not from the certificate CN. The cert only needs to exist so the TLS 1.3 handshake can complete.
 
 **Rationale:**
-- **Security isolation:** Operational certificates are never exposed to unauthenticated commissioning peers. The commissioning port's TLS config is completely independent of the operational port's config.
-- **Strict mutual TLS:** The operational port can enforce `RequireAndVerifyClientCert`, rejecting any connection without a valid Zone CA-signed certificate at the TLS level.
+- **Security isolation:** Commissioning connections get NoClientCert + self-signed cert. Operational connections get RequireAndVerifyClientCert + zone CA cert. Certificate leakage is prevented because `GetConfigForClient` returns different `tls.Config` instances before the handshake completes.
+- **Strict mutual TLS:** Operational connections enforce `RequireAndVerifyClientCert`, rejecting any connection without a valid Zone CA-signed certificate at the TLS level.
 - **Resource efficiency:** Eliminating per-window key generation removes a 200-500ms latency spike on ESP32 for every commissioning window open. In test mode with dozens of commission/decommission cycles, this adds up significantly.
-- **Simpler routing:** No post-handshake routing heuristic needed. Each listener has a single, unambiguous purpose.
-- **Clean lifecycle:** The commissioning listener starts/stops with the commissioning window. No application-level rejection needed when commissioning is inactive -- the port simply isn't open.
+- **Simpler architecture:** One listener, one accept loop, one handler with ALPN-based dispatch. No post-handshake routing heuristic needed.
+- **TLS-level rejection:** When the commissioning window is closed, `GetConfigForClient` returns an error for `mash-comm/1` connections, causing the TLS handshake to fail at the TLS layer.
+- **Embedded-friendly:** Fewer sockets, simpler lifecycle. Especially beneficial on resource-constrained MCUs.
+
+**Certificate Properties:**
+- Self-signed ECDSA P-256 certificate
+- CN: `MASH-<discriminator>` (informational only; authentication via PASE)
+- Validity: 20 years (arbitrarily long since it's not security-critical)
+- Key material: Generated once, never changes
 
 **Declined Alternatives:**
+- **Separate commissioning and operational ports:** Works but adds ~150 lines of dual-listener infrastructure for no additional security benefit over ALPN routing.
 - **Single port with SNI-based routing:** TLS SNI could distinguish commissioning vs operational, but adds complexity without solving the cert-leakage issue.
-- **Per-window cert regeneration on a separate port:** Still wastes crypto resources for no security benefit.
-- **No TLS for commissioning (Matter approach):** Matter avoids this entirely by running PASE over raw TCP/UDP. This would require implementing a custom framing and encryption layer. MASH's TLS-based approach is simpler for implementors at the cost of requiring a commissioning certificate.
+- **Post-handshake routing (pre-DEC-067):** The original approach. Leaked operational certs and couldn't enforce strict mutual TLS.
+- **No TLS for commissioning (Matter approach):** Matter runs PASE over raw TCP/UDP. This would require implementing a custom framing and encryption layer. MASH's TLS-based approach is simpler for implementors at the cost of requiring a commissioning certificate.
 
 **Implementation notes:**
-- The commissioning port listener is created/destroyed by `EnterCommissioningMode()` / `ExitCommissioningMode()`.
-- The operational port listener is created when the first zone is registered and remains open until the device has zero zones.
-- Both listeners share the same `DeviceService` but use independent `tls.Config` instances.
-- The `acceptCommissioningConnection()` gate (DEC-047) and PASE backoff continue to apply on the commissioning port.
+- `commissioningOpen atomic.Bool` gates commissioning at the TLS layer.
+- `ensureListenerStarted()` / `stopListener()` manage the single listener lifecycle.
+- `handleIncomingConnection()` routes based on negotiated ALPN protocol.
+- `NewCommissioningTLSConfig()` returns `mash-comm/1` ALPN (used by controllers dialing commissioning).
+- `MajorFromALPN()` handles both `mash/N` and `mash-comm/N` prefixes.
 
 **Related:** DEC-047 (commissioning security), DEC-061 (message-gated locking), DEC-066 (close commissioning connection after cert exchange)
 
@@ -3923,4 +3931,4 @@ Key learnings:
 | 2026-02-04 | Added DEC-064: Stale connection reaper. Periodic background goroutine force-closes pre-operational connections exceeding 90s staleness threshold. |
 | 2026-02-04 | Added DEC-061: Message-gated commissioning locking. Moves commissioning lock from TLS accept to first PASERequest receipt. Splits PASEServerSession.Handshake into WaitForPASERequest (5s timeout, no lock) + CompleteHandshake (85s, with lock). Idle TLS connections no longer block commissioning. |
 | 2026-02-04 | Added DEC-065: Connection cooldown starts at release. Moves lastCommissioningAttempt timestamp from acceptCommissioningConnection to releaseCommissioningConnection so cooldown prevents rapid re-attempts after completion, not during in-progress connections. |
-| 2026-02-10 | Added DEC-067: Separate commissioning port and stable commissioning certificate. Splits single TLS listener into dedicated commissioning and operational ports. Commissioning cert generated once (at first startup or factory provisioning) instead of per-window. |
+| 2026-02-11 | Added DEC-067: Single-port ALPN-based commissioning routing and stable commissioning certificate. Uses `GetConfigForClient` with ALPN `mash-comm/1` (commissioning) and `mash/1` (operational) on a single port. Commissioning cert generated once (at first startup or factory provisioning) instead of per-window. |

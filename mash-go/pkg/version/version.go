@@ -52,12 +52,18 @@ func ALPNProtocol(major uint16) string {
 }
 
 // MajorFromALPN extracts the major version from an ALPN protocol string.
+// Handles both operational ("mash/N") and commissioning ("mash-comm/N") forms.
 func MajorFromALPN(alpn string) (uint16, error) {
-	if !strings.HasPrefix(alpn, "mash/") {
+	var suffix string
+	switch {
+	case strings.HasPrefix(alpn, "mash-comm/"):
+		suffix = alpn[len("mash-comm/"):]
+	case strings.HasPrefix(alpn, "mash/"):
+		suffix = alpn[len("mash/"):]
+	default:
 		return 0, fmt.Errorf("not a MASH ALPN protocol: %q", alpn)
 	}
 
-	suffix := alpn[len("mash/"):]
 	if suffix == "" {
 		return 0, fmt.Errorf("empty major version in ALPN: %q", alpn)
 	}

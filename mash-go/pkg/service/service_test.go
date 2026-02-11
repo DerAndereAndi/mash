@@ -1354,11 +1354,10 @@ func TestControllerOperationalDiscoveryIgnoresUnknownDevices(t *testing.T) {
 	}
 }
 
-// Connection routing tests -- verify that the TLS config requests (but does not
-// require) client certificates, enabling the device to distinguish operational
-// reconnections from new PASE commissionings.
+// Connection routing tests -- verify that GetConfigForClient returns the correct
+// TLS configuration based on ALPN protocol.
 
-func TestDeviceServiceTLSConfigRequestsClientCert(t *testing.T) {
+func TestDeviceServiceGetConfigForClient(t *testing.T) {
 	device := model.NewDevice("test-device", 0x1234, 0x5678)
 	config := validDeviceConfig()
 
@@ -1373,9 +1372,25 @@ func TestDeviceServiceTLSConfigRequestsClientCert(t *testing.T) {
 	}
 	defer func() { _ = svc.Stop() }()
 
-	// DEC-067: Verify the commissioning TLS config does not require client certificates.
-	if svc.commissioningTLSConfig.ClientAuth != tls.NoClientCert {
-		t.Errorf("expected ClientAuth=NoClientCert, got %v", svc.commissioningTLSConfig.ClientAuth)
+	// Commissioning ALPN should be rejected when window is closed.
+	hello := &tls.ClientHelloInfo{
+		SupportedProtos: []string{"mash-comm/1"},
+	}
+	_, err = svc.getConfigForClient(hello)
+	if err == nil {
+		t.Error("expected error when commissioning window is closed")
+	}
+
+	// Open commissioning window.
+	svc.commissioningOpen.Store(true)
+
+	// Commissioning ALPN should return NoClientCert config.
+	cfg, err := svc.getConfigForClient(hello)
+	if err != nil {
+		t.Fatalf("getConfigForClient failed: %v", err)
+	}
+	if cfg.ClientAuth != tls.NoClientCert {
+		t.Errorf("expected ClientAuth=NoClientCert, got %v", cfg.ClientAuth)
 	}
 }
 

@@ -121,28 +121,28 @@ tags:
   - commissioning
 
 ---
-# TC-TLS-COMM-004: ALPN mash/1 Negotiated During Commissioning
+# TC-TLS-COMM-004: ALPN mash-comm/1 Negotiated During Commissioning
 id: TC-TLS-COMM-004
-name: ALPN Protocol Negotiated During Commissioning TLS
+name: Commissioning ALPN Protocol Negotiated During TLS
 description: |
-  Verifies that the ALPN protocol "mash/1" is successfully
+  Verifies that the commissioning ALPN protocol "mash-comm/1" is successfully
   negotiated during the commissioning TLS handshake.
 
 pics_requirements:
-  - MASH.S.TLS.ALPN=mash/1
+  - MASH.S.TLS.ALPN_COMM=mash-comm/1
 
 preconditions:
   - device_in_commissioning_mode: true
 
 steps:
-  - name: Connect with ALPN during commissioning
+  - name: Connect with commissioning ALPN during commissioning
     action: connect
     params:
-      alpn: "mash/1"
+      alpn: "mash-comm/1"
       accept_self_signed: true
     expect:
       connected: true
-      negotiated_alpn: "mash/1"
+      negotiated_alpn: "mash-comm/1"
 
 postconditions:
   - alpn_negotiated: true
@@ -1487,13 +1487,13 @@ tags:
   - warning
 
 ---
-# TC-CONN-OP-PORT-001: Operational Port Available After Commission (DEC-067)
-id: TC-CONN-OP-PORT-001
-name: Operational Port Available After Commission
+# TC-CONN-OP-001: Operational Connection Available After Commission (DEC-067)
+id: TC-CONN-OP-001
+name: Operational Connection Available After Commission
 description: |
-  DEC-067: Verifies that the operational port becomes reachable after
-  commissioning. The operational listener is started when the first zone's
-  operational certificate is installed during the cert exchange phase.
+  DEC-067: Verifies that operational connections (ALPN mash/1) are accepted after
+  commissioning. The listener is started when the first zone's operational
+  certificate is installed during the cert exchange phase.
 
 pics_requirements:
   - MASH.S.COMM

@@ -154,8 +154,8 @@ func TestBusyResponse_CooldownActive(t *testing.T) {
 
 // TestBusyResponse_ZonesFullNotInCommissioningMode verifies that when all zone
 // slots are occupied AND the device has exited commissioning mode, new
-// commissioning attempts are rejected at the TCP level (connection refused).
-// DEC-067: The commissioning listener is closed when the window closes.
+// commissioning attempts are rejected at the TLS level.
+// DEC-067: mash-comm/1 connections are rejected when the window is closed.
 func TestBusyResponse_ZonesFullNotInCommissioningMode(t *testing.T) {
 	svc := startCappedDevice(t, 1)
 	addr := svc.CommissioningAddr()
@@ -164,13 +164,13 @@ func TestBusyResponse_ZonesFullNotInCommissioningMode(t *testing.T) {
 	svc.HandleZoneConnect("zone-full-test", 2) // ZoneTypeLocal = 2
 
 	// Exit commissioning mode -- the device is now fully operational
-	// and the commissioning listener is closed.
+	// and mash-comm/1 connections are rejected.
 	if err := svc.ExitCommissioningMode(); err != nil {
 		t.Fatalf("ExitCommissioningMode: %v", err)
 	}
 
-	// DEC-067: Connection to the commissioning port should be refused
-	// because the listener is closed.
+	// DEC-067: mash-comm/1 connection should be rejected at the TLS layer
+	// because the commissioning window is closed.
 	tlsConfig := transport.NewCommissioningTLSConfig()
 	dialer := &net.Dialer{Timeout: 2 * time.Second}
 	_, err := tls.DialWithDialer(dialer, "tcp", addr.String(), tlsConfig)

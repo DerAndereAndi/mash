@@ -64,7 +64,7 @@ MASH-<discriminator>._mash-comm._tcp.local
 **Example:**
 ```
 MASH-1234._mash-comm._tcp.local
-  SRV 0 0 8444 evse-001.local
+  SRV 0 0 8443 evse-001.local
   TXT D=1234 VP=1234:5678 CM=1 DT=EVSE
 ```
 
