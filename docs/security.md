@@ -155,25 +155,30 @@ Example: MASH:1:1234:12345678:0x1234:0x5678
 | vendorid | Vendor ID (hex) |
 | productid | Product ID (hex) |
 
-### 4.3 Commissioning Flow
+### 4.3 Commissioning Flow (DEC-067)
 
 ```
 Controller                         Device
      │                               │
-     │◄── mDNS: _mash._tcp ──────────┤  Advertising
+     │◄── mDNS: _mash-comm._tcp ────┤  Commissioning port (8444)
      │                               │
-     │── TCP Connect ───────────────►│
+     │── TCP Connect (port 8444) ──►│  Commissioning listener
      │                               │
-     │◄── SPAKE2+ (setup code) ─────►│  From QR code (8 digits)
+     │◄── TLS: self-signed cert ────┤  Stable cert (generated once)
      │                               │
-     │── Request CSR ───────────────►│
-     │◄── CSR with new key pair ─────┤
+     │◄── SPAKE2+ (setup code) ────►│  From QR code (8 digits)
      │                               │
-     │── Install Operational Cert ──►│  Signed by Zone CA
+     │── Request CSR ──────────────►│
+     │◄── CSR with new key pair ────┤
      │                               │
-     │◄── Cert Install Ack ──────────┤
+     │── Install Operational Cert ─►│  Signed by Zone CA
      │                               │
-     │   [Connection Closed]         │  Device closes commissioning connection
+     │◄── Cert Install Ack ─────────┤
+     │                               │
+     │   [Commissioning Conn Closed] │  Device closes port 8444 connection
+     │                               │
+     │── TCP Connect (port 8443) ──►│  Operational listener
+     │◄── Mutual TLS ──────────────►│  Operational certificates
      │                               │
 ```
 
@@ -217,6 +222,46 @@ After the device sends CertInstallAck (message type 33), it MUST close the commi
 TLS connection. The device then waits for the controller to initiate a new operational
 connection. If no operational connection arrives within 30 seconds, the device MAY remove
 the zone (as if the controller abandoned commissioning).
+
+### 4.6 Commissioning Certificate Stability (DEC-067)
+
+The device SHOULD generate its self-signed commissioning certificate once and reuse it
+indefinitely:
+
+- **Reference implementation (Go):** Generate at first startup, cache in memory for the
+  process lifetime.
+- **Embedded devices (ESP32):** Generate at factory provisioning, store in NVS alongside
+  discriminator and setup code.
+- **No regeneration required:** The commissioner uses `InsecureSkipVerify: true` and all
+  authentication comes from PASE (SPAKE2+). Neither the key material, the CN, nor the
+  validity period of the commissioning certificate is security-relevant.
+
+**Certificate Properties:**
+- Self-signed ECDSA P-256 certificate
+- CN: `MASH-<discriminator>` (informational only; authentication via PASE)
+- Validity: 20 years (arbitrarily long since it's not security-critical)
+- Key material: Generated once, never changes
+
+**Rationale:**
+- Eliminates 200-500ms P-256 key generation latency on ESP32 per commissioning window
+- No certificate rotation logic needed for commissioning
+- SPAKE2+ provides authentication; commissioning cert only enables TLS handshake
+
+### 4.7 Port Separation (DEC-067)
+
+The device uses separate ports for commissioning and operational connections:
+
+| Port | Default | TLS ClientAuth | Certificate |
+|------|---------|----------------|-------------|
+| Commissioning | 8444 | `NoClientCert` | Self-signed (stable) |
+| Operational | 8443 | `RequireAndVerifyClientCert` | Zone CA-signed |
+
+- The commissioning listener is created by `EnterCommissioningMode()` and destroyed by
+  `ExitCommissioningMode()`.
+- The operational listener is created when the first zone is registered and remains open
+  until the device has zero zones.
+- An uncommissioned device only has the commissioning port open.
+- Operational certificates are never exposed to unauthenticated commissioning peers.
 
 ---
 

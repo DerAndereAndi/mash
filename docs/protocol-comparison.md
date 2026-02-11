@@ -281,7 +281,7 @@ EEBUS:   Node A ◄──WebSocket/TLS──► Node B (either side can initiate
 | Aspect | MASH | Matter 1.5 | EEBUS (SHIP) |
 |--------|------|------------|--------------|
 | Protocol | mDNS/DNS-SD | mDNS/DNS-SD | mDNS/DNS-SD |
-| Commissionable | `_mashc._udp` | `_matterc._udp` | `_ship._tcp` |
+| Commissionable | `_mash-comm._tcp` | `_matterc._udp` | `_ship._tcp` |
 | Operational | `_mash._tcp` | `_matter._tcp` | `_ship._tcp` |
 | Commissioner | `_mashd._udp` | `_matterd._udp` | N/A |
 | BLE discovery | Not supported | BLE advertising (commissioning) | Not supported |

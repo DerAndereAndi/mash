@@ -423,7 +423,7 @@ For each feature, in order:
 | TC-ZONE-COMM | 5 | Multi-zone commissioning |
 | TC-ADMIN | 4 | Admin delegation |
 | TC-CERT | 4 | Certificate handling |
-| TC-MASHC | 6 | Commissionable discovery (`_mashc._udp`) |
+| TC-MASHC | 6 | Commissionable discovery (`_mash-comm._tcp`) |
 | TC-MASHO | 6 | Operational discovery (`_mash._tcp`) |
 | TC-MASHD | 6 | Commissioner discovery (`_mashd._udp`) |
 | TC-QR | 6 | QR code parsing |

@@ -23,7 +23,7 @@ MASH uses mDNS/DNS-SD for network discovery with four service types:
 
 | Service Type | Purpose | Advertised By |
 |--------------|---------|---------------|
-| `_mashc._udp` | Commissionable device | Device in commissioning mode |
+| `_mash-comm._tcp` | Commissionable device | Device in commissioning mode |
 | `_mash._tcp` | Operational device | Commissioned device |
 | `_mashd._udp` | Commissioner/controller | Zone controller |
 | `_mashp._udp` | Pairing request | Controller seeking specific device |
@@ -38,18 +38,18 @@ After network discovery, controllers use capability discovery to learn device fe
 
 | Service | Protocol | Description |
 |---------|----------|-------------|
-| `_mashc._udp.local` | UDP | Device ready for commissioning |
+| `_mash-comm._tcp.local` | TCP | Device ready for commissioning (DEC-067) |
 | `_mash._tcp.local` | TCP | Operational device accepting connections |
 | `_mashd._udp.local` | UDP | Zone controller announcing presence |
 | `_mashp._udp.local` | UDP | Pairing request for specific device |
 
-### 2.2 Commissionable Device (`_mashc._udp`)
+### 2.2 Commissionable Device (`_mash-comm._tcp`)
 
 When a device has an open commissioning window:
 
 **Service Instance Name:**
 ```
-MASH-<discriminator>._mashc._udp.local
+MASH-<discriminator>._mash-comm._tcp.local
 ```
 
 **TXT Records:**
@@ -63,8 +63,8 @@ MASH-<discriminator>._mashc._udp.local
 
 **Example:**
 ```
-MASH-1234._mashc._udp.local
-  SRV 0 0 8443 evse-001.local
+MASH-1234._mash-comm._tcp.local
+  SRV 0 0 8444 evse-001.local
   TXT D=1234 VP=1234:5678 CM=1 DT=EVSE
 ```
 
@@ -134,7 +134,7 @@ Devices SHOULD listen for `_mashp._udp` announcements when:
 When a device receives a pairing request matching its discriminator:
 
 1. Open commissioning window (default: 3 hours)
-2. Start advertising `_mashc._udp`
+2. Start advertising `_mash-comm._tcp`
 3. Accept PASE connections
 
 **Commissioning Window Duration:**
@@ -146,13 +146,13 @@ When a device receives a pairing request matching its discriminator:
 
 #### 2.4.2 Controller Behavior
 
-Controllers announce `_mashp._udp` when they have device credentials but cannot find the device via `_mashc._udp`:
+Controllers announce `_mashp._udp` when they have device credentials but cannot find the device via `_mash-comm._tcp`:
 
 1. Scan QR code or receive credentials from backend
-2. Browse `_mashc._udp` for device by discriminator
+2. Browse `_mash-comm._tcp` for device by discriminator
 3. If NOT found: announce `_mashp._udp` with target discriminator
 4. Continue announcing until:
-   - Device appears on `_mashc._udp`, OR
+   - Device appears on `_mash-comm._tcp`, OR
    - User cancels, OR
    - Timeout (configurable, e.g., 7 days for SMGW, 1 hour for interactive)
 5. Once device is found, proceed with normal PASE commissioning
@@ -169,16 +169,16 @@ Controllers announce `_mashp._udp` when they have device credentials but cannot 
 │  Scenario A: Device already advertising                          │
 │  ─────────────────────────────────────────                       │
 │  1. Controller scans QR → discriminator + passcode               │
-│  2. Controller browses _mashc._udp                               │
+│  2. Controller browses _mash-comm._tcp                               │
 │  3. Device found → connect, PASE with passcode                   │
 │                                                                  │
 │  Scenario B: Device not advertising (deferred)                   │
 │  ─────────────────────────────────────────────                   │
 │  1. Controller receives credentials (QR scan or backend)         │
-│  2. Controller browses _mashc._udp → device NOT found            │
+│  2. Controller browses _mash-comm._tcp → device NOT found            │
 │  3. Controller announces _mashp._udp with D=<discriminator>      │
 │  4. Device sees pairing request → opens window                   │
-│  5. Device advertises _mashc._udp                                │
+│  5. Device advertises _mash-comm._tcp                                │
 │  6. Controller discovers device → connect, PASE with passcode    │
 │                                                                  │
 │  Scenario C: SMGW / Backend-provisioned                          │
@@ -187,7 +187,7 @@ Controllers announce `_mashp._udp` when they have device credentials but cannot 
 │  2. [days/weeks pass]                                            │
 │  3. Backend provisions SMGW with discriminator + passcode        │
 │  4. SMGW announces _mashp._udp                                   │
-│  5. Device sees request → opens window → advertises _mashc._udp  │
+│  5. Device sees request → opens window → advertises _mash-comm._tcp  │
 │  6. SMGW discovers device → connect, PASE with passcode          │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘

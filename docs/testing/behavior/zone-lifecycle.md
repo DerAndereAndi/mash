@@ -125,7 +125,7 @@ Zone owner maintains:
 │           │ Parse MASH:<version>:<D>:<setupcode>                         │
 │           ▼                                                              │
 │   ┌────────────────┐                                                     │
-│   │ BROWSE_MDNS    │  Look for MASH-<D>._mashc._udp                      │
+│   │ BROWSE_MDNS    │  Look for MASH-<D>._mash-comm._tcp                      │
 │   │   (10s max)    │                                                     │
 │   └───────┬────────┘                                                     │
 │           │ Device found with matching discriminator                     │

@@ -656,7 +656,41 @@ Pinning protects against compromised Zone CA issuing rogue certificates.
 
 ---
 
-## 18. References
+## 19. Port-Specific TLS Configurations (DEC-067)
+
+### 19.1 Commissioning Port TLS Config
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Default port | 8444 | Separate from operational traffic |
+| Server certificate | Self-signed, stable (generated once) | Enables TLS handshake; auth via PASE |
+| Client certificate | Not required | Controller has no cert yet |
+| ClientAuth mode | `NoClientCert` | No mutual TLS during commissioning |
+| `InsecureSkipVerify` | Controller uses `true` | Self-signed cert acceptance |
+| ALPN | `mash/1` | Same as operational |
+
+### 19.2 Operational Port TLS Config
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Default port | 8443 | Standard operational port |
+| Server certificate | Operational cert signed by Zone CA | Mutual authentication |
+| Client certificate | Required | Controller presents operational cert |
+| ClientAuth mode | `RequireAndVerifyClientCert` | Strict mutual TLS |
+| Certificate validation | Verify against Zone CA pool | Zone membership enforcement |
+| ALPN | `mash/1` | Protocol version negotiation |
+
+### 19.3 Port Isolation Benefits
+
+- Operational certificates never exposed to unauthenticated commissioning peers
+- Commissioning and operational TLS configs are completely independent
+- No post-handshake routing heuristics needed
+- Commissioning listener starts/stops with commissioning window
+- Operational port remains stable regardless of commissioning state
+
+---
+
+## 20. References
 
 - [RFC 8446](https://datatracker.ietf.org/doc/html/rfc8446) - TLS 1.3
 - [RFC 8447](https://datatracker.ietf.org/doc/html/rfc8447) - TLS Cipher Suite Registry Updates

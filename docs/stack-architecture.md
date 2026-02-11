@@ -620,7 +620,7 @@ classDiagram
 
 | Service Type | DNS-SD Name | Purpose | Instance Name |
 |-------------|-------------|---------|---------------|
-| Commissionable | `_mashc._udp` | Devices in commissioning mode | `MASH-<discriminator>` |
+| Commissionable | `_mash-comm._tcp` | Devices in commissioning mode | `MASH-<discriminator>` |
 | Operational | `_mash._tcp` | Commissioned devices | `<ZoneID>-<DeviceID>` |
 | Commissioner | `_mashd._udp` | Zone controllers | `<ZoneName>` |
 | PairingRequest | `_mashp._udp` | Pairing request signals | `<ZoneID>-<Discriminator>` |
@@ -667,10 +667,10 @@ sequenceDiagram
     participant D as Device
 
     Note over D: Device powers on
-    D->>DNS: Advertise _mashc._udp<br/>MASH-1234 (D=1234, cat=3)
+    D->>DNS: Advertise _mash-comm._tcp<br/>MASH-1234 (D=1234, cat=3)
 
     Note over C: Controller discovers
-    C->>DNS: Browse _mashc._udp
+    C->>DNS: Browse _mash-comm._tcp
     DNS->>C: Found MASH-1234 at 192.168.1.50:8443
 
     Note over C,D: Phase 1: TLS (InsecureSkipVerify)
@@ -698,7 +698,7 @@ sequenceDiagram
     Note over D: Install operational cert atomically
     D->>C: CertRenewalAck (status=0, activeSeq=1)
 
-    Note over D: Stop _mashc._udp
+    Note over D: Stop _mash-comm._tcp
     D->>DNS: Advertise _mash._tcp<br/><ZoneID>-<DeviceID>
 
     Note over C,D: Phase 4: Operational (mTLS)

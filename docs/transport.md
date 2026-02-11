@@ -139,10 +139,19 @@ MASH uses length-prefix for simplicity and efficiency on constrained devices.
 - Connection stays open for the session lifetime
 - Automatic reconnection on disconnect
 
-### 5.3 Port
+### 5.3 Ports (DEC-067)
 
-- Default port: **8443** (TBD - needs IANA registration consideration)
-- Configurable per device
+MASH uses two distinct TCP ports:
+
+| Port Type | Default | Purpose | TLS Config | Lifecycle |
+|-----------|---------|---------|------------|-----------|
+| Operational | 8443 | Zone connections (Read/Write/Subscribe/Invoke) | Mutual TLS with operational certs | Listening when at least one zone exists |
+| Commissioning | 8444 | PASE handshake + certificate exchange | Self-signed server cert, no client cert required | Open only during commissioning window |
+
+- Operational port (8443) is advertised in `_mash._tcp` mDNS records
+- Commissioning port (8444) is advertised in `_mash-comm._tcp` mDNS records
+- Both ports are configurable per device implementation
+- An uncommissioned device with zero zones only has the commissioning port open
 
 ### 5.4 Connection Limits (DEC-047)
 
@@ -153,8 +162,10 @@ Connection limits are derived from zone capacity to ensure predictable resource 
 | Connection Type | Maximum | Derivation |
 |-----------------|---------|------------|
 | Operational | max_zones | One per paired zone |
-| Commissioning | 1 | Single concurrent |
+| Commissioning | 1 | Single concurrent (commissioning port) |
 | **Total** | max_zones + 1 | Maximum simultaneous |
+
+Connection caps are enforced per-port: the commissioning port allows 1 concurrent connection, the operational port allows up to max_zones.
 
 **Example (typical device, max_zones=2):**
 - 2 operational connections (GRID zone + LOCAL zone)

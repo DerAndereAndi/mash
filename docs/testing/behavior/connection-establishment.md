@@ -27,27 +27,27 @@ MASH uses three separate service types (see `discovery.md` for full details):
 
 | Service Type | Purpose | When Present |
 |--------------|---------|--------------|
-| `_mashc._udp` | Commissionable discovery | Commissioning window open |
+| `_mash-comm._tcp` | Commissionable discovery | Commissioning window open |
 | `_mash._tcp` | Operational discovery | Device has zone(s) |
 | `_mashd._udp` | Commissioner discovery | Controller has zone(s) |
 
-### 2.1 Commissionable Discovery Records (`_mashc._udp`)
+### 2.1 Commissionable Discovery Records (`_mash-comm._tcp`)
 
 During commissioning, device publishes:
 
 **PTR Record:**
 ```
-_mashc._udp.local.  PTR  MASH-1234._mashc._udp.local.
+_mash-comm._tcp.local.  PTR  MASH-1234._mash-comm._tcp.local.
 ```
 
 **SRV Record:**
 ```
-MASH-1234._mashc._udp.local.  SRV  0 0 8443 evse-001.local.
+MASH-1234._mash-comm._tcp.local.  SRV  0 0 8444 evse-001.local.
 ```
 
 **TXT Record:**
 ```
-MASH-1234._mashc._udp.local.  TXT  "D=1234" "cat=3" "serial=WB-001234" "brand=ChargePoint" "model=Home Flex"
+MASH-1234._mash-comm._tcp.local.  TXT  "D=1234" "cat=3" "serial=WB-001234" "brand=ChargePoint" "model=Home Flex"
 ```
 
 **AAAA Record:**
@@ -83,7 +83,7 @@ A1B2C3D4E5F6A7B8-F9E8D7C6B5A49382._mash._tcp.local.  TXT  "ZI=A1B2C3D4E5F6A7B8" 
 |-------|-------|-------------|
 | Priority | 0 | Single instance, no failover |
 | Weight | 0 | No load balancing |
-| Port | 8443 | MASH default port |
+| Port | 8443 | MASH operational port (commissioning uses 8444) |
 | Target | hostname.local | Device hostname |
 
 ### 2.3 Address Records

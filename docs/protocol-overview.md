@@ -325,7 +325,7 @@ MASH uses mDNS/DNS-SD for network discovery with four service types:
 
 | Service Type | Purpose | Advertised By |
 |--------------|---------|---------------|
-| `_mashc._udp` | Commissionable device | Device in commissioning mode |
+| `_mash-comm._tcp` | Commissionable device | Device in commissioning mode |
 | `_mash._tcp` | Operational device | Commissioned device |
 | `_mashd._udp` | Commissioner/controller | Zone controller |
 | `_mashp._udp` | Pairing request | Controller seeking specific device |
@@ -391,7 +391,7 @@ Commissioning establishes trust between a controller and a device using SPAKE2+ 
 ```
 Controller                         Device
      │                               │
-     │◄── mDNS: _mashc._udp ────────┤  Device advertising
+     │◄── mDNS: _mash-comm._tcp ────────┤  Device advertising
      │                               │
      │── TCP Connect ───────────────►│
      │                               │

@@ -12,7 +12,7 @@
 
 MASH discovery uses **three separate mDNS service types** (following the Matter model):
 
-1. **Commissionable Discovery (`_mashc._udp`)** - Find devices ready for pairing
+1. **Commissionable Discovery (`_mash-comm._tcp`)** - Find devices ready for pairing
 2. **Operational Discovery (`_mash._tcp`)** - Find commissioned devices in zones
 3. **Commissioner Discovery (`_mashd._udp`)** - Find zone controllers (EMSs)
 
@@ -26,12 +26,12 @@ MASH discovery uses **three separate mDNS service types** (following the Matter 
 
 ## 2. Service Types
 
-### 2.1 Commissionable Discovery (`_mashc._udp`)
+### 2.1 Commissionable Discovery (`_mash-comm._tcp`)
 
 **Purpose:** Discover devices that are ready to be commissioned (paired).
 
 ```
-Service Type:  _mashc._udp
+Service Type:  _mash-comm._tcp
 Domain:        local
 Port:          8443 (UDP for PASE, then TCP for operational)
 ```
@@ -44,9 +44,9 @@ Port:          8443 (UDP for PASE, then TCP for operational)
 
 **Example:**
 ```
-_mashc._udp.local.            PTR   MASH-1234._mashc._udp.local.
-MASH-1234._mashc._udp.local.  SRV   0 0 8443 evse-001.local.
-MASH-1234._mashc._udp.local.  TXT   "D=1234" "cat=3" "serial=WB-2024-001234" "brand=ChargePoint" "model=Home Flex"
+_mash-comm._tcp.local.            PTR   MASH-1234._mash-comm._tcp.local.
+MASH-1234._mash-comm._tcp.local.  SRV   0 0 8443 evse-001.local.
+MASH-1234._mash-comm._tcp.local.  TXT   "D=1234" "cat=3" "serial=WB-2024-001234" "brand=ChargePoint" "model=Home Flex"
 evse-001.local.               AAAA  fe80::1234:5678:9abc:def0
 ```
 
@@ -119,7 +119,7 @@ ems-controller.local.                AAAA  2001:db8::1
 
 | Service Type | Purpose | When Present | Instance Name |
 |--------------|---------|--------------|---------------|
-| `_mashc._udp` | Find devices to commission | Commissioning window open | `MASH-<discriminator>` |
+| `_mash-comm._tcp` | Find devices to commission | Commissioning window open | `MASH-<discriminator>` |
 | `_mash._tcp` | Find operational devices | Device has zone(s) | `<zone-id>-<device-id>` |
 | `_mashd._udp` | Find commissioners | Controller ready | `<zone-name>` |
 
@@ -162,7 +162,7 @@ key=value
 - Values: UTF-8, maximum 200 bytes per value
 - Total TXT record: Maximum 400 bytes (leaves headroom for DNS overhead)
 
-### 3.2 Commissionable TXT Records (`_mashc._udp`)
+### 3.2 Commissionable TXT Records (`_mash-comm._tcp`)
 
 | Key | Type | Required | Max Len | Description |
 |-----|------|----------|---------|-------------|
@@ -187,7 +187,7 @@ key=value
 
 **Note:** Category numbers align with EEBUS "SHIP Requirements for Installation Process" v1.1.0. Numbers are stable - new categories will be added at the end, existing numbers will not change.
 
-**Zone controllers:** Category 2 (EMS) devices are typically zone controllers - they create zones, commission other devices, and coordinate energy management. An EMS advertises `_mashd._udp` (commissioner discovery) and browses `_mashc._udp` to find devices to commission. Category 1 (GCPH) may also act as a zone controller in grid operator scenarios.
+**Zone controllers:** Category 2 (EMS) devices are typically zone controllers - they create zones, commission other devices, and coordinate energy management. An EMS advertises `_mashd._udp` (commissioner discovery) and browses `_mash-comm._tcp` to find devices to commission. Category 1 (GCPH) may also act as a zone controller in grid operator scenarios.
 
 **Multiple categories:** A device may belong to multiple categories. For example, a hybrid inverter with integrated EMS functionality uses `cat=2,5`. If functionality changes (e.g., user deactivates EMS because a separate EMS is used), the device updates its `cat` value dynamically.
 
@@ -212,9 +212,9 @@ model=Home Hub
 
 **Total size:** ~120 bytes typical, 180 bytes maximum
 
-**Note:** No `CM` flag needed - presence of `_mashc._udp` service indicates commissioning mode.
+**Note:** No `CM` flag needed - presence of `_mash-comm._tcp` service indicates commissioning mode.
 
-**UI pairing flow:** When QR scanning is unavailable, the controller browses `_mashc._udp`, filters by `cat` to show compatible devices, and displays `serial`, `brand`, `model` to help the user identify the physical device (e.g., by matching serial number on label).
+**UI pairing flow:** When QR scanning is unavailable, the controller browses `_mash-comm._tcp`, filters by `cat` to show compatible devices, and displays `serial`, `brand`, `model` to help the user identify the physical device (e.g., by matching serial number on label).
 
 ### 3.3 Operational TXT Records (`_mash._tcp`)
 
@@ -264,9 +264,9 @@ DC=5
 
 | Event | Service | Action |
 |-------|---------|--------|
-| Enter commissioning mode | `_mashc._udp` | Register service |
-| Exit commissioning mode (timeout) | `_mashc._udp` | Deregister service |
-| Commissioning complete | `_mashc._udp` | Deregister service |
+| Enter commissioning mode | `_mash-comm._tcp` | Register service |
+| Exit commissioning mode (timeout) | `_mash-comm._tcp` | Deregister service |
+| Commissioning complete | `_mash-comm._tcp` | Deregister service |
 | Commissioning complete | `_mash._tcp` | Register new zone instance |
 | Zone added | `_mash._tcp` | Register additional instance |
 | Zone removed | `_mash._tcp` | Deregister that instance |
@@ -316,7 +316,7 @@ MASH:1:1234:12345678
 ```
 
 **Design rationale:** The QR code contains only the minimum needed for commissioning:
-- **discriminator**: Find the device via mDNS (`MASH-<D>._mashc._udp`)
+- **discriminator**: Find the device via mDNS (`MASH-<D>._mash-comm._tcp`)
 - **setupcode**: Authenticate via SPAKE2+
 
 Device identification (brand, model, serial) is available in the mDNS TXT records, eliminating the need for vendor/product IDs in the QR code. This:
@@ -436,13 +436,13 @@ If multiple devices have the same discriminator:
 Pre-commissioning instance name includes discriminator:
 
 ```
-MASH-<discriminator>._mashc._udp.local
+MASH-<discriminator>._mash-comm._tcp.local
 ```
 
 This allows DNS-SD PTR query filtering:
 ```
 ; Query for specific discriminator
-MASH-1234._mashc._udp.local
+MASH-1234._mash-comm._tcp.local
 ```
 
 ### 5.5 UI Fallback Flow (Without QR Code)
@@ -451,7 +451,7 @@ When QR code scanning is not available (no camera, QR damaged, remote pairing), 
 
 **Step 1: Browse for commissionable devices**
 ```
-Controller browses _mashc._udp.local
+Controller browses _mash-comm._tcp.local
 ```
 
 **Step 2: Filter by device category**
@@ -510,9 +510,9 @@ Proceeds with normal commissioning flow (PASE, CSR, etc.)
 ```
 Controller                                              Device
     │                                                      │
-    │─── Browse _mashc._udp.local ────────────────────────►│
+    │─── Browse _mash-comm._tcp.local ────────────────────────►│
     │                                                      │
-    │◄── PTR: MASH-1234._mashc._udp.local ─────────────────│
+    │◄── PTR: MASH-1234._mash-comm._tcp.local ─────────────────│
     │◄── TXT: D=1234 cat=3 serial=WB-001234                │
     │        brand=ChargePoint model=Home Flex             │
     │                                                      │
@@ -553,7 +553,7 @@ Controller                                              Device
 │            │ Button press                                                   │
 │            ▼                                                                │
 │   ┌─────────────────┐                                                       │
-│   │ COMMISSIONING   │  _mashc._udp: MASH-<D>                                │
+│   │ COMMISSIONING   │  _mash-comm._tcp: MASH-<D>                                │
 │   │  OPEN (120s)    │  (Ready for pairing)                                  │
 │   └────────┬────────┘                                                       │
 │            │                                                                │
@@ -574,7 +574,7 @@ Controller                                              Device
 │                         ┌─────────────────────────────────────────┐         │
 │                         │   OPERATIONAL + COMMISSIONING           │         │
 │                         │  _mash._tcp: existing zones             │         │
-│                         │  _mashc._udp: MASH-<D> (for new zone)   │         │
+│                         │  _mash-comm._tcp: MASH-<D> (for new zone)   │         │
 │                         └─────────────────────────────────────────┘         │
 │                                                                             │
 └────────────────────────────────────────────────────────────────────────────┘
@@ -602,7 +602,7 @@ OPERATIONAL+COMMISSIONING → OPERATIONAL : Timeout or success
 
 ### 6.3 mDNS Updates per State
 
-| Transition | `_mashc._udp` | `_mash._tcp` |
+| Transition | `_mash-comm._tcp` | `_mash._tcp` |
 |------------|---------------|--------------|
 | → UNCOMMISSIONED | - | - |
 | → COMMISSIONING_OPEN | Register MASH-D | - |
@@ -715,7 +715,7 @@ OPERATIONAL+COMMISSIONING → OPERATIONAL : Timeout or success
 
 ```
 # Service types
-MASH.S.DISC.SVC_COMMISSION=_mashc._udp  # Commissionable discovery service
+MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp  # Commissionable discovery service
 MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp  # Operational discovery service
 MASH.S.DISC.SVC_COMMISSIONER=_mashd._udp # Commissioner discovery service (controllers only)
 
@@ -723,7 +723,7 @@ MASH.S.DISC.SVC_COMMISSIONER=_mashd._udp # Commissioner discovery service (contr
 MASH.S.DISC.INSTANCE_MAX_LEN=63         # Maximum instance name length
 MASH.S.DISC.TXT_MAX_LEN=400             # Maximum TXT record size
 
-# Commissionable (_mashc._udp)
+# Commissionable (_mash-comm._tcp)
 MASH.S.DISC.COMM_TXT_D=1                # Discriminator in TXT
 MASH.S.DISC.COMM_TXT_CAT=1              # Device categories in TXT (comma-separated)
 MASH.S.DISC.COMM_TXT_SERIAL=1           # Serial number in TXT
@@ -760,16 +760,16 @@ MASH.S.DISC.COMMISSION_WINDOW=120       # Commissioning window timeout (seconds)
 
 ## 10. Test Cases
 
-### TC-MASHC-*: Commissionable Discovery (`_mashc._udp`)
+### TC-MASHC-*: Commissionable Discovery (`_mash-comm._tcp`)
 
 | ID | Description | Steps | Expected |
 |----|-------------|-------|----------|
-| TC-MASHC-1 | Register on button press | Press commissioning button | `_mashc._udp` MASH-D instance appears |
-| TC-MASHC-2 | Deregister on timeout | Wait 120s in commissioning | `_mashc._udp` instance removed |
-| TC-MASHC-3 | Deregister on success | Complete commissioning | `_mashc._udp` instance removed |
+| TC-MASHC-1 | Register on button press | Press commissioning button | `_mash-comm._tcp` MASH-D instance appears |
+| TC-MASHC-2 | Deregister on timeout | Wait 120s in commissioning | `_mash-comm._tcp` instance removed |
+| TC-MASHC-3 | Deregister on success | Complete commissioning | `_mash-comm._tcp` instance removed |
 | TC-MASHC-4 | TXT record format | Enter commissioning | D, cat, serial, brand, model fields present |
 | TC-MASHC-5 | Instance conflict | Two devices same D | Suffix added (-2) |
-| TC-MASHC-6 | Already operational | Device in zone, press button | `_mashc._udp` added, `_mash._tcp` kept |
+| TC-MASHC-6 | Already operational | Device in zone, press button | `_mash-comm._tcp` added, `_mash._tcp` kept |
 
 ### TC-MASHO-*: Operational Discovery (`_mash._tcp`)
 
@@ -808,7 +808,7 @@ MASH.S.DISC.COMMISSION_WINDOW=120       # Commissioning window timeout (seconds)
 
 | ID | Description | Setup | Expected |
 |----|-------------|-------|----------|
-| TC-DISC-1 | Match found | QR D=1234, device D=1234 | Device discovered via `_mashc._udp` |
+| TC-DISC-1 | Match found | QR D=1234, device D=1234 | Device discovered via `_mash-comm._tcp` |
 | TC-DISC-2 | No match | QR D=1234, no device D=1234 | Timeout, error |
 | TC-DISC-3 | Multiple match | Two devices D=1234 | Both discovered |
 | TC-DISC-4 | Collision resolve | Wrong device first | PASE fails, retry finds correct |
@@ -817,10 +817,10 @@ MASH.S.DISC.COMMISSION_WINDOW=120       # Commissioning window timeout (seconds)
 
 | ID | Description | Initial State | Action | Expected |
 |----|-------------|---------------|--------|----------|
-| TC-DSTATE-1 | Enter comm mode | UNCOMMISSIONED | Button press | `_mashc._udp` registered |
-| TC-DSTATE-2 | Comm timeout | COMMISSIONING_OPEN | Wait 120s | `_mashc._udp` deregistered |
-| TC-DSTATE-3 | Comm success | COMMISSIONING_OPEN | Complete pairing | `_mashc._udp` removed, `_mash._tcp` added |
-| TC-DSTATE-4 | Add zone (operational) | OPERATIONAL | Button press | `_mashc._udp` added, `_mash._tcp` kept |
+| TC-DSTATE-1 | Enter comm mode | UNCOMMISSIONED | Button press | `_mash-comm._tcp` registered |
+| TC-DSTATE-2 | Comm timeout | COMMISSIONING_OPEN | Wait 120s | `_mash-comm._tcp` deregistered |
+| TC-DSTATE-3 | Comm success | COMMISSIONING_OPEN | Complete pairing | `_mash-comm._tcp` removed, `_mash._tcp` added |
+| TC-DSTATE-4 | Add zone (operational) | OPERATIONAL | Button press | `_mash-comm._tcp` added, `_mash._tcp` kept |
 | TC-DSTATE-5 | Second zone added | OPERATIONAL+COMM | Complete | New `_mash._tcp` instance added |
 | TC-DSTATE-6 | Remove all zones | OPERATIONAL | RemoveZone (last) | All `_mash._tcp` removed |
 
@@ -828,10 +828,10 @@ MASH.S.DISC.COMMISSION_WINDOW=120       # Commissioning window timeout (seconds)
 
 | ID | Description | Setup | Expected |
 |----|-------------|-------|----------|
-| TC-BROWSE-1 | Browse commissionable | Multiple commissioning devices | All `_mashc._udp` found |
+| TC-BROWSE-1 | Browse commissionable | Multiple commissioning devices | All `_mash-comm._tcp` found |
 | TC-BROWSE-2 | Browse operational | Multiple operational devices | All `_mash._tcp` found |
 | TC-BROWSE-3 | Browse commissioners | Multiple controllers | All `_mashd._udp` found |
-| TC-BROWSE-4 | Filter by discriminator | QR scan D=1234 | Only MASH-1234 in `_mashc._udp` |
+| TC-BROWSE-4 | Filter by discriminator | QR scan D=1234 | Only MASH-1234 in `_mash-comm._tcp` |
 | TC-BROWSE-5 | Filter by zone | Zone ID A1B2C3D4 | Only A1B2C3D4-* in `_mash._tcp` |
 | TC-BROWSE-6 | Browse timeout | No services | Error after 10s |
 

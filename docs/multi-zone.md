@@ -281,7 +281,7 @@ For detailed timing requirements, see [Failsafe Timing](testing/behavior/failsaf
 ### 8.3 Zone Slot Exhaustion
 
 When all zone slots are filled:
-- Device stops advertising `_mashc._udp` (commissioning service)
+- Device stops advertising `_mash-comm._tcp` (commissioning service)
 - Device rejects commissioning connections at TLS level
 - Existing operational connections continue normally
 - A zone must be removed before a new one can be added
