@@ -96,7 +96,7 @@ func TestCommissioning_CertExchangeAfterPASE(t *testing.T) {
 	}
 
 	// Get device address
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("Device TLS address is nil")
 	}
@@ -209,7 +209,7 @@ func TestCommissioning_DeviceIDFromOperationalCert(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 
 	// Set up controller
 	controllerConfig := validControllerConfig()
@@ -357,7 +357,7 @@ func TestCommissioning_EventCommissionedEmitted(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 
 	// Set up controller
 	controllerConfig := validControllerConfig()
@@ -464,7 +464,7 @@ func TestDEC066_OperationalReconnection(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 
 	// Set up controller
 	controllerConfig := validControllerConfig()
@@ -533,6 +533,19 @@ func TestDEC066_OperationalReconnection(t *testing.T) {
 	if zoneConnected {
 		t.Error("Zone should be registered as disconnected after commissioning (DEC-066)")
 	}
+
+	// DEC-067: After commissioning, the device's operational listener is on a
+	// different port than the commissioning listener. Update the controller's
+	// stored address to the operational port for reconnection.
+	opAddr := deviceSvc.OperationalAddr()
+	if opAddr == nil {
+		t.Fatal("Device operational address is nil after commissioning")
+	}
+	controllerSvc.mu.Lock()
+	if dev, ok := controllerSvc.connectedDevices[connectedDevice.ID]; ok {
+		dev.Port = uint16(opAddr.(*net.TCPAddr).Port)
+	}
+	controllerSvc.mu.Unlock()
 
 	// Phase 2: Controller reconnects with operational certificates
 	err = controllerSvc.Reconnect(ctx, connectedDevice.ID)

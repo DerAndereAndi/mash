@@ -207,7 +207,7 @@ tags:
 id: TC-TRANS-002
 name: mDNS Records Updated During PASE-to-Operational Transition
 description: |
-  Verifies that during the transition, _mashc._udp is removed and
+  Verifies that during the transition, _mash-comm._tcp is removed and
   _mash._tcp is registered.
 
 pics_requirements:
@@ -221,7 +221,7 @@ steps:
   - name: Verify commissionable service present
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: true
 
@@ -240,7 +240,7 @@ steps:
   - name: Verify commissionable removed
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: false
 
@@ -378,7 +378,7 @@ steps:
   - name: Discover device via mDNS
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       discriminator: 1234
     expect:
       device_found: true
@@ -1295,7 +1295,7 @@ steps:
   - name: Attempt to browse
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       timeout: "10s"
     expect:
       device_found: false
@@ -1320,7 +1320,7 @@ description: |
   discriminator, a DISCRIMINATOR_MISMATCH error is returned.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
 
 preconditions:
   - device_in_commissioning_mode: true
@@ -1329,7 +1329,7 @@ steps:
   - name: Browse with wrong discriminator
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       discriminator: 9999
     expect:
       device_found: false
@@ -1355,7 +1355,7 @@ description: |
   record, an ADDRESS_RESOLUTION_FAILED error is returned.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
 
 preconditions:
   - device_srv_present: true
@@ -1365,7 +1365,7 @@ steps:
   - name: Browse for device
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: true
       error_code: ADDRESS_RESOLUTION_FAILED
@@ -1390,7 +1390,7 @@ description: |
   is refused (port not listening), a CONNECTION_FAILED error is returned.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
 
 preconditions:
   - device_address_valid: true
@@ -1425,7 +1425,7 @@ description: |
   a device appears after the initial browse found nothing.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
 
 preconditions:
   - device_will_appear_after_delay: true
@@ -1434,7 +1434,7 @@ steps:
   - name: Browse with retry (device appears during retry)
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       retry: true
     expect:
       device_found: true
@@ -1470,7 +1470,7 @@ steps:
   - name: Browse for device during end of window
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: true
       window_expiry_warning: true
@@ -1485,3 +1485,30 @@ tags:
   - not-found
   - window
   - warning
+
+---
+# TC-CONN-OP-PORT-001: Operational Port Available After Commission (DEC-067)
+id: TC-CONN-OP-PORT-001
+name: Operational Port Available After Commission
+description: |
+  DEC-067: Verifies that the operational port becomes reachable after
+  commissioning. The operational listener is started when the first zone's
+  operational certificate is installed during the cert exchange phase.
+
+pics_requirements:
+  - MASH.S.COMM
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect on operational port with zone credentials
+    action: connect_operational
+    expect:
+      connection_established: true
+
+timeout: "30s"
+tags:
+  - base-protocol
+  - connection
+  - DEC-067

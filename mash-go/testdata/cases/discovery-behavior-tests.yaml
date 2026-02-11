@@ -4,7 +4,7 @@
 # Spec: docs/testing/behavior/discovery.md
 #
 # Key concepts:
-# - Three service types: _mashc._udp (commissionable), _mash._tcp (operational), _mashd._udp (commissioner)
+# - Three service types: _mash-comm._tcp (commissionable), _mash._tcp (operational), _mashd._udp (commissioner)
 # - Instance names: MASH-<D> for commissionable, <zone-id>-<device-id> for operational
 # - QR format: MASH:<version>:<discriminator>:<setupcode>
 # - 12-bit discriminator (0-4095), 8-digit setup code
@@ -17,11 +17,11 @@ id: TC-MASHC-001
 name: Commissionable Service Registered on Button Press
 description: |
   Verifies that pressing the commissioning button causes the device
-  to register a _mashc._udp service instance with the correct
+  to register a _mash-comm._tcp service instance with the correct
   instance name MASH-<discriminator>.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
   - D.COMM.QR
 
 preconditions:
@@ -39,7 +39,7 @@ steps:
   - name: Browse for commissionable devices
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: true
       instance_name_prefix: "MASH-"
@@ -59,11 +59,11 @@ tags:
 id: TC-MASHC-002
 name: Commissionable Service Removed After 120s Timeout
 description: |
-  Verifies that the _mashc._udp service instance is deregistered
+  Verifies that the _mash-comm._tcp service instance is deregistered
   after the 120-second commissioning window expires.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
   - MASH.S.DISC.COMMISSION_WINDOW=120
 
 preconditions:
@@ -73,7 +73,7 @@ steps:
   - name: Verify device is advertising
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: true
 
@@ -92,7 +92,7 @@ steps:
   - name: Verify device no longer advertising
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: false
 
@@ -111,11 +111,11 @@ tags:
 id: TC-MASHC-003
 name: Commissionable Service Removed After Successful Commissioning
 description: |
-  Verifies that the _mashc._udp service instance is deregistered
+  Verifies that the _mash-comm._tcp service instance is deregistered
   after commissioning completes successfully.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
 
 preconditions:
   - device_in_commissioning_mode: true
@@ -137,7 +137,7 @@ steps:
   - name: Verify commissionable service removed
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: false
 
@@ -156,7 +156,7 @@ tags:
 id: TC-MASHC-004
 name: Commissionable TXT Record Contains Required Fields
 description: |
-  Verifies that the _mashc._udp TXT record contains all required
+  Verifies that the _mash-comm._tcp TXT record contains all required
   fields: D (discriminator), cat (device category), serial, brand,
   and model.
 
@@ -174,7 +174,7 @@ steps:
   - name: Browse and inspect TXT record
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: true
       txt_field_D: present
@@ -204,7 +204,7 @@ description: |
   the conflict (e.g., MASH-1234-2).
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
 
 preconditions:
   - two_devices_same_discriminator: true
@@ -221,7 +221,7 @@ steps:
   - name: Browse for commissionable devices
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       discriminator: 1234
     expect:
       devices_found: 2
@@ -243,11 +243,11 @@ id: TC-MASHC-006
 name: Operational Device Also Advertises Commissionable Service
 description: |
   Verifies that a device already in a zone can also advertise
-  _mashc._udp when entering commissioning mode for a second zone,
+  _mash-comm._tcp when entering commissioning mode for a second zone,
   while keeping the existing _mash._tcp advertisement.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
   - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
 
 preconditions:
@@ -271,7 +271,7 @@ steps:
   - name: Verify both services present
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: true
 
@@ -1015,7 +1015,7 @@ description: |
   the controller discovers all of them via mDNS.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
 
 preconditions:
   - two_devices_same_discriminator: true
@@ -1024,7 +1024,7 @@ steps:
   - name: Browse for discriminator
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       discriminator: 1234
     expect:
       devices_found: 2
@@ -1049,7 +1049,7 @@ description: |
   setup code matches the correct device.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
   - D.COMM.PASE
 
 preconditions:
@@ -1083,11 +1083,11 @@ id: TC-DSTATE-001
 name: Uncommissioned Device Transitions to Commissioning Open
 description: |
   Verifies that pressing the commissioning button on an uncommissioned
-  device causes it to register _mashc._udp (transition from
+  device causes it to register _mash-comm._tcp (transition from
   UNCOMMISSIONED to COMMISSIONING_OPEN).
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
 
 preconditions:
   - device_uncommissioned: true
@@ -1100,10 +1100,10 @@ steps:
     expect:
       action_triggered: true
 
-  - name: Verify _mashc._udp registered
+  - name: Verify _mash-comm._tcp registered
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: true
 
@@ -1123,7 +1123,7 @@ id: TC-DSTATE-002
 name: Commissioning Timeout Returns to Uncommissioned State
 description: |
   Verifies that after the 120s commissioning window expires, the
-  device deregisters _mashc._udp and returns to UNCOMMISSIONED.
+  device deregisters _mash-comm._tcp and returns to UNCOMMISSIONED.
 
 pics_requirements:
   - MASH.S.DISC.COMMISSION_WINDOW=120
@@ -1145,10 +1145,10 @@ steps:
     params:
       duration_ms: 2000
 
-  - name: Verify _mashc._udp deregistered
+  - name: Verify _mash-comm._tcp deregistered
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: false
 
@@ -1168,10 +1168,10 @@ id: TC-DSTATE-003
 name: Successful Commissioning Transitions to Operational State
 description: |
   Verifies that successful commissioning transitions the device:
-  _mashc._udp removed, _mash._tcp added.
+  _mash-comm._tcp removed, _mash._tcp added.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
   - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
 
 preconditions:
@@ -1194,7 +1194,7 @@ steps:
   - name: Verify commissionable gone
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: false
 
@@ -1221,10 +1221,10 @@ id: TC-DSTATE-004
 name: Operational Device Can Enter Commissioning for Second Zone
 description: |
   Verifies that an operational device can enter commissioning mode
-  to add a second zone: _mashc._udp added while _mash._tcp kept.
+  to add a second zone: _mash-comm._tcp added while _mash._tcp kept.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
   - MASH.S.DISC.SVC_OPERATIONAL=_mash._tcp
   - D.ZONE.MULTI
 
@@ -1242,7 +1242,7 @@ steps:
   - name: Verify both services present
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       device_found: true
 
@@ -1360,11 +1360,11 @@ tags:
 id: TC-BROWSE-001
 name: Browse Discovers All Commissionable Devices
 description: |
-  Verifies that browsing _mashc._udp discovers all devices currently
+  Verifies that browsing _mash-comm._tcp discovers all devices currently
   in commissioning mode.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
 
 preconditions:
   - multiple_devices_commissioning: true
@@ -1373,7 +1373,7 @@ steps:
   - name: Browse commissionable
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       devices_found_min: 2
 
@@ -1456,11 +1456,11 @@ tags:
 id: TC-BROWSE-004
 name: Browse Filtered by Discriminator Finds Matching Device
 description: |
-  Verifies that browsing _mashc._udp filtered by discriminator
+  Verifies that browsing _mash-comm._tcp filtered by discriminator
   from QR code finds only the matching device.
 
 pics_requirements:
-  - MASH.S.DISC.SVC_COMMISSION=_mashc._udp
+  - MASH.S.DISC.SVC_COMMISSION=_mash-comm._tcp
 
 preconditions:
   - device_in_commissioning_mode: true
@@ -1469,7 +1469,7 @@ steps:
   - name: Browse for specific discriminator
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       discriminator: 1234
     expect:
       device_found: true
@@ -1536,7 +1536,7 @@ steps:
   - name: Browse with no devices present
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       timeout: "10s"
     expect:
       device_found: false

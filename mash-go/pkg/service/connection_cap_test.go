@@ -88,7 +88,7 @@ func waitForActiveConns(svc *DeviceService, expected int32, timeout time.Duratio
 // With MaxZones=2, the cap is 3: open 3 (succeed), 4th rejected, close 1, retry succeeds.
 func TestConnectionCapBasic(t *testing.T) {
 	svc := startCappedDevice(t, 2)
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 	cap := int32(3) // MaxZones(2) + 1
 
 	// Open cap connections -- all should succeed.
@@ -136,7 +136,7 @@ func TestConnectionCapBasic(t *testing.T) {
 // that at most MaxZones+1 are accepted concurrently.
 func TestConnectionCapFlood(t *testing.T) {
 	svc := startCappedDevice(t, 2)
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 	cap := int32(3)
 
 	const numAttempts = 100
@@ -179,7 +179,7 @@ func TestConnectionCapFlood(t *testing.T) {
 // decrements the counter, freeing a cap slot.
 func TestConnectionCapDecrementOnTLSFailure(t *testing.T) {
 	svc := startCappedDevice(t, 2)
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 
 	// Open a connection with an invalid TLS config (max TLS 1.2 won't match server's TLS 1.3).
 	badConfig := &tls.Config{
@@ -219,7 +219,7 @@ func TestConnectionCapDecrementOnTLSFailure(t *testing.T) {
 // TestConnectionCapDecrementOnClose verifies that client close decrements the counter.
 func TestConnectionCapDecrementOnClose(t *testing.T) {
 	svc := startCappedDevice(t, 2)
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 
 	conn := capDialTLS(t, addr)
 	if !waitForActiveConns(svc, 1, 2*time.Second) {
@@ -235,7 +235,7 @@ func TestConnectionCapDecrementOnClose(t *testing.T) {
 // TestActiveConns verifies the ActiveConns accessor returns the correct count.
 func TestActiveConns(t *testing.T) {
 	svc := startCappedDevice(t, 2)
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 
 	// Initially zero.
 	if got := svc.ActiveConns(); got != 0 {

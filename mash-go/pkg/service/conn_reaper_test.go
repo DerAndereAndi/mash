@@ -66,7 +66,7 @@ func reaperDialTLS(t *testing.T, addr net.Addr) *tls.Conn {
 // that sends no messages is closed after the stale timeout.
 func TestStaleConnectionReaper_ClosesIdleConnection(t *testing.T) {
 	svc := startReaperDevice(t, 500*time.Millisecond, 100*time.Millisecond)
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 
 	// Open a TLS connection and send nothing.
 	conn := reaperDialTLS(t, addr)
@@ -180,7 +180,7 @@ func TestStaleConnectionReaper_DisabledWhenZero(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode: %v", err)
 	}
 
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 	conn := reaperDialTLS(t, addr)
 	defer conn.Close()
 

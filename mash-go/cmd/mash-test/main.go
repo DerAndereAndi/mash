@@ -10,6 +10,8 @@
 // Flags:
 //
 //	-target string          Target address (host:port) of device/controller under test
+//	-comm-port int          Commissioning port (default 8444, DEC-067)
+//	-op-port int            Operational port (default 8443, DEC-067)
 //	-mode string            Test mode: device, controller (default "device")
 //	-pics string            Path to PICS file for the target
 //	-tests string           Path to test cases directory
@@ -92,6 +94,8 @@ var (
 	excludeTags    = flag.String("exclude-tags", "", "Exclude tests with these tags (comma-separated)")
 	shuffle        = flag.Bool("shuffle", false, "Randomize test order within each precondition level")
 	shuffleSeed    = flag.Int64("shuffle-seed", 0, "Seed for shuffle randomization (0 = auto-generate)")
+	commPort       = flag.Int("comm-port", 8444, "Commissioning port (DEC-067)")
+	opPort         = flag.Int("op-port", 8443, "Operational port (DEC-067)")
 )
 
 func main() {
@@ -182,6 +186,8 @@ func run() int {
 	// Create runner configuration
 	config := &runner.Config{
 		Target:             *target,
+		CommissioningPort:  *commPort,
+		OperationalPort:    *opPort,
 		Mode:               *mode,
 		PICSFile:           *pics,
 		TestDir:            *tests,

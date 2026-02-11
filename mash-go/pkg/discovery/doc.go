@@ -2,7 +2,7 @@
 //
 // MASH uses three separate mDNS service types (following the Matter model):
 //
-// # Commissionable Discovery (_mashc._udp)
+// # Commissionable Discovery (_mash-comm._tcp)
 //
 // Devices advertise this service when in commissioning mode (ready for pairing).
 // Instance name format: MASH-<discriminator>

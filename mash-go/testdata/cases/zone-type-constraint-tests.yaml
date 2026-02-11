@@ -183,7 +183,7 @@ id: TC-ZTYPE-004
 name: Max Zones Not Advertising Commissioning
 description: |
   When a device has all zone slots filled (GRID + LOCAL = 2 non-TEST
-  zones), it does not advertise _mashc._udp. The device is at capacity
+  zones), it does not advertise _mash-comm._tcp. The device is at capacity
   and should not accept new commissioning attempts.
 
   TEST zones do not count toward zone limits -- they are a transparent
@@ -201,7 +201,7 @@ steps:
   - name: Verify device is NOT advertising commissioning
     action: verify_mdns_not_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       timeout_ms: 3000
     expect:
       not_advertising: true
@@ -224,7 +224,7 @@ id: TC-ZTYPE-005
 name: Zone Removal Auto-Enters Commissioning
 description: |
   When a zone is removed from a device at max capacity, the device
-  auto-enters commissioning mode and advertises _mashc._udp (DEC-059).
+  auto-enters commissioning mode and advertises _mash-comm._tcp (DEC-059).
 
   Starts at max capacity (GRID + LOCAL), LOCAL zone self-removes.
   The device now has an available zone slot and must become
@@ -257,7 +257,7 @@ steps:
   - name: Verify device is advertising commissioning
     action: verify_mdns_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       timeout_ms: 10000
     expect:
       advertising: true

@@ -478,11 +478,12 @@ func (r *Runner) reconnectOperational() error {
 	}
 
 	tlsConfig := r.operationalTLSConfig()
+	target := r.getOperationalTarget(nil)
 	var tlsConn *tls.Conn
 	var dialErr error
 	for attempt := range 3 {
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", r.config.Target, tlsConfig)
+		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 		if dialErr == nil {
 			break
 		}

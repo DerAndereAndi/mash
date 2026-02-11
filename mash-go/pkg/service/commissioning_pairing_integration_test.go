@@ -71,7 +71,7 @@ func TestE2E_StandardCommissioning(t *testing.T) {
 	}
 
 	// Get device address
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("Device TLS address is nil")
 	}
@@ -422,21 +422,9 @@ func TestE2E_DeferredCommissioning_PairingRequest(t *testing.T) {
 	}
 	defer func() { _ = deviceSvc.Stop() }()
 
-	// Get device address (needed for when it becomes commissionable)
-	addr := deviceSvc.TLSAddr()
-	if addr == nil {
-		t.Fatal("Device TLS address is nil")
-	}
-	port := parseAddrPort(addr.String())
-
-	// Set up the device info that controller will discover
-	deviceBrowser.SetPendingDevice(&discovery.CommissionableService{
-		InstanceName:  "MASH-2001",
-		Host:          "localhost",
-		Port:          port,
-		Addresses:     []string{"127.0.0.1"},
-		Discriminator: 2001,
-	})
+	// NOTE: Commissioning address is not available yet -- it is created when
+	// the device enters commissioning mode (triggered by the pairing request).
+	// Mock browser data is set up lazily inside the commissioningOpenedCh handler below.
 
 	// === Setup Controller ===
 	controllerConfig := testControllerConfig()
@@ -453,13 +441,6 @@ func TestE2E_DeferredCommissioning_PairingRequest(t *testing.T) {
 
 	// Use a browser that's linked to the device scenario
 	controllerBrowser := newPairingRequestMockBrowser()
-	controllerBrowser.SetPendingDevice(&discovery.CommissionableService{
-		InstanceName:  "MASH-2001",
-		Host:          "localhost",
-		Port:          port,
-		Addresses:     []string{"127.0.0.1"},
-		Discriminator: 2001,
-	})
 	controllerSvc.SetBrowser(controllerBrowser)
 
 	// Use advertiser that tracks pairing requests
@@ -514,12 +495,23 @@ func TestE2E_DeferredCommissioning_PairingRequest(t *testing.T) {
 	}, 1)
 
 	go func() {
-		// When device opens commissioning window, make it visible to controller
+		// When device opens commissioning window, capture the commissioning
+		// address, set up mock browser data, and make the device visible.
 		go func() {
-			// Wait for device to open commissioning window
 			select {
 			case <-commissioningOpenedCh:
-				t.Log("Device opened commissioning window - making visible to controller")
+				t.Log("Device opened commissioning window - setting up discovery data")
+				addr := deviceSvc.CommissioningAddr()
+				port := parseAddrPort(addr.String())
+				commSvc := &discovery.CommissionableService{
+					InstanceName:  "MASH-2001",
+					Host:          "localhost",
+					Port:          port,
+					Addresses:     []string{"127.0.0.1"},
+					Discriminator: 2001,
+				}
+				deviceBrowser.SetPendingDevice(commSvc)
+				controllerBrowser.SetPendingDevice(commSvc)
 				time.Sleep(10 * time.Millisecond) // Small delay
 				controllerBrowser.MakeDeviceVisible()
 			case <-ctx.Done():
@@ -611,7 +603,7 @@ func TestE2E_ZoneTypeConstraint(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	port := parseAddrPort(addr.String())
 
 	discoveryService := &discovery.CommissionableService{

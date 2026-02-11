@@ -38,7 +38,7 @@ steps:
   - name: Verify commissionable advertisement
     action: verify_mdns_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       advertising: true
 
@@ -51,7 +51,7 @@ steps:
   - name: Verify still advertising at 15 seconds
     action: verify_mdns_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       advertising: true
 
@@ -64,7 +64,7 @@ steps:
   - name: Verify no longer advertising
     action: verify_mdns_not_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       not_advertising: true
 
@@ -113,7 +113,7 @@ steps:
   - name: Verify window closed
     action: verify_mdns_not_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       not_advertising: true
 
@@ -134,7 +134,7 @@ steps:
   - name: Verify window re-opened
     action: verify_mdns_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       timeout_ms: 5000
     expect:
       advertising: true
@@ -260,7 +260,7 @@ steps:
   - name: Verify commissionable advertisement
     action: verify_mdns_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       advertising: true
 
@@ -275,7 +275,7 @@ steps:
   - name: Verify window closed immediately
     action: verify_mdns_not_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       not_advertising: true
 
@@ -290,3 +290,81 @@ tags:
   - timing
   - security
   - DEC-048
+
+---
+# TC-COMM-PORT-001: Commissioning Port Opens With Window (DEC-067)
+id: TC-COMM-PORT-001
+name: Commissioning Port Opens With Window
+description: |
+  DEC-067: Verifies that the commissioning port becomes reachable when the
+  commissioning window opens. The commissioning TCP listener is created by
+  EnterCommissioningMode and destroyed by ExitCommissioningMode.
+
+pics_requirements:
+  - MASH.S.COMM
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Enter commissioning mode
+    action: enter_commissioning_mode
+    expect:
+      commissioning_mode: true
+
+  - name: Open commissioning connection (port reachable)
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+  - name: Close connections
+    action: close_connection
+
+timeout: "30s"
+tags:
+  - base-protocol
+  - commissioning
+  - DEC-067
+
+---
+# TC-COMM-PORT-002: Commissioning Port Closes With Window (DEC-067)
+id: TC-COMM-PORT-002
+name: Commissioning Port Closes With Window
+description: |
+  DEC-067: Verifies that the commissioning port becomes unreachable after
+  the commissioning window closes. With separate ports, closing the window
+  destroys the TCP listener, so connections are refused at transport level.
+
+pics_requirements:
+  - MASH.S.COMM
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Enter commissioning mode
+    action: enter_commissioning_mode
+    expect:
+      commissioning_mode: true
+
+  - name: Verify port reachable
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+
+  - name: Close connections
+    action: close_connection
+
+  - name: Exit commissioning mode
+    action: exit_commissioning_mode
+
+  - name: Attempt commissioning connection (should fail)
+    action: open_commissioning_connection
+    expect:
+      connection_established: false
+
+timeout: "30s"
+tags:
+  - base-protocol
+  - commissioning
+  - DEC-067

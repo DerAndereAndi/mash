@@ -46,9 +46,11 @@ func deriveClientID(controllerName string) []byte {
 // generateSelfSignedCert generates a self-signed TLS certificate for commissioning.
 // During commissioning, devices use self-signed certificates. The actual security
 // comes from the SPAKE2+ (PASE) handshake, not from certificate verification.
-// The CN is set to "MASH-<discriminator>" so controllers can correlate the cert
-// with the discovered mDNS advertisement.
-func generateSelfSignedCert(discriminator uint16) (tls.Certificate, error) {
+//
+// DEC-067: The certificate is stable -- generated once at startup and reused for
+// all commissioning windows. The CN is informational only ("MASH-Commissioning").
+// 20-year validity avoids unnecessary regeneration.
+func generateSelfSignedCert() (tls.Certificate, error) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("generate key: %w", err)
@@ -63,11 +65,11 @@ func generateSelfSignedCert(discriminator uint16) (tls.Certificate, error) {
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			CommonName:   fmt.Sprintf("MASH-%d", discriminator),
+			CommonName:   "MASH-Commissioning",
 			Organization: []string{"MASH"},
 		},
 		NotBefore:             now,
-		NotAfter:              now.Add(24 * time.Hour), // Short validity for commissioning
+		NotAfter:              now.Add(20 * 365 * 24 * time.Hour), // DEC-067: stable, long-lived
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,

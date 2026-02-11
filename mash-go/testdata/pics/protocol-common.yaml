@@ -71,7 +71,7 @@ items:
   # Discovery (mDNS)
   # ==========================================================================
 
-  MASH.S.DISC.SVC_COMMISSION: _mashc._udp     # Commissioning service type
+  MASH.S.DISC.SVC_COMMISSION: _mash-comm._tcp  # Commissioning service type (DEC-067)
   MASH.S.DISC.SVC_OPERATIONAL: _mash._tcp      # Operational service type
   MASH.S.DISC.SVC_COMMISSIONER: _mashd._udp    # Commissioner service type
   MASH.S.DISC.BROWSE_TIMEOUT: 10               # Browse timeout (seconds)

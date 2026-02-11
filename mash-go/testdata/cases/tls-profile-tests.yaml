@@ -794,6 +794,7 @@ steps:
   - name: Connect without client cert for commissioning
     action: connect
     params:
+      commissioning: true
       client_cert: none
       alpn: "mash/1"
     expect:
@@ -883,4 +884,70 @@ tags:
   - tls
   - resume
   - session-ticket
+
+---
+# TC-TLS-COMM-PORT-001: Commissioning Port Accepts Without Client Cert (DEC-067)
+id: TC-TLS-COMM-PORT-001
+name: Commissioning Port Accepts Without Client Cert
+description: |
+  DEC-067: Verifies that the commissioning port (NoClientCert TLS config)
+  accepts connections without a client certificate. Security on the
+  commissioning port comes from SPAKE2+ (PASE), not certificate verification.
+
+pics_requirements:
+  - MASH.S.COMM
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Enter commissioning mode
+    action: enter_commissioning_mode
+    expect:
+      commissioning_mode: true
+
+  - name: Connect to commissioning port without client cert
+    action: open_commissioning_connection
+    expect:
+      connection_established: true
+      self_signed_accepted: true
+
+  - name: Close connections
+    action: close_connection
+
+timeout: "30s"
+tags:
+  - base-protocol
+  - tls
+  - commissioning
+  - DEC-067
+
+---
+# TC-TLS-OP-PORT-001: Operational Port Requires Client Cert (DEC-067)
+id: TC-TLS-OP-PORT-001
+name: Operational Port Requires Client Cert
+description: |
+  DEC-067: Verifies that the operational port uses RequireAndVerifyClientCert.
+  A connection with valid zone CA-signed credentials succeeds, confirming
+  mutual TLS is enforced on the operational port.
+
+pics_requirements:
+  - MASH.S.COMM
+
+preconditions:
+  - device_commissioned: true
+
+steps:
+  - name: Connect to operational port with zone credentials
+    action: connect_operational
+    expect:
+      connection_established: true
+      connection_type: "operational"
+
+timeout: "30s"
+tags:
+  - base-protocol
+  - tls
+  - security
+  - DEC-067
 

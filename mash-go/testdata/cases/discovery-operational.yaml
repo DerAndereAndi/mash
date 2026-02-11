@@ -5,7 +5,7 @@ id: TC-DISC-002
 name: Operational mDNS Discovery
 description: |
   Verifies that after commissioning, a device transitions from commissionable
-  discovery (_mashc._udp) to operational discovery (_mash._tcp).
+  discovery (_mash-comm._tcp) to operational discovery (_mash._tcp).
 
   The operational advertisement allows controllers to rediscover devices
   for reconnection after network disruptions.
@@ -23,7 +23,7 @@ steps:
   - name: Verify commissionable service stopped
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       timeout_ms: 3000
     expect:
       device_found: false

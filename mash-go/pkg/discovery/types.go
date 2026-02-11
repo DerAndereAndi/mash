@@ -7,8 +7,8 @@ import (
 
 // Service type constants for mDNS.
 const (
-	// ServiceTypeCommissionable is the service type for devices in commissioning mode.
-	ServiceTypeCommissionable = "_mashc._udp"
+	// ServiceTypeCommissionable is the service type for devices in commissioning mode (DEC-067).
+	ServiceTypeCommissionable = "_mash-comm._tcp"
 
 	// ServiceTypeOperational is the service type for commissioned devices.
 	ServiceTypeOperational = "_mash._tcp"
@@ -23,8 +23,11 @@ const (
 	// Domain is the mDNS domain.
 	Domain = "local"
 
-	// DefaultPort is the default MASH port.
+	// DefaultPort is the default MASH operational port.
 	DefaultPort = 8443
+
+	// DefaultCommissioningPort is the default MASH commissioning port (DEC-067).
+	DefaultCommissioningPort = 8444
 )
 
 // TXT record key constants.
@@ -180,7 +183,7 @@ const (
 	// StateUncommissioned - device has no zones, not in commissioning mode.
 	StateUncommissioned
 
-	// StateCommissioningOpen - commissioning window is open (_mashc._udp advertised).
+	// StateCommissioningOpen - commissioning window is open (_mash-comm._tcp advertised).
 	StateCommissioningOpen
 
 	// StateOperational - device has zones (_mash._tcp advertised per zone).

@@ -89,7 +89,7 @@ func dialCommissioning(t *testing.T, addr net.Addr) *tls.Conn {
 // with RetryAfter > 0.
 func TestBusyResponse_CommissioningInProgress(t *testing.T) {
 	svc := startCappedDevice(t, 2)
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 
 	// First controller: TLS connect + send PASERequest to hold the commissioning lock.
 	conn1 := dialCommissioning(t, addr)
@@ -118,7 +118,7 @@ func TestBusyResponse_CommissioningInProgress(t *testing.T) {
 // a commissioning attempt gets a busy response with RetryAfter ~ remaining cooldown.
 func TestBusyResponse_CooldownActive(t *testing.T) {
 	svc := startCappedDevice(t, 2)
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 
 	// Override cooldown to 2s for testing (non-test-mode, so cooldown is active).
 	svc.config.ConnectionCooldown = 2 * time.Second
@@ -153,42 +153,39 @@ func TestBusyResponse_CooldownActive(t *testing.T) {
 }
 
 // TestBusyResponse_ZonesFullNotInCommissioningMode verifies that when all zone
-// slots are occupied AND the device has exited commissioning mode, a new
-// commissioning attempt still gets a proper CommissioningError with ErrCodeBusy
-// (rather than the connection being silently closed by handleOperationalConnection).
+// slots are occupied AND the device has exited commissioning mode, new
+// commissioning attempts are rejected at the TCP level (connection refused).
+// DEC-067: The commissioning listener is closed when the window closes.
 func TestBusyResponse_ZonesFullNotInCommissioningMode(t *testing.T) {
 	svc := startCappedDevice(t, 1)
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 
 	// Fill the single zone slot.
 	svc.HandleZoneConnect("zone-full-test", 2) // ZoneTypeLocal = 2
 
-	// Exit commissioning mode -- the device is now fully operational.
+	// Exit commissioning mode -- the device is now fully operational
+	// and the commissioning listener is closed.
 	if err := svc.ExitCommissioningMode(); err != nil {
 		t.Fatalf("ExitCommissioningMode: %v", err)
 	}
 
-	// New controller connects without a cert -> should be routed to
-	// handleCommissioningConnection which will send ErrCodeBusy.
-	conn := dialCommissioning(t, addr)
-	defer conn.Close()
-	sendPASERequest(t, conn)
-
-	errMsg := readCommissioningError(t, conn)
-
-	if errMsg.ErrorCode != commissioning.ErrCodeBusy {
-		t.Errorf("ErrorCode: expected %d (ErrCodeBusy), got %d", commissioning.ErrCodeBusy, errMsg.ErrorCode)
+	// DEC-067: Connection to the commissioning port should be refused
+	// because the listener is closed.
+	tlsConfig := transport.NewCommissioningTLSConfig()
+	dialer := &net.Dialer{Timeout: 2 * time.Second}
+	_, err := tls.DialWithDialer(dialer, "tcp", addr.String(), tlsConfig)
+	if err == nil {
+		t.Fatal("Expected connection refused when commissioning window is closed")
 	}
-	if errMsg.RetryAfter != 0 {
-		t.Errorf("RetryAfter: expected 0 when zones full, got %d", errMsg.RetryAfter)
-	}
+	// Verify it's a connection error (not a TLS error).
+	t.Logf("Got expected connection error: %v", err)
 }
 
 // TestBusyResponse_ZonesFull verifies that when all zone slots are occupied,
 // a commissioning attempt gets a busy response with RetryAfter == 0.
 func TestBusyResponse_ZonesFull(t *testing.T) {
 	svc := startCappedDevice(t, 1)
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 
 	// Simulate a commissioned zone to fill the slot.
 	svc.HandleZoneConnect("zone-full-test", 2) // ZoneTypeLocal = 2

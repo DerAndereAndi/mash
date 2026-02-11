@@ -76,7 +76,7 @@ func TestE2E_CommissioningFlow(t *testing.T) {
 	}
 
 	// Get device address
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("Device TLS address is nil - TLS server not started")
 	}
@@ -231,7 +231,7 @@ func TestE2E_CommissioningFlowWrongCode(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("Device TLS address is nil")
 	}
@@ -319,7 +319,7 @@ func TestE2E_MultipleCommissioning(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("Device TLS address is nil")
 	}
@@ -416,7 +416,7 @@ func TestE2E_OperationalRead(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	port := parseTestPort(addr.String())
 
 	// Setup and start controller
@@ -504,7 +504,7 @@ func TestE2E_OperationalSubscribe(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	port := parseTestPort(addr.String())
 
 	// Setup and start controller
@@ -592,7 +592,7 @@ func TestE2E_SubscriptionNotification(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	port := parseTestPort(addr.String())
 
 	// Setup and start controller
@@ -706,14 +706,14 @@ func TestE2E_NotificationDelivery(t *testing.T) {
 	}
 	defer func() { _ = deviceSvc.Stop() }()
 
-	addr := deviceSvc.TLSAddr()
-	port := addr.(*net.TCPAddr).Port
-	t.Logf("Device listening on port %d", port)
-
 	// Enter commissioning mode
 	if err := deviceSvc.EnterCommissioningMode(); err != nil {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
+
+	addr := deviceSvc.CommissioningAddr()
+	port := addr.(*net.TCPAddr).Port
+	t.Logf("Device listening on port %d", port)
 
 	// Create controller
 	controllerConfig := DefaultControllerConfig()
@@ -851,7 +851,7 @@ func TestE2E_DeviceIDConsistencyForReconnection(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("Device TLS address is nil")
 	}
@@ -970,7 +970,7 @@ func TestE2E_ReconnectionAfterDisconnect(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 
 	// === Setup Controller ===
 	controllerConfig := validControllerConfig()
@@ -1135,7 +1135,7 @@ func TestE2E_RenewalOverTLS(t *testing.T) {
 	defer func() { _ = controllerSvc.Stop() }()
 
 	// Get device address for commissioning
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("Device TLS address is nil")
 	}
@@ -1271,7 +1271,7 @@ func TestE2E_RemoveDevice(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	port := parseTestPort(addr.String())
 	t.Logf("Device listening on port %d", port)
 

@@ -34,6 +34,7 @@ func TestDeviceServiceStartsTLSServer(t *testing.T) {
 
 	// Use mock advertiser to avoid mDNS
 	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
 	advertiser.EXPECT().StopAll().Return().Maybe()
 	svc.SetAdvertiser(advertiser)
 
@@ -43,10 +44,14 @@ func TestDeviceServiceStartsTLSServer(t *testing.T) {
 	}
 	defer func() { _ = svc.Stop() }()
 
-	// Verify TLS server is running by checking the address
-	addr := svc.TLSAddr()
+	if err := svc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	// Verify commissioning TLS server is running by checking the address
+	addr := svc.CommissioningAddr()
 	if addr == nil {
-		t.Fatal("TLS server address is nil - server not started")
+		t.Fatal("Commissioning address is nil - server not started")
 	}
 
 	// Try to connect with commissioning TLS config
@@ -91,7 +96,7 @@ func TestDeviceServicePASEHandshake(t *testing.T) {
 	}
 
 	// Connect and perform PASE handshake
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("TLS server address is nil")
 	}
@@ -170,7 +175,7 @@ func TestDeviceServicePASEWrongSetupCode(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("TLS server address is nil")
 	}
@@ -248,7 +253,7 @@ func TestControllerServiceCommission(t *testing.T) {
 	}
 
 	// Get device address
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("Device TLS address is nil")
 	}
@@ -361,7 +366,7 @@ func TestControllerServiceCommissionWrongCode(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("Device TLS address is nil")
 	}
@@ -452,7 +457,7 @@ func TestDeriveDeviceID(t *testing.T) {
 
 // TestGenerateSelfSignedCert verifies self-signed certificate generation.
 func TestGenerateSelfSignedCert(t *testing.T) {
-	cert, err := generateSelfSignedCert(1234)
+	cert, err := generateSelfSignedCert()
 	if err != nil {
 		t.Fatalf("generateSelfSignedCert failed: %v", err)
 	}
@@ -552,7 +557,7 @@ func TestMessageGatedLocking_IdleConnectionDoesNotBlock(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("TLS server address is nil")
 	}
@@ -627,7 +632,7 @@ func TestMessageGatedLocking_FirstMessageTimeout(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("TLS server address is nil")
 	}
@@ -683,7 +688,7 @@ func TestMessageGatedLocking_BackwardCompat(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := svc.TLSAddr()
+	addr := svc.CommissioningAddr()
 	if addr == nil {
 		t.Fatal("TLS server address is nil")
 	}

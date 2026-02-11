@@ -18,7 +18,8 @@
 //	-config string      Configuration file path
 //	-discriminator int  Discriminator for commissioning (0-4095)
 //	-setup-code string  8-digit setup code for commissioning
-//	-port int           Listen port (default 8443)
+//	-port int           Operational listen port (default 8443)
+//	-comm-port int      Commissioning listen port (default 8444, DEC-067)
 //	-log-level string   Log level: debug, info, warn, error (default "info")
 //	-simulate           Enable simulation mode with synthetic data
 //	-interactive        Enable interactive command mode
@@ -93,14 +94,15 @@ const (
 // Config holds the device configuration.
 // It implements interactive.DeviceConfig.
 type Config struct {
-	Type          DeviceType
-	ConfigFile    string
-	Discriminator uint16
-	SetupCode     string
-	Port          int
-	LogLevel      string
-	Simulate      bool
-	Interactive   bool
+	Type              DeviceType
+	ConfigFile        string
+	Discriminator     uint16
+	SetupCode         string
+	Port              int
+	CommissioningPort int
+	LogLevel          string
+	Simulate          bool
+	Interactive       bool
 
 	// Device-specific settings
 	SerialNumber string
@@ -143,7 +145,8 @@ func init() {
 	flag.StringVar(&config.ConfigFile, "config", "", "Configuration file path")
 	flag.UintVar(&discriminator, "discriminator", 1234, "Discriminator for commissioning (0-4095)")
 	flag.StringVar(&config.SetupCode, "setup-code", "12345678", "8-digit setup code for commissioning")
-	flag.IntVar(&config.Port, "port", 8443, "Listen port")
+	flag.IntVar(&config.Port, "port", 8443, "Operational listen port")
+	flag.IntVar(&config.CommissioningPort, "comm-port", 8444, "Commissioning listen port (DEC-067)")
 	flag.StringVar(&config.LogLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	flag.BoolVar(&config.Simulate, "simulate", false, "Enable simulation mode with synthetic data")
 	flag.BoolVar(&config.Interactive, "interactive", false, "Enable interactive command mode")
@@ -172,7 +175,8 @@ func main() {
 	log.Println("=====================")
 	log.Printf("Device type: %s", config.Type)
 	log.Printf("Discriminator: %d", config.Discriminator)
-	log.Printf("Port: %d", config.Port)
+	log.Printf("Operational port: %d", config.Port)
+	log.Printf("Commissioning port: %d", config.CommissioningPort)
 
 	// Validate configuration
 	if err := validateConfig(); err != nil {
@@ -212,7 +216,8 @@ func main() {
 	svcConfig.Model = config.Model
 	svcConfig.DeviceName = config.DeviceName
 	svcConfig.Categories = []discovery.DeviceCategory{deviceCategory}
-	svcConfig.ListenAddress = fmt.Sprintf(":%d", config.Port)
+	svcConfig.OperationalListenAddress = fmt.Sprintf(":%d", config.Port)
+	svcConfig.CommissioningListenAddress = fmt.Sprintf(":%d", config.CommissioningPort)
 	svcConfig.TestEnableKey = config.EnableKey
 	svcConfig.ListenForPairingRequests = true
 	svcConfig.Logger = logger

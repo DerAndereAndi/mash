@@ -124,10 +124,7 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 
 	secState := getSecurityState(state)
 
-	target := r.config.Target
-	if t, ok := step.Params["target"].(string); ok && t != "" {
-		target = t
-	}
+	target := r.getCommissioningTarget(step.Params)
 
 	// Create commissioning TLS config
 	tlsConfig := transport.NewCommissioningTLSConfig()
@@ -386,10 +383,7 @@ func (r *Runner) handleFloodConnections(ctx context.Context, step *loader.Step, 
 
 	duration := paramInt(params, "duration_seconds", 5)
 
-	target := r.config.Target
-	if t, ok := params[KeyTarget].(string); ok && t != "" {
-		target = t
-	}
+	target := r.getCommissioningTarget(params)
 
 	// Track results
 	var accepted, rejected int32
@@ -491,10 +485,7 @@ func (r *Runner) handleConnectOperational(ctx context.Context, step *loader.Step
 		zoneID = z
 	}
 
-	target := r.config.Target
-	if t, ok := params[KeyTarget].(string); ok && t != "" {
-		target = t
-	}
+	target := r.getOperationalTarget(params)
 
 	// For operational connection, use Zone CA validation when available.
 	// When no Zone CA exists, default to InsecureSkipVerify since there's
@@ -963,7 +954,7 @@ func (r *Runner) handlePASEAttemptTimed(ctx context.Context, step *loader.Step, 
 
 // measurePASEAttempt measures the time for a single PASE attempt.
 func (r *Runner) measurePASEAttempt(ctx context.Context, setupCode string) (time.Duration, error, error) {
-	target := r.config.Target
+	target := r.getCommissioningTarget(nil)
 
 	// Create connection
 	tlsConfig := transport.NewCommissioningTLSConfig()
@@ -1282,7 +1273,7 @@ func (r *Runner) handleFillConnections(ctx context.Context, step *loader.Step, s
 	}
 
 	secState := getSecurityState(state)
-	target := r.config.Target
+	target := r.getCommissioningTarget(params)
 
 	opened := 0
 	for i := 0; i < count; i++ {
@@ -1360,10 +1351,7 @@ func (r *Runner) checkBusyRetryAfterGT(key string, expected interface{}, state *
 // the expected CommissioningError busy response. When no target is configured
 // (simulation mode), it returns canned busy response values.
 func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, error) {
-	target := r.config.Target
-	if t, ok := step.Params["target"].(string); ok && t != "" {
-		target = t
-	}
+	target := r.getCommissioningTarget(step.Params)
 
 	// Simulation mode: return expected busy values without connecting.
 	// DEC-063: Device always includes RetryAfter when busy.

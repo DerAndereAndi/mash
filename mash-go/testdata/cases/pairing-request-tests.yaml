@@ -5,7 +5,7 @@
 # - Controllers announce pairing requests via _mashp._udp mDNS
 # - Uncommissioned devices listen for matching discriminators
 # - When discriminator matches, device opens commissioning window
-# - Device starts advertising _mashc._udp for commissioning
+# - Device starts advertising _mash-comm._tcp for commissioning
 # - Rate limiting: device ignores requests if window already open
 
 ---
@@ -15,7 +15,7 @@ name: Device Opens Window on Pairing Request
 description: |
   An uncommissioned device receives a pairing request with a matching
   discriminator. The device opens its commissioning window automatically
-  and starts advertising _mashc._udp for commissioning.
+  and starts advertising _mash-comm._tcp for commissioning.
 
   This enables deferred commissioning scenarios where the controller
   (e.g., SMGW) announces intent to commission before the device is
@@ -34,7 +34,7 @@ steps:
   - name: Verify device is not advertising commissioning
     action: verify_mdns_not_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       not_advertising: true
 
@@ -55,7 +55,7 @@ steps:
   - name: Verify device opens commissioning window
     action: verify_mdns_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       timeout_ms: 5000
     expect:
       advertising: true
@@ -108,7 +108,7 @@ steps:
   - name: Verify device is not advertising commissioning
     action: verify_mdns_not_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       not_advertising: true
 
@@ -129,7 +129,7 @@ steps:
   - name: Verify device did NOT open commissioning window
     action: verify_mdns_not_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       not_advertising: true
 
@@ -169,14 +169,14 @@ steps:
   - name: Verify device is advertising commissioning
     action: verify_mdns_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       advertising: true
 
   - name: Record window expiry time
     action: read_mdns_txt
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       key: "wexp"                    # Window expiry timestamp
     store_as: original_window_expiry
     expect:
@@ -199,7 +199,7 @@ steps:
   - name: Verify window expiry unchanged (rate limited)
     action: read_mdns_txt
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       key: "wexp"
     expect:
       value: "{{ original_window_expiry }}"    # Not extended
@@ -264,7 +264,7 @@ steps:
   - name: Verify device advertises commissioning
     action: verify_mdns_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       timeout_ms: 10000
     expect:
       advertising: true
@@ -346,7 +346,7 @@ steps:
   - name: Verify device did NOT open commissioning window
     action: verify_mdns_not_advertising
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
     expect:
       not_advertising: true
 

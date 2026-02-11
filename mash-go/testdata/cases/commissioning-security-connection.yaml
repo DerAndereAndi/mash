@@ -61,14 +61,15 @@ id: TC-SEC-CONN-002
 name: Commissioning Blocked When Zones Full
 description: |
   Verifies device rejects commissioning when all zone slots are filled.
-  Device should not advertise as commissionable and send a
-  CommissioningError with DEVICE_BUSY (error code 5) and a RetryAfter
-  hint when a PASERequest is received (DEC-063).
+  DEC-067: With separate ports, the commissioning TCP listener is closed
+  when the commissioning window is closed. When zones are full and no
+  window is open, the commissioning port is unreachable at the transport
+  level (connection refused). Step 1 verifies no mDNS advertisement,
+  step 2 verifies the commissioning port is closed.
 
 pics_requirements:
   - MASH.S.COMM.HARDENING
   - MASH.S.ZONE.MAX
-  - MASH.S.COMM.ERR_BUSY
 
 preconditions:
   - device_zones_full: true
@@ -79,15 +80,10 @@ steps:
     expect:
       commissionable: false
 
-  - name: Attempt commissioning connection anyway
+  - name: Verify commissioning port unreachable (DEC-067)
     action: open_commissioning_connection
-    params:
-      send_pase: true
     expect:
-      busy_response_received: true
-      busy_error_code: 5
-      # Device may include remaining cooldown time; just verify the field is present.
-      busy_retry_after_present: true
+      connection_established: false
 
 postconditions:
   - commissioning_rejected: true
@@ -99,7 +95,7 @@ tags:
   - commissioning
   - zones
   - DEC-047
-  - DEC-063
+  - DEC-067
 
 ---
 id: TC-SEC-CONN-003

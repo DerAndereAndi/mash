@@ -147,7 +147,7 @@ steps:
   - name: Browse and find both devices
     action: browse_mdns
     params:
-      service_type: "_mashc._udp"
+      service_type: "_mash-comm._tcp"
       discriminator: 1234
     expect:
       devices_found: 2

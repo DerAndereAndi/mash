@@ -127,10 +127,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		conn = r.conn.tlsConn
 	} else {
 		// Create new commissioning connection
-		target := r.config.Target
-		if t, ok := params[KeyTarget].(string); ok && t != "" {
-			target = t
-		}
+		target := r.getCommissioningTarget(params)
 
 		r.debugf("handleCommission: dialing new commissioning connection to %s", target)
 		tlsConfig := transport.NewCommissioningTLSConfig()
@@ -177,10 +174,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			time.Sleep(wait)
 
 			// Reconnect and retry PASE.
-			target := r.config.Target
-			if t, ok := params[KeyTarget].(string); ok && t != "" {
-				target = t
-			}
+			target := r.getCommissioningTarget(params)
 			tlsConfig := transport.NewCommissioningTLSConfig()
 			dialer := &net.Dialer{Timeout: 10 * time.Second}
 			tlsConn, retryErr := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
@@ -216,10 +210,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			r.conn.transitionTo(ConnDisconnected)
 			time.Sleep(500 * time.Millisecond)
 
-			target := r.config.Target
-			if t, ok := params[KeyTarget].(string); ok && t != "" {
-				target = t
-			}
+			target := r.getCommissioningTarget(params)
 			tlsConfig := transport.NewCommissioningTLSConfig()
 			dialer := &net.Dialer{Timeout: 10 * time.Second}
 			tlsConn, retryErr := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
@@ -324,10 +315,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	doTransition, _ := params[ParamTransitionToOperational].(bool)
 	_, fromPrecondition := params[ParamFromPrecondition]
 	if certErr == nil && (doTransition || (!fromPrecondition && r.config.Target != "")) {
-		target := r.config.Target
-		if t, ok := params[KeyTarget].(string); ok && t != "" {
-			target = t
-		}
+		target := r.getOperationalTarget(params)
 
 		// Retry the dial briefly in case the device hasn't registered the
 		// zone as awaiting reconnection yet.

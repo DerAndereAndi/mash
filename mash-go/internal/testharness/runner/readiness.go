@@ -9,7 +9,7 @@ import (
 )
 
 // waitForCommissioningMode polls mDNS until the device advertises the
-// commissionable service (_mashc._udp), indicating it has re-entered
+// commissionable service (_mash-comm._tcp), indicating it has re-entered
 // commissioning mode. Uses exponential backoff on browse windows
 // (300ms initial, doubling up to 1s).
 func (r *Runner) waitForCommissioningMode(ctx context.Context, timeout time.Duration) error {

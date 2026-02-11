@@ -880,8 +880,22 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 
 						r.conn = &Connection{}
 
+						// DEC-067: After commissioning, the commissioning
+						// window closes and its TCP listener stops. Trigger
+						// re-entering commissioning mode on a tracked zone
+						// connection so the port is open for the next zone.
 						if i < len(zones)-1 {
-							if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+							for _, tracked := range ct.zoneConnections {
+								if tracked != nil && tracked.isConnected() {
+									savedConn := r.conn
+									r.conn = tracked
+									r.debugf("device_zones_full: triggering enter commissioning mode on tracked zone connection")
+									_, _ = r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
+									r.conn = savedConn
+									break
+								}
+							}
+							if err := r.waitForCommissioningMode(ctx, 5*time.Second); err != nil {
 								r.debugf("device_zones_full: %v (continuing)", err)
 							}
 						}
@@ -1301,11 +1315,12 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 	r.debugf("transitionToOperational: reconnecting with operational TLS")
 
 	tlsConfig := r.operationalTLSConfig()
+	target := r.getOperationalTarget(nil)
 	var tlsConn *tls.Conn
 	var dialErr error
 	for attempt := range 3 {
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", r.config.Target, tlsConfig)
+		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 		if dialErr == nil {
 			break
 		}
@@ -1354,11 +1369,12 @@ func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
 	r.debugf("reconnectToZone: reconnecting to zone %s", r.suiteZoneID)
 
 	tlsConfig := r.operationalTLSConfig()
+	target := r.getOperationalTarget(nil)
 	var tlsConn *tls.Conn
 	var dialErr error
 	for attempt := range 3 {
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", r.config.Target, tlsConfig)
+		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 		if dialErr == nil {
 			break
 		}

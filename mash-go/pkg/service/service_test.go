@@ -1373,9 +1373,9 @@ func TestDeviceServiceTLSConfigRequestsClientCert(t *testing.T) {
 	}
 	defer func() { _ = svc.Stop() }()
 
-	// Verify the TLS config requests client certificates without requiring them.
-	if svc.tlsConfig.ClientAuth != tls.RequestClientCert {
-		t.Errorf("expected ClientAuth=RequestClientCert, got %v", svc.tlsConfig.ClientAuth)
+	// DEC-067: Verify the commissioning TLS config does not require client certificates.
+	if svc.commissioningTLSConfig.ClientAuth != tls.NoClientCert {
+		t.Errorf("expected ClientAuth=NoClientCert, got %v", svc.commissioningTLSConfig.ClientAuth)
 	}
 }
 

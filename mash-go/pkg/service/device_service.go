@@ -53,10 +53,15 @@ type DeviceService struct {
 	pairingRequestActive bool
 	pairingRequestCancel context.CancelFunc
 
-	// TLS server for commissioning and operational connections
-	tlsListener net.Listener
-	tlsConfig   *tls.Config
-	tlsCert     tls.Certificate
+	// DEC-067: Separate commissioning and operational listeners.
+	// The commissioning listener is created/destroyed with the commissioning window.
+	// The operational listener is started after the first zone and stopped after the last.
+	commissioningListener  net.Listener
+	operationalListener    net.Listener
+	commissioningTLSConfig *tls.Config
+	operationalTLSConfig   *tls.Config
+	commissioningCert      tls.Certificate // Stable, generated once at startup
+	tlsCert                tls.Certificate // Operational cert (from zone CA)
 
 	// PASE commissioning
 	verifier *commissioning.Verifier
@@ -215,6 +220,9 @@ func (s *DeviceService) Start(ctx context.Context) error {
 	s.state = StateStarting
 	s.mu.Unlock()
 
+	// Resolve listen addresses for backward compatibility.
+	s.resolveListenAddresses()
+
 	// Create cancellable context
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
@@ -246,6 +254,26 @@ func (s *DeviceService) Start(ctx context.Context) error {
 		return err
 	}
 
+	// DEC-067: Generate stable commissioning certificate once at startup.
+	// This cert is reused across all commissioning windows.
+	s.commissioningCert, err = generateSelfSignedCert()
+	if err != nil {
+		s.mu.Lock()
+		s.state = StateIdle
+		s.mu.Unlock()
+		return err
+	}
+
+	// DEC-067: Commissioning TLS config -- no client cert required.
+	// Security comes from SPAKE2+ (PASE), not certificate verification.
+	s.commissioningTLSConfig = &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		MaxVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{s.commissioningCert},
+		ClientAuth:   tls.NoClientCert,
+		NextProtos:   []string{transport.ALPNProtocol},
+	}
+
 	// Get cert store for loading zone memberships
 	s.mu.RLock()
 	certStore := s.certStore
@@ -259,7 +287,6 @@ func (s *DeviceService) Start(ctx context.Context) error {
 
 	if len(zones) > 0 {
 		// COMMISSIONED: Load operational certs from zones
-		// Use the first zone's operational cert for the device ID
 		firstZone := zones[0]
 		opCert, err := certStore.GetOperationalCert(firstZone)
 		if err != nil {
@@ -271,54 +298,21 @@ func (s *DeviceService) Start(ctx context.Context) error {
 
 		// Use operational cert for TLS
 		s.tlsCert = opCert.TLSCertificate()
-
-		// Device ID is extracted from operational cert (Matter-style: embedded in CommonName)
 		s.deviceID, _ = cert.ExtractDeviceID(opCert.Certificate)
 
-		// TODO: In Phase 4, implement per-zone TLS config for multi-zone support
-		// For now, use the first zone's cert for all connections
-	} else {
-		// UNCOMMISSIONED: Generate throwaway commissioning cert (not persisted)
-		// This cert is only used for TLS during PASE commissioning.
-		// The device ID will be assigned during cert exchange after PASE.
-		var err error
-		s.tlsCert, err = generateSelfSignedCert(s.config.Discriminator)
-		if err != nil {
+		// DEC-067: Create operational TLS config and start listener.
+		s.buildOperationalTLSConfig()
+		if err := s.startOperationalListener(); err != nil {
 			s.mu.Lock()
 			s.state = StateIdle
 			s.mu.Unlock()
 			return err
 		}
-
-		// No device ID until commissioned - will be derived from operational cert
+	} else {
+		// UNCOMMISSIONED: No operational cert yet. The operational listener
+		// will be started after the first zone is commissioned.
 		s.deviceID = ""
 	}
-
-	// Create TLS config for commissioning (no client cert required).
-	// Note: Go's TLS 1.3 ALPN negotiation natively rejects mismatched protocols
-	// (client sends ALPN but no match) with no_application_protocol alert.
-	// Missing ALPN (client sends no ALPN extension) is caught post-handshake
-	// by transport.VerifyConnection in handleConnection.
-	s.tlsConfig = &tls.Config{
-		MinVersion:   tls.VersionTLS13,
-		MaxVersion:   tls.VersionTLS13,
-		Certificates: []tls.Certificate{s.tlsCert},
-		ClientAuth:   tls.RequestClientCert, // Request but don't require; used to distinguish operational reconnections
-		NextProtos:   []string{transport.ALPNProtocol},
-	}
-
-	// Start TLS listener
-	listener, err := net.Listen("tcp", s.config.ListenAddress)
-	if err != nil {
-		s.mu.Lock()
-		s.state = StateIdle
-		s.mu.Unlock()
-		return err
-	}
-	s.tlsListener = listener
-
-	// Start accepting connections in background
-	go s.acceptLoop()
 
 	// Start stale connection reaper if enabled (DEC-064)
 	if s.config.StaleConnectionTimeout > 0 {
@@ -330,7 +324,7 @@ func (s *DeviceService) Start(ctx context.Context) error {
 		advConfig := discovery.DefaultAdvertiserConfig()
 		advertiser, err := discovery.NewMDNSAdvertiser(advConfig)
 		if err != nil {
-			s.tlsListener.Close()
+			s.stopAllListeners()
 			s.mu.Lock()
 			s.state = StateIdle
 			s.mu.Unlock()
@@ -339,9 +333,8 @@ func (s *DeviceService) Start(ctx context.Context) error {
 		s.advertiser = advertiser
 		s.discoveryManager = discovery.NewDiscoveryManager(advertiser)
 
-		// Parse port from actual listener address
-		port := parsePort(s.tlsListener.Addr().String())
-
+		// DEC-067: Use commissioning port for commissionable info.
+		commPort := parsePort(s.config.CommissioningListenAddress)
 		s.discoveryManager.SetCommissionableInfo(&discovery.CommissionableInfo{
 			Discriminator: s.config.Discriminator,
 			Categories:    s.config.Categories,
@@ -349,7 +342,7 @@ func (s *DeviceService) Start(ctx context.Context) error {
 			Brand:         s.config.Brand,
 			Model:         s.config.Model,
 			DeviceName:    s.config.DeviceName,
-			Port:          port,
+			Port:          commPort,
 		})
 
 		// Set commissioning window duration from config
@@ -359,6 +352,8 @@ func (s *DeviceService) Start(ctx context.Context) error {
 
 		// Register callback for commissioning timeout
 		s.discoveryManager.OnCommissioningTimeout(func() {
+			// DEC-067: Close the commissioning listener when the window times out.
+			s.closeCommissioningListener()
 			s.emitEvent(Event{
 				Type:   EventCommissioningClosed,
 				Reason: "timeout",
@@ -378,8 +373,95 @@ func (s *DeviceService) Start(ctx context.Context) error {
 	return nil
 }
 
-// acceptLoop accepts incoming TLS connections.
-func (s *DeviceService) acceptLoop() {
+// resolveListenAddresses applies backward-compat mapping for ListenAddress.
+func (s *DeviceService) resolveListenAddresses() {
+	if s.config.ListenAddress != "" {
+		if s.config.OperationalListenAddress == "" || s.config.OperationalListenAddress == ":8443" {
+			s.config.OperationalListenAddress = s.config.ListenAddress
+		}
+		if s.config.CommissioningListenAddress == "" || s.config.CommissioningListenAddress == ":8444" {
+			// Derive commissioning address: same host, port 0 (random).
+			host, _, err := net.SplitHostPort(s.config.ListenAddress)
+			if err != nil {
+				host = s.config.ListenAddress
+			}
+			s.config.CommissioningListenAddress = net.JoinHostPort(host, "0")
+		}
+	}
+}
+
+// buildOperationalTLSConfig creates the operational TLS config with RequireAndVerifyClientCert.
+func (s *DeviceService) buildOperationalTLSConfig() {
+	// Build CA pool from known zone CAs for client cert verification.
+	caPool := x509.NewCertPool()
+	if s.certStore != nil {
+		for _, ca := range s.certStore.GetAllZoneCAs() {
+			caPool.AddCert(ca)
+		}
+	}
+
+	s.operationalTLSConfig = &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		MaxVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{s.tlsCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caPool,
+		NextProtos:   []string{transport.ALPNProtocol},
+	}
+}
+
+// startOperationalListener starts the operational TCP listener and accept loop.
+func (s *DeviceService) startOperationalListener() error {
+	if s.operationalListener != nil {
+		return nil // Already running
+	}
+	listener, err := net.Listen("tcp", s.config.OperationalListenAddress)
+	if err != nil {
+		return fmt.Errorf("operational listener: %w", err)
+	}
+	s.operationalListener = listener
+	go s.acceptOperationalLoop(listener)
+	s.debugLog("startOperationalListener: listening", "addr", listener.Addr().String())
+	return nil
+}
+
+// startCommissioningListener starts the commissioning TCP listener and accept loop.
+func (s *DeviceService) startCommissioningListener() error {
+	if s.commissioningListener != nil {
+		return nil // Already running
+	}
+	listener, err := net.Listen("tcp", s.config.CommissioningListenAddress)
+	if err != nil {
+		return fmt.Errorf("commissioning listener: %w", err)
+	}
+	s.commissioningListener = listener
+	go s.acceptCommissioningLoop(listener)
+	s.debugLog("startCommissioningListener: listening", "addr", listener.Addr().String())
+	return nil
+}
+
+// closeCommissioningListener stops the commissioning listener.
+func (s *DeviceService) closeCommissioningListener() {
+	if s.commissioningListener != nil {
+		s.commissioningListener.Close()
+		s.commissioningListener = nil
+	}
+}
+
+// stopAllListeners closes both listeners.
+func (s *DeviceService) stopAllListeners() {
+	s.closeCommissioningListener()
+	if s.operationalListener != nil {
+		s.operationalListener.Close()
+		s.operationalListener = nil
+	}
+}
+
+// acceptCommissioningLoop accepts connections on the commissioning listener.
+// The listener is passed directly to avoid a race with closeCommissioningListener
+// nilling the field before the goroutine reads it. When the listener is closed,
+// Accept returns an error and this goroutine exits.
+func (s *DeviceService) acceptCommissioningLoop(listener net.Listener) {
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -387,34 +469,59 @@ func (s *DeviceService) acceptLoop() {
 		default:
 		}
 
-		conn, err := s.tlsListener.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
-			select {
-			case <-s.ctx.Done():
-				return
-			default:
-				continue
-			}
+			// Listener closed (commissioning window ended) or context cancelled.
+			return
 		}
 
 		// Transport-level connection cap (DEC-062): reject at TCP level before TLS.
-		// Both check and increment happen here in acceptLoop (single goroutine), so no TOCTOU race.
 		cap := int32(s.config.MaxZones + 1)
 		current := s.activeConns.Load()
 		if current >= cap {
-			s.debugLog("acceptLoop: connection rejected (cap)",
+			s.debugLog("acceptCommissioningLoop: connection rejected (cap)",
 				"activeConns", current, "cap", cap,
 				"remoteAddr", conn.RemoteAddr().String())
 			_ = conn.Close()
 			continue
 		}
 		s.activeConns.Add(1)
-		s.debugLog("acceptLoop: connection accepted",
-			"activeConns", current+1, "cap", cap,
-			"remoteAddr", conn.RemoteAddr().String())
 		s.connTracker.Add(conn)
 
-		go s.handleConnection(conn)
+		go s.handleIncomingCommissioning(conn)
+	}
+}
+
+// acceptOperationalLoop accepts connections on the operational listener.
+// Same parameter-passing pattern as acceptCommissioningLoop.
+func (s *DeviceService) acceptOperationalLoop(listener net.Listener) {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
+		}
+
+		conn, err := listener.Accept()
+		if err != nil {
+			// Listener closed or context cancelled.
+			return
+		}
+
+		// Transport-level connection cap (DEC-062): reject at TCP level before TLS.
+		cap := int32(s.config.MaxZones + 1)
+		current := s.activeConns.Load()
+		if current >= cap {
+			s.debugLog("acceptOperationalLoop: connection rejected (cap)",
+				"activeConns", current, "cap", cap,
+				"remoteAddr", conn.RemoteAddr().String())
+			_ = conn.Close()
+			continue
+		}
+		s.activeConns.Add(1)
+		s.connTracker.Add(conn)
+
+		go s.handleIncomingOperational(conn)
 	}
 }
 
@@ -474,20 +581,15 @@ func (s *DeviceService) verifyClientCert(peerCert *x509.Certificate) error {
 	return err
 }
 
-// handleConnection handles an incoming connection.
-func (s *DeviceService) handleConnection(conn net.Conn) {
-	// DEC-062: Track active pre-operational connections for the connection cap.
-	// The counter is decremented when this goroutine exits (safety net via defer)
-	// or earlier when the connection transitions to operational mode. Releasing
-	// the slot before the operational message loop ensures that long-lived
-	// operational connections don't consume cap slots intended for limiting
-	// new incoming connections.
+// handleIncomingCommissioning handles TLS handshake for a commissioning connection.
+// DEC-067: Commissioning connections arrive on the dedicated commissioning port.
+func (s *DeviceService) handleIncomingCommissioning(conn net.Conn) {
 	activeConnReleased := false
 	remoteAddr := conn.RemoteAddr().String()
 	defer func() {
 		if !activeConnReleased {
 			newVal := s.activeConns.Add(-1)
-			s.debugLog("handleConnection: defer released activeConn",
+			s.debugLog("handleIncomingCommissioning: defer released activeConn",
 				"activeConns", newVal, "remoteAddr", remoteAddr)
 		}
 	}()
@@ -497,7 +599,7 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 			activeConnReleased = true
 		}
 	}
-	defer s.connTracker.Remove(conn) // DEC-064: safety net removal
+	defer s.connTracker.Remove(conn)
 
 	// TLS handshake with per-connection timeout to prevent slowloris-style
 	// attacks from holding cap slots indefinitely.
@@ -507,78 +609,88 @@ func (s *DeviceService) handleConnection(conn net.Conn) {
 		handshakeCtx, cancel = context.WithTimeout(s.ctx, s.config.TLSHandshakeTimeout)
 		defer cancel()
 	}
-	s.debugLog("handleConnection: starting TLS handshake",
+	s.debugLog("handleIncomingCommissioning: starting TLS handshake",
 		"timeout", s.config.TLSHandshakeTimeout,
 		"remoteAddr", remoteAddr)
-	tlsConn := tls.Server(conn, s.tlsConfig)
+	tlsConn := tls.Server(conn, s.commissioningTLSConfig)
 	if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
 		conn.Close()
 		return
 	}
 
-	// Verify TLS version and ALPN
 	state := tlsConn.ConnectionState()
 	if err := transport.VerifyConnection(state); err != nil {
 		tlsConn.Close()
 		return
 	}
-	// Check if we're in commissioning mode
-	s.mu.RLock()
-	inCommissioningMode := s.discoveryManager != nil && s.discoveryManager.IsCommissioningMode()
-	var discoveryState string
-	if s.discoveryManager != nil {
-		discoveryState = s.discoveryManager.State().String()
-	}
-	s.mu.RUnlock()
 
-	// If the peer presented a client certificate, this is an operational
-	// reconnection from a known zone (not a new PASE commissioning).
-	peerHasCert := len(state.PeerCertificates) > 0
+	s.debugLog("handleIncomingCommissioning: -> commissioning handler", "remoteAddr", remoteAddr)
+	s.handleCommissioningConnection(conn, tlsConn, releaseActiveConn)
+}
 
-	// Validate the client certificate against known Zone CAs.
-	// This must happen after the TLS handshake (not in VerifyPeerCertificate)
-	// because TLS 1.3 client cert verification happens after the handshake
-	// completes from the client's point of view.
-	if peerHasCert {
-		// MASH spec: certificate chain depth must not exceed 2
-		// (Zone CA + leaf). Reject deeper chains immediately.
-		if len(state.PeerCertificates) > 2 {
-			s.debugLog("handleConnection: certificate chain too long",
-				"depth", len(state.PeerCertificates))
-			tlsConn.Close()
-			return
+// handleIncomingOperational handles TLS handshake for an operational connection.
+// DEC-067: Operational connections arrive on the dedicated operational port.
+func (s *DeviceService) handleIncomingOperational(conn net.Conn) {
+	activeConnReleased := false
+	remoteAddr := conn.RemoteAddr().String()
+	defer func() {
+		if !activeConnReleased {
+			newVal := s.activeConns.Add(-1)
+			s.debugLog("handleIncomingOperational: defer released activeConn",
+				"activeConns", newVal, "remoteAddr", remoteAddr)
 		}
-		if err := s.verifyClientCert(state.PeerCertificates[0]); err != nil {
-			s.debugLog("handleConnection: client cert rejected",
-				"cn", state.PeerCertificates[0].Subject.CommonName,
-				"err", err)
-			tlsConn.Close()
-			return
+	}()
+	releaseActiveConn := func() {
+		if !activeConnReleased {
+			s.activeConns.Add(-1)
+			activeConnReleased = true
 		}
 	}
+	defer s.connTracker.Remove(conn)
 
-	s.debugLog("handleConnection: routing decision",
-		"discoveryState", discoveryState,
-		"inCommissioningMode", inCommissioningMode,
-		"peerHasCert", peerHasCert,
-		"remoteAddr", tlsConn.RemoteAddr().String())
-
-	if !peerHasCert {
-		// No client certificate: always route to commissioning handler.
-		// Operational reconnections always present a zone CA-issued client
-		// certificate, so a connection without one is always a commissioning
-		// attempt. The commissioning handler checks slot availability,
-		// cooldown, and PASE backoff -- it does not require the device to
-		// be in commissioning mode (mDNS-advertised).
-		s.debugLog("handleConnection: -> commissioning handler (no client cert)")
-		s.handleCommissioningConnection(conn, tlsConn, releaseActiveConn)
-	} else {
-		// Client certificate present: operational reconnection from a
-		// known zone. Also valid when in commissioning mode (a zone can
-		// reconnect while commissioning is open for another zone).
-		s.debugLog("handleConnection: -> operational handler (client cert present)")
-		s.handleOperationalConnection(conn, tlsConn, releaseActiveConn)
+	handshakeCtx := s.ctx
+	if s.config.TLSHandshakeTimeout > 0 {
+		var cancel context.CancelFunc
+		handshakeCtx, cancel = context.WithTimeout(s.ctx, s.config.TLSHandshakeTimeout)
+		defer cancel()
 	}
+	s.debugLog("handleIncomingOperational: starting TLS handshake",
+		"timeout", s.config.TLSHandshakeTimeout,
+		"remoteAddr", remoteAddr)
+	tlsConn := tls.Server(conn, s.operationalTLSConfig)
+	if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
+		conn.Close()
+		return
+	}
+
+	state := tlsConn.ConnectionState()
+	if err := transport.VerifyConnection(state); err != nil {
+		tlsConn.Close()
+		return
+	}
+
+	// Verify client certificate -- operational connections must present one.
+	if len(state.PeerCertificates) == 0 {
+		s.debugLog("handleIncomingOperational: no client certificate", "remoteAddr", remoteAddr)
+		tlsConn.Close()
+		return
+	}
+	if len(state.PeerCertificates) > 2 {
+		s.debugLog("handleIncomingOperational: certificate chain too long",
+			"depth", len(state.PeerCertificates))
+		tlsConn.Close()
+		return
+	}
+	if err := s.verifyClientCert(state.PeerCertificates[0]); err != nil {
+		s.debugLog("handleIncomingOperational: client cert rejected",
+			"cn", state.PeerCertificates[0].Subject.CommonName,
+			"err", err)
+		tlsConn.Close()
+		return
+	}
+
+	s.debugLog("handleIncomingOperational: -> operational handler", "remoteAddr", remoteAddr)
+	s.handleOperationalConnection(conn, tlsConn, releaseActiveConn)
 }
 
 // handleOperationalConnection handles a reconnection from a known zone.
@@ -869,8 +981,15 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	// from the new zone's CA -- we must present that cert on future TLS
 	// connections, otherwise the controller sees a stale certificate.
 	s.tlsCert = operationalCert.TLSCertificate()
-	s.tlsConfig.Certificates = []tls.Certificate{s.tlsCert}
+	s.buildOperationalTLSConfig()
 	s.mu.Unlock()
+
+	// DEC-067: Start operational listener for the controller's reconnection.
+	if err := s.startOperationalListener(); err != nil {
+		s.debugLog("handleCommissioningConnection: failed to start operational listener", "error", err)
+		conn.Close()
+		return
+	}
 
 	// Store Zone CA for future verification of controller connections
 	_ = zoneCA // Zone CA already stored in performCertExchange
@@ -1305,12 +1424,28 @@ func (s *DeviceService) GetZoneSession(zoneID string) *ZoneSession {
 	return s.zoneSessions[zoneID]
 }
 
-// TLSAddr returns the TLS server's listen address.
+// TLSAddr returns the operational listener's address.
+// Deprecated: Use OperationalAddr or CommissioningAddr instead.
 func (s *DeviceService) TLSAddr() net.Addr {
+	return s.OperationalAddr()
+}
+
+// OperationalAddr returns the operational listener's address (DEC-067).
+func (s *DeviceService) OperationalAddr() net.Addr {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.tlsListener != nil {
-		return s.tlsListener.Addr()
+	if s.operationalListener != nil {
+		return s.operationalListener.Addr()
+	}
+	return nil
+}
+
+// CommissioningAddr returns the commissioning listener's address (DEC-067).
+func (s *DeviceService) CommissioningAddr() net.Addr {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.commissioningListener != nil {
+		return s.commissioningListener.Addr()
 	}
 	return nil
 }
@@ -1345,10 +1480,8 @@ func (s *DeviceService) Stop() error {
 		s.cancel()
 	}
 
-	// Close TLS listener
-	if s.tlsListener != nil {
-		s.tlsListener.Close()
-	}
+	// DEC-067: Close both listeners.
+	s.stopAllListeners()
 
 	// Stop all failsafe timers
 	s.mu.Lock()
@@ -1397,26 +1530,15 @@ func (s *DeviceService) EnterCommissioningMode() error {
 	// so controllers get a fresh start without accumulated delays.
 	s.ResetPASETracker()
 
-	// When no zones are connected, regenerate the self-signed commissioning
-	// certificate so the TLS listener presents CN=MASH-<discriminator>
-	// instead of the operational cert from a previous commissioning cycle.
-	// The zoneCount == 0 guard preserves the operational cert for devices
-	// with existing zones (HandleZoneDisconnect calls this with zones
-	// still registered but disconnected; RemoveZone calls it after
-	// deleting from connectedZones).
-	if zoneCount == 0 && s.config.Discriminator != 0 {
-		if commCert, err := generateSelfSignedCert(s.config.Discriminator); err == nil {
-			s.tlsCert = commCert
-			if s.tlsConfig != nil {
-				s.tlsConfig.Certificates = []tls.Certificate{s.tlsCert}
-			}
-		}
-	}
-
 	// Capture context before releasing lock.
 	ctx := s.ctx
 	dm := s.discoveryManager
 	s.mu.Unlock()
+
+	// DEC-067: Start the commissioning listener when the window opens.
+	if err := s.startCommissioningListener(); err != nil {
+		return fmt.Errorf("start commissioning listener: %w", err)
+	}
 
 	// Start mDNS commissioning advertising outside the lock because mDNS
 	// operations can take >1s on macOS and would block new connections
@@ -1424,6 +1546,7 @@ func (s *DeviceService) EnterCommissioningMode() error {
 	if dm != nil {
 		if err := dm.EnterCommissioningMode(ctx); err != nil {
 			s.debugLog("EnterCommissioningMode: failed", "error", err)
+			s.closeCommissioningListener()
 			return err
 		}
 	}
@@ -1448,6 +1571,9 @@ func (s *DeviceService) ExitCommissioningMode() error {
 
 	dm := s.discoveryManager
 	s.mu.Unlock()
+
+	// DEC-067: Close the commissioning listener when the window closes.
+	s.closeCommissioningListener()
 
 	// Stop mDNS commissioning advertising outside the lock because mDNS
 	// operations can take >1s on macOS and would block new connections.
@@ -1568,8 +1694,8 @@ func (s *DeviceService) handleZoneConnectInternal(zoneID string, zoneType cert.Z
 	var opInfo *discovery.OperationalInfo
 	if s.discoveryManager != nil {
 		port := uint16(0)
-		if s.tlsListener != nil {
-			port = parsePort(s.tlsListener.Addr().String())
+		if s.operationalListener != nil {
+			port = parsePort(s.operationalListener.Addr().String())
 		}
 
 		opInfo = &discovery.OperationalInfo{
@@ -2222,7 +2348,7 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 
 	// DEC-059: Auto re-enter commissioning mode when zone slots become available.
 	// After any zone removal, if the device is below max capacity it should
-	// advertise _mashc._udp so new controllers can discover and commission it.
+	// advertise _mash-comm._tcp so new controllers can discover and commission it.
 	s.mu.RLock()
 	hasAvailableSlots := s.nonTestZoneCountLocked() < s.config.MaxZones
 	s.mu.RUnlock()
@@ -2251,8 +2377,8 @@ func (s *DeviceService) StartOperationalAdvertising() error {
 	}
 
 	port := uint16(0)
-	if s.tlsListener != nil {
-		port = parsePort(s.tlsListener.Addr().String())
+	if s.operationalListener != nil {
+		port = parsePort(s.operationalListener.Addr().String())
 	}
 
 	s.debugLog("StartOperationalAdvertising: advertising zones",

@@ -52,7 +52,7 @@ func TestBidirectional_ControllerExposesFeatures(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	port := parseTestPort(addr.String())
 
 	// === Setup Controller with Exposed Features ===
@@ -188,7 +188,7 @@ func TestBidirectional_ControllerWithoutExposedFeatures(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	port := parseTestPort(addr.String())
 
 	// === Setup Controller WITHOUT Exposed Features ===
@@ -297,7 +297,7 @@ func TestBidirectional_Subscriptions(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	port := parseTestPort(addr.String())
 
 	// === Setup Controller with Exposed Meter Feature ===
@@ -480,7 +480,7 @@ func TestBidirectional_NormalOperationsStillWork(t *testing.T) {
 		t.Fatalf("EnterCommissioningMode failed: %v", err)
 	}
 
-	addr := deviceSvc.TLSAddr()
+	addr := deviceSvc.CommissioningAddr()
 	port := parseTestPort(addr.String())
 
 	// Setup controller with exposed features (to enable bidirectional)
