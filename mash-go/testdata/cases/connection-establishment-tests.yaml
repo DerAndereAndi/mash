@@ -30,7 +30,7 @@ steps:
   - name: Connect to device during commissioning
     action: connect
     params:
-      alpn: "mash/1"
+      alpn: "mash-comm/1"
       accept_self_signed: true
       commissioning: true
     expect:

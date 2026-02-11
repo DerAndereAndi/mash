@@ -796,7 +796,7 @@ steps:
     params:
       commissioning: true
       client_cert: none
-      alpn: "mash/1"
+      alpn: "mash-comm/1"
     expect:
       connected: true
       self_signed_accepted: true

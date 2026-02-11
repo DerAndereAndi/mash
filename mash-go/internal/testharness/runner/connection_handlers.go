@@ -1614,7 +1614,7 @@ func (r *Runner) handleOpenConnections(ctx context.Context, step *loader.Step, s
 		tlsConfig := &tls.Config{
 			MinVersion:         tls.VersionTLS13,
 			InsecureSkipVerify: true,
-			NextProtos:         []string{transport.ALPNProtocol},
+			NextProtos:         []string{transport.ALPNCommissioningProtocol},
 		}
 		dialer := &net.Dialer{Timeout: 5 * time.Second}
 		conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
