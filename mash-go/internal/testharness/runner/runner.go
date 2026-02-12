@@ -391,6 +391,20 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 		}
 	}
 
+	// Auto-detect host IPv6 capability and inject PICS item.
+	// Tests like TC-IPV6-002 require a global IPv6 address; on IPv4-only
+	// hosts this PICS item will be absent and those tests are skipped.
+	if detectHostIPv6Global() {
+		if r.pics == nil {
+			r.pics = &loader.PICSFile{Items: make(map[string]interface{})}
+			r.engineConfig.PICS = r.pics
+		}
+		if r.pics.Items == nil {
+			r.pics.Items = make(map[string]interface{})
+		}
+		r.pics.Items["MASH.C.NETWORK.HAS_IPV6_GLOBAL"] = 1
+	}
+
 	// Load test cases (optionally filtered by file name pattern).
 	cases, err := loader.LoadDirectoryWithFilter(r.config.TestDir, r.config.Files)
 	if err != nil {
@@ -2582,4 +2596,46 @@ func checkInterfaceCorrect(addr net.Addr, params map[string]any) bool {
 		return tcpAddr.Zone != ""
 	}
 	return true
+}
+
+// hasGlobalIPv6Addr returns true if any address is a non-link-local,
+// non-loopback IPv6 address (global unicast or ULA).
+func hasGlobalIPv6Addr(addrs []net.Addr) bool {
+	for _, a := range addrs {
+		ipNet, ok := a.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipNet.IP
+		if ip.To4() != nil {
+			continue // Skip IPv4
+		}
+		if ip.IsLinkLocalUnicast() || ip.IsLoopback() {
+			continue
+		}
+		// Any other IPv6 address is global unicast or ULA.
+		return true
+	}
+	return false
+}
+
+// detectHostIPv6Global returns true if the host has at least one
+// non-link-local IPv6 address on an active interface.
+func detectHostIPv6Global() bool {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return false
+	}
+	var addrs []net.Addr
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		ifAddrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		addrs = append(addrs, ifAddrs...)
+	}
+	return hasGlobalIPv6Addr(addrs)
 }

@@ -118,6 +118,17 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
+	// DEC-066: After a successful commission, the device closes the
+	// commissioning socket after cert exchange. If a previous commission step
+	// in this test completed, r.conn still references the dead socket at
+	// ConnTLSConnected. Clean it up so we dial fresh below.
+	if r.conn.state == ConnTLSConnected && r.paseState != nil && r.paseState.completed {
+		r.debugf("handleCommission: cleaning up dead post-commission socket")
+		r.conn.transitionTo(ConnDisconnected)
+		r.conn.clearConnectionRefs()
+		r.paseState = nil
+	}
+
 	r.debugf("handleCommission: conn.state=%v tlsConn=%v paseState=%v",
 		r.conn.state, r.conn.tlsConn != nil, r.paseState != nil)
 

@@ -465,6 +465,70 @@ func TestSetCommissioningWindowDurationHandler(t *testing.T) {
 	})
 }
 
+// TestSetAdvertiser_TimeoutClosesCommissioningOpen verifies that the
+// OnCommissioningTimeout callback registered by SetAdvertiser() properly
+// sets commissioningOpen to false when the window expires. This mirrors
+// the full callback from Start(). Without the fix, commissioningOpen
+// stays stale at true after timeout.
+func TestSetAdvertiser_TimeoutClosesCommissioningOpen(t *testing.T) {
+	device := model.NewDevice("test-device-timeout", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	config.CommissioningWindowDuration = 100 * time.Millisecond // Short window
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	// Call SetAdvertiser BEFORE Start -- this is the code path under test.
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	// Track timeout event
+	eventCh := make(chan struct{}, 1)
+	svc.OnEvent(func(e Event) {
+		if e.Type == EventCommissioningClosed && e.Reason == "timeout" {
+			select {
+			case eventCh <- struct{}{}:
+			default:
+			}
+		}
+	})
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// Enter commissioning mode
+	if err := svc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode failed: %v", err)
+	}
+
+	// commissioningOpen should be true now
+	if !svc.commissioningOpen.Load() {
+		t.Fatal("commissioningOpen should be true after EnterCommissioningMode")
+	}
+
+	// Wait for the window to expire
+	select {
+	case <-eventCh:
+		// Timeout event received
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for EventCommissioningClosed")
+	}
+
+	// Key assertion: commissioningOpen must be false after timeout.
+	// Without the fix, SetAdvertiser's minimal callback doesn't reset this.
+	if svc.commissioningOpen.Load() {
+		t.Error("commissioningOpen should be false after commissioning window timeout (SetAdvertiser callback incomplete)")
+	}
+}
+
 // newTestControlFeature creates a TestControl feature for testing.
 func newTestControlFeature(t *testing.T) *features.TestControl {
 	t.Helper()

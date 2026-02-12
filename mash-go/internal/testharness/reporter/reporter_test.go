@@ -397,6 +397,98 @@ func TestReportSummary_SkippedExcludedFromSlowest(t *testing.T) {
 	}
 }
 
+// TestJSONReporter_CBORMaps verifies that map[interface{}]interface{} values
+// (produced by CBOR decoders) in step outputs, expect results, and device
+// state snapshots are serialized successfully instead of producing marshal errors.
+func TestJSONReporter_CBORMaps(t *testing.T) {
+	// Simulate CBOR-decoded maps: map[interface{}]interface{} and map[uint64]interface{}.
+	cborMap := map[interface{}]interface{}{
+		"key1":    "value1",
+		uint64(2): "value2",
+		"nested": map[interface{}]interface{}{
+			"deep": []interface{}{1, "two", map[interface{}]interface{}{"three": 3}},
+		},
+	}
+
+	result := &engine.TestResult{
+		TestCase: &loader.TestCase{
+			ID:   "TC-CBOR-MAP",
+			Name: "CBOR map normalization",
+		},
+		Passed:   false,
+		Duration: 100 * time.Millisecond,
+		Error:    &testError{msg: "forced failure"},
+		// Device state with CBOR-style maps (only included for failed tests).
+		DeviceStateBefore: map[string]any{
+			"endpoints": cborMap,
+		},
+		DeviceStateAfter: map[string]any{
+			"endpoints": map[interface{}]interface{}{"changed": true},
+		},
+		StepResults: []*engine.StepResult{
+			{
+				Step:      &loader.Step{Action: "read_attribute"},
+				StepIndex: 0,
+				Passed:    false,
+				Duration:  50 * time.Millisecond,
+				Output: map[string]any{
+					"raw_response": cborMap,
+				},
+				ExpectResults: map[string]*engine.ExpectResult{
+					"value": {
+						Key:      "value",
+						Expected: map[interface{}]interface{}{"expected_key": 42},
+						Actual:   cborMap,
+						Passed:   false,
+						Message:  "mismatch",
+					},
+				},
+			},
+		},
+	}
+
+	// Test single test output.
+	var buf bytes.Buffer
+	r := reporter.NewJSONReporter(&buf, false)
+	r.ReportTest(result)
+
+	output := buf.String()
+	if strings.HasPrefix(output, `{"error"`) {
+		t.Fatalf("JSON marshal failed: %s", output)
+	}
+
+	// Verify it's valid JSON by parsing it back.
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(output), &parsed); err != nil {
+		t.Fatalf("JSON output is not valid: %v\nOutput: %s", err, output)
+	}
+
+	// Verify CBOR map keys were stringified.
+	if parsed["id"] != "TC-CBOR-MAP" {
+		t.Errorf("Expected id TC-CBOR-MAP, got %v", parsed["id"])
+	}
+
+	// Test in suite context too.
+	buf.Reset()
+	suite := &engine.SuiteResult{
+		SuiteName: "CBOR Suite",
+		Results:   []*engine.TestResult{result},
+		FailCount: 1,
+		Duration:  200 * time.Millisecond,
+	}
+	r.ReportSuite(suite)
+
+	output = buf.String()
+	if strings.HasPrefix(output, `{"error"`) {
+		t.Fatalf("Suite JSON marshal failed: %s", output)
+	}
+
+	var suiteResult map[string]any
+	if err := json.Unmarshal([]byte(output), &suiteResult); err != nil {
+		t.Fatalf("Suite JSON output is not valid: %v", err)
+	}
+}
+
 func TestXMLEscaping(t *testing.T) {
 	var buf bytes.Buffer
 	r := reporter.NewJUnitReporter(&buf)

@@ -594,6 +594,7 @@ description: |
 
 pics_requirements:
   - MASH.S.MDNS.GLOBAL_ADDR=1
+  - MASH.C.NETWORK.HAS_IPV6_GLOBAL=1
 
 preconditions:
   - device_commissioned: true

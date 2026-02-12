@@ -299,10 +299,13 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 		if s.subscriptionManager != nil {
 			s.subscriptionManager.ClearAll()
 		}
-		// Stop pairing request listening if a prior test left it active.
-		// StopPairingRequestListening takes s.mu internally, so call after
-		// releasing it above.
+		// Reset pairing request listening: stop first to clear stale state,
+		// then restart if configured so the next test can receive pairing
+		// requests (e.g., TC-COMM-WINDOW-002).
 		_ = s.StopPairingRequestListening()
+		if s.config.ListenForPairingRequests && s.ctx != nil {
+			_ = s.StartPairingRequestListening(s.ctx)
+		}
 		return nil
 	default:
 		// Check for parameterized triggers (base + encoded value).

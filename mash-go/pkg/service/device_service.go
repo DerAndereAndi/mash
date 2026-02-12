@@ -947,6 +947,8 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	// but now we know it's not a TEST zone, so check slots again.
 	if zoneType != cert.ZoneTypeTest && s.isZonesFull() {
 		s.debugLog("handleCommissioningConnection: GRID/LOCAL zone rejected (slots full)", "zoneID", zoneID, "zoneType", zoneType)
+		retryAfterMs := s.computeBusyRetryAfter()
+		_ = commissioning.WriteCommissioningError(conn, commissioning.ErrCodeBusy, "zone slots full", retryAfterMs)
 		conn.Close()
 		return
 	}
@@ -1967,8 +1969,17 @@ func (s *DeviceService) SetAdvertiser(advertiser discovery.Advertiser) {
 		s.discoveryManager.SetCommissioningWindowDuration(s.config.CommissioningWindowDuration)
 	}
 
-	// Register callback for commissioning timeout
+	// Register callback for commissioning timeout.
+	// Must mirror the full callback in Start() -- specifically setting
+	// commissioningOpen=false and stopping the listener when idle.
 	s.discoveryManager.OnCommissioningTimeout(func() {
+		s.commissioningOpen.Store(false)
+		s.mu.RLock()
+		zoneCount := len(s.connectedZones)
+		s.mu.RUnlock()
+		if zoneCount == 0 {
+			s.stopListener()
+		}
 		s.emitEvent(Event{
 			Type:   EventCommissioningClosed,
 			Reason: "timeout",

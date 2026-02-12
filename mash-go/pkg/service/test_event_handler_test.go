@@ -773,10 +773,55 @@ func TestTriggerResetTestState_ClearsGlobalSubscriptionManager(t *testing.T) {
 	}
 }
 
-func TestTriggerResetTestState_StopsPairingRequestListening(t *testing.T) {
+func TestTriggerResetTestState_RestartsPairingRequestListening(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	config.ListenForPairingRequests = true
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	// Set up mock browser so StartPairingRequestListening succeeds.
+	browser := mocks.NewMockBrowser(t)
+	browser.EXPECT().BrowsePairingRequests(mock.Anything, mock.Anything).
+		Return(nil).Maybe()
+	svc.SetBrowser(browser)
+
+	// Start the service so ctx is set.
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer svc.Stop()
+
+	// After Start, listening should be active.
+	if !svc.IsPairingRequestListening() {
+		t.Fatal("expected listening active after Start")
+	}
+
+	// Reset test state -- should stop then restart listening.
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+
+	if !svc.IsPairingRequestListening() {
+		t.Error("pairing request listening should be restarted after reset when ListenForPairingRequests=true")
+	}
+}
+
+func TestTriggerResetTestState_NoRestartWhenListeningDisabled(t *testing.T) {
 	svc := newDeviceServiceWithAllFeatures(t)
 	ctx := context.Background()
 
+	// ListenForPairingRequests is false by default in validDeviceConfig.
 	// Simulate a prior test leaving pairing request active.
 	svc.mu.Lock()
 	svc.pairingRequestActive = true
@@ -788,7 +833,7 @@ func TestTriggerResetTestState_StopsPairingRequestListening(t *testing.T) {
 	}
 
 	if svc.IsPairingRequestListening() {
-		t.Error("pairingRequestActive should be false after reset")
+		t.Error("pairingRequestActive should be false after reset when ListenForPairingRequests=false")
 	}
 }
 

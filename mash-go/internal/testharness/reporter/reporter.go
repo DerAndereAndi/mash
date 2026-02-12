@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -307,9 +308,14 @@ func (r *JSONReporter) testToJSON(result *engine.TestResult) JSONTestResult {
 
 	// Add device state snapshots (only for failed tests to keep output compact).
 	if !result.Passed && !result.Skipped {
-		jr.DeviceStateBefore = result.DeviceStateBefore
-		jr.DeviceStateAfter = result.DeviceStateAfter
-		jr.DeviceStateDiffs = result.DeviceStateDiffs
+		jr.DeviceStateBefore = normalizeMap(result.DeviceStateBefore)
+		jr.DeviceStateAfter = normalizeMap(result.DeviceStateAfter)
+		if result.DeviceStateDiffs != nil {
+			jr.DeviceStateDiffs = make([]map[string]any, len(result.DeviceStateDiffs))
+			for i, d := range result.DeviceStateDiffs {
+				jr.DeviceStateDiffs[i] = normalizeMap(d)
+			}
+		}
 	}
 
 	// Add step results
@@ -325,7 +331,7 @@ func (r *JSONReporter) testToJSON(result *engine.TestResult) JSONTestResult {
 			Status:   stepStatus,
 			Duration: sr.Duration.Round(time.Millisecond).String(),
 			Expects:  make(map[string]JSONExpect),
-			Outputs:  sr.Output,
+			Outputs:  normalizeMap(sr.Output),
 		}
 
 		if sr.Error != nil {
@@ -335,8 +341,8 @@ func (r *JSONReporter) testToJSON(result *engine.TestResult) JSONTestResult {
 		for key, er := range sr.ExpectResults {
 			jsr.Expects[key] = JSONExpect{
 				Passed:   er.Passed,
-				Expected: er.Expected,
-				Actual:   er.Actual,
+				Expected: normalizeForJSON(er.Expected),
+				Actual:   normalizeForJSON(er.Actual),
 				Message:  er.Message,
 			}
 		}
@@ -347,7 +353,79 @@ func (r *JSONReporter) testToJSON(result *engine.TestResult) JSONTestResult {
 	return jr
 }
 
+// normalizeForJSON recursively converts map[interface{}]interface{} and any
+// other non-string-keyed map types (produced by CBOR/YAML decoders) to
+// map[string]any so encoding/json can marshal the value. Uses reflect to
+// catch all map variants regardless of concrete key type, and traverses
+// struct fields to normalize nested values.
+func normalizeForJSON(v any) any {
+	if v == nil {
+		return nil
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Map:
+		m := make(map[string]any, rv.Len())
+		for _, k := range rv.MapKeys() {
+			m[fmt.Sprintf("%v", k.Interface())] = normalizeForJSON(rv.MapIndex(k).Interface())
+		}
+		return m
+	case reflect.Slice:
+		n := rv.Len()
+		s := make([]any, n)
+		for i := range n {
+			s[i] = normalizeForJSON(rv.Index(i).Interface())
+		}
+		return s
+	case reflect.Struct:
+		t := rv.Type()
+		m := make(map[string]any, t.NumField())
+		for i := range t.NumField() {
+			f := t.Field(i)
+			if !f.IsExported() {
+				continue
+			}
+			name, opts, _ := strings.Cut(f.Tag.Get("json"), ",")
+			if name == "-" {
+				continue
+			}
+			if name == "" {
+				name = f.Name
+			}
+			fv := rv.Field(i)
+			if strings.Contains(opts, "omitempty") && fv.IsZero() {
+				continue
+			}
+			m[name] = normalizeForJSON(fv.Interface())
+		}
+		return m
+	case reflect.Ptr:
+		if rv.IsNil() {
+			return nil
+		}
+		return normalizeForJSON(rv.Elem().Interface())
+	default:
+		return v
+	}
+}
+
+// normalizeMap applies normalizeForJSON to each value in a map[string]any.
+func normalizeMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = normalizeForJSON(v)
+	}
+	return out
+}
+
 func (r *JSONReporter) writeJSON(v any) {
+	// Normalize the entire value tree so map[interface{}]interface{} from
+	// CBOR/YAML decoders is converted to map[string]any before marshaling.
+	v = normalizeForJSON(v)
+
 	var data []byte
 	var err error
 
