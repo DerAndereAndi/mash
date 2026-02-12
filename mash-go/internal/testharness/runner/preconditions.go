@@ -617,6 +617,18 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		preconds = append(preconds, map[string]any{PrecondTwoZonesConnected: true})
 	}
 
+	// Save crypto state before precondition handlers may replace it.
+	// Handlers like device_has_grid_zone call handleCreateZone which
+	// generates a new Zone CA + controller cert. If ensureCommissioned
+	// later reuses the existing session (no fresh PASE), the device
+	// still has the original crypto. We restore it to avoid "unknown_ca"
+	// TLS errors on subsequent connections.
+	savedZoneCA := r.zoneCA
+	savedControllerCert := r.controllerCert
+	savedZoneCAPool := r.zoneCAPool
+	savedIssuedDeviceCert := r.issuedDeviceCert
+	savedPASE := r.paseState
+
 	// Handle preconditions that require special setup.
 	for _, cond := range preconds {
 		for key, val := range cond {
@@ -1048,6 +1060,17 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 		if setupErr != nil {
 			r.debugf("ensureCommissioned FAILED for %s: %v", tc.ID, setupErr)
 			return setupErr
+		}
+		// If the session was reused (same PASE state, not freshly commissioned),
+		// restore the crypto state that matches the actual connection. Without
+		// this, device_has_grid_zone leaves r.controllerCert signed by a Zone CA
+		// the device doesn't know, causing "unknown_ca" on new connections.
+		if r.paseState == savedPASE && savedPASE != nil && savedPASE.completed {
+			r.zoneCA = savedZoneCA
+			r.controllerCert = savedControllerCert
+			r.zoneCAPool = savedZoneCAPool
+			r.issuedDeviceCert = savedIssuedDeviceCert
+			r.debugf("restored crypto state after session reuse for %s", tc.ID)
 		}
 		// Store the commissioned zone ID for test interpolation
 		// (e.g. {{ grid_zone_id }}, {{ local_zone_id }}).

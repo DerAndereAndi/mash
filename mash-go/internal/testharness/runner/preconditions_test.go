@@ -1354,6 +1354,132 @@ func TestSetupPreconditions_SessionReuseNoResetWhenUnmodified(t *testing.T) {
 	}
 }
 
+func TestDeviceHasGridZone_PreservesCryptoOnSessionReuse(t *testing.T) {
+	// When a completed PASE session exists (suite zone), device_has_grid_zone
+	// calls handleCreateZone which generates NEW crypto (GRID Zone CA + cert).
+	// But ensureCommissioned reuses the session (no fresh PASE), so the device
+	// never learns about the GRID crypto. The runner must restore the original
+	// crypto that matches the actual connection.
+	r := newTestRunner()
+	r.conn.state = ConnOperational
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+
+	// Simulate existing suite zone crypto (what the device actually knows).
+	origZoneCA := &cert.ZoneCA{}
+	origControllerCert := &cert.OperationalCert{}
+	origZoneCAPool := x509.NewCertPool()
+	origIssuedDeviceCert := &x509.Certificate{}
+	r.zoneCA = origZoneCA
+	r.controllerCert = origControllerCert
+	r.zoneCAPool = origZoneCAPool
+	r.issuedDeviceCert = origIssuedDeviceCert
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-ZTYPE-002",
+		Preconditions: []loader.Condition{
+			{PrecondDeviceHasGridZone: true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The precondition handler should still have set commissionZoneType to GRID.
+	if r.commissionZoneType != cert.ZoneTypeGrid {
+		t.Errorf("expected commissionZoneType=GRID, got %v", r.commissionZoneType)
+	}
+
+	// But the crypto state must match the original (suite zone) crypto,
+	// because the session was reused and the device doesn't know about
+	// the GRID crypto.
+	if r.zoneCA != origZoneCA {
+		t.Error("expected zoneCA to be restored to original after session reuse")
+	}
+	if r.controllerCert != origControllerCert {
+		t.Error("expected controllerCert to be restored to original after session reuse")
+	}
+	if r.zoneCAPool != origZoneCAPool {
+		t.Error("expected zoneCAPool to be restored to original after session reuse")
+	}
+	if r.issuedDeviceCert != origIssuedDeviceCert {
+		t.Error("expected issuedDeviceCert to be restored to original after session reuse")
+	}
+}
+
+func TestDeviceHasLocalZone_PreservesCryptoOnSessionReuse(t *testing.T) {
+	// Same as grid zone test but for device_has_local_zone.
+	r := newTestRunner()
+	r.conn.state = ConnOperational
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+
+	origZoneCA := &cert.ZoneCA{}
+	origControllerCert := &cert.OperationalCert{}
+	origZoneCAPool := x509.NewCertPool()
+	r.zoneCA = origZoneCA
+	r.controllerCert = origControllerCert
+	r.zoneCAPool = origZoneCAPool
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-ZTYPE-003",
+		Preconditions: []loader.Condition{
+			{PrecondDeviceHasLocalZone: true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if r.commissionZoneType != cert.ZoneTypeLocal {
+		t.Errorf("expected commissionZoneType=LOCAL, got %v", r.commissionZoneType)
+	}
+
+	if r.zoneCA != origZoneCA {
+		t.Error("expected zoneCA to be restored to original after session reuse")
+	}
+	if r.controllerCert != origControllerCert {
+		t.Error("expected controllerCert to be restored to original after session reuse")
+	}
+	if r.zoneCAPool != origZoneCAPool {
+		t.Error("expected zoneCAPool to be restored to original after session reuse")
+	}
+}
+
+func TestDeviceHasGridZone_KeepsNewCryptoOnFreshCommission(t *testing.T) {
+	// When there's NO existing PASE session, ensureCommissioned does a fresh
+	// commission. In this case the new GRID crypto IS correct (it matches
+	// the fresh PASE) and should NOT be restored.
+	r := newTestRunner()
+	// No PASE session -- paseState is nil.
+	r.conn.state = ConnDisconnected
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-ZTYPE-FRESH",
+		Preconditions: []loader.Condition{
+			{PrecondDeviceHasGridZone: true},
+		},
+	}
+
+	// Will fail at ensureConnected (no target), but precondition handlers
+	// already ran. Check that zoneCA was set by handleCreateZone and NOT
+	// restored (since there was no prior session to restore).
+	_ = r.setupPreconditions(context.Background(), tc, state)
+
+	// handleCreateZone should have set new GRID crypto.
+	if r.zoneCA == nil {
+		t.Error("expected zoneCA to be set by handleCreateZone (not restored to nil)")
+	}
+	if r.controllerCert == nil {
+		t.Error("expected controllerCert to be set by handleCreateZone (not restored to nil)")
+	}
+}
+
 func TestCooldownRemaining(t *testing.T) {
 	tests := []struct {
 		name string
