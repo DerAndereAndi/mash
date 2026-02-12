@@ -224,7 +224,7 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 	// Send the raw (unclamped) duration to the real device first. The
 	// device has its own bounds check ([3s, 10800s]) via TestControl.
 	rawDurationSeconds := uint32(minutes * 60)
-	r.sendSetCommWindowDuration(rawDurationSeconds, state)
+	deviceAcked := r.sendSetCommWindowDuration(rawDurationSeconds, state)
 
 	// Validate bounds for harness simulation: min 3 minutes (180s, DEC-048),
 	// max 180 minutes (10800s).
@@ -242,8 +242,13 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 
 	cs.commissioningWindowDuration = time.Duration(minutes * float64(time.Minute))
 
+	// Report whether the device actually received the duration change.
+	// In real-device mode, duration_set reflects the device acknowledgment.
+	// In stub mode (no EnableKey), it reflects the harness-local update.
+	durationSet := deviceAcked || r.config.EnableKey == ""
+
 	return map[string]any{
-		KeyDurationSet:     true,
+		KeyDurationSet:     durationSet,
 		KeyMinutes:         minutes,
 		KeyDurationSeconds: minutes * 60,
 		KeyResult:          result,
@@ -254,12 +259,15 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 // to the real device over an operational zone connection. Falls back to
 // zone connections (from the connection tracker) when r.conn is not
 // available (e.g. after device_zones_full precondition).
-func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine.ExecutionState) {
+// Returns true if the command was successfully sent and acknowledged.
+func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine.ExecutionState) bool {
 	if r.config.EnableKey == "" {
-		return
+		return false
 	}
 
-	// Find a usable connection: prefer r.conn, fall back to zone connections.
+	// Find a usable connection: prefer r.conn, fall back to per-test zone
+	// connections, then runner-level activeZoneConns (which includes the
+	// suite zone). This mirrors sendTriggerViaZone's fallback chain.
 	conn := r.conn
 	if conn == nil || !conn.isConnected() || !conn.isOperational() {
 		conn = nil
@@ -272,7 +280,16 @@ func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine
 		}
 	}
 	if conn == nil {
-		return
+		for _, c := range r.activeZoneConns {
+			if c.isConnected() && c.framer != nil {
+				conn = c
+				break
+			}
+		}
+	}
+	if conn == nil {
+		r.debugf("sendSetCommWindowDuration: no usable connection")
+		return false
 	}
 
 	req := &wire.Request{
@@ -292,12 +309,12 @@ func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine
 	data, err := wire.EncodeRequest(req)
 	if err != nil {
 		r.debugf("sendSetCommWindowDuration: encode error: %v", err)
-		return
+		return false
 	}
 
 	if err := conn.framer.WriteFrame(data); err != nil {
 		r.debugf("sendSetCommWindowDuration: write error: %v", err)
-		return
+		return false
 	}
 
 	// Read the response (may need to skip notifications).
@@ -305,12 +322,12 @@ func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine
 		respData, readErr := conn.framer.ReadFrame()
 		if readErr != nil {
 			r.debugf("sendSetCommWindowDuration: read error: %v", readErr)
-			return
+			return false
 		}
 		msgType, peekErr := wire.PeekMessageType(respData)
 		if peekErr != nil {
 			r.debugf("sendSetCommWindowDuration: peek error: %v", peekErr)
-			return
+			return false
 		}
 		if msgType == wire.MessageTypeNotification {
 			conn.pendingNotifications = append(conn.pendingNotifications, respData)
@@ -318,9 +335,10 @@ func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine
 		}
 		// Got the invoke response -- done.
 		r.debugf("sendSetCommWindowDuration: success (durationSeconds=%d)", durationSeconds)
-		return
+		return true
 	}
 	r.debugf("sendSetCommWindowDuration: too many notifications, giving up")
+	return false
 }
 
 // handleGetCommissioningWindowDuration returns the commissioning window duration.

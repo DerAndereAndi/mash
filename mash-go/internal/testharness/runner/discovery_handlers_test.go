@@ -1188,3 +1188,62 @@ func TestBrowseMDNS_InterfaceUpThenBrowse(t *testing.T) {
 		t.Errorf("expected 2 addresses, got %d: %v", len(ds.services[0].Addresses), ds.services[0].Addresses)
 	}
 }
+
+// TestConfirmNotAdvertising_ClearsStaleCache verifies that when the first
+// browse finds a stale mDNS entry but subsequent browses do not, the function
+// correctly reports the service as gone.
+func TestConfirmNotAdvertising_ClearsStaleCache(t *testing.T) {
+	callCount := 0
+	browseFunc := func() (int, error) {
+		callCount++
+		if callCount == 1 {
+			return 1, nil // first browse finds stale entry
+		}
+		return 0, nil // subsequent browses find nothing
+	}
+
+	found := confirmNotAdvertising(browseFunc, 3, 10*time.Millisecond)
+	if found {
+		t.Error("should report not advertising after stale entry clears")
+	}
+	if callCount < 2 {
+		t.Error("should have retried at least once")
+	}
+}
+
+// TestConfirmNotAdvertising_PersistentAdvertising verifies that when the
+// service is genuinely still advertising (all retries find it), the function
+// reports it as found.
+func TestConfirmNotAdvertising_PersistentAdvertising(t *testing.T) {
+	callCount := 0
+	browseFunc := func() (int, error) {
+		callCount++
+		return 1, nil // always found
+	}
+
+	found := confirmNotAdvertising(browseFunc, 3, 10*time.Millisecond)
+	if !found {
+		t.Error("should report still advertising when all retries find service")
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 attempts, got %d", callCount)
+	}
+}
+
+// TestConfirmNotAdvertising_NotFoundImmediately verifies that when the first
+// browse finds nothing, the function returns immediately without retrying.
+func TestConfirmNotAdvertising_NotFoundImmediately(t *testing.T) {
+	callCount := 0
+	browseFunc := func() (int, error) {
+		callCount++
+		return 0, nil
+	}
+
+	found := confirmNotAdvertising(browseFunc, 3, 10*time.Millisecond)
+	if found {
+		t.Error("should report not advertising")
+	}
+	if callCount != 1 {
+		t.Errorf("should not retry when first browse finds nothing, got %d calls", callCount)
+	}
+}

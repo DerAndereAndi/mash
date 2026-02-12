@@ -36,6 +36,21 @@ type TestResult struct {
 
 	// SkipReason explains why the test was skipped.
 	SkipReason string
+
+	// ExecutionIndex is the 0-based position in the execution order.
+	// Useful for correlating failures with preceding tests.
+	ExecutionIndex int
+
+	// DeviceStateBefore is the device state snapshot taken before the test.
+	// Only populated when the device supports getTestState.
+	DeviceStateBefore map[string]any
+
+	// DeviceStateAfter is the device state snapshot taken after the test.
+	DeviceStateAfter map[string]any
+
+	// DeviceStateDiffs lists fields that changed between before and after.
+	// Empty means no state leakage detected.
+	DeviceStateDiffs []map[string]any
 }
 
 // StepResult represents the outcome of a single step.
@@ -99,6 +114,14 @@ type SuiteResult struct {
 
 	// Duration is the total time for all tests.
 	Duration time.Duration
+
+	// ShuffleSeed is the seed used for randomization, or 0 if not shuffled.
+	// Record this so a failure can be reproduced with the exact same order.
+	ShuffleSeed int64
+
+	// ExecutionOrder lists test IDs in the order they were executed.
+	// Present only when shuffle is enabled.
+	ExecutionOrder []string
 }
 
 // ActionHandler processes a test step action.
@@ -164,6 +187,15 @@ func trimSpaces(s string) string {
 	}
 	return s[start:end]
 }
+
+// Well-known keys for device state snapshots stored in ExecutionState.Custom.
+// The runner stores these during precondition setup and teardown; the engine
+// transfers them to TestResult after teardown completes.
+const (
+	StateKeyDeviceStateBefore = "__device_state_before"
+	StateKeyDeviceStateAfter  = "__device_state_after"
+	StateKeyDeviceStateDiffs  = "__device_state_diffs"
+)
 
 // EngineConfig configures the test engine.
 type EngineConfig struct {

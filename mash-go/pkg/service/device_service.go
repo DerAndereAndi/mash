@@ -255,7 +255,7 @@ func (s *DeviceService) Start(ctx context.Context) error {
 
 	// DEC-067: Generate stable commissioning certificate once at startup.
 	// This cert is reused across all commissioning windows.
-	s.commissioningCert, err = generateSelfSignedCert()
+	s.commissioningCert, err = generateSelfSignedCert(s.config.Discriminator)
 	if err != nil {
 		s.mu.Lock()
 		s.state = StateIdle
@@ -2487,8 +2487,8 @@ func (s *DeviceService) handlePairingRequestDiscovered(svc discovery.PairingRequ
 	s.mu.RLock()
 	// Rate limiting: check if commissioning window is already open
 	commissioningOpen := s.discoveryManager != nil && s.discoveryManager.IsCommissioningMode()
-	// Check if at max zones
-	atMaxZones := len(s.connectedZones) >= s.config.MaxZones
+	// Check if at max non-TEST zones (TEST zones don't count toward limits)
+	atMaxZones := s.nonTestZoneCountLocked() >= s.config.MaxZones
 	s.mu.RUnlock()
 
 	if commissioningOpen {

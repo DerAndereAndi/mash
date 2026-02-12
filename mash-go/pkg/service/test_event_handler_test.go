@@ -2,11 +2,15 @@ package service
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
+	"github.com/mash-protocol/mash-go/pkg/failsafe"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
@@ -550,6 +554,7 @@ func TestTriggerResetTestState_ResetsCommissioningWindowDuration(t *testing.T) {
 	// Set up a mock advertiser so SetAdvertiser creates a DiscoveryManager.
 	advertiser := mocks.NewMockAdvertiser(t)
 	advertiser.EXPECT().StopAll().Return().Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
 	svc.SetAdvertiser(advertiser)
 
 	dm := svc.DiscoveryManager()
@@ -578,6 +583,49 @@ func TestTriggerResetTestState_ResetsCommissioningWindowDuration(t *testing.T) {
 	got := dm.CommissioningWindowDuration()
 	if got != configDefault {
 		t.Errorf("CommissioningWindowDuration = %v after reset, want %v", got, configDefault)
+	}
+}
+
+func TestTriggerResetTestState_ReopensCommissioningALPNGate(t *testing.T) {
+	svc := newDeviceServiceWithAllFeatures(t)
+	ctx := context.Background()
+
+	// Use an ephemeral port so ensureListenerStarted can bind.
+	svc.config.OperationalListenAddress = "localhost:0"
+
+	// Mock advertiser: expect the exit+enter cycle during reset.
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	advertiser.EXPECT().AdvertiseCommissionable(
+		mock.Anything, mock.Anything,
+	).Return(nil).Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	// Service must be running for EnterCommissioningMode to succeed.
+	svc.state = StateRunning
+	svc.ctx, svc.cancel = context.WithCancel(context.Background())
+	t.Cleanup(func() { svc.cancel() })
+
+	// Open the commissioning window.
+	if err := svc.EnterCommissioningMode(); err != nil {
+		t.Fatalf("EnterCommissioningMode: %v", err)
+	}
+	t.Cleanup(func() { svc.stopListener() })
+
+	if !svc.commissioningOpen.Load() {
+		t.Fatal("commissioningOpen should be true after EnterCommissioningMode")
+	}
+
+	// Reset test state — this must close and re-open the ALPN gate so
+	// subsequent commissioning connections (mash-comm/1) still succeed.
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+
+	// The ALPN gate must be open after reset.
+	if !svc.commissioningOpen.Load() {
+		t.Error("commissioningOpen should be true after reset (ALPN gate must stay open for next test)")
 	}
 }
 
@@ -619,5 +667,165 @@ func TestVerifyClientCert_UsesClockOffset(t *testing.T) {
 	svc.clockOffset = 0
 	if err := svc.verifyClientCert(controllerCert.Certificate); err != nil {
 		t.Errorf("cert should be valid after clearing offset: %v", err)
+	}
+}
+
+func TestTriggerResetTestState_ResetsFailsafeTimers(t *testing.T) {
+	svc := newDeviceServiceWithAllFeatures(t)
+	ctx := context.Background()
+
+	// Create a failsafe timer and start it (simulates a prior test
+	// that set a failsafe but didn't clean up).
+	timer := failsafe.NewTimer()
+	timer.Start()
+	if timer.State() != failsafe.StateTimerRunning {
+		t.Fatal("failsafe timer should be TimerRunning after Start()")
+	}
+
+	svc.mu.Lock()
+	svc.failsafeTimers["test-zone"] = timer
+	svc.mu.Unlock()
+
+	// Reset test state.
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+
+	// Failsafe timer should be reset to Normal.
+	if timer.State() != failsafe.StateNormal {
+		t.Errorf("failsafe timer state = %v after reset, want Normal", timer.State())
+	}
+}
+
+func TestTriggerResetTestState_ClearsConnTracker(t *testing.T) {
+	svc := newDeviceServiceWithAllFeatures(t)
+	ctx := context.Background()
+
+	// Create a pipe to simulate a pre-operational connection tracked
+	// by connTracker (e.g., from a failed commissioning attempt).
+	server, client := net.Pipe()
+	t.Cleanup(func() {
+		server.Close()
+		client.Close()
+	})
+
+	svc.connTracker.Add(server)
+	if svc.connTracker.Len() != 1 {
+		t.Fatal("expected 1 tracked connection before reset")
+	}
+
+	// Reset test state.
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+
+	// ConnTracker should be empty.
+	if svc.connTracker.Len() != 0 {
+		t.Errorf("connTracker.Len() = %d after reset, want 0", svc.connTracker.Len())
+	}
+}
+
+func TestTriggerResetTestState_ResetsAutoReentryPending(t *testing.T) {
+	svc := newDeviceServiceWithAllFeatures(t)
+	ctx := context.Background()
+
+	// Simulate a prior test that set autoReentryPending.
+	svc.autoReentryPending = true
+
+	// Reset test state.
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+
+	if svc.autoReentryPending {
+		t.Error("autoReentryPending should be false after reset")
+	}
+}
+
+func TestTriggerResetTestState_ClearsGlobalSubscriptionManager(t *testing.T) {
+	svc := newDeviceServiceWithAllFeatures(t)
+	ctx := context.Background()
+
+	// Add a subscription to the global subscription manager to simulate
+	// a subscription that accumulated from a prior test.
+	_, err := svc.subscriptionManager.Subscribe(
+		1, 2, // endpointID=1, featureID=2
+		[]uint16{1}, // attributeID=1
+		1*time.Second, 10*time.Second,
+		map[uint16]any{1: uint8(0)},
+	)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if svc.subscriptionManager.Count() != 1 {
+		t.Fatal("expected 1 subscription before reset")
+	}
+
+	// Reset test state.
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+
+	// Global subscription manager should be empty.
+	if svc.subscriptionManager.Count() != 0 {
+		t.Errorf("subscriptionManager.Count() = %d after reset, want 0",
+			svc.subscriptionManager.Count())
+	}
+}
+
+func TestTriggerResetTestState_StopsPairingRequestListening(t *testing.T) {
+	svc := newDeviceServiceWithAllFeatures(t)
+	ctx := context.Background()
+
+	// Simulate a prior test leaving pairing request active.
+	svc.mu.Lock()
+	svc.pairingRequestActive = true
+	svc.mu.Unlock()
+
+	// Reset test state.
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+
+	if svc.IsPairingRequestListening() {
+		t.Error("pairingRequestActive should be false after reset")
+	}
+}
+
+func TestTriggerResetTestState_RemovesLeakedZones(t *testing.T) {
+	svc := newDeviceServiceWithAllFeatures(t)
+	ctx := context.Background()
+
+	// Simulate a leaked zone WITHOUT a session (from a failed PASE handshake).
+	// This is the exact scenario: PASE creates a zone record in connectedZones,
+	// but the connection dies (EOF) before operational TLS establishes a session.
+	leakedZoneID := "leaked-zone-xyz"
+	svc.mu.Lock()
+	svc.connectedZones[leakedZoneID] = &ConnectedZone{
+		ID:        leakedZoneID,
+		Type:      cert.ZoneTypeLocal,
+		Priority:  2,
+		Connected: false,
+	}
+	if svc.failsafeTimers == nil {
+		svc.failsafeTimers = make(map[string]*failsafe.Timer)
+	}
+	svc.failsafeTimers[leakedZoneID] = failsafe.NewTimer()
+	svc.mu.Unlock()
+
+	// Verify zone exists before reset.
+	if len(svc.ListZoneIDs()) != 1 {
+		t.Fatalf("expected 1 zone before reset, got %d", len(svc.ListZoneIDs()))
+	}
+
+	// Reset test state.
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+
+	// Leaked zone (no session) should be removed.
+	zoneIDs := svc.ListZoneIDs()
+	if len(zoneIDs) != 0 {
+		t.Fatalf("expected 0 zones after reset, got %d: %v", len(zoneIDs), zoneIDs)
 	}
 }

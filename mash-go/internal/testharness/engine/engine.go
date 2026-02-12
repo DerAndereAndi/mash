@@ -139,6 +139,23 @@ func (e *Engine) Run(ctx context.Context, tc *loader.TestCase) *TestResult {
 		e.config.TeardownTest(testCtx, tc, state)
 	}
 
+	// Transfer device state snapshots from execution state to test result.
+	if before, ok := state.Custom[StateKeyDeviceStateBefore]; ok {
+		if m, ok := before.(map[string]any); ok {
+			result.DeviceStateBefore = m
+		}
+	}
+	if after, ok := state.Custom[StateKeyDeviceStateAfter]; ok {
+		if m, ok := after.(map[string]any); ok {
+			result.DeviceStateAfter = m
+		}
+	}
+	if diffs, ok := state.Custom[StateKeyDeviceStateDiffs]; ok {
+		if d, ok := diffs.([]map[string]any); ok {
+			result.DeviceStateDiffs = d
+		}
+	}
+
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime)
 
@@ -419,7 +436,7 @@ func (e *Engine) RunSuite(ctx context.Context, cases []*loader.TestCase) *SuiteR
 		defer cancel()
 	}
 
-	for _, tc := range cases {
+	for i, tc := range cases {
 		// Check for context cancellation
 		select {
 		case <-ctx.Done():
@@ -428,6 +445,7 @@ func (e *Engine) RunSuite(ctx context.Context, cases []*loader.TestCase) *SuiteR
 		}
 
 		testResult := e.Run(ctx, tc)
+		testResult.ExecutionIndex = i
 		result.Results = append(result.Results, testResult)
 
 		if testResult.Skipped {

@@ -424,13 +424,14 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 	SortByPreconditionLevel(cases)
 
 	// Shuffle within precondition levels if requested.
+	var shuffleSeed int64
 	if r.config.Shuffle {
-		seed := r.config.ShuffleSeed
-		if seed == 0 {
-			seed = time.Now().UnixNano()
+		shuffleSeed = r.config.ShuffleSeed
+		if shuffleSeed == 0 {
+			shuffleSeed = time.Now().UnixNano()
 		}
-		ShuffleWithinLevels(cases, seed)
-		stdlog.Printf("Shuffle: seed=%d", seed)
+		ShuffleWithinLevels(cases, shuffleSeed)
+		stdlog.Printf("Shuffle: seed=%d", shuffleSeed)
 	}
 
 	// Suite setup: commission once before any test runs if L3 tests exist.
@@ -444,6 +445,15 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 	// Run the test suite
 	result := r.engine.RunSuite(ctx, cases)
 	result.SuiteName = fmt.Sprintf("MASH Conformance Tests (%s)", r.config.Target)
+
+	// Record shuffle metadata for reproducibility.
+	if shuffleSeed != 0 {
+		result.ShuffleSeed = shuffleSeed
+		result.ExecutionOrder = make([]string, len(cases))
+		for i, tc := range cases {
+			result.ExecutionOrder[i] = tc.ID
+		}
+	}
 
 	// Suite teardown: remove the suite zone and close all connections.
 	if r.suiteZoneKey != "" {
@@ -1060,6 +1070,12 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	needsDisconnectWait := false
 	if (clientCertParam == "controller_operational" || isOperationalChain) && r.conn != nil && r.conn.tlsConn != nil {
 		r.conn.transitionTo(ConnDisconnected)
+		needsDisconnectWait = true
+	}
+	// Also retry when reconnecting operationally after a disconnect (e.g.
+	// invoke_with_disconnect → connect). The device may not have detected
+	// our TCP close yet and rejects the new connection for the same zone.
+	if !needsDisconnectWait && !commissioning && r.zoneCAPool != nil && r.conn != nil && !r.conn.isConnected() {
 		needsDisconnectWait = true
 	}
 

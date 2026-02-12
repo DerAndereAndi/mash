@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -457,7 +458,7 @@ func TestDeriveDeviceID(t *testing.T) {
 
 // TestGenerateSelfSignedCert verifies self-signed certificate generation.
 func TestGenerateSelfSignedCert(t *testing.T) {
-	cert, err := generateSelfSignedCert()
+	cert, err := generateSelfSignedCert(1234)
 	if err != nil {
 		t.Fatalf("generateSelfSignedCert failed: %v", err)
 	}
@@ -468,6 +469,26 @@ func TestGenerateSelfSignedCert(t *testing.T) {
 
 	if cert.PrivateKey == nil {
 		t.Error("Private key should not be nil")
+	}
+}
+
+// TestGenerateSelfSignedCert_IncludesDiscriminator verifies that the
+// commissioning certificate CN contains the device discriminator so that
+// the test harness can extract it during PASE handshake.
+func TestGenerateSelfSignedCert_IncludesDiscriminator(t *testing.T) {
+	cert, err := generateSelfSignedCert(1234)
+	if err != nil {
+		t.Fatalf("generateSelfSignedCert: %v", err)
+	}
+
+	x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	want := "MASH-1234"
+	if x509Cert.Subject.CommonName != want {
+		t.Errorf("CN = %q, want %q", x509Cert.Subject.CommonName, want)
 	}
 }
 

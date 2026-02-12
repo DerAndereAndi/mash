@@ -269,6 +269,7 @@ func main() {
 	if enableKeyValid {
 		svc.RegisterTestEventHandler(testControl)
 		svc.RegisterSetCommissioningWindowDurationHandler(testControl)
+		svc.RegisterGetTestStateHandler(testControl)
 		log.Printf("TestControl triggers enabled (enable-key: %s...)", config.EnableKey[:8])
 	}
 

@@ -53,6 +53,20 @@ func (ct *connTracker) CloseStale(maxAge time.Duration) int {
 	return closed
 }
 
+// CloseAll closes and removes all tracked connections.
+func (ct *connTracker) CloseAll() int {
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
+
+	closed := 0
+	for conn := range ct.conns {
+		_ = conn.Close()
+		delete(ct.conns, conn)
+		closed++
+	}
+	return closed
+}
+
 // Len returns the number of tracked connections.
 func (ct *connTracker) Len() int {
 	ct.mu.Lock()

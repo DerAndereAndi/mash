@@ -58,6 +58,121 @@ func (s *DeviceService) RegisterSetCommissioningWindowDurationHandler(tc *featur
 	})
 }
 
+// TestControlCmdGetTestState is the command ID for the getTestState diagnostic command.
+// This is added manually (not generated) because it's a diagnostic-only command.
+const TestControlCmdGetTestState uint8 = 3
+
+// RegisterGetTestStateHandler adds the getTestState command to the TestControl
+// feature. This command returns a snapshot of the device's mutable state for
+// test-level diagnostics. It allows the test harness to detect state leakage
+// between shuffled tests.
+func (s *DeviceService) RegisterGetTestStateHandler(tc *features.TestControl) {
+	tc.Feature.AddCommand(model.NewCommand(&model.CommandMetadata{
+		ID:          TestControlCmdGetTestState,
+		Name:        "getTestState",
+		Description: "Returns device mutable state snapshot for test diagnostics.",
+		Parameters: []model.ParameterMetadata{
+			{Name: "enableKey", Type: model.DataTypeString, Required: true},
+		},
+	}, func(_ context.Context, params map[string]any) (map[string]any, error) {
+		enableKey, _ := params["enableKey"].(string)
+		if enableKey != s.config.TestEnableKey {
+			return nil, fmt.Errorf("invalid enable key")
+		}
+		return s.collectTestState(), nil
+	}))
+}
+
+// collectTestState gathers a snapshot of all mutable device state that could
+// leak between tests. The keys and types are stable -- the harness diffs
+// consecutive snapshots to detect leakage.
+func (s *DeviceService) collectTestState() map[string]any {
+	s.mu.RLock()
+	// Zone info
+	zones := make([]map[string]any, 0, len(s.connectedZones))
+	for id, z := range s.connectedZones {
+		zi := map[string]any{
+			"id":        id,
+			"type":      int(z.Type),
+			"priority":  int(z.Priority),
+			"connected": z.Connected,
+		}
+		if sess, ok := s.zoneSessions[id]; ok {
+			zi["has_session"] = true
+			zi["subscriptions"] = sess.SubscriptionCount()
+		}
+		zones = append(zones, zi)
+	}
+
+	// Failsafe timers
+	failsafeStates := make(map[string]string, len(s.failsafeTimers))
+	for id, timer := range s.failsafeTimers {
+		failsafeStates[id] = timer.State().String()
+	}
+
+	clockOffset := int(s.clockOffset.Seconds())
+	autoReentry := s.autoReentryPending
+	pairingActive := s.pairingRequestActive
+	s.mu.RUnlock()
+
+	snapshot := map[string]any{
+		"zone_count":      len(zones),
+		"zones":           zones,
+		"failsafe_timers": failsafeStates,
+		"clock_offset_s":  clockOffset,
+		"commissioning_open": s.commissioningOpen.Load(),
+		"auto_reentry":       autoReentry,
+		"pairing_active":     pairingActive,
+		"active_conns":       int(s.activeConns.Load()),
+	}
+
+	if s.connTracker != nil {
+		snapshot["conn_tracker_count"] = s.connTracker.Len()
+	}
+	if s.paseTracker != nil {
+		snapshot["pase_failed_attempts"] = s.paseTracker.AttemptCount()
+	}
+
+	// Feature attribute snapshot (first endpoint with each feature)
+	for _, ep := range s.device.Endpoints() {
+		if f, err := ep.GetFeatureByID(uint8(model.FeatureStatus)); err == nil {
+			if v, err2 := f.ReadAttribute(features.StatusAttrOperatingState); err2 == nil {
+				snapshot["status_operating_state"] = v
+			}
+			break
+		}
+	}
+	for _, ep := range s.device.Endpoints() {
+		if f, err := ep.GetFeatureByID(uint8(model.FeatureEnergyControl)); err == nil {
+			if v, err2 := f.ReadAttribute(features.EnergyControlAttrControlState); err2 == nil {
+				snapshot["ec_control_state"] = v
+			}
+			if v, err2 := f.ReadAttribute(features.EnergyControlAttrProcessState); err2 == nil {
+				snapshot["ec_process_state"] = v
+			}
+			break
+		}
+	}
+	for _, ep := range s.device.Endpoints() {
+		if f, err := ep.GetFeatureByID(uint8(model.FeatureChargingSession)); err == nil {
+			if v, err2 := f.ReadAttribute(features.ChargingSessionAttrState); err2 == nil {
+				snapshot["charging_state"] = v
+			}
+			break
+		}
+	}
+	for _, ep := range s.device.Endpoints() {
+		if f, err := ep.GetFeatureByID(uint8(model.FeatureMeasurement)); err == nil {
+			if v, err2 := f.ReadAttribute(features.MeasurementAttrACActivePower); err2 == nil {
+				snapshot["measurement_power"] = v
+			}
+			break
+		}
+	}
+
+	return snapshot
+}
+
 // dispatchTrigger routes a trigger opcode to the appropriate domain handler.
 func (s *DeviceService) dispatchTrigger(ctx context.Context, trigger uint64) error {
 	domain := features.TriggerDomain(trigger)
@@ -119,16 +234,38 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 					uint8(features.ProcessStateNone))
 			}
 		}
+		// Remove leaked/partial zones that have no active session. These
+		// arise when a PASE handshake creates a zone record but the
+		// connection dies before operational TLS completes (e.g. EOF).
+		// Zones WITH an active session (like the suite zone) are kept.
+		// Collect IDs under RLock, then remove outside the lock because
+		// RemoveZone takes s.mu.Lock internally and calls slow operations.
+		s.mu.RLock()
+		var staleZoneIDs []string
+		for id := range s.connectedZones {
+			if _, hasSession := s.zoneSessions[id]; !hasSession {
+				staleZoneIDs = append(staleZoneIDs, id)
+			}
+		}
+		s.mu.RUnlock()
+		for _, id := range staleZoneIDs {
+			s.debugLog("trigger: removing leaked zone", "zoneID", id)
+			_ = s.RemoveZone(id)
+		}
 		// Reset LimitResolver state (clears per-zone limits, timers, callbacks).
 		if s.limitResolver != nil {
 			s.limitResolver.ResetAll()
 		}
 		// Reset clock offset.
 		s.clockOffset = 0
-		// Reset commissioning window duration to configured default.
+		// Reset commissioning window: exit clears timers and mDNS, then
+		// restore the default duration and re-enter so the ALPN gate
+		// (mash-comm/1) stays open for the next test's PASE handshake.
+		_ = s.ExitCommissioningMode()
 		if s.discoveryManager != nil && s.config.CommissioningWindowDuration > 0 {
 			s.discoveryManager.SetCommissioningWindowDuration(s.config.CommissioningWindowDuration)
 		}
+		_ = s.EnterCommissioningMode()
 		// Reset PASE backoff counter so timing-sensitive tests start clean.
 		s.ResetPASETracker()
 		// Clear connection cooldown timer so cooldown tests are hermetic.
@@ -136,6 +273,20 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 		s.lastCommissioningAttempt = time.Time{}
 		s.commissioningConnActive = false
 		s.connectionMu.Unlock()
+		// Reset failsafe timers to prevent active failsafes from prior
+		// tests from firing during subsequent tests.
+		s.mu.Lock()
+		for _, timer := range s.failsafeTimers {
+			timer.Reset()
+		}
+		s.mu.Unlock()
+		// Close pre-operational connections tracked by connTracker to
+		// prevent stale entries from prior tests from being reaped mid-test.
+		if s.connTracker != nil {
+			s.connTracker.CloseAll()
+		}
+		// Reset auto-reentry flag so commissioning re-entry is clean.
+		s.autoReentryPending = false
 		// Clear inbound subscriptions on all active zone sessions to stop
 		// notifications from leaking into the next test.
 		s.mu.Lock()
@@ -143,6 +294,15 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 			session.ClearSubscriptions()
 		}
 		s.mu.Unlock()
+		// Clear the global subscription manager so no stale subscription
+		// entries accumulate across tests (separate from per-session clearing).
+		if s.subscriptionManager != nil {
+			s.subscriptionManager.ClearAll()
+		}
+		// Stop pairing request listening if a prior test left it active.
+		// StopPairingRequestListening takes s.mu internally, so call after
+		// releasing it above.
+		_ = s.StopPairingRequestListening()
 		return nil
 	default:
 		// Check for parameterized triggers (base + encoded value).

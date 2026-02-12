@@ -293,6 +293,35 @@ func (r *Runner) currentLevel() int {
 // Without this cleanup, subscriptions leak between tests (causing stale
 // notifications) and TCP sockets leak until GC (consuming device connection slots).
 func (r *Runner) teardownTest(_ context.Context, _ *loader.TestCase, state *engine.ExecutionState) {
+	// Capture device state snapshot AFTER the test ran, BEFORE cleanup.
+	// Compare with the "before" snapshot to detect what this test changed.
+	if r.config.Target != "" && r.config.EnableKey != "" {
+		afterCtx, afterCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if after := r.requestDeviceState(afterCtx, state); after != nil {
+			state.Custom[engine.StateKeyDeviceStateAfter] = map[string]any(after)
+
+			// Compute diff if we have a before snapshot.
+			if beforeRaw, ok := state.Custom[engine.StateKeyDeviceStateBefore]; ok {
+				if before, ok := beforeRaw.(map[string]any); ok {
+					diffs := diffSnapshots(DeviceStateSnapshot(before), DeviceStateSnapshot(after))
+					if len(diffs) > 0 {
+						diffMaps := make([]map[string]any, len(diffs))
+						for i, d := range diffs {
+							diffMaps[i] = map[string]any{
+								"key":    d.Key,
+								"before": d.Before,
+								"after":  d.After,
+							}
+						}
+						state.Custom[engine.StateKeyDeviceStateDiffs] = diffMaps
+						r.debugf("teardown: device state diffs: %d fields changed", len(diffs))
+					}
+				}
+			}
+		}
+		afterCancel()
+	}
+
 	// Unsubscribe all active subscriptions created during this test.
 	// Each sendUnsubscribe reads the response and discards any interleaved
 	// stale notifications, leaving the wire clean for the next test.
@@ -386,17 +415,43 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	// Always reset device test state between tests to prevent state
 	// contamination. triggerResetTestState resets attributes, measurements,
 	// control state, limits, clock offset, PASE backoff, cooldown timer,
-	// and per-zone subscriptions without removing zones or certificates.
+	// failsafe timers, connTracker, and per-zone subscriptions without
+	// removing zones or certificates.
 	// The suite zone (ZoneTypeTest) is always connected, so
 	// sendTriggerViaZone will find it via activeZoneConns.
 	if r.config.Target != "" && r.config.EnableKey != "" {
 		r.debugf("resetting device test state")
 		resetCtx, resetCancel := context.WithTimeout(ctx, 5*time.Second)
-		if err := r.sendTriggerViaZone(resetCtx, features.TriggerResetTestState, state); err != nil {
-			r.debugf("reset trigger failed: %v (continuing)", err)
-		}
+		err := r.sendTriggerViaZone(resetCtx, features.TriggerResetTestState, state)
 		resetCancel()
+		if err != nil {
+			r.debugf("reset trigger failed: %v, attempting reconnect+retry", err)
+			// The suite zone connection may have died (device-side close,
+			// reaper, etc.). Reconnect and retry once.
+			if r.suiteZoneID != "" && r.zoneCAPool != nil {
+				if reconErr := r.reconnectToZone(state); reconErr != nil {
+					r.debugf("reconnect for reset retry failed: %v (continuing)", reconErr)
+				} else {
+					retryCtx, retryCancel := context.WithTimeout(ctx, 5*time.Second)
+					err = r.sendTriggerViaZone(retryCtx, features.TriggerResetTestState, state)
+					retryCancel()
+					if err != nil {
+						r.debugf("reset trigger retry failed: %v (continuing)", err)
+					}
+				}
+			}
+		}
 		r.deviceStateModified = false
+
+		// Capture device state snapshot AFTER reset, BEFORE preconditions.
+		// This is the baseline: if the reset worked, all mutable state should
+		// be at default values. Differences from the previous test's "after"
+		// snapshot indicate state leakage through reset.
+		snapCtx, snapCancel := context.WithTimeout(ctx, 3*time.Second)
+		if before := r.requestDeviceState(snapCtx, state); before != nil {
+			state.Custom[engine.StateKeyDeviceStateBefore] = map[string]any(before)
+		}
+		snapCancel()
 	}
 
 	// Clear stale zone CA state for non-commissioned tests. This prevents
@@ -467,6 +522,26 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 			r.closeActiveZoneConns()
 		}
 	} else {
+		// When reusing a session but the test doesn't need multi-zone,
+		// clean up extra non-suite zones left by a previous multi-zone test
+		// (e.g., TC-ZONE-REMOVE-004 leaves GRID + LOCAL zones). Without
+		// cleanup, tests like TC-COMM-003 see device IDs from the wrong zone.
+		if !needsZoneConns {
+			for id, conn := range r.activeZoneConns {
+				if id == r.suiteZoneKey || conn == r.conn {
+					continue
+				}
+				r.debugf("reusing session: cleaning up extra zone %s", id)
+				if conn.isConnected() && conn.framer != nil {
+					if zoneID, ok := r.activeZoneIDs[id]; ok {
+						r.sendRemoveZoneOnConn(conn, zoneID)
+					}
+				}
+				conn.transitionTo(ConnDisconnected)
+				delete(r.activeZoneConns, id)
+				delete(r.activeZoneIDs, id)
+			}
+		}
 		r.debugf("reusing session for %s (skipping closeActiveZoneConns)", tc.ID)
 	}
 
@@ -1468,8 +1543,8 @@ func cooldownRemaining(err error) time.Duration {
 	if parseErr != nil {
 		return 0
 	}
-	// Add a small buffer so we don't race with the cooldown expiry.
-	return d + 50*time.Millisecond
+	// Add a buffer that covers TLS reconnection overhead (~35ms) plus margin.
+	return d + 200*time.Millisecond
 }
 
 // isTransientError returns true for errors that may resolve on retry.

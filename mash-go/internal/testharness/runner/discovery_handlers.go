@@ -1039,7 +1039,25 @@ func (r *Runner) handleVerifyMDNSBrowsing(ctx context.Context, step *loader.Step
 	return result, nil
 }
 
+// confirmNotAdvertising calls browseFunc up to maxAttempts times. If a browse
+// finds services but a subsequent one does not, the stale result is ignored.
+// Returns true if services were found on ALL attempts (genuinely advertising).
+func confirmNotAdvertising(browseFunc func() (int, error), maxAttempts int, retryDelay time.Duration) bool {
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		count, err := browseFunc()
+		if err != nil || count == 0 {
+			return false // not advertising
+		}
+		if attempt < maxAttempts-1 {
+			time.Sleep(retryDelay)
+		}
+	}
+	return true // still advertising after all attempts
+}
+
 // handleVerifyMDNSNotAdvertising verifies device is NOT advertising.
+// Uses retry logic to handle macOS mDNSResponder cache staleness after
+// rapid register/shutdown cycles.
 func (r *Runner) handleVerifyMDNSNotAdvertising(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
@@ -1060,13 +1078,16 @@ func (r *Runner) handleVerifyMDNSNotAdvertising(ctx context.Context, step *loade
 			KeyTimeoutMs:   timeoutMs,
 		},
 	}
-	result, err := r.handleBrowseMDNS(ctx, browseStep, state)
-	if err != nil {
-		// Browse error likely means no service found.
-		return map[string]any{KeyAdvertising: false, KeyNotAdvertising: true}, nil
+
+	browseFunc := func() (int, error) {
+		result, err := r.handleBrowseMDNS(ctx, browseStep, state)
+		if err != nil {
+			return 0, err
+		}
+		return result[KeyServiceCount].(int), nil
 	}
 
-	found := result[KeyServiceCount].(int) > 0
+	found := confirmNotAdvertising(browseFunc, 3, 500*time.Millisecond)
 
 	return map[string]any{
 		KeyAdvertising:    found,

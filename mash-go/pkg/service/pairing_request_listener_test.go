@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"net"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/mock"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
 	"github.com/mash-protocol/mash-go/pkg/model"
@@ -268,5 +270,92 @@ func TestPairingRequestListener_RestartAfterStop(t *testing.T) {
 	count := browseCount.Load()
 	if count != 2 {
 		t.Errorf("expected BrowsePairingRequests to be called exactly 2 times (start + restart), got %d", count)
+	}
+}
+
+// TestPairingRequestDiscovered_TestZonesDontBlockPairing verifies that
+// TEST zones do not count against MaxZones when deciding whether to accept
+// a pairing request. Only non-TEST zones should block pairing.
+//
+// Bug: handlePairingRequestDiscovered used len(s.connectedZones) >= MaxZones,
+// which counts TEST zones. With MaxZones=2 and 2 TEST zones connected,
+// pairing requests were incorrectly rejected. The fix uses
+// nonTestZoneCountLocked() for consistency with updatePairingRequestListening.
+func TestPairingRequestDiscovered_TestZonesDontBlockPairing(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	config.MaxZones = 2
+	config.Discriminator = 3840
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	// Set up a dummy listener so ensureListenerStarted returns nil.
+	// This allows EnterCommissioningMode to succeed and set commissioningOpen=true.
+	dummyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("create dummy listener: %v", err)
+	}
+	t.Cleanup(func() { dummyListener.Close() })
+	svc.listener = dummyListener
+
+	// Put service in running state so EnterCommissioningMode proceeds.
+	svc.state = StateRunning
+
+	// Simulate 2 TEST zones connected (at MaxZones if counting all zones).
+	svc.mu.Lock()
+	svc.connectedZones["zone-a"] = &ConnectedZone{
+		ID:        "zone-a",
+		Type:      cert.ZoneTypeTest,
+		Connected: true,
+	}
+	svc.connectedZones["zone-b"] = &ConnectedZone{
+		ID:        "zone-b",
+		Type:      cert.ZoneTypeTest,
+		Connected: true,
+	}
+	svc.mu.Unlock()
+
+	pairingReq := discovery.PairingRequestService{
+		Discriminator: 3840,
+		ZoneID:        "controller-zone",
+	}
+
+	// Call handlePairingRequestDiscovered with matching discriminator.
+	// Before fix: len(connectedZones)==2 >= MaxZones==2 → "at max zones"
+	//             → commissioningOpen stays false.
+	// After fix:  nonTestZoneCount==0 < MaxZones==2 → EnterCommissioningMode
+	//             → commissioningOpen=true.
+	svc.handlePairingRequestDiscovered(pairingReq, 3840)
+
+	if !svc.commissioningOpen.Load() {
+		t.Error("expected commissioningOpen=true: TEST zones should not block pairing requests")
+	}
+
+	// Clean up: close commissioning window for next sub-test
+	svc.commissioningOpen.Store(false)
+
+	// Verify that non-TEST zones at max DO block pairing.
+	svc.mu.Lock()
+	svc.connectedZones = map[string]*ConnectedZone{
+		"zone-grid": {
+			ID:        "zone-grid",
+			Type:      cert.ZoneTypeGrid,
+			Connected: true,
+		},
+		"zone-local": {
+			ID:        "zone-local",
+			Type:      cert.ZoneTypeLocal,
+			Connected: true,
+		},
+	}
+	svc.mu.Unlock()
+
+	svc.handlePairingRequestDiscovered(pairingReq, 3840)
+
+	if svc.commissioningOpen.Load() {
+		t.Error("expected commissioningOpen=false: non-TEST zones at max should block pairing")
 	}
 }

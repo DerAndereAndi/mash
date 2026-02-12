@@ -86,6 +86,10 @@ func (r *TextReporter) ReportSummary(result *engine.SuiteResult) {
 		fmt.Fprintf(r.writer, "Pass Rate: %.1f%%\n", rate)
 	}
 
+	if result.ShuffleSeed != 0 {
+		fmt.Fprintf(r.writer, "Shuffle Seed: %d\n", result.ShuffleSeed)
+	}
+
 	r.reportSlowest(result)
 }
 
@@ -187,25 +191,31 @@ func NewJSONReporter(w io.Writer, pretty bool) *JSONReporter {
 
 // JSONSuiteResult is the JSON representation of suite results.
 type JSONSuiteResult struct {
-	SuiteName string           `json:"suite_name"`
-	Duration  string           `json:"duration"`
-	Total     int              `json:"total"`
-	Passed    int              `json:"passed"`
-	Failed    int              `json:"failed"`
-	Skipped   int              `json:"skipped"`
-	PassRate  float64          `json:"pass_rate"`
-	Tests     []JSONTestResult `json:"tests"`
+	SuiteName      string           `json:"suite_name"`
+	Duration       string           `json:"duration"`
+	Total          int              `json:"total"`
+	Passed         int              `json:"passed"`
+	Failed         int              `json:"failed"`
+	Skipped        int              `json:"skipped"`
+	PassRate       float64          `json:"pass_rate"`
+	ShuffleSeed    int64            `json:"shuffle_seed,omitempty"`
+	ExecutionOrder []string         `json:"execution_order,omitempty"`
+	Tests          []JSONTestResult `json:"tests"`
 }
 
 // JSONTestResult is the JSON representation of a test result.
 type JSONTestResult struct {
-	ID         string           `json:"id"`
-	Name       string           `json:"name"`
-	Status     string           `json:"status"`
-	Duration   string           `json:"duration"`
-	Error      string           `json:"error,omitempty"`
-	SkipReason string           `json:"skip_reason,omitempty"`
-	Steps      []JSONStepResult `json:"steps,omitempty"`
+	ID                string           `json:"id"`
+	Name              string           `json:"name"`
+	ExecutionIndex    int              `json:"execution_index"`
+	Status            string           `json:"status"`
+	Duration          string           `json:"duration"`
+	Error             string           `json:"error,omitempty"`
+	SkipReason        string           `json:"skip_reason,omitempty"`
+	Steps             []JSONStepResult `json:"steps,omitempty"`
+	DeviceStateBefore map[string]any   `json:"device_state_before,omitempty"`
+	DeviceStateAfter  map[string]any   `json:"device_state_after,omitempty"`
+	DeviceStateDiffs  []map[string]any `json:"device_state_diffs,omitempty"`
 }
 
 // JSONStepResult is the JSON representation of a step result.
@@ -236,14 +246,16 @@ func (r *JSONReporter) ReportSuite(result *engine.SuiteResult) {
 	}
 
 	jr := JSONSuiteResult{
-		SuiteName: result.SuiteName,
-		Duration:  result.Duration.Round(time.Millisecond).String(),
-		Total:     len(result.Results),
-		Passed:    result.PassCount,
-		Failed:    result.FailCount,
-		Skipped:   result.SkipCount,
-		PassRate:  passRate,
-		Tests:     make([]JSONTestResult, 0, len(result.Results)),
+		SuiteName:      result.SuiteName,
+		Duration:       result.Duration.Round(time.Millisecond).String(),
+		Total:          len(result.Results),
+		Passed:         result.PassCount,
+		Failed:         result.FailCount,
+		Skipped:        result.SkipCount,
+		PassRate:       passRate,
+		ShuffleSeed:    result.ShuffleSeed,
+		ExecutionOrder: result.ExecutionOrder,
+		Tests:          make([]JSONTestResult, 0, len(result.Results)),
 	}
 
 	for _, tr := range result.Results {
@@ -279,10 +291,11 @@ func (r *JSONReporter) testToJSON(result *engine.TestResult) JSONTestResult {
 	}
 
 	jr := JSONTestResult{
-		ID:       tc.ID,
-		Name:     tc.Name,
-		Status:   status,
-		Duration: result.Duration.Round(time.Millisecond).String(),
+		ID:             tc.ID,
+		Name:           tc.Name,
+		ExecutionIndex: result.ExecutionIndex,
+		Status:         status,
+		Duration:       result.Duration.Round(time.Millisecond).String(),
 	}
 
 	if result.Error != nil {
@@ -290,6 +303,13 @@ func (r *JSONReporter) testToJSON(result *engine.TestResult) JSONTestResult {
 	}
 	if result.SkipReason != "" {
 		jr.SkipReason = result.SkipReason
+	}
+
+	// Add device state snapshots (only for failed tests to keep output compact).
+	if !result.Passed && !result.Skipped {
+		jr.DeviceStateBefore = result.DeviceStateBefore
+		jr.DeviceStateAfter = result.DeviceStateAfter
+		jr.DeviceStateDiffs = result.DeviceStateDiffs
 	}
 
 	// Add step results

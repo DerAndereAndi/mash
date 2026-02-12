@@ -97,10 +97,12 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	clientIdentity := r.getClientIdentity(params)
 	serverIdentity := r.getServerIdentity(params)
 
-	// If a previous commission completed on this connection, the device
-	// is now in operational mode and won't accept another PASE handshake.
-	// Disconnect so we create a fresh commissioning connection below.
-	if r.paseState != nil && r.paseState.completed && r.conn.isConnected() {
+	// If the connection is operational (either from a completed commission or
+	// from suite zone reuse with cleared PASE state), the device won't accept
+	// PASE on it -- mash/1 ALPN routes to the operational handler, not the
+	// commissioning handler. Disconnect so we create a fresh mash-comm/1
+	// commissioning connection below.
+	if r.conn.isConnected() && r.conn.state == ConnOperational {
 		r.debugf("handleCommission: closing stale operational conn (pase completed, conn live)")
 		// Send ControlClose so the device's message loop exits immediately.
 		if r.conn.framer != nil {

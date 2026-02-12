@@ -48,9 +48,10 @@ func deriveClientID(controllerName string) []byte {
 // comes from the SPAKE2+ (PASE) handshake, not from certificate verification.
 //
 // DEC-067: The certificate is stable -- generated once at startup and reused for
-// all commissioning windows. The CN is informational only ("MASH-Commissioning").
+// all commissioning windows. The CN encodes the device discriminator ("MASH-1234")
+// so that controllers can extract it during the TLS handshake.
 // 20-year validity avoids unnecessary regeneration.
-func generateSelfSignedCert() (tls.Certificate, error) {
+func generateSelfSignedCert(discriminator uint16) (tls.Certificate, error) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("generate key: %w", err)
@@ -65,7 +66,7 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			CommonName:   "MASH-Commissioning",
+			CommonName:   fmt.Sprintf("MASH-%d", discriminator),
 			Organization: []string{"MASH"},
 		},
 		NotBefore:             now,
