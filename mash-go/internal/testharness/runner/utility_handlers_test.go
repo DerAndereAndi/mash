@@ -10,12 +10,14 @@ import (
 )
 
 func newTestRunner() *Runner {
-	return &Runner{
-		config:          &Config{},
-		conn:            &Connection{},
-		activeZoneConns: make(map[string]*Connection),
-		suite:           NewSuiteSession(),
+	r := &Runner{
+		config: &Config{},
+		pool:   NewConnPool(func(string, ...any) {}, nil),
+		suite:  NewSuiteSession(),
 	}
+	r.pool.SetMain(&Connection{})
+	r.coordinator = NewCoordinator(r.suite, r.pool, r, r.config, r.debugf)
+	return r
 }
 
 func TestHandleCompare(t *testing.T) {

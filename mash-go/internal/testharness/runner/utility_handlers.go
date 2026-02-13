@@ -422,9 +422,7 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 	}
 
 	// Check if a notification was buffered by sendRequest (interleaved with a response).
-	if len(r.pendingNotifications) > 0 {
-		data := r.pendingNotifications[0]
-		r.pendingNotifications = r.pendingNotifications[1:]
+	if data, ok := r.pool.ShiftNotification(); ok {
 		r.debugf("receive_notification: using buffered notification frame (%d bytes)", len(data))
 		notif, err := wire.DecodeNotification(data)
 		if err == nil {
@@ -437,7 +435,7 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 		// Not a valid notification -- ignore and continue to wire read.
 	}
 
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return map[string]any{
 			KeyNotificationReceived: false,
 			KeyError:                "not connected",
@@ -450,16 +448,16 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 	// consumes the next frame on the wire (e.g. a reset trigger response),
 	// causing subsequent operations to time out.
 	timeout := time.Duration(timeoutMs) * time.Millisecond
-	if r.conn.tlsConn != nil {
-		_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(timeout))
+	if r.pool.Main().tlsConn != nil {
+		_ = r.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(timeout))
 		defer func() {
-			if r.conn.tlsConn != nil {
-				_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+			if r.pool.Main().tlsConn != nil {
+				_ = r.pool.Main().tlsConn.SetReadDeadline(time.Time{})
 			}
 		}()
 	}
 
-	data, err := r.conn.framer.ReadFrame()
+	data, err := r.pool.Main().framer.ReadFrame()
 	if err != nil {
 		// Timeout or connection error -- no notification arrived.
 		return map[string]any{
@@ -639,7 +637,7 @@ func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state 
 		}, nil
 	}
 
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return map[string]any{
 			KeyReportReceived: false,
 			KeyError:          "not connected",
@@ -656,7 +654,7 @@ func (r *Runner) handleWaitReport(ctx context.Context, step *loader.Step, state 
 
 	ch := make(chan readResult, 1)
 	go func() {
-		data, err := r.conn.framer.ReadFrame()
+		data, err := r.pool.Main().framer.ReadFrame()
 		ch <- readResult{data, err}
 	}()
 

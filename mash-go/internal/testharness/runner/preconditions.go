@@ -12,7 +12,6 @@ import (
 	"net"
 	"sort"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -278,971 +277,26 @@ func ShuffleWithinLevels(cases []*loader.TestCase, seed int64) {
 // currentLevel returns the runner's current precondition level based on connection
 // and commissioning state.
 func (r *Runner) currentLevel() int {
-	if r.paseState != nil && r.paseState.completed {
-		return precondLevelCommissioned
-	}
-	if r.conn != nil && r.conn.isConnected() {
-		return precondLevelConnected
-	}
-	return precondLevelNone
+	return r.coordinator.CurrentLevel()
 }
 
-// teardownTest is called after each test completes (pass or fail).
-// It unsubscribes any active subscriptions created during the test and
-// closes per-test resources stored in the execution state, such as
-// security pool connections opened by handleOpenConnections / handleFillConnections.
-// Without this cleanup, subscriptions leak between tests (causing stale
-// notifications) and TCP sockets leak until GC (consuming device connection slots).
-func (r *Runner) teardownTest(_ context.Context, _ *loader.TestCase, state *engine.ExecutionState) {
-	// Capture device state snapshot AFTER the test ran, BEFORE cleanup.
-	// Compare with the "before" snapshot to detect what this test changed.
-	if r.config.Target != "" && r.config.EnableKey != "" {
-		afterCtx, afterCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if after := r.requestDeviceState(afterCtx, state); after != nil {
-			state.Custom[engine.StateKeyDeviceStateAfter] = map[string]any(after)
-
-			// Compute diff if we have a before snapshot.
-			if beforeRaw, ok := state.Custom[engine.StateKeyDeviceStateBefore]; ok {
-				if before, ok := beforeRaw.(map[string]any); ok {
-					diffs := diffSnapshots(DeviceStateSnapshot(before), DeviceStateSnapshot(after))
-					if len(diffs) > 0 {
-						diffMaps := make([]map[string]any, len(diffs))
-						for i, d := range diffs {
-							diffMaps[i] = map[string]any{
-								"key":    d.Key,
-								"before": d.Before,
-								"after":  d.After,
-							}
-						}
-						state.Custom[engine.StateKeyDeviceStateDiffs] = diffMaps
-						r.debugf("teardown: device state diffs: %d fields changed", len(diffs))
-					}
-				}
-			}
-		}
-		afterCancel()
-	}
-
-	// Unsubscribe all active subscriptions created during this test.
-	// Each sendUnsubscribe reads the response and discards any interleaved
-	// stale notifications, leaving the wire clean for the next test.
-	if len(r.activeSubscriptionIDs) > 0 {
-		r.debugf("teardown: unsubscribing %d active subscriptions", len(r.activeSubscriptionIDs))
-		for _, subID := range r.activeSubscriptionIDs {
-			r.sendUnsubscribe(r.conn, subID)
-		}
-	}
-	r.activeSubscriptionIDs = nil
-	r.pendingNotifications = nil
-	if r.conn != nil {
-		r.conn.pendingNotifications = nil
-	}
-	for _, zc := range r.activeZoneConns {
-		if zc != nil {
-			zc.pendingNotifications = nil
-		}
-	}
-
-	// Close connections in a partial/dirty state (e.g., PASE X/Y exchanged
-	// but handshake never completed). Without this, the next test inherits a
-	// socket that the device considers mid-handshake, causing EOF/reset errors.
-	if r.conn != nil && r.conn.isConnected() && (r.paseState == nil || !r.paseState.completed) {
-		r.debugf("teardown: closing connection with incomplete PASE state")
-		r.conn.transitionTo(ConnDisconnected)
-		r.paseState = nil
-	}
-
-	// Clear stale PASE state from failed handshakes. When a test triggers a
-	// PASE failure (e.g., wrong setup code), handleCommission closes the
-	// connection but paseState remains set with completed=false. Clear it
-	// here so the next test starts clean. No sleep needed -- the PASE retry
-	// logic in pase.go handles "commissioning already in progress" (error
-	// code 5) with proper backoff if the device still has a defunct session.
-	if r.paseState != nil && !r.paseState.completed {
-		r.debugf("teardown: clearing incomplete PASE state")
-		r.paseState = nil
-	}
-
-	// Reset hadConnection so the next test starts with a clean signal.
-	// verify_commissioning_state uses this to distinguish ADVERTISING
-	// (had a connection) from IDLE (never connected).
-	if r.conn != nil {
-		r.conn.hadConnection = false
-	}
-
-	if secState, ok := state.Custom["security"].(*securityState); ok && secState.pool != nil {
-		secState.pool.mu.Lock()
-		for _, conn := range secState.pool.connections {
-			if conn.isConnected() {
-				_ = conn.Close()
-			}
-		}
-		secState.pool.connections = nil
-		secState.pool.mu.Unlock()
-	}
+// teardownTest is the callback registered with the engine.
+// It delegates to the coordinator for test cleanup.
+func (r *Runner) teardownTest(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState) {
+	r.coordinator.TeardownTest(ctx, tc, state)
 }
 
 // setupPreconditions is the callback registered with the engine.
-// It inspects tc.Preconditions and ensures the runner is in the right state.
-// When transitioning backwards (e.g., from commissioned to commissioning),
-// it disconnects to give the device a clean state.
+// It delegates to the coordinator for all lifecycle orchestration.
 func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState) error {
-	// Populate setup_code so that test steps using ${setup_code} resolve correctly.
-	if r.config.SetupCode != "" {
-		state.Set(StateSetupCode, r.config.SetupCode)
-	}
-
-	// Populate device_discriminator from auto-PICS discovery.
-	if r.discoveredDiscriminator > 0 {
-		state.Set(StateDeviceDiscriminator, int(r.discoveredDiscriminator))
-	}
-
-	// Compute the needed precondition level early so we can clear stale
-	// zone state before processing special preconditions or connections.
-	needed := r.preconditionLevel(tc.Preconditions)
-	current := r.currentLevel()
-
-	r.debugf("setupPreconditions %s: current=%d needed=%d", tc.ID, current, needed)
-	r.debugSnapshot("setupPreconditions BEFORE " + tc.ID)
-
-	// Clear stale notification buffer from previous tests.
-	r.pendingNotifications = nil
-
-	// Reset commission zone type to default (LOCAL) between tests.
-	// Precondition handlers (e.g. device_has_grid_zone) will override
-	// this before ensureCommissioned is called.
-	r.commissionZoneType = 0
-
-	// Always reset device test state between tests to prevent state
-	// contamination. triggerResetTestState resets attributes, measurements,
-	// control state, limits, clock offset, PASE backoff, cooldown timer,
-	// failsafe timers, connTracker, and per-zone subscriptions without
-	// removing zones or certificates.
-	// The suite zone (ZoneTypeTest) is always connected, so
-	// sendTriggerViaZone will find it via activeZoneConns.
-	if r.config.Target != "" && r.config.EnableKey != "" {
-		r.debugf("resetting device test state")
-		resetCtx, resetCancel := context.WithTimeout(ctx, 5*time.Second)
-		err := r.sendTriggerViaZone(resetCtx, features.TriggerResetTestState, state)
-		resetCancel()
-		if err != nil {
-			r.debugf("reset trigger failed: %v, attempting reconnect+retry", err)
-			// The suite zone connection may have died (device-side close,
-			// reaper, etc.). Reconnect and retry once.
-			if r.suite.ZoneID() != "" && r.zoneCAPool != nil {
-				if reconErr := r.reconnectToZone(state); reconErr != nil {
-					r.debugf("reconnect for reset retry failed: %v (continuing)", reconErr)
-				} else {
-					retryCtx, retryCancel := context.WithTimeout(ctx, 5*time.Second)
-					err = r.sendTriggerViaZone(retryCtx, features.TriggerResetTestState, state)
-					retryCancel()
-					if err != nil {
-						r.debugf("reset trigger retry failed: %v (continuing)", err)
-					}
-				}
-			}
-		}
-		r.deviceStateModified = false
-
-		// Capture device state snapshot AFTER reset, BEFORE preconditions.
-		// This is the baseline: if the reset worked, all mutable state should
-		// be at default values. Differences from the previous test's "after"
-		// snapshot indicate state leakage through reset.
-		snapCtx, snapCancel := context.WithTimeout(ctx, 3*time.Second)
-		if before := r.requestDeviceState(snapCtx, state); before != nil {
-			state.Custom[engine.StateKeyDeviceStateBefore] = map[string]any(before)
-		}
-		snapCancel()
-	}
-
-	// Clear stale zone CA state for non-commissioned tests. This prevents
-	// a zone CA from a previous commissioned test from causing TLS
-	// verification failures on subsequent connection-level or lower tests.
-	// Skip clearing when the test needs zone connections (two_zones_connected),
-	// since those require the zone CA and controller cert for operational TLS.
-	needsZoneConns := hasPrecondition(tc.Preconditions, PrecondTwoZonesConnected) ||
-		hasPrecondition(tc.Preconditions, PrecondTwoZonesWithLimits) ||
-		hasPreconditionInt(tc.Preconditions, PrecondZoneCountAtLeast, 2) ||
-		hasPreconditionString(tc.Preconditions, PrecondSecondZoneConnected)
-	if needed < precondLevelCommissioned && !needsZoneConns {
-		if r.zoneCA != nil || r.controllerCert != nil || r.zoneCAPool != nil {
-			r.debugf("clearing stale zone CA state (needed=%d < commissioned)", needed)
-		}
-		r.zoneCA = nil
-		r.controllerCert = nil
-		r.zoneCAPool = nil
-		r.issuedDeviceCert = nil
-	}
-
-	// Close stale non-suite zone connections from previous tests so the
-	// device marks those zones as disconnected.
-	// When both the current and needed level are "commissioned" and no
-	// incompatible preconditions are present, skip the teardown to reuse
-	// the existing operational session (saves ~1.5s per test).
-	canReuseSession := current >= precondLevelCommissioned &&
-		needed >= precondLevelCommissioned &&
-		!needsFreshCommission(tc.Preconditions) &&
-		!needsZoneConns &&
-		!hasPrecondition(tc.Preconditions, PrecondDeviceZonesFull) &&
-		!hasPrecondition(tc.Preconditions, PrecondDeviceHasGridZone) &&
-		!hasPrecondition(tc.Preconditions, PrecondDeviceHasLocalZone) &&
-		!hasPrecondition(tc.Preconditions, PrecondSessionPreviouslyConnected)
-
-	// Verify session is still healthy before reusing. A previous test may
-	// have corrupted the connection (protocol errors, partial reads, etc.).
-	// If the health check fails, try to reconnect to the suite zone first
-	// before falling back to full recommission.
-	if canReuseSession && r.config.Target != "" {
-		if err := r.probeSessionHealth(); err != nil {
-			r.debugf("session health check failed for %s: %v", tc.ID, err)
-			if r.suite.ZoneID() != "" {
-				r.debugf("attempting reconnect to suite zone %s", r.suite.ZoneID())
-				if reconnErr := r.reconnectToZone(state); reconnErr != nil {
-					r.debugf("reconnect failed: %v, falling back to fresh commission", reconnErr)
-					canReuseSession = false
-				} else {
-					r.debugf("reconnected to suite zone %s", r.suite.ZoneID())
-				}
-			} else {
-				canReuseSession = false
-			}
-		}
-	}
-
-	if !canReuseSession {
-		hadActive := len(r.activeZoneConns) > 0
-		if hadActive {
-			r.debugf("closing %d stale zone connections", len(r.activeZoneConns))
-		}
-		// fresh_commission requires full zone removal including suite zone.
-		if needsFreshCommission(tc.Preconditions) && r.suite.ZoneID() != "" {
-			r.debugf("fresh_commission: removing suite zone %s", r.suite.ZoneID())
-			r.closeAllZoneConns()
-			r.ensureDisconnected()
-		} else {
-			r.closeActiveZoneConns()
-		}
-	} else {
-		// When reusing a session but the test doesn't need multi-zone,
-		// clean up extra non-suite zones left by a previous multi-zone test
-		// (e.g., TC-ZONE-REMOVE-004 leaves GRID + LOCAL zones). Without
-		// cleanup, tests like TC-COMM-003 see device IDs from the wrong zone.
-		if !needsZoneConns {
-			for id, conn := range r.activeZoneConns {
-				if id == r.suite.ConnKey() || conn == r.conn {
-					continue
-				}
-				r.debugf("reusing session: cleaning up extra zone %s", id)
-				if conn.isConnected() && conn.framer != nil {
-					if zoneID, ok := r.activeZoneIDs[id]; ok {
-						r.sendRemoveZoneOnConn(conn, zoneID)
-					}
-				}
-				conn.transitionTo(ConnDisconnected)
-				delete(r.activeZoneConns, id)
-				delete(r.activeZoneIDs, id)
-			}
-		}
-		r.debugf("reusing session for %s (skipping closeActiveZoneConns)", tc.ID)
-	}
-
-	// DEC-059: On backward transition from commissioned, prepare for
-	// commissioning-level tests. The suite zone (ZoneTypeTest) stays
-	// connected -- it doesn't count against MaxZones and is transparent
-	// to device logic.
-	if current >= precondLevelCommissioned && needed <= precondLevelCommissioning {
-		if r.suite.ZoneID() != "" {
-			// Detach r.conn from the suite zone without closing the TCP
-			// connection. The suite zone stays alive in activeZoneConns
-			// for trigger delivery.
-			r.debugf("backward transition: detaching r.conn (suite zone %s stays connected)", r.suite.ZoneID())
-			r.conn = &Connection{}
-			r.paseState = nil
-		} else {
-			r.debugf("backward transition: sending RemoveZone (current=%d -> needed=%d)", current, needed)
-			r.sendRemoveZone()
-		}
-	}
-
-	// Backwards transition: disconnect to give the device a clean state.
-	if needed < current && needed <= precondLevelCommissioning {
-		r.debugf("backward transition: disconnecting (current=%d -> needed=%d)", current, needed)
-		if r.suite.ZoneID() != "" {
-			// Suite zone stays connected; just detach r.conn.
-			r.conn = &Connection{}
-			r.paseState = nil
-		} else {
-			r.ensureDisconnected()
-		}
-		if r.config.Target != "" {
-			r.lastDeviceConnClose = time.Now()
-		}
-	}
-
-	// Store simulation precondition keys in state so handlers can check them.
-	for _, cond := range tc.Preconditions {
-		for key, val := range cond {
-			if simulationPreconditionKeys[key] {
-				state.Set(key, val)
-			}
-		}
-	}
-
-	// Handle non-boolean preconditions that trigger multi-zone setup.
-	// zone_count_at_least: 2 and second_zone_connected: GRID trigger
-	// the same two_zones_connected behavior.
-	needsMultiZone := false
-	for _, cond := range tc.Preconditions {
-		if v, ok := cond[PrecondZoneCountAtLeast]; ok {
-			if n, ok := v.(int); ok && n >= 2 {
-				needsMultiZone = true
-			}
-		}
-		if v, ok := cond[PrecondSecondZoneConnected]; ok {
-			if s, ok := v.(string); ok && s != "" {
-				needsMultiZone = true
-			}
-		}
-		if v, ok := cond[PrecondTwoZonesWithLimits]; ok {
-			if b, ok := v.(bool); ok && b {
-				needsMultiZone = true
-			}
-		}
-	}
-
-	// If needsMultiZone was set by zone_count_at_least/second_zone_connected
-	// but the test doesn't have an explicit two_zones_connected precondition,
-	// inject it so the commissioning flow below picks it up.
-	preconds := tc.Preconditions
-	if needsMultiZone && !hasPrecondition(tc.Preconditions, PrecondTwoZonesConnected) {
-		preconds = append(preconds, map[string]any{PrecondTwoZonesConnected: true})
-	}
-
-	// Save crypto state before precondition handlers may replace it.
-	// Handlers like device_has_grid_zone call handleCreateZone which
-	// generates a new Zone CA + controller cert. If ensureCommissioned
-	// later reuses the existing session (no fresh PASE), the device
-	// still has the original crypto. We restore it to avoid "unknown_ca"
-	// TLS errors on subsequent connections.
-	savedZoneCA := r.zoneCA
-	savedControllerCert := r.controllerCert
-	savedZoneCAPool := r.zoneCAPool
-	savedIssuedDeviceCert := r.issuedDeviceCert
-	savedPASE := r.paseState
-
-	// Handle preconditions that require special setup.
-	for _, cond := range preconds {
-		for key, val := range cond {
-			b, ok := val.(bool)
-			if !ok || !b {
-				continue
-			}
-			switch key {
-			case PrecondZoneCreated, PrecondControllerHasCert:
-				// Create a default zone (generates Zone CA + controller cert).
-				if r.zoneCA == nil {
-					step := &loader.Step{Params: map[string]any{KeyZoneType: "LOCAL"}}
-					_, _ = r.handleCreateZone(ctx, step, state)
-				}
-			case PrecondDeviceHasGridZone:
-				zs := getZoneState(state)
-				if !hasZoneOfType(zs, ZoneTypeGrid) {
-					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeGrid, KeyZoneID: "GRID"}}
-					_, _ = r.handleCreateZone(ctx, step, state)
-				}
-				// Commission as GRID so the real device gets a GRID zone.
-				r.commissionZoneType = cert.ZoneTypeGrid
-			case PrecondDeviceHasLocalZone:
-				zs := getZoneState(state)
-				if !hasZoneOfType(zs, ZoneTypeLocal) {
-					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeLocal, KeyZoneID: "LOCAL"}}
-					_, _ = r.handleCreateZone(ctx, step, state)
-				}
-				r.commissionZoneType = cert.ZoneTypeLocal
-			case PrecondDeviceInLocalZone:
-				// Ensure zone crypto state exists for LOCAL and set commission
-				// zone type so the device gets a LOCAL zone.
-				zs := getZoneState(state)
-				if !hasZoneOfType(zs, ZoneTypeLocal) {
-					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeLocal, KeyZoneID: "LOCAL"}}
-					_, _ = r.handleCreateZone(ctx, step, state)
-				}
-				// Pre-populate zone state so zone_count returns the correct
-				// count when the test checks for the existing zone.
-				if len(zs.zones) == 0 {
-					zoneID := "sim-local-zone"
-					zs.zones[zoneID] = &zoneInfo{
-						ZoneID:         zoneID,
-						ZoneType:       ZoneTypeLocal,
-						Priority:       zonePriority[ZoneTypeLocal],
-						Connected:      true,
-						Metadata:       make(map[string]any),
-						CommissionedAt: time.Now(),
-					}
-					zs.zoneOrder = append(zs.zoneOrder, zoneID)
-					state.Set(StateLocalZoneID, zoneID)
-				}
-				r.commissionZoneType = cert.ZoneTypeLocal
-			case PrecondNoZonesConfigured:
-				zs := getZoneState(state)
-				zs.zones = make(map[string]*zoneInfo)
-				zs.zoneOrder = nil
-			case PrecondLocalZoneConfigured:
-				zs := getZoneState(state)
-				if _, exists := zs.zones["zone-local-001"]; !exists {
-					zs.zones["zone-local-001"] = &zoneInfo{
-						ZoneID:         "zone-local-001",
-						ZoneType:       ZoneTypeLocal,
-						Priority:       zonePriority[ZoneTypeLocal],
-						Connected:      false,
-						Metadata:       make(map[string]any),
-						CommissionedAt: time.Now(),
-					}
-					zs.zoneOrder = append(zs.zoneOrder, "zone-local-001")
-				}
-			case PrecondTwoZonesConfigured:
-				zs := getZoneState(state)
-				if _, exists := zs.zones["zone-grid-001"]; !exists {
-					zs.zones["zone-grid-001"] = &zoneInfo{
-						ZoneID:         "zone-grid-001",
-						ZoneType:       ZoneTypeGrid,
-						Priority:       zonePriority[ZoneTypeGrid],
-						Connected:      false,
-						Metadata:       make(map[string]any),
-						CommissionedAt: time.Now(),
-					}
-					zs.zoneOrder = append(zs.zoneOrder, "zone-grid-001")
-				}
-				if _, exists := zs.zones["zone-local-001"]; !exists {
-					zs.zones["zone-local-001"] = &zoneInfo{
-						ZoneID:         "zone-local-001",
-						ZoneType:       ZoneTypeLocal,
-						Priority:       zonePriority[ZoneTypeLocal],
-						Connected:      false,
-						Metadata:       make(map[string]any),
-						CommissionedAt: time.Now(),
-					}
-					zs.zoneOrder = append(zs.zoneOrder, "zone-local-001")
-				}
-			case PrecondCommissioningWindowClosed:
-				// Ensure commissioning state is cleared so the test starts
-				// with the window closed. This prevents a previous test's
-				// stub-mode commissioning from leaking into this test.
-				state.Set(StateCommissioningActive, false)
-			case PrecondDeviceInZone:
-				// Populate zone state with a LOCAL zone so that handlers like
-				// zone_count return the correct count. Without this, commission
-				// to a second zone (TC-E2E-003) yields count=1 instead of 2.
-				zs := getZoneState(state)
-				if len(zs.zones) == 0 {
-					zoneID := "sim-local-zone"
-					zs.zones[zoneID] = &zoneInfo{
-						ZoneID:         zoneID,
-						ZoneType:       ZoneTypeLocal,
-						Priority:       zonePriority[ZoneTypeLocal],
-						Connected:      true,
-						Metadata:       make(map[string]any),
-						CommissionedAt: time.Now(),
-					}
-					zs.zoneOrder = append(zs.zoneOrder, zoneID)
-					state.Set(StateLocalZoneID, zoneID)
-				}
-			case PrecondCommissioningWindowAt95s:
-				// Simulate 95 seconds elapsed of a 120-second window.
-				// buildBrowseOutput uses this to compute window_expiry_warning.
-				state.Set(StateCommWindowStart, time.Now().Add(-95*time.Second))
-			case PrecondControllerCertNearExpiry:
-				state.Set(StateCertDaysUntilExpiry, 29)
-			case PrecondFiveZonesConnected:
-				// Pre-populate connection tracker with 5 dummy zone connections.
-				ct := getConnectionTracker(state)
-				for _, name := range []string{"GRID", "BUILDING", "HOME", "USER1", "USER2"} {
-					if _, exists := ct.zoneConnections[name]; !exists {
-						ct.zoneConnections[name] = &Connection{state: ConnOperational}
-					}
-				}
-			case PrecondTwoZonesConnected:
-				needsMultiZone = false // Already handled inline.
-				ct := getConnectionTracker(state)
-				zones := []struct {
-					name string
-					zt   cert.ZoneType
-				}{
-					{"GRID", cert.ZoneTypeGrid},
-					{"LOCAL", cert.ZoneTypeLocal},
-				}
-				if r.config.Target != "" {
-					r.debugf("two_zones_connected: commissioning against real device")
-					// Wait for the device to finish processing zone removals
-					// and re-enter commissioning mode (mDNS advertisement).
-					if !r.lastDeviceConnClose.IsZero() {
-						if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
-							r.debugf("two_zones_connected: %v (continuing)", err)
-						}
-					}
-
-					// Commission each zone separately. Each PASE session
-					// creates a new zone on the device, and the PASE
-					// connection becomes that zone's live framer for
-					// subscribe/read/write operations.
-					for i, z := range zones {
-						if _, exists := ct.zoneConnections[z.name]; exists {
-							r.debugf("two_zones_connected: zone %s already exists, skipping", z.name)
-							continue
-						}
-						r.debugf("two_zones_connected: commissioning zone %s (type=%d)", z.name, z.zt)
-						r.debugSnapshot("two_zones_connected BEFORE commission " + z.name)
-
-						// Send RemoveZone before closing so the device can
-						// synchronously process zone removal and re-enter
-						// commissioning mode. Without this, the device relies
-						// on async TCP disconnect detection which is slower.
-						if r.conn != nil && r.conn.isConnected() && r.paseState != nil && r.paseState.completed {
-							r.debugf("two_zones_connected: sending RemoveZone before disconnect (zone %d)", i)
-							r.sendRemoveZone()
-						}
-
-						// Clear connection and crypto for the next commission,
-						// but preserve suite zone state so closeActiveZoneConns
-						// continues to protect the suite zone connection.
-						savedPool := r.zoneCAPool
-						r.disconnectConnection()
-						r.zoneCA = nil
-						r.controllerCert = nil
-						r.zoneCAPool = savedPool
-						r.issuedDeviceCert = nil
-
-						// Set zone type so performCertExchange generates the
-						// correct Zone CA (GRID vs LOCAL).
-						r.commissionZoneType = z.zt
-
-						if err := r.ensureCommissioned(ctx, state); err != nil {
-							r.debugf("two_zones_connected: PASE FAILED for zone %s: %v", z.name, err)
-							r.debugSnapshot("two_zones_connected AFTER PASE FAIL " + z.name)
-							return fmt.Errorf("precondition two_zones_connected commission zone %s: %w", z.name, err)
-						}
-
-						r.debugf("two_zones_connected: zone %s commissioned successfully", z.name)
-
-						// Move the PASE connection to the zone tracker.
-						zoneConn := r.conn
-						ct.zoneConnections[z.name] = zoneConn
-						r.activeZoneConns[z.name] = zoneConn
-						state.Set(ZoneConnectionStateKey(z.name), zoneConn)
-
-						// Store zone ID for explicit RemoveZone on teardown
-						// and in state for interpolation ({{ grid_zone_id }}).
-						if r.paseState != nil && r.paseState.sessionKey != nil {
-							zID := deriveZoneIDFromSecret(r.paseState.sessionKey)
-							r.activeZoneIDs[z.name] = zID
-
-							var stateKey string
-							switch z.zt {
-							case cert.ZoneTypeGrid:
-								stateKey = StateGridZoneID
-							case cert.ZoneTypeLocal:
-								stateKey = StateLocalZoneID
-							case cert.ZoneTypeTest:
-								stateKey = StateTestZoneID
-							}
-							if stateKey != "" {
-								state.Set(stateKey, zID)
-							}
-						}
-
-						// For the last zone, verify the device is processing
-						// protocol messages before detaching the connection.
-						if i == len(zones)-1 {
-							if err := r.waitForOperationalReady(2 * time.Second); err != nil {
-								r.debugf("two_zones_connected: %v (continuing)", err)
-							}
-						}
-
-						// Detach from runner so the next iteration
-						// creates a fresh connection.
-						r.conn = &Connection{}
-
-						if i < len(zones)-1 {
-							// Wait for device to re-enter commissioning mode.
-							if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
-								r.debugf("two_zones_connected: %v (continuing)", err)
-							}
-						}
-					}
-					// Restore the first zone's connection (GRID) to r.conn so
-					// that ensureCommissioned (called later) sees an active
-					// session and does not attempt a third commission on a
-					// device that is already at max capacity. We use the
-					// first zone because tests that disconnect LOCAL expect
-					// GRID (r.conn) to remain alive.
-					firstZone := zones[0]
-					if zc, ok := ct.zoneConnections[firstZone.name]; ok && zc.isConnected() {
-						r.conn = zc
-						r.debugf("two_zones_connected: restored r.conn from zone %s", firstZone.name)
-					}
-					// Set current_zone_id (GRID, since r.conn is restored to GRID)
-					// and other_zone_id (LOCAL) for test interpolation.
-					if gridID, ok := state.Get(StateGridZoneID); ok {
-						state.Set(StateCurrentZoneID, gridID)
-					}
-					if localID, ok := state.Get(StateLocalZoneID); ok {
-						state.Set(StateOtherZoneID, localID)
-					}
-					// Reset commission zone type to default.
-					r.commissionZoneType = 0
-				} else {
-					// No target available (unit tests): use dummy connections.
-					for _, z := range zones {
-						if _, exists := ct.zoneConnections[z.name]; exists {
-							continue
-						}
-						dummyConn := &Connection{state: ConnOperational}
-						ct.zoneConnections[z.name] = dummyConn
-						r.activeZoneConns[z.name] = dummyConn
-					}
-				}
-			case PrecondDeviceZonesFull:
-				// Real device: commission zones to fill all slots so the
-				// device rejects further commissioning with ErrCodeBusy.
-				// Simulation mode relies on the state flag set earlier.
-				if r.config.Target != "" {
-					r.debugf("device_zones_full: commissioning zones to fill device slots")
-					ct := getConnectionTracker(state)
-
-					// Wait for device to process prior zone removals.
-					if !r.lastDeviceConnClose.IsZero() {
-						if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
-							r.debugf("device_zones_full: %v (continuing)", err)
-						}
-					}
-
-					// In test mode the device allows 3 zones (GRID + LOCAL + TEST,
-					// DEC-043/DEC-060). The suite zone fills the TEST slot,
-					// so we only need to commission GRID + LOCAL.
-					zones := []struct {
-						name string
-						zt   cert.ZoneType
-					}{
-						{"GRID", cert.ZoneTypeGrid},
-						{"LOCAL", cert.ZoneTypeLocal},
-					}
-
-					for i, z := range zones {
-						if _, exists := ct.zoneConnections[z.name]; exists {
-							r.debugf("device_zones_full: zone %s already exists, skipping", z.name)
-							continue
-						}
-						r.debugf("device_zones_full: commissioning zone %s (type=%d)", z.name, z.zt)
-
-						if r.conn != nil && r.conn.isConnected() && r.paseState != nil && r.paseState.completed {
-							r.debugf("device_zones_full: sending RemoveZone before disconnect (zone %d)", i)
-							r.sendRemoveZone()
-						}
-
-						// Clear connection and crypto for the next commission,
-						// but preserve suite zone state so closeActiveZoneConns
-						// continues to protect the suite zone connection.
-						savedPool := r.zoneCAPool
-						r.disconnectConnection()
-						r.zoneCA = nil
-						r.controllerCert = nil
-						r.zoneCAPool = savedPool
-						r.issuedDeviceCert = nil
-
-						r.commissionZoneType = z.zt
-						if err := r.ensureCommissioned(ctx, state); err != nil {
-							r.debugf("device_zones_full: commission zone %s FAILED: %v", z.name, err)
-							return fmt.Errorf("precondition device_zones_full commission zone %s: %w", z.name, err)
-						}
-
-						r.debugf("device_zones_full: zone %s commissioned successfully", z.name)
-
-						zoneConn := r.conn
-						ct.zoneConnections[z.name] = zoneConn
-						r.activeZoneConns[z.name] = zoneConn
-						state.Set(ZoneConnectionStateKey(z.name), zoneConn)
-
-						if r.paseState != nil && r.paseState.sessionKey != nil {
-							zID := deriveZoneIDFromSecret(r.paseState.sessionKey)
-							r.activeZoneIDs[z.name] = zID
-
-							var stateKey string
-							switch z.zt {
-							case cert.ZoneTypeGrid:
-								stateKey = StateGridZoneID
-							case cert.ZoneTypeLocal:
-								stateKey = StateLocalZoneID
-							}
-							if stateKey != "" {
-								state.Set(stateKey, zID)
-							}
-						}
-
-						r.conn = &Connection{}
-
-						// DEC-067: After commissioning, the commissioning
-						// window closes. Trigger re-entering commissioning
-						// mode on a tracked zone connection so the device
-						// accepts mash-comm/1 connections for the next zone.
-						if i < len(zones)-1 {
-							for _, tracked := range ct.zoneConnections {
-								if tracked != nil && tracked.isConnected() {
-									savedConn := r.conn
-									r.conn = tracked
-									r.debugf("device_zones_full: triggering enter commissioning mode on tracked zone connection")
-									_, _ = r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
-									r.conn = savedConn
-									break
-								}
-							}
-							if err := r.waitForCommissioningMode(ctx, 5*time.Second); err != nil {
-								r.debugf("device_zones_full: %v (continuing)", err)
-							}
-						}
-					}
-					// Wait for device to exit and re-enter commissioning mode
-					// after filling all zone slots.
-					if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
-						r.debugf("device_zones_full: post-fill %v (continuing)", err)
-					}
-
-					r.commissionZoneType = 0
-					// Clear main connection state so the runner does not
-					// appear commissioned on a detached connection.
-					r.paseState = nil
-				}
-			}
-		}
-	}
-
-	// Handle needsMultiZone: set up two_zones_connected when triggered
-	// by zone_count_at_least, second_zone_connected, or two_zones_with_limits.
-	if needsMultiZone {
-		state.Set(PrecondTwoZonesConnected, true)
-		ct := getConnectionTracker(state)
-		if len(ct.zoneConnections) < 2 {
-			// Synthesize zone connections for simulation mode.
-			// Real device mode will be handled by ensureCommissioned + the
-			// two_zones_connected precondition flag in state.
-			if r.config.Target == "" {
-				for _, z := range []string{"GRID", "LOCAL"} {
-					if _, exists := ct.zoneConnections[z]; !exists {
-						dummyConn := &Connection{state: ConnOperational}
-						ct.zoneConnections[z] = dummyConn
-						r.activeZoneConns[z] = dummyConn
-					}
-				}
-			}
-		}
-	}
-
-	// If a commissioned session exists but isn't tracked in activeZoneConns,
-	// it was established by a test step (not by ensureCommissioned which calls
-	// transitionToOperational). Such sessions are unreliable: the device may
-	// have closed the idle commissioning connection, and the zone type may not
-	// match what this test needs. Force a fresh commission.
-	// Only apply to real device connections -- unit tests use stub connections
-	// that don't need operational transition.
-	if needed >= precondLevelCommissioned &&
-		r.paseState != nil && r.paseState.completed &&
-		len(r.activeZoneConns) == 0 &&
-		r.config.Target != "" {
-		r.debugf("resetting untracked commission session (no activeZoneConns)")
-		r.ensureDisconnected()
-	}
-
-	r.debugSnapshot("setupPreconditions AFTER " + tc.ID)
-
-	var setupErr error
-	switch needed {
-	case precondLevelCommissioned:
-		r.debugf("ensuring commissioned for %s", tc.ID)
-		setupErr = r.ensureCommissioned(ctx, state)
-		if setupErr != nil {
-			r.debugf("ensureCommissioned FAILED for %s: %v", tc.ID, setupErr)
-			return setupErr
-		}
-		// Store the commissioned zone ID for test interpolation
-		// (e.g. {{ grid_zone_id }}, {{ local_zone_id }}).
-		// Also update the simulated zone state entry with the actual
-		// device zone ID so that RemoveZone cleanup can find it.
-		//
-		// Skip when a multi-zone precondition already set zone IDs
-		// (two_zones_connected, device_zones_full, etc.). In that case
-		// r.paseState holds the LAST zone's key, not the active r.conn
-		// zone, so overwriting StateCurrentZoneID here would be wrong.
-		if !needsZoneConns && r.paseState != nil && r.paseState.sessionKey != nil {
-			zID := deriveZoneIDFromSecret(r.paseState.sessionKey)
-			var stateKey, zoneLabel string
-			switch r.commissionZoneType {
-			case cert.ZoneTypeGrid:
-				stateKey = StateGridZoneID
-				zoneLabel = ZoneTypeGrid
-			case cert.ZoneTypeLocal, 0:
-				stateKey = StateLocalZoneID
-				zoneLabel = ZoneTypeLocal
-			case cert.ZoneTypeTest:
-				stateKey = StateTestZoneID
-				zoneLabel = ZoneTypeTest
-			}
-			if stateKey != "" {
-				state.Set(stateKey, zID)
-			}
-			// Set current_zone_id for test interpolation (e.g. {{ current_zone_id }}).
-			// This is the zone ID of the most recently commissioned zone.
-			state.Set(StateCurrentZoneID, zID)
-			// Patch the simulated zone entry with the real zone ID.
-			if zoneLabel != "" {
-				zs := getZoneState(state)
-				if z, exists := zs.zones[zoneLabel]; exists {
-					z.ZoneID = zID
-				}
-			}
-		}
-	case precondLevelConnected:
-		// If currently commissioned but only a connection is needed,
-		// disconnect and reconnect for a clean TLS session.
-		if current > precondLevelConnected {
-			r.debugf("downgrading from commissioned to connected for %s", tc.ID)
-			if r.suite.ZoneID() != "" {
-				// Preserve suite zone; just detach r.conn.
-				r.conn = &Connection{}
-				r.paseState = nil
-			} else {
-				r.ensureDisconnected()
-			}
-		}
-		r.debugf("ensuring connected for %s", tc.ID)
-		setupErr = r.ensureConnected(ctx, state)
-		if setupErr != nil {
-			return setupErr
-		}
-	case precondLevelCommissioning:
-		r.debugf("ensuring commissioning mode for %s", tc.ID)
-		if r.suite.ZoneID() != "" {
-			// Suite zone is alive in activeZoneConns -- only detach
-			// r.conn (backward transition already did this, but guard
-			// in case we arrive here without hitting that block).
-			r.debugf("preserving suite zone %s during commissioning setup", r.suite.ZoneID())
-			if r.conn != nil && r.conn.isConnected() {
-				r.conn = &Connection{}
-			}
-			r.paseState = nil
-		} else {
-			r.ensureDisconnected()
-		}
-		// Wait for device to re-enter commissioning mode (mDNS advertisement).
-		if r.config.Target != "" {
-			if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
-				r.debugf("commissioning mode: %v (continuing)", err)
-			}
-			// No cooldown sleep needed: the PASE retry logic in pase.go
-			// handles "busy" rejections by reading the retry_after field
-			// from the error response and waiting the exact duration.
-			r.lastDeviceConnClose = time.Now()
-		}
-		state.Set(StateCommissioningActive, true)
-	}
-
-	// If no fresh PASE occurred and a precondition handler replaced the
-	// crypto (zoneCA changed), restore the pre-handler crypto. This only
-	// applies when there's no suite zone -- with a suite zone,
-	// ensureCommissioned already handles restoration unconditionally.
-	if r.suite.ZoneID() == "" &&
-		r.paseState == savedPASE && savedPASE != nil && savedPASE.completed &&
-		r.zoneCA != savedZoneCA {
-		r.zoneCA = savedZoneCA
-		r.controllerCert = savedControllerCert
-		r.zoneCAPool = savedZoneCAPool
-		r.issuedDeviceCert = savedIssuedDeviceCert
-		r.debugf("restored crypto state after session reuse for %s", tc.ID)
-	}
-
-	// Send control/process state triggers on real devices so the device
-	// matches the simulated preconditions. At baseline these states leaked
-	// from prior tests; with session reuse + fresh zone commissions, the
-	// device starts in AUTONOMOUS and needs an explicit trigger.
-	if r.config.Target != "" && r.config.EnableKey != "" && needed >= precondLevelCommissioned {
-		if csVal := preconditionValue(tc.Preconditions, PrecondControlState); csVal != "" {
-			var trigger uint64
-			switch csVal {
-			case ControlStateControlled:
-				trigger = features.TriggerControlStateControlled
-			case ControlStateFailsafe:
-				trigger = features.TriggerControlStateFailsafe
-			case ControlStateAutonomous:
-				trigger = features.TriggerControlStateAutonomous
-			case ControlStateLimited:
-				trigger = features.TriggerControlStateLimited
-			case ControlStateOverride:
-				trigger = features.TriggerControlStateOverride
-			}
-			if trigger != 0 {
-				trigCtx, trigCancel := context.WithTimeout(ctx, 3*time.Second)
-				if err := r.sendTriggerViaZone(trigCtx, trigger, state); err != nil {
-					r.debugf("control_state trigger failed: %v (continuing)", err)
-				}
-				trigCancel()
-			}
-		}
-		if psVal := preconditionValue(tc.Preconditions, PrecondProcessState); psVal != "" {
-			var trigger uint64
-			switch psVal {
-			case ProcessStateRunning:
-				trigger = features.TriggerProcessStateRunning
-			case ProcessStatePaused:
-				trigger = features.TriggerProcessStatePaused
-			case ProcessStateAvailable:
-				trigger = features.TriggerProcessStateAvailable
-			case ProcessStateNone:
-				trigger = features.TriggerProcessStateNone
-			}
-			if trigger != 0 {
-				trigCtx, trigCancel := context.WithTimeout(ctx, 3*time.Second)
-				if err := r.sendTriggerViaZone(trigCtx, trigger, state); err != nil {
-					r.debugf("process_state trigger failed: %v (continuing)", err)
-				}
-				trigCancel()
-			}
-		}
-	}
-
-	// Clear device-side limits when test requires no_existing_limits.
-	if r.config.Target != "" && needed >= precondLevelCommissioned &&
-		hasPrecondition(tc.Preconditions, PrecondNoExistingLimits) {
-		clearCtx, clearCancel := context.WithTimeout(ctx, 3*time.Second)
-		if err := r.sendClearLimitInvoke(clearCtx); err != nil {
-			r.debugf("no_existing_limits: ClearLimit failed: %v (continuing)", err)
-		}
-		clearCancel()
-	}
-
-	// Post-setup: session_previously_connected disconnects but preserves
-	// zone crypto state so the test's connect step can reconnect with
-	// operational TLS using the zone CA pool.
-	if hasPrecondition(tc.Preconditions, PrecondSessionPreviouslyConnected) {
-		r.debugf("session_previously_connected: disconnecting but preserving zone state")
-		savedCA := r.zoneCA
-		savedCert := r.controllerCert
-		savedPool := r.zoneCAPool
-		if r.conn != nil {
-			_ = r.conn.Close()
-		}
-		r.conn = &Connection{}
-		r.paseState = nil
-		r.zoneCA = savedCA
-		r.controllerCert = savedCert
-		r.zoneCAPool = savedPool
-	}
-
-	return nil
+	return r.coordinator.SetupPreconditions(ctx, tc, state)
 }
 
 // sendClearLimitInvoke sends a ClearLimit invoke (direction=nil, i.e. clear both)
 // to endpoint 1 / EnergyControl on the device. Used by the no_existing_limits
 // precondition to ensure the device has no stale limits from prior tests.
 func (r *Runner) sendClearLimitInvoke(_ context.Context) error {
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return fmt.Errorf("no connection for ClearLimit")
 	}
 
@@ -1267,7 +321,7 @@ func (r *Runner) sendClearLimitInvoke(_ context.Context) error {
 
 // ensureConnected checks if already connected; if not, establishes a commissioning TLS connection.
 func (r *Runner) ensureConnected(ctx context.Context, state *engine.ExecutionState) error {
-	if r.conn != nil && r.conn.isConnected() {
+	if r.pool.Main() != nil && r.pool.Main().isConnected() {
 		return nil
 	}
 
@@ -1296,7 +350,7 @@ func (r *Runner) ensureConnected(ctx context.Context, state *engine.ExecutionSta
 // ensureCommissioned checks if already commissioned; if not, connects and performs PASE.
 func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.ExecutionState) error {
 	// Track whether we already had a live connection before ensureConnected.
-	wasConnected := r.conn != nil && r.conn.isConnected()
+	wasConnected := r.pool.Main() != nil && r.pool.Main().isConnected()
 
 	r.debugf("ensureCommissioned: wasConnected=%v paseState=%v paseCompleted=%v",
 		wasConnected,
@@ -1503,8 +557,8 @@ func (r *Runner) isSuiteZoneCommission() bool {
 	if r.suite.ZoneID() == "" {
 		return false
 	}
-	suiteConn, exists := r.activeZoneConns[r.suite.ConnKey()]
-	if exists && suiteConn.isConnected() {
+	suiteConn := r.pool.Zone(r.suite.ConnKey())
+	if suiteConn != nil && suiteConn.isConnected() {
 		return false
 	}
 	return true
@@ -1529,10 +583,10 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 
 	// DEC-066: Close the commissioning connection.
 	// The device has already closed its end after sending CertInstallAck.
-	if r.conn != nil {
+	if r.pool.Main() != nil {
 		r.debugf("transitionToOperational: closing commissioning connection")
-		_ = r.conn.Close()
-		r.conn = nil
+		_ = r.pool.Main().Close()
+		r.pool.SetMain(nil)
 	}
 
 	// DEC-066: Establish new operational TLS connection.
@@ -1558,12 +612,13 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 	}
 
 	// Create new connection wrapper
-	r.conn = &Connection{
+	newConn := &Connection{
 		tlsConn: tlsConn,
 		framer:  transport.NewFramer(tlsConn),
 		state:   ConnOperational,
 	}
-	state.Set(StateConnection, r.conn)
+	r.pool.SetMain(newConn)
+	state.Set(StateConnection, newConn)
 	// Record timestamp for verify_timing (TC-TRANS-004).
 	state.Set(StateOperationalConnEstablished, time.Now())
 
@@ -1574,8 +629,7 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 
 	// Register the commissioned zone so closeActiveZoneConns can clean it up.
 	connKey := "main-" + zoneID
-	r.activeZoneConns[connKey] = r.conn
-	r.activeZoneIDs[connKey] = zoneID
+	r.pool.TrackZone(connKey, newConn, zoneID)
 	r.debugf("transitionToOperational: reconnected and registered zone %s in activeZoneConns", zoneID)
 
 	return nil
@@ -1621,22 +675,23 @@ func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
 		return fmt.Errorf("reconnectToZone failed: %w", dialErr)
 	}
 
-	r.conn = &Connection{
+	newConn := &Connection{
 		tlsConn: tlsConn,
 		framer:  transport.NewFramer(tlsConn),
 		state:   ConnOperational,
 	}
-	state.Set(StateConnection, r.conn)
+	r.pool.SetMain(newConn)
+	state.Set(StateConnection, newConn)
 
 	// Verify the device accepts us on this connection.
 	if err := r.waitForOperationalReady(2 * time.Second); err != nil {
 		r.debugf("reconnectToZone: readiness check failed: %v", err)
-		r.conn.transitionTo(ConnDisconnected)
+		r.pool.Main().transitionTo(ConnDisconnected)
 		return fmt.Errorf("reconnectToZone readiness failed: %w", err)
 	}
 
-	// Re-register in activeZoneConns.
-	r.activeZoneConns[r.suite.ConnKey()] = r.conn
+	// Re-register in pool zone tracking.
+	r.pool.TrackZone(r.suite.ConnKey(), newConn, r.suite.ZoneID())
 	r.debugf("reconnectToZone: reconnected to zone %s", r.suite.ZoneID())
 
 	return nil
@@ -1701,19 +756,25 @@ func (r *Runner) closeAllZoneConns() {
 // except the one matching exceptKey.
 func (r *Runner) closeActiveZoneConnsExcept(exceptKey string) {
 	closedAny := false
-	for id, conn := range r.activeZoneConns {
-		if exceptKey != "" && id == exceptKey {
-			r.debugf("closeActiveZoneConns: keeping suite zone %s", id)
+	for _, key := range r.pool.ZoneKeys() {
+		if exceptKey != "" && key == exceptKey {
+			r.debugf("closeActiveZoneConns: keeping suite zone %s", key)
+			continue
+		}
+		conn := r.pool.Zone(key)
+		if conn == nil {
+			r.pool.UntrackZone(key)
 			continue
 		}
 		r.debugf("closeActiveZoneConns: zone %s (state=%v tls=%v raw=%v)",
-			id, conn.state, conn.tlsConn != nil, conn.conn != nil)
+			key, conn.state, conn.tlsConn != nil, conn.conn != nil)
 		// Send explicit RemoveZone before closing so the device can
 		// synchronously process the zone removal and re-enter commissioning
 		// mode quickly.
 		if conn.framer != nil {
-			if zoneID, ok := r.activeZoneIDs[id]; ok {
-				r.debugf("closeActiveZoneConns: sending RemoveZone for zone %s (zoneID=%s, state=%v)", id, zoneID, conn.state)
+			zoneID := r.pool.ZoneID(key)
+			if zoneID != "" {
+				r.debugf("closeActiveZoneConns: sending RemoveZone for zone %s (zoneID=%s, state=%v)", key, zoneID, conn.state)
 				r.sendRemoveZoneOnConn(conn, zoneID)
 			}
 		}
@@ -1729,8 +790,7 @@ func (r *Runner) closeActiveZoneConnsExcept(exceptKey string) {
 		}
 		_ = conn.Close()
 		conn.clearConnectionRefs()
-		delete(r.activeZoneConns, id)
-		delete(r.activeZoneIDs, id)
+		r.pool.UntrackZone(key)
 	}
 	if closedAny {
 		r.paseState = nil
@@ -1742,24 +802,24 @@ func (r *Runner) closeActiveZoneConnsExcept(exceptKey string) {
 // (zoneCA, controllerCert, zoneCAPool) and suite zone identity. Used for L3->L1
 // transitions where the connection will be re-established later.
 func (r *Runner) disconnectConnection() {
-	if r.conn != nil {
-		if r.conn.isConnected() || r.conn.tlsConn != nil || r.conn.conn != nil {
+	if r.pool.Main() != nil {
+		if r.pool.Main().isConnected() || r.pool.Main().tlsConn != nil || r.pool.Main().conn != nil {
 			r.debugf("disconnectConnection: closing (state=%v tls=%v raw=%v)",
-				r.conn.state, r.conn.tlsConn != nil, r.conn.conn != nil)
+				r.pool.Main().state, r.pool.Main().tlsConn != nil, r.pool.Main().conn != nil)
 			// Send ControlClose before TCP close.
-			if r.conn.framer != nil {
+			if r.pool.Main().framer != nil {
 				closeMsg := &wire.ControlMessage{Type: wire.ControlClose}
 				if closeData, err := wire.EncodeControlMessage(closeMsg); err == nil {
-					_ = r.conn.framer.WriteFrame(closeData)
+					_ = r.pool.Main().framer.WriteFrame(closeData)
 				}
 			}
 		}
-		_ = r.conn.Close()
+		_ = r.pool.Main().Close()
 		// Nil pointers after close. This is the full-cleanup path --
 		// no goroutines should be referencing this connection's framer
 		// because disconnectConnection is called between tests, not
 		// mid-handler.
-		r.conn.clearConnectionRefs()
+		r.pool.Main().clearConnectionRefs()
 	}
 	r.paseState = nil
 }
@@ -1784,7 +844,7 @@ func (r *Runner) ensureDisconnected() {
 // commissioning mode (DEC-059). Errors are ignored because the device may
 // have already closed the connection.
 func (r *Runner) sendRemoveZone() {
-	if r.conn == nil || !r.conn.isConnected() || r.conn.framer == nil {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() || r.pool.Main().framer == nil {
 		return
 	}
 	if r.paseState == nil || !r.paseState.completed || r.paseState.sessionKey == nil {
@@ -1796,7 +856,7 @@ func (r *Runner) sendRemoveZone() {
 
 	// Build RemoveZone invoke: endpoint 0, DeviceInfo feature (1), command 0x10.
 	req := &wire.Request{
-		MessageID:  atomic.AddUint32(&r.messageID, 1),
+		MessageID:  r.pool.NextMessageID(),
 		Operation:  wire.OpInvoke,
 		EndpointID: 0,
 		FeatureID:  1, // DeviceInfo
@@ -1814,16 +874,16 @@ func (r *Runner) sendRemoveZone() {
 	// Best-effort: send and read response with a short deadline to avoid
 	// blocking forever when the device closes the connection (e.g., last
 	// zone removed triggers commissioning mode).
-	if err := r.conn.framer.WriteFrame(data); err != nil {
+	if err := r.pool.Main().framer.WriteFrame(data); err != nil {
 		return
 	}
-	if r.conn.tlsConn != nil {
-		r.conn.tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	if r.pool.Main().tlsConn != nil {
+		r.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	}
-	_, _ = r.conn.framer.ReadFrame()
+	_, _ = r.pool.Main().framer.ReadFrame()
 	// Reset deadline for subsequent operations.
-	if r.conn.tlsConn != nil {
-		r.conn.tlsConn.SetReadDeadline(time.Time{})
+	if r.pool.Main().tlsConn != nil {
+		r.pool.Main().tlsConn.SetReadDeadline(time.Time{})
 	}
 }
 
@@ -1834,7 +894,7 @@ func (r *Runner) sendRemoveZone() {
 // the device enters commissioning mode before responding (e.g., last zone).
 func (r *Runner) sendRemoveZoneOnConn(conn *Connection, zoneID string) {
 	req := &wire.Request{
-		MessageID:  atomic.AddUint32(&r.messageID, 1),
+		MessageID:  r.pool.NextMessageID(),
 		Operation:  wire.OpInvoke,
 		EndpointID: 0,
 		FeatureID:  1, // DeviceInfo
@@ -1878,4 +938,475 @@ func hasZoneOfType(zs *zoneState, zoneType string) bool {
 func deriveZoneIDFromSecret(secret []byte) string {
 	hash := sha256.Sum256(secret)
 	return hex.EncodeToString(hash[:8])
+}
+
+// ---------------------------------------------------------------------------
+// CommissioningOps interface implementation
+// ---------------------------------------------------------------------------
+// These exported wrappers allow the Coordinator to call back into Runner
+// without knowing about Runner's internals. Each method delegates to the
+// corresponding private method or field.
+
+// EnsureConnected wraps ensureConnected.
+func (r *Runner) EnsureConnected(ctx context.Context, state *engine.ExecutionState) error {
+	return r.ensureConnected(ctx, state)
+}
+
+// EnsureCommissioned wraps ensureCommissioned.
+func (r *Runner) EnsureCommissioned(ctx context.Context, state *engine.ExecutionState) error {
+	return r.ensureCommissioned(ctx, state)
+}
+
+// DisconnectConnection wraps disconnectConnection.
+func (r *Runner) DisconnectConnection() {
+	r.disconnectConnection()
+}
+
+// EnsureDisconnected wraps ensureDisconnected.
+func (r *Runner) EnsureDisconnected() {
+	r.ensureDisconnected()
+}
+
+// ReconnectToZone wraps reconnectToZone.
+func (r *Runner) ReconnectToZone(state *engine.ExecutionState) error {
+	return r.reconnectToZone(state)
+}
+
+// ProbeSessionHealth wraps probeSessionHealth.
+func (r *Runner) ProbeSessionHealth() error {
+	return r.probeSessionHealth()
+}
+
+// WaitForCommissioningMode wraps waitForCommissioningMode.
+func (r *Runner) WaitForCommissioningMode(ctx context.Context, timeout time.Duration) error {
+	return r.waitForCommissioningMode(ctx, timeout)
+}
+
+// SendRemoveZone wraps sendRemoveZone.
+func (r *Runner) SendRemoveZone() {
+	r.sendRemoveZone()
+}
+
+// SendRemoveZoneOnConn wraps sendRemoveZoneOnConn.
+func (r *Runner) SendRemoveZoneOnConn(conn *Connection, zoneID string) {
+	r.sendRemoveZoneOnConn(conn, zoneID)
+}
+
+// SendTriggerViaZone wraps sendTriggerViaZone.
+func (r *Runner) SendTriggerViaZone(ctx context.Context, trigger uint64, state *engine.ExecutionState) error {
+	return r.sendTriggerViaZone(ctx, trigger, state)
+}
+
+// SendClearLimitInvoke wraps sendClearLimitInvoke.
+func (r *Runner) SendClearLimitInvoke(ctx context.Context) error {
+	return r.sendClearLimitInvoke(ctx)
+}
+
+// PASEState returns the current PASE state.
+func (r *Runner) PASEState() *PASEState {
+	return r.paseState
+}
+
+// SetPASEState sets the current PASE state.
+func (r *Runner) SetPASEState(ps *PASEState) {
+	r.paseState = ps
+}
+
+// DeviceStateModified returns whether device state has been modified.
+func (r *Runner) DeviceStateModified() bool {
+	return r.deviceStateModified
+}
+
+// SetDeviceStateModified sets the device state modified flag.
+func (r *Runner) SetDeviceStateModified(modified bool) {
+	r.deviceStateModified = modified
+}
+
+// WorkingCrypto returns the current working crypto material.
+func (r *Runner) WorkingCrypto() CryptoState {
+	return CryptoState{
+		ZoneCA:           r.zoneCA,
+		ControllerCert:   r.controllerCert,
+		ZoneCAPool:       r.zoneCAPool,
+		IssuedDeviceCert: r.issuedDeviceCert,
+	}
+}
+
+// SetWorkingCrypto replaces the working crypto material.
+func (r *Runner) SetWorkingCrypto(crypto CryptoState) {
+	r.zoneCA = crypto.ZoneCA
+	r.controllerCert = crypto.ControllerCert
+	r.zoneCAPool = crypto.ZoneCAPool
+	r.issuedDeviceCert = crypto.IssuedDeviceCert
+}
+
+// ClearWorkingCrypto nils all working crypto fields.
+func (r *Runner) ClearWorkingCrypto() {
+	r.zoneCA = nil
+	r.controllerCert = nil
+	r.zoneCAPool = nil
+	r.issuedDeviceCert = nil
+}
+
+// CommissionZoneType returns the current commission zone type.
+func (r *Runner) CommissionZoneType() cert.ZoneType {
+	return r.commissionZoneType
+}
+
+// SetCommissionZoneType sets the commission zone type.
+func (r *Runner) SetCommissionZoneType(zt cert.ZoneType) {
+	r.commissionZoneType = zt
+}
+
+// DiscoveredDiscriminator returns the mDNS-discovered discriminator.
+func (r *Runner) DiscoveredDiscriminator() uint16 {
+	return r.discoveredDiscriminator
+}
+
+// LastDeviceConnClose returns when zone connections were last closed.
+func (r *Runner) LastDeviceConnClose() time.Time {
+	return r.lastDeviceConnClose
+}
+
+// SetLastDeviceConnClose sets the last device connection close time.
+func (r *Runner) SetLastDeviceConnClose(t time.Time) {
+	r.lastDeviceConnClose = t
+}
+
+// IsSuiteZoneCommission wraps isSuiteZoneCommission.
+func (r *Runner) IsSuiteZoneCommission() bool {
+	return r.isSuiteZoneCommission()
+}
+
+// RequestDeviceState wraps requestDeviceState.
+func (r *Runner) RequestDeviceState(ctx context.Context, state *engine.ExecutionState) DeviceStateSnapshot {
+	return r.requestDeviceState(ctx, state)
+}
+
+// DebugSnapshot wraps debugSnapshot.
+func (r *Runner) DebugSnapshot(label string) {
+	r.debugSnapshot(label)
+}
+
+// HandlePreconditionCases processes the boolean precondition switch that sets
+// up zone state, crypto, and multi-zone commissioning. Extracted from
+// setupPreconditions so the coordinator can delegate it back to Runner.
+func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState,
+	preconds []loader.Condition, needsMultiZone *bool) error {
+	for _, cond := range preconds {
+		for key, val := range cond {
+			b, ok := val.(bool)
+			if !ok || !b {
+				continue
+			}
+			switch key {
+			case PrecondZoneCreated, PrecondControllerHasCert:
+				// Create a default zone (generates Zone CA + controller cert).
+				if r.zoneCA == nil {
+					step := &loader.Step{Params: map[string]any{KeyZoneType: "LOCAL"}}
+					_, _ = r.handleCreateZone(ctx, step, state)
+				}
+			case PrecondDeviceHasGridZone:
+				zs := getZoneState(state)
+				if !hasZoneOfType(zs, ZoneTypeGrid) {
+					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeGrid, KeyZoneID: "GRID"}}
+					_, _ = r.handleCreateZone(ctx, step, state)
+				}
+				r.commissionZoneType = cert.ZoneTypeGrid
+			case PrecondDeviceHasLocalZone:
+				zs := getZoneState(state)
+				if !hasZoneOfType(zs, ZoneTypeLocal) {
+					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeLocal, KeyZoneID: "LOCAL"}}
+					_, _ = r.handleCreateZone(ctx, step, state)
+				}
+				r.commissionZoneType = cert.ZoneTypeLocal
+			case PrecondDeviceInLocalZone:
+				zs := getZoneState(state)
+				if !hasZoneOfType(zs, ZoneTypeLocal) {
+					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeLocal, KeyZoneID: "LOCAL"}}
+					_, _ = r.handleCreateZone(ctx, step, state)
+				}
+				if len(zs.zones) == 0 {
+					zoneID := "sim-local-zone"
+					zs.zones[zoneID] = &zoneInfo{
+						ZoneID:         zoneID,
+						ZoneType:       ZoneTypeLocal,
+						Priority:       zonePriority[ZoneTypeLocal],
+						Connected:      true,
+						Metadata:       make(map[string]any),
+						CommissionedAt: time.Now(),
+					}
+					zs.zoneOrder = append(zs.zoneOrder, zoneID)
+					state.Set(StateLocalZoneID, zoneID)
+				}
+				r.commissionZoneType = cert.ZoneTypeLocal
+			case PrecondNoZonesConfigured:
+				zs := getZoneState(state)
+				zs.zones = make(map[string]*zoneInfo)
+				zs.zoneOrder = nil
+			case PrecondLocalZoneConfigured:
+				zs := getZoneState(state)
+				if _, exists := zs.zones["zone-local-001"]; !exists {
+					zs.zones["zone-local-001"] = &zoneInfo{
+						ZoneID:         "zone-local-001",
+						ZoneType:       ZoneTypeLocal,
+						Priority:       zonePriority[ZoneTypeLocal],
+						Connected:      false,
+						Metadata:       make(map[string]any),
+						CommissionedAt: time.Now(),
+					}
+					zs.zoneOrder = append(zs.zoneOrder, "zone-local-001")
+				}
+			case PrecondTwoZonesConfigured:
+				zs := getZoneState(state)
+				if _, exists := zs.zones["zone-grid-001"]; !exists {
+					zs.zones["zone-grid-001"] = &zoneInfo{
+						ZoneID:         "zone-grid-001",
+						ZoneType:       ZoneTypeGrid,
+						Priority:       zonePriority[ZoneTypeGrid],
+						Connected:      false,
+						Metadata:       make(map[string]any),
+						CommissionedAt: time.Now(),
+					}
+					zs.zoneOrder = append(zs.zoneOrder, "zone-grid-001")
+				}
+				if _, exists := zs.zones["zone-local-001"]; !exists {
+					zs.zones["zone-local-001"] = &zoneInfo{
+						ZoneID:         "zone-local-001",
+						ZoneType:       ZoneTypeLocal,
+						Priority:       zonePriority[ZoneTypeLocal],
+						Connected:      false,
+						Metadata:       make(map[string]any),
+						CommissionedAt: time.Now(),
+					}
+					zs.zoneOrder = append(zs.zoneOrder, "zone-local-001")
+				}
+			case PrecondCommissioningWindowClosed:
+				state.Set(StateCommissioningActive, false)
+			case PrecondDeviceInZone:
+				zs := getZoneState(state)
+				if len(zs.zones) == 0 {
+					zoneID := "sim-local-zone"
+					zs.zones[zoneID] = &zoneInfo{
+						ZoneID:         zoneID,
+						ZoneType:       ZoneTypeLocal,
+						Priority:       zonePriority[ZoneTypeLocal],
+						Connected:      true,
+						Metadata:       make(map[string]any),
+						CommissionedAt: time.Now(),
+					}
+					zs.zoneOrder = append(zs.zoneOrder, zoneID)
+					state.Set(StateLocalZoneID, zoneID)
+				}
+			case PrecondCommissioningWindowAt95s:
+				state.Set(StateCommWindowStart, time.Now().Add(-95*time.Second))
+			case PrecondControllerCertNearExpiry:
+				state.Set(StateCertDaysUntilExpiry, 29)
+			case PrecondFiveZonesConnected:
+				ct := getConnectionTracker(state)
+				for _, name := range []string{"GRID", "BUILDING", "HOME", "USER1", "USER2"} {
+					if _, exists := ct.zoneConnections[name]; !exists {
+						ct.zoneConnections[name] = &Connection{state: ConnOperational}
+					}
+				}
+			case PrecondTwoZonesConnected:
+				*needsMultiZone = false // Already handled inline.
+				ct := getConnectionTracker(state)
+				zones := []struct {
+					name string
+					zt   cert.ZoneType
+				}{
+					{"GRID", cert.ZoneTypeGrid},
+					{"LOCAL", cert.ZoneTypeLocal},
+				}
+				if r.config.Target != "" {
+					r.debugf("two_zones_connected: commissioning against real device")
+					if !r.lastDeviceConnClose.IsZero() {
+						if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+							r.debugf("two_zones_connected: %v (continuing)", err)
+						}
+					}
+					for i, z := range zones {
+						if _, exists := ct.zoneConnections[z.name]; exists {
+							r.debugf("two_zones_connected: zone %s already exists, skipping", z.name)
+							continue
+						}
+						r.debugf("two_zones_connected: commissioning zone %s (type=%d)", z.name, z.zt)
+						r.debugSnapshot("two_zones_connected BEFORE commission " + z.name)
+
+						if r.pool.Main() != nil && r.pool.Main().isConnected() && r.paseState != nil && r.paseState.completed {
+							r.debugf("two_zones_connected: sending RemoveZone before disconnect (zone %d)", i)
+							r.sendRemoveZone()
+						}
+
+						savedPool := r.zoneCAPool
+						r.disconnectConnection()
+						r.zoneCA = nil
+						r.controllerCert = nil
+						r.zoneCAPool = savedPool
+						r.issuedDeviceCert = nil
+
+						r.commissionZoneType = z.zt
+
+						if err := r.ensureCommissioned(ctx, state); err != nil {
+							r.debugf("two_zones_connected: PASE FAILED for zone %s: %v", z.name, err)
+							r.debugSnapshot("two_zones_connected AFTER PASE FAIL " + z.name)
+							return fmt.Errorf("precondition two_zones_connected commission zone %s: %w", z.name, err)
+						}
+
+						r.debugf("two_zones_connected: zone %s commissioned successfully", z.name)
+
+						zoneConn := r.pool.Main()
+						ct.zoneConnections[z.name] = zoneConn
+						state.Set(ZoneConnectionStateKey(z.name), zoneConn)
+
+						if r.paseState != nil && r.paseState.sessionKey != nil {
+							zID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+							r.pool.TrackZone(z.name, zoneConn, zID)
+
+							var stateKey string
+							switch z.zt {
+							case cert.ZoneTypeGrid:
+								stateKey = StateGridZoneID
+							case cert.ZoneTypeLocal:
+								stateKey = StateLocalZoneID
+							case cert.ZoneTypeTest:
+								stateKey = StateTestZoneID
+							}
+							if stateKey != "" {
+								state.Set(stateKey, zID)
+							}
+						}
+
+						if i == len(zones)-1 {
+							if err := r.waitForOperationalReady(2 * time.Second); err != nil {
+								r.debugf("two_zones_connected: %v (continuing)", err)
+							}
+						}
+
+						r.pool.SetMain(&Connection{})
+
+						if i < len(zones)-1 {
+							if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+								r.debugf("two_zones_connected: %v (continuing)", err)
+							}
+						}
+					}
+					firstZone := zones[0]
+					if zc, ok := ct.zoneConnections[firstZone.name]; ok && zc.isConnected() {
+						r.pool.SetMain(zc)
+						r.debugf("two_zones_connected: restored main conn from zone %s", firstZone.name)
+					}
+					if gridID, ok := state.Get(StateGridZoneID); ok {
+						state.Set(StateCurrentZoneID, gridID)
+					}
+					if localID, ok := state.Get(StateLocalZoneID); ok {
+						state.Set(StateOtherZoneID, localID)
+					}
+					r.commissionZoneType = 0
+				} else {
+					for _, z := range zones {
+						if _, exists := ct.zoneConnections[z.name]; exists {
+							continue
+						}
+						dummyConn := &Connection{state: ConnOperational}
+						ct.zoneConnections[z.name] = dummyConn
+						r.pool.TrackZone(z.name, dummyConn, z.name)
+					}
+				}
+			case PrecondDeviceZonesFull:
+				if r.config.Target != "" {
+					r.debugf("device_zones_full: commissioning zones to fill device slots")
+					ct := getConnectionTracker(state)
+
+					if !r.lastDeviceConnClose.IsZero() {
+						if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+							r.debugf("device_zones_full: %v (continuing)", err)
+						}
+					}
+
+					zones := []struct {
+						name string
+						zt   cert.ZoneType
+					}{
+						{"GRID", cert.ZoneTypeGrid},
+						{"LOCAL", cert.ZoneTypeLocal},
+					}
+
+					for i, z := range zones {
+						if _, exists := ct.zoneConnections[z.name]; exists {
+							r.debugf("device_zones_full: zone %s already exists, skipping", z.name)
+							continue
+						}
+						r.debugf("device_zones_full: commissioning zone %s (type=%d)", z.name, z.zt)
+
+						if r.pool.Main() != nil && r.pool.Main().isConnected() && r.paseState != nil && r.paseState.completed {
+							r.debugf("device_zones_full: sending RemoveZone before disconnect (zone %d)", i)
+							r.sendRemoveZone()
+						}
+
+						savedPool := r.zoneCAPool
+						r.disconnectConnection()
+						r.zoneCA = nil
+						r.controllerCert = nil
+						r.zoneCAPool = savedPool
+						r.issuedDeviceCert = nil
+
+						r.commissionZoneType = z.zt
+						if err := r.ensureCommissioned(ctx, state); err != nil {
+							r.debugf("device_zones_full: commission zone %s FAILED: %v", z.name, err)
+							return fmt.Errorf("precondition device_zones_full commission zone %s: %w", z.name, err)
+						}
+
+						r.debugf("device_zones_full: zone %s commissioned successfully", z.name)
+
+						zoneConn := r.pool.Main()
+						ct.zoneConnections[z.name] = zoneConn
+						state.Set(ZoneConnectionStateKey(z.name), zoneConn)
+
+						if r.paseState != nil && r.paseState.sessionKey != nil {
+							zID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+							r.pool.TrackZone(z.name, zoneConn, zID)
+
+							var stateKey string
+							switch z.zt {
+							case cert.ZoneTypeGrid:
+								stateKey = StateGridZoneID
+							case cert.ZoneTypeLocal:
+								stateKey = StateLocalZoneID
+							}
+							if stateKey != "" {
+								state.Set(stateKey, zID)
+							}
+						}
+
+						r.pool.SetMain(&Connection{})
+
+						if i < len(zones)-1 {
+							for _, tracked := range ct.zoneConnections {
+								if tracked != nil && tracked.isConnected() {
+									savedConn := r.pool.Main()
+									r.pool.SetMain(tracked)
+									r.debugf("device_zones_full: triggering enter commissioning mode on tracked zone connection")
+									_, _ = r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
+									r.pool.SetMain(savedConn)
+									break
+								}
+							}
+							if err := r.waitForCommissioningMode(ctx, 5*time.Second); err != nil {
+								r.debugf("device_zones_full: %v (continuing)", err)
+							}
+						}
+					}
+					if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+						r.debugf("device_zones_full: post-fill %v (continuing)", err)
+					}
+
+					r.commissionZoneType = 0
+					r.paseState = nil
+				}
+			}
+		}
+	}
+	return nil
 }

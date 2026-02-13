@@ -38,7 +38,7 @@ func (r *Runner) registerCertHandlers() {
 
 // handleVerifyCertificate verifies a certificate's validity (chain, expiry).
 func (r *Runner) handleVerifyCertificate(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() || r.pool.Main().tlsConn == nil {
 		return map[string]any{
 			KeyCertValid:  false,
 			KeyChainValid: false,
@@ -46,7 +46,7 @@ func (r *Runner) handleVerifyCertificate(ctx context.Context, step *loader.Step,
 		}, nil
 	}
 
-	tlsState := r.conn.tlsConn.ConnectionState()
+	tlsState := r.pool.Main().tlsConn.ConnectionState()
 	hasCerts := len(tlsState.PeerCertificates) > 0
 
 	chainValid := false
@@ -90,8 +90,8 @@ func (r *Runner) handleVerifyCertSubject(ctx context.Context, step *loader.Step,
 	var cert *x509.Certificate
 	if r.issuedDeviceCert != nil {
 		cert = r.issuedDeviceCert
-	} else if r.conn != nil && r.conn.isConnected() && r.conn.tlsConn != nil {
-		cs := r.conn.tlsConn.ConnectionState()
+	} else if r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().tlsConn != nil {
+		cs := r.pool.Main().tlsConn.ConnectionState()
 		if len(cs.PeerCertificates) > 0 {
 			cert = cs.PeerCertificates[0]
 		}
@@ -142,8 +142,8 @@ func (r *Runner) handleVerifyDeviceCert(ctx context.Context, step *loader.Step, 
 	if r.issuedDeviceCert != nil {
 		deviceCert = r.issuedDeviceCert
 		hasOperationalCert = true
-	} else if r.conn != nil && r.conn.isConnected() && r.conn.tlsConn != nil {
-		cs := r.conn.tlsConn.ConnectionState()
+	} else if r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().tlsConn != nil {
+		cs := r.pool.Main().tlsConn.ConnectionState()
 		if len(cs.PeerCertificates) > 0 {
 			deviceCert = cs.PeerCertificates[0]
 			hasOperationalCert = true
@@ -174,8 +174,8 @@ func (r *Runner) handleVerifyDeviceCertStore(ctx context.Context, step *loader.S
 	hasCerts := false
 	certCount := 0
 
-	if r.conn != nil && r.conn.isConnected() && r.conn.tlsConn != nil {
-		tlsState := r.conn.tlsConn.ConnectionState()
+	if r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().tlsConn != nil {
+		tlsState := r.pool.Main().tlsConn.ConnectionState()
 		hasCerts = len(tlsState.PeerCertificates) > 0
 		certCount = len(tlsState.PeerCertificates)
 	}
@@ -203,11 +203,11 @@ func (r *Runner) handleGetCertFingerprint(ctx context.Context, step *loader.Step
 	}
 
 	// Fall back to TLS peer cert.
-	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() || r.pool.Main().tlsConn == nil {
 		return map[string]any{KeyFingerprint: ""}, nil
 	}
 
-	tlsState := r.conn.tlsConn.ConnectionState()
+	tlsState := r.pool.Main().tlsConn.ConnectionState()
 	if len(tlsState.PeerCertificates) == 0 {
 		return map[string]any{KeyFingerprint: ""}, nil
 	}
@@ -223,14 +223,14 @@ func (r *Runner) handleGetCertFingerprint(ctx context.Context, step *loader.Step
 
 // handleExtractCertDeviceID extracts device ID from cert CN.
 // When a zone_id parameter is provided, the handler looks up the
-// zone-specific connection from activeZoneConns instead of using r.conn.
+// zone-specific connection from activeZoneConns instead of using r.pool.Main().
 // This is required for multi-zone tests where each zone has a different
 // operational certificate (and therefore a different device ID).
 func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 	notFound := map[string]any{KeyDeviceID: "", KeyExtracted: false}
 
-	conn := r.conn
+	conn := r.pool.Main()
 	if zoneID, ok := params[KeyZoneID].(string); ok && zoneID != "" {
 		conn = r.findZoneConn(zoneID)
 		if conn == nil {
@@ -268,9 +268,9 @@ func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Ste
 // findZoneConn looks up a zone connection by zone ID from activeZoneConns.
 // It checks activeZoneIDs (connKey -> zoneID) to find the matching connKey.
 func (r *Runner) findZoneConn(zoneID string) *Connection {
-	for connKey, id := range r.activeZoneIDs {
-		if id == zoneID {
-			if conn, ok := r.activeZoneConns[connKey]; ok {
+	for _, key := range r.pool.ZoneKeys() {
+		if r.pool.ZoneID(key) == zoneID {
+			if conn := r.pool.Zone(key); conn != nil {
 				return conn
 			}
 		}
@@ -288,19 +288,19 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 	paseCompleted := r.paseState != nil && r.paseState.completed
 
 	// Probe the connection to detect remote closure (e.g., after PASE timeout).
-	connected := r.conn != nil && r.conn.isConnected()
-	if connected && r.conn.tlsConn != nil {
+	connected := r.pool.Main() != nil && r.pool.Main().isConnected()
+	if connected && r.pool.Main().tlsConn != nil {
 		// Real TLS connection: probe with a short read to detect EOF/reset.
-		_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		_ = r.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 		buf := make([]byte, 1)
-		_, err := r.conn.tlsConn.Read(buf)
-		_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+		_, err := r.pool.Main().tlsConn.Read(buf)
+		_ = r.pool.Main().tlsConn.SetReadDeadline(time.Time{})
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				// read timed out -- connection still alive
 			} else {
 				// EOF, reset, or other error -- remote closed.
-				r.conn.transitionTo(ConnDisconnected)
+				r.pool.Main().transitionTo(ConnDisconnected)
 				connected = false
 			}
 		}
@@ -318,7 +318,7 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 		currentState = CommissioningStateCommissioned
 	case connected:
 		currentState = CommissioningStateConnected
-	case r.conn != nil && r.conn.hadConnection:
+	case r.pool.Main() != nil && r.pool.Main().hadConnection:
 		// Had a commissioning connection that is now closed. The device
 		// returns to ADVERTISING after PASE failure/timeout.
 		// hadConnection survives transitionTo(ConnDisconnected) which
@@ -351,7 +351,7 @@ func (r *Runner) handleResetPASESession(ctx context.Context, step *loader.Step, 
 
 // handleSendPASEX sends a raw PASE X value (for error testing).
 func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -364,7 +364,7 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 		xValue = make([]byte, 32)
 	}
 
-	err := r.conn.framer.WriteFrame(xValue)
+	err := r.pool.Main().framer.WriteFrame(xValue)
 	outputs := map[string]any{
 		KeyPASEXSent: err == nil,
 		KeyXSent:     err == nil,
@@ -372,7 +372,7 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 
 	if err != nil {
 		// Write failed -- connection is dead, clean up.
-		r.conn.transitionTo(ConnDisconnected)
+		r.pool.Main().transitionTo(ConnDisconnected)
 		r.paseState = nil
 		return outputs, err
 	}
@@ -380,7 +380,7 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 	if invalidPoint {
 		// Device closes connection for invalid point -- close our side too
 		// so subsequent tests don't inherit a dead socket.
-		r.conn.transitionTo(ConnDisconnected)
+		r.pool.Main().transitionTo(ConnDisconnected)
 		r.paseState = nil
 		outputs[KeyConnectionClosed] = true
 		outputs[KeyError] = "INVALID_PARAMETER"
@@ -403,7 +403,7 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 
 // handleDeviceVerifyPeer verifies peer cert in D2D scenario.
 func (r *Runner) handleDeviceVerifyPeer(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() || r.pool.Main().tlsConn == nil {
 		// No active TLS connection -- check D2D precondition state
 		// to simulate the verification result.
 		// Check expired first: it's more specific than same_zone (a test can
@@ -440,7 +440,7 @@ func (r *Runner) handleDeviceVerifyPeer(ctx context.Context, step *loader.Step, 
 		}, nil
 	}
 
-	tlsState := r.conn.tlsConn.ConnectionState()
+	tlsState := r.pool.Main().tlsConn.ConnectionState()
 	hasPeerCert := len(tlsState.PeerCertificates) > 0
 
 	verificationSuccess := false

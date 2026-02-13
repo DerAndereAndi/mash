@@ -22,7 +22,7 @@ func (r *Runner) registerTriggerHandlers() {
 // handleTriggerTestEvent sends a triggerTestEvent invoke to the device's
 // TestControl feature on endpoint 0.
 func (r *Runner) handleTriggerTestEvent(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		// Not connected -- try delivering to the real device via a temporary
 		// zone commission if a target is configured. This covers tests like
 		// TC-MASHC-002 and TC-DSTATE-002 that trigger an event and then

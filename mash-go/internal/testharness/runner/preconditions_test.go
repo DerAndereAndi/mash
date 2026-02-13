@@ -118,7 +118,7 @@ func TestSetupPreconditions_Level0(t *testing.T) {
 func TestSetupPreconditions_Level1(t *testing.T) {
 	r := newTestRunner()
 	// Simulate an existing connection
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -134,37 +134,37 @@ func TestSetupPreconditions_Level1(t *testing.T) {
 	}
 
 	// Should have disconnected
-	if r.conn.isConnected() {
+	if r.pool.Main().isConnected() {
 		t.Error("expected connection to be closed for commissioning mode")
 	}
 }
 
 func TestEnsureDisconnected(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 
 	r.ensureDisconnected()
 
-	if r.conn.isConnected() {
+	if r.pool.Main().isConnected() {
 		t.Error("expected connected to be false after ensureDisconnected")
 	}
 }
 
 func TestEnsureDisconnected_AlreadyDisconnected(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnDisconnected
+	r.pool.Main().state = ConnDisconnected
 
 	// Should not panic or error
 	r.ensureDisconnected()
 
-	if r.conn.isConnected() {
+	if r.pool.Main().isConnected() {
 		t.Error("expected connected to remain false")
 	}
 }
 
 func TestEnsureConnected_AlreadyConnected(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	state := engine.NewExecutionState(context.Background())
 
 	err := r.ensureConnected(context.Background(), state)
@@ -175,7 +175,7 @@ func TestEnsureConnected_AlreadyConnected(t *testing.T) {
 
 func TestEnsureCommissioned_AlreadyDone(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{
 		completed:  true,
 		sessionKey: []byte{1, 2, 3, 4},
@@ -326,14 +326,14 @@ func TestCurrentLevel(t *testing.T) {
 		{
 			name: "connected only",
 			setup: func(r *Runner) {
-				r.conn.state = ConnTLSConnected
+				r.pool.Main().state = ConnTLSConnected
 			},
 			wantLevel: precondLevelConnected,
 		},
 		{
 			name: "commissioned",
 			setup: func(r *Runner) {
-				r.conn.state = ConnOperational
+				r.pool.Main().state = ConnOperational
 				r.paseState = &PASEState{completed: true}
 			},
 			wantLevel: precondLevelCommissioned,
@@ -341,7 +341,7 @@ func TestCurrentLevel(t *testing.T) {
 		{
 			name: "pase incomplete treated as connected",
 			setup: func(r *Runner) {
-				r.conn.state = ConnTLSConnected
+				r.pool.Main().state = ConnTLSConnected
 				r.paseState = &PASEState{completed: false}
 			},
 			wantLevel: precondLevelConnected,
@@ -363,7 +363,7 @@ func TestCurrentLevel(t *testing.T) {
 func TestSetupPreconditions_BackwardsTransition(t *testing.T) {
 	// Commissioned runner + commissioning-level test -> should disconnect.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
 
 	state := engine.NewExecutionState(context.Background())
@@ -379,7 +379,7 @@ func TestSetupPreconditions_BackwardsTransition(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if r.conn.isConnected() {
+	if r.pool.Main().isConnected() {
 		t.Error("expected connection to be closed for backwards transition")
 	}
 	if r.paseState != nil {
@@ -585,7 +585,7 @@ func TestPreconditionLevel_TwoDevicesSameDiscriminator(t *testing.T) {
 func TestSendRemoveZone_NilPaseState(t *testing.T) {
 	// sendRemoveZone should be a no-op when not commissioned.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = nil
 
 	// Should not panic.
@@ -594,7 +594,7 @@ func TestSendRemoveZone_NilPaseState(t *testing.T) {
 
 func TestSendRemoveZone_NoSessionKey(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: nil}
 
 	// Should not panic.
@@ -606,7 +606,7 @@ func TestSetupPreconditions_BackwardsFromCommissioned_SendsRemoveZone(t *testing
 	// sendRemoveZone is called before disconnect. Since there's no real server,
 	// the send will silently fail but the transition should still complete.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{
 		completed:  true,
 		sessionKey: []byte{0xDE, 0xAD, 0xBE, 0xEF},
@@ -626,7 +626,7 @@ func TestSetupPreconditions_BackwardsFromCommissioned_SendsRemoveZone(t *testing
 	}
 
 	// Connection should be closed after backward transition
-	if r.conn.isConnected() {
+	if r.pool.Main().isConnected() {
 		t.Error("expected connection to be closed")
 	}
 	// PASE state should be cleared
@@ -716,7 +716,7 @@ func TestEnsureCommissioned_RestoresSuiteZoneCrypto(t *testing.T) {
 	// commissioned test reuses the suite zone session, ensureCommissioned
 	// must restore the crypto from the saved suite zone state.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
 	// Simulate suite zone crypto saved during recordSuiteZone.
 	r.suite.Record("suite-zone-123", CryptoState{
@@ -809,8 +809,8 @@ func TestSetupPreconditions_ClosesStaleZoneConnections(t *testing.T) {
 	// Simulate zone connections left over from a previous test.
 	conn1 := &Connection{state: ConnOperational}
 	conn2 := &Connection{state: ConnOperational}
-	r.activeZoneConns["GRID"] = conn1
-	r.activeZoneConns["LOCAL"] = conn2
+	r.pool.TrackZone("GRID", conn1, "GRID")
+	r.pool.TrackZone("LOCAL", conn2, "LOCAL")
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -829,9 +829,9 @@ func TestSetupPreconditions_ClosesStaleZoneConnections(t *testing.T) {
 	if conn2.isConnected() {
 		t.Error("expected stale LOCAL connection to be closed")
 	}
-	if len(r.activeZoneConns) != 2 {
+	if r.pool.ZoneCount() != 2 {
 		// New connections (dummy since no target) should have been created.
-		t.Errorf("expected 2 active zone conns, got %d", len(r.activeZoneConns))
+		t.Errorf("expected 2 active zone conns, got %d", r.pool.ZoneCount())
 	}
 }
 
@@ -845,16 +845,16 @@ func TestHandleConnectAsZone_TracksInRunner(t *testing.T) {
 	ct := getConnectionTracker(state)
 	conn := &Connection{state: ConnOperational}
 	ct.zoneConnections["GRID"] = conn
-	r.activeZoneConns["GRID"] = conn
+	r.pool.TrackZone("GRID", conn, "GRID")
 
-	if _, ok := r.activeZoneConns["GRID"]; !ok {
-		t.Error("expected GRID to be tracked in runner activeZoneConns")
+	if r.pool.Zone("GRID") == nil {
+		t.Error("expected GRID to be tracked in pool zones")
 	}
 }
 
 func TestEnsureDisconnected_ClearsZoneCA(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 
 	// Simulate state left over from a previous commissioned test.
 	r.zoneCA = &cert.ZoneCA{}
@@ -900,7 +900,7 @@ func TestPreconditionLevel_DeviceStateKeys(t *testing.T) {
 
 func TestSetupPreconditions_DeviceHasGridZone(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
 
 	state := engine.NewExecutionState(context.Background())
@@ -938,7 +938,7 @@ func TestSetupPreconditions_DeviceHasGridZone(t *testing.T) {
 
 func TestSetupPreconditions_DeviceHasBothZones(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
 
 	state := engine.NewExecutionState(context.Background())
@@ -990,7 +990,7 @@ func TestPreconditionLevel_SessionPreviouslyConnected(t *testing.T) {
 
 func TestSetupPreconditions_SessionPreviouslyConnected(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3, 4}}
 
 	// Set up zone crypto state (simulates what PASE would produce).
@@ -1012,7 +1012,7 @@ func TestSetupPreconditions_SessionPreviouslyConnected(t *testing.T) {
 	}
 
 	// Connection should be closed (simulating disconnect).
-	if r.conn.isConnected() {
+	if r.pool.Main().isConnected() {
 		t.Error("expected connection to be closed after session_previously_connected setup")
 	}
 
@@ -1071,10 +1071,9 @@ func TestNeedsFreshCommission(t *testing.T) {
 func TestSetupPreconditions_SessionReuse_SkipsCloseZoneConns(t *testing.T) {
 	// Commissioned runner + session_established test -> session preserved.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
-	r.activeZoneConns["main-abc123"] = r.conn
-	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -1087,24 +1086,23 @@ func TestSetupPreconditions_SessionReuse_SkipsCloseZoneConns(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !r.conn.isConnected() {
+	if !r.pool.Main().isConnected() {
 		t.Error("expected connection to remain connected")
 	}
 	if r.paseState == nil || !r.paseState.completed {
 		t.Error("expected PASE state to be preserved")
 	}
-	if len(r.activeZoneConns) != 1 {
-		t.Errorf("expected 1 active zone conn, got %d", len(r.activeZoneConns))
+	if r.pool.ZoneCount() != 1 {
+		t.Errorf("expected 1 active zone conn, got %d", r.pool.ZoneCount())
 	}
 }
 
 func TestSetupPreconditions_FreshCommission_ClosesZoneConns(t *testing.T) {
 	// fresh_commission=true -> session torn down even at level 3 -> level 3.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
-	r.activeZoneConns["main-abc123"] = r.conn
-	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -1118,8 +1116,8 @@ func TestSetupPreconditions_FreshCommission_ClosesZoneConns(t *testing.T) {
 	_ = r.setupPreconditions(context.Background(), tc, state)
 
 	// closeActiveZoneConns should have been called -- verify the map is empty.
-	if len(r.activeZoneConns) != 0 {
-		t.Errorf("expected 0 active zone conns, got %d", len(r.activeZoneConns))
+	if r.pool.ZoneCount() != 0 {
+		t.Errorf("expected 0 active zone conns, got %d", r.pool.ZoneCount())
 	}
 	// Note: paseState is cleared only when real sockets (tlsConn/conn) are
 	// present, which stub connections lack. The important assertion is that
@@ -1129,10 +1127,9 @@ func TestSetupPreconditions_FreshCommission_ClosesZoneConns(t *testing.T) {
 func TestSetupPreconditions_SessionReuse_TwoZonesConnectedForcesClose(t *testing.T) {
 	// two_zones_connected forces teardown even at level 3 -> level 3.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
-	r.activeZoneConns["main-abc123"] = r.conn
-	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -1153,10 +1150,9 @@ func TestSetupPreconditions_SessionReuse_TwoZonesConnectedForcesClose(t *testing
 func TestSetupPreconditions_SessionReuse_DeviceHasGridZoneForcesClose(t *testing.T) {
 	// device_has_grid_zone forces teardown even at level 3 -> level 3.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
-	r.activeZoneConns["main-abc123"] = r.conn
-	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -1169,18 +1165,17 @@ func TestSetupPreconditions_SessionReuse_DeviceHasGridZoneForcesClose(t *testing
 	_ = r.setupPreconditions(context.Background(), tc, state)
 
 	// closeActiveZoneConns should have been called, clearing paseState.
-	if len(r.activeZoneConns) != 0 {
-		t.Errorf("expected 0 active zone conns after device_has_grid_zone, got %d", len(r.activeZoneConns))
+	if r.pool.ZoneCount() != 0 {
+		t.Errorf("expected 0 active zone conns after device_has_grid_zone, got %d", r.pool.ZoneCount())
 	}
 }
 
 func TestSetupPreconditions_SessionReuse_BackwardsTransitionUnaffected(t *testing.T) {
 	// Level 3 -> level 1 still tears down (canReuseSession=false because needed < commissioned).
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
-	r.activeZoneConns["main-abc123"] = r.conn
-	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -1195,7 +1190,7 @@ func TestSetupPreconditions_SessionReuse_BackwardsTransitionUnaffected(t *testin
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if r.conn.isConnected() {
+	if r.pool.Main().isConnected() {
 		t.Error("expected connection to be closed for backwards transition")
 	}
 	if r.paseState != nil {
@@ -1210,11 +1205,12 @@ func TestTrackSubscription(t *testing.T) {
 	r.trackSubscription(1)
 	r.trackSubscription(2)
 
-	if len(r.activeSubscriptionIDs) != 2 {
-		t.Fatalf("expected 2 tracked subs, got %d", len(r.activeSubscriptionIDs))
+	subs := r.pool.Subscriptions()
+	if len(subs) != 2 {
+		t.Fatalf("expected 2 tracked subs, got %d", len(subs))
 	}
-	if r.activeSubscriptionIDs[0] != 1 || r.activeSubscriptionIDs[1] != 2 {
-		t.Errorf("unexpected IDs: %v", r.activeSubscriptionIDs)
+	if subs[0] != 1 || subs[1] != 2 {
+		t.Errorf("unexpected IDs: %v", subs)
 	}
 }
 
@@ -1226,11 +1222,12 @@ func TestRemoveActiveSubscription(t *testing.T) {
 
 	r.removeActiveSubscription(20)
 
-	if len(r.activeSubscriptionIDs) != 2 {
-		t.Fatalf("expected 2 tracked subs after remove, got %d", len(r.activeSubscriptionIDs))
+	subs := r.pool.Subscriptions()
+	if len(subs) != 2 {
+		t.Fatalf("expected 2 tracked subs after remove, got %d", len(subs))
 	}
 	// Remaining should be 10 and 30.
-	for _, id := range r.activeSubscriptionIDs {
+	for _, id := range subs {
 		if id == 20 {
 			t.Error("expected subscription 20 to be removed")
 		}
@@ -1244,8 +1241,9 @@ func TestRemoveActiveSubscription_NotFound(t *testing.T) {
 	// Removing a non-existent ID should be a no-op.
 	r.removeActiveSubscription(99)
 
-	if len(r.activeSubscriptionIDs) != 1 {
-		t.Fatalf("expected 1 tracked sub, got %d", len(r.activeSubscriptionIDs))
+	subs := r.pool.Subscriptions()
+	if len(subs) != 1 {
+		t.Fatalf("expected 1 tracked sub, got %d", len(subs))
 	}
 }
 
@@ -1258,8 +1256,9 @@ func TestTeardownTest_ClearsTrackingList(t *testing.T) {
 	tc := &loader.TestCase{ID: "TC-TEST-001"}
 	r.teardownTest(context.Background(), tc, state)
 
-	if len(r.activeSubscriptionIDs) != 0 {
-		t.Errorf("expected empty tracking list after teardown, got %d", len(r.activeSubscriptionIDs))
+	subs := r.pool.Subscriptions()
+	if len(subs) != 0 {
+		t.Errorf("expected empty tracking list after teardown, got %d", len(subs))
 	}
 }
 
@@ -1274,21 +1273,23 @@ func TestTeardownTest_NoUnsubscribeWhenDisconnected(t *testing.T) {
 	// Should not panic or attempt to send on a nil/disconnected conn.
 	r.teardownTest(context.Background(), tc, state)
 
-	if len(r.activeSubscriptionIDs) != 0 {
-		t.Errorf("expected empty tracking list after teardown, got %d", len(r.activeSubscriptionIDs))
+	subs := r.pool.Subscriptions()
+	if len(subs) != 0 {
+		t.Errorf("expected empty tracking list after teardown, got %d", len(subs))
 	}
 }
 
 func TestTeardownTest_ClearsPendingNotifications(t *testing.T) {
 	r := newTestRunner()
-	r.pendingNotifications = [][]byte{{1, 2, 3}}
+	r.pool.AppendNotification([]byte{1, 2, 3})
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{ID: "TC-TEST-001"}
 	r.teardownTest(context.Background(), tc, state)
 
-	if len(r.pendingNotifications) != 0 {
-		t.Errorf("expected empty pending notifications after teardown, got %d", len(r.pendingNotifications))
+	pending := r.pool.PendingNotifications()
+	if len(pending) != 0 {
+		t.Errorf("expected empty pending notifications after teardown, got %d", len(pending))
 	}
 }
 
@@ -1296,7 +1297,7 @@ func TestTeardownTest_ClearsPendingNotifications(t *testing.T) {
 
 func TestProbeSessionHealth_NilConnection(t *testing.T) {
 	r := newTestRunner()
-	r.conn = nil
+	r.pool.SetMain(nil)
 
 	err := r.probeSessionHealth()
 	if err == nil {
@@ -1322,8 +1323,8 @@ func TestProbeSessionHealth_DisconnectedConnection(t *testing.T) {
 
 func TestProbeSessionHealth_NilFramer(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
-	r.conn.framer = nil
+	r.pool.Main().state = ConnOperational
+	r.pool.Main().framer = nil
 
 	err := r.probeSessionHealth()
 	if err == nil {
@@ -1342,10 +1343,9 @@ func TestSetupPreconditions_SessionReuse_FallsBackOnHealthCheckFailure(t *testin
 	// skipped for stub connections without a target).
 	r := newTestRunner()
 	r.config.Target = "127.0.0.1:9999"
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
-	r.activeZoneConns["main-abc123"] = r.conn
-	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -1359,8 +1359,8 @@ func TestSetupPreconditions_SessionReuse_FallsBackOnHealthCheckFailure(t *testin
 	_ = r.setupPreconditions(context.Background(), tc, state)
 
 	// activeZoneConns should be emptied because closeActiveZoneConns was called.
-	if len(r.activeZoneConns) != 0 {
-		t.Errorf("expected 0 active zone conns after health check failure, got %d", len(r.activeZoneConns))
+	if r.pool.ZoneCount() != 0 {
+		t.Errorf("expected 0 active zone conns after health check failure, got %d", r.pool.ZoneCount())
 	}
 }
 
@@ -1371,11 +1371,10 @@ func TestSetupPreconditions_SessionReuseNoResetWhenUnmodified(t *testing.T) {
 	// The reset trigger should NOT fire when device state was not modified.
 	// Verify that session reuse works correctly in this case.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
 	r.deviceStateModified = false
-	r.activeZoneConns["main-abc123"] = r.conn
-	r.activeZoneIDs = map[string]string{"main-abc123": "abc123"}
+	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -1390,7 +1389,7 @@ func TestSetupPreconditions_SessionReuseNoResetWhenUnmodified(t *testing.T) {
 	}
 
 	// Session should still be reusable (no target means health check skipped too).
-	if !r.conn.isConnected() {
+	if !r.pool.Main().isConnected() {
 		t.Error("expected connection to remain connected")
 	}
 }
@@ -1402,7 +1401,7 @@ func TestDeviceHasGridZone_PreservesCryptoOnSessionReuse(t *testing.T) {
 	// never learns about the GRID crypto. The runner must restore the original
 	// crypto that matches the actual connection.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
 
 	// Simulate existing suite zone crypto (what the device actually knows).
@@ -1453,7 +1452,7 @@ func TestDeviceHasGridZone_PreservesCryptoOnSessionReuse(t *testing.T) {
 func TestDeviceHasLocalZone_PreservesCryptoOnSessionReuse(t *testing.T) {
 	// Same as grid zone test but for device_has_local_zone.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
 
 	origZoneCA := &cert.ZoneCA{}
@@ -1497,7 +1496,7 @@ func TestDeviceHasGridZone_KeepsNewCryptoOnFreshCommission(t *testing.T) {
 	// the fresh PASE) and should NOT be restored.
 	r := newTestRunner()
 	// No PASE session -- paseState is nil.
-	r.conn.state = ConnDisconnected
+	r.pool.Main().state = ConnDisconnected
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -1553,7 +1552,7 @@ func TestEnsureDisconnected_ClearsSuiteCrypto(t *testing.T) {
 	// to the old CA, causing "unknown_ca" TLS failures when ensureCommissioned's
 	// session-reuse path restores the stale suite crypto.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
 	// Simulate suite zone crypto.
 	r.suite.Record("suite-zone-123", CryptoState{
@@ -1606,7 +1605,7 @@ func TestEnsureCommissioned_NoStaleSuiteRestore_AfterEnsureDisconnected(t *testi
 	// session-reuse path must NOT restore stale suite crypto.
 	// This tests the fix for TC-IPV6-004/TC-TLS-CTRL-006 shuffle failures.
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
 
 	// Simulate state after ensureDisconnected + fresh commission:
@@ -1650,7 +1649,7 @@ func TestIsSuiteZoneCommission_SuiteZoneAlive(t *testing.T) {
 	r := newTestRunner()
 	r.suite.Record("suite-123", CryptoState{})
 	suiteConn := &Connection{state: ConnOperational}
-	r.activeZoneConns["main-suite-123"] = suiteConn
+	r.pool.TrackZone("main-suite-123", suiteConn, "suite-123")
 
 	if r.isSuiteZoneCommission() {
 		t.Error("expected false when suite zone connection is alive")
@@ -1662,7 +1661,7 @@ func TestIsSuiteZoneCommission_SuiteZoneDead(t *testing.T) {
 	r := newTestRunner()
 	r.suite.Record("suite-123", CryptoState{})
 	suiteConn := &Connection{state: ConnDisconnected}
-	r.activeZoneConns["main-suite-123"] = suiteConn
+	r.pool.TrackZone("main-suite-123", suiteConn, "suite-123")
 
 	if !r.isSuiteZoneCommission() {
 		t.Error("expected true when suite zone connection is dead")
@@ -1670,12 +1669,12 @@ func TestIsSuiteZoneCommission_SuiteZoneDead(t *testing.T) {
 }
 
 func TestIsSuiteZoneCommission_SuiteZoneMissing(t *testing.T) {
-	// When the suite zone connection is not in activeZoneConns (cleaned up),
+	// When the suite zone connection is not in pool zones (cleaned up),
 	// a new commission replaces it.
 	r := newTestRunner()
 	r.suite.Record("suite-123", CryptoState{})
 
 	if !r.isSuiteZoneCommission() {
-		t.Error("expected true when suite zone connection is missing from activeZoneConns")
+		t.Error("expected true when suite zone connection is missing from pool zones")
 	}
 }

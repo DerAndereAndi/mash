@@ -30,6 +30,24 @@ type PASEState struct {
 	completed bool
 }
 
+// Completed returns whether the PASE handshake completed successfully.
+// Nil-safe: returns false for a nil PASEState.
+func (ps *PASEState) Completed() bool {
+	if ps == nil {
+		return false
+	}
+	return ps.completed
+}
+
+// SessionKey returns the derived session key, or nil if not yet available.
+// Nil-safe: returns nil for a nil PASEState.
+func (ps *PASEState) SessionKey() []byte {
+	if ps == nil {
+		return nil
+	}
+	return ps.sessionKey
+}
+
 // registerPASEHandlers registers all PASE-related action handlers.
 func (r *Runner) registerPASEHandlers() {
 	// Primary commissioning action (recommended)
@@ -102,16 +120,16 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// PASE on it -- mash/1 ALPN routes to the operational handler, not the
 	// commissioning handler. Disconnect so we create a fresh mash-comm/1
 	// commissioning connection below.
-	if r.conn.isConnected() && r.conn.state == ConnOperational {
+	if r.pool.Main().isConnected() && r.pool.Main().state == ConnOperational {
 		r.debugf("handleCommission: closing stale operational conn (pase completed, conn live)")
 		// Send ControlClose so the device's message loop exits immediately.
-		if r.conn.framer != nil {
+		if r.pool.Main().framer != nil {
 			closeMsg := &wire.ControlMessage{Type: wire.ControlClose}
 			if closeData, encErr := wire.EncodeControlMessage(closeMsg); encErr == nil {
-				_ = r.conn.framer.WriteFrame(closeData)
+				_ = r.pool.Main().framer.WriteFrame(closeData)
 			}
 		}
-		r.conn.transitionTo(ConnDisconnected)
+		r.pool.Main().transitionTo(ConnDisconnected)
 		// Wait for device to re-enter commissioning mode (mDNS advertisement).
 		if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
 			r.debugf("handleCommission: %v (continuing)", err)
@@ -120,24 +138,24 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 
 	// DEC-066: After a successful commission, the device closes the
 	// commissioning socket after cert exchange. If a previous commission step
-	// in this test completed, r.conn still references the dead socket at
+	// in this test completed, the main conn still references the dead socket at
 	// ConnTLSConnected. Clean it up so we dial fresh below.
-	if r.conn.state == ConnTLSConnected && r.paseState != nil && r.paseState.completed {
+	if r.pool.Main().state == ConnTLSConnected && r.paseState != nil && r.paseState.completed {
 		r.debugf("handleCommission: cleaning up dead post-commission socket")
-		r.conn.transitionTo(ConnDisconnected)
-		r.conn.clearConnectionRefs()
+		r.pool.Main().transitionTo(ConnDisconnected)
+		r.pool.Main().clearConnectionRefs()
 		r.paseState = nil
 	}
 
 	r.debugf("handleCommission: conn.state=%v tlsConn=%v paseState=%v",
-		r.conn.state, r.conn.tlsConn != nil, r.paseState != nil)
+		r.pool.Main().state, r.pool.Main().tlsConn != nil, r.paseState != nil)
 
 	// Establish commissioning connection if not already connected
 	// This ensures connection + PASE happen atomically
 	var conn net.Conn
-	if r.conn.isConnected() && r.conn.tlsConn != nil {
+	if r.pool.Main().isConnected() && r.pool.Main().tlsConn != nil {
 		r.debugf("handleCommission: reusing existing TLS connection")
-		conn = r.conn.tlsConn
+		conn = r.pool.Main().tlsConn
 	} else {
 		// Create new commissioning connection
 		target := r.getTarget(params)
@@ -153,13 +171,13 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		r.debugf("handleCommission: connected to %s", tlsConn.RemoteAddr())
 
 		// Store connection for later use
-		r.conn.tlsConn = tlsConn
-		r.conn.framer = transport.NewFramer(tlsConn)
-		r.conn.state = ConnTLSConnected
-		r.conn.hadConnection = true
+		r.pool.Main().tlsConn = tlsConn
+		r.pool.Main().framer = transport.NewFramer(tlsConn)
+		r.pool.Main().state = ConnTLSConnected
+		r.pool.Main().hadConnection = true
 		conn = tlsConn
 
-		state.Set(StateConnection, r.conn)
+		state.Set(StateConnection, r.pool.Main())
 		state.Set(KeyConnectionEstablished, true)
 	}
 
@@ -183,7 +201,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		// where a prior step (e.g., pase_attempts) triggered a cooldown.
 		if wait := cooldownRemaining(err); wait > 0 {
 			r.debugf("handleCommission: cooldown active, waiting %s and retrying", wait.Round(time.Millisecond))
-			r.conn.transitionTo(ConnDisconnected)
+			r.pool.Main().transitionTo(ConnDisconnected)
 			time.Sleep(wait)
 
 			// Reconnect and retry PASE.
@@ -194,10 +212,10 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			if retryErr != nil {
 				return nil, fmt.Errorf("cooldown retry connect failed: %w", retryErr)
 			}
-			r.conn.tlsConn = tlsConn
-			r.conn.framer = transport.NewFramer(tlsConn)
-			r.conn.state = ConnTLSConnected
-			r.conn.hadConnection = true
+			r.pool.Main().tlsConn = tlsConn
+			r.pool.Main().framer = transport.NewFramer(tlsConn)
+			r.pool.Main().state = ConnTLSConnected
+			r.pool.Main().hadConnection = true
 			conn = tlsConn
 
 			retrySession, retryErr := commissioning.NewPASEClientSession(
@@ -220,7 +238,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		if code, hasCode := extractPASEErrorCode(err.Error()); hasCode &&
 			code == commissioning.ErrCodeBusy && cooldownRemaining(err) == 0 {
 			r.debugf("handleCommission: device busy (stale session), waiting 500ms and retrying")
-			r.conn.transitionTo(ConnDisconnected)
+			r.pool.Main().transitionTo(ConnDisconnected)
 			time.Sleep(500 * time.Millisecond)
 
 			target := r.getTarget(params)
@@ -228,10 +246,10 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			dialer := &net.Dialer{Timeout: 10 * time.Second}
 			tlsConn, retryErr := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
 			if retryErr == nil {
-				r.conn.tlsConn = tlsConn
-				r.conn.framer = transport.NewFramer(tlsConn)
-				r.conn.state = ConnTLSConnected
-				r.conn.hadConnection = true
+				r.pool.Main().tlsConn = tlsConn
+				r.pool.Main().framer = transport.NewFramer(tlsConn)
+				r.pool.Main().state = ConnTLSConnected
+				r.pool.Main().hadConnection = true
 				conn = tlsConn
 
 				retrySession, retryErr := commissioning.NewPASEClientSession(
@@ -255,7 +273,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		// The handshake writes/reads on the connection. If it fails,
 		// the connection is in an unusable state (the device closes
 		// it on PASE failure per the MASH spec).
-		r.conn.transitionTo(ConnDisconnected)
+		r.pool.Main().transitionTo(ConnDisconnected)
 
 		// Distinguish PASE protocol errors (device sent an error code)
 		// from connection/infrastructure errors (timeout, EOF, etc.).
@@ -302,8 +320,8 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// so basic tests that don't need operational connections still work.
 	if certErr != nil {
 		// Fall back: use peer cert from commissioning TLS.
-		if r.conn.tlsConn != nil {
-			cs := r.conn.tlsConn.ConnectionState()
+		if r.pool.Main().tlsConn != nil {
+			cs := r.pool.Main().tlsConn.ConnectionState()
 			if len(cs.PeerCertificates) > 0 {
 				pool := x509.NewCertPool()
 				for _, c := range cs.PeerCertificates {
@@ -318,13 +336,13 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// exchange, so we must reconnect operationally for cleanup to work.
 	//
 	// Two modes:
-	// 1. Explicit transition (doTransition=true): replaces r.conn with
-	//    operational connection. Used by test steps that need read/write
+	// 1. Explicit transition (doTransition=true): replaces the main connection
+	//    with an operational connection. Used by test steps that need read/write
 	//    after commissioning.
 	// 2. Implicit tracking (real device, no explicit transition): creates
-	//    a SEPARATE operational connection for zone cleanup, leaving r.conn
-	//    unchanged. This avoids the shared-Connection-object bug where
-	//    closeActiveZoneConns would corrupt r.conn.
+	//    a SEPARATE operational connection for zone cleanup, leaving the main
+	//    connection unchanged. This avoids the shared-Connection-object bug where
+	//    closeActiveZoneConns would corrupt the main connection.
 	doTransition, _ := params[ParamTransitionToOperational].(bool)
 	_, fromPrecondition := params[ParamFromPrecondition]
 	if certErr == nil && (doTransition || (!fromPrecondition && r.config.Target != "")) {
@@ -346,13 +364,13 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		}
 
 		if opErr == nil && doTransition {
-			// Explicit transition: close commissioning conn, replace r.conn.
-			_ = r.conn.Close()
-			r.conn.tlsConn = opConn
-			r.conn.framer = transport.NewFramer(opConn)
-			r.conn.state = ConnOperational
-			r.conn.hadConnection = true
-			state.Set(StateConnection, r.conn)
+			// Explicit transition: close commissioning conn, replace r.pool.Main().
+			_ = r.pool.Main().Close()
+			r.pool.Main().tlsConn = opConn
+			r.pool.Main().framer = transport.NewFramer(opConn)
+			r.pool.Main().state = ConnOperational
+			r.pool.Main().hadConnection = true
+			state.Set(StateConnection, r.pool.Main())
 			state.Set(StateOperationalConnEstablished, time.Now())
 			if err := r.waitForOperationalReady(2 * time.Second); err != nil {
 				r.debugf("handleCommission: %v (continuing)", err)
@@ -360,13 +378,12 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			if r.paseState != nil && r.paseState.sessionKey != nil {
 				zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
 				connKey := "step-" + zoneID
-				r.activeZoneConns[connKey] = r.conn
-				r.activeZoneIDs[connKey] = zoneID
+				r.pool.TrackZone(connKey, r.pool.Main(), zoneID)
 				r.debugf("handleCommission: transitioned to operational, zone %s", zoneID)
 			}
 		} else if opErr == nil {
 			// Implicit tracking: create a separate Connection for cleanup.
-			// r.conn remains the (dead) commissioning connection so test
+			// The main connection remains the (dead) commissioning connection so test
 			// steps aren't disrupted by an unexpected operational connection.
 			if r.paseState != nil && r.paseState.sessionKey != nil {
 				zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
@@ -376,8 +393,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 					framer:  transport.NewFramer(opConn),
 					state:   ConnOperational,
 				}
-				r.activeZoneConns[connKey] = trackConn
-				r.activeZoneIDs[connKey] = zoneID
+				r.pool.TrackZone(connKey, trackConn, zoneID)
 				r.debugf("handleCommission: tracking connection for zone %s", zoneID)
 			} else {
 				opConn.Close()
@@ -496,7 +512,7 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 	if r.paseState == nil || r.paseState.sessionKey == nil {
 		return "", fmt.Errorf("no PASE session key")
 	}
-	if r.conn == nil || !r.conn.isConnected() || r.conn.framer == nil {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() || r.pool.Main().framer == nil {
 		return "", fmt.Errorf("no active connection")
 	}
 
@@ -516,7 +532,7 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 	}
 
 	// Create a SyncConnection adapter wrapping the framer.
-	syncConn := &framerSyncConn{framer: r.conn.framer}
+	syncConn := &framerSyncConn{framer: r.pool.Main().framer}
 
 	// Create the renewal handler and perform the 4-message cert exchange.
 	renewalHandler := service.NewControllerRenewalHandler(zoneCA, syncConn)
@@ -555,7 +571,7 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 // For backward compatibility, this initiates commissioning and returns
 // the expected outputs from the original stub.
 func (r *Runner) handlePASERequest(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.isConnected() {
+	if !r.pool.Main().isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -625,14 +641,14 @@ func (r *Runner) handlePASEReceiveVerify(ctx context.Context, step *loader.Step,
 		return nil, fmt.Errorf("no PASE session in progress")
 	}
 
-	if !r.conn.isConnected() {
+	if !r.pool.Main().isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
 	// Perform the actual handshake now
-	sessionKey, err := r.paseState.session.Handshake(ctx, r.conn.tlsConn)
+	sessionKey, err := r.paseState.session.Handshake(ctx, r.pool.Main().tlsConn)
 	if err != nil {
-		r.conn.transitionTo(ConnDisconnected)
+		r.pool.Main().transitionTo(ConnDisconnected)
 		return nil, fmt.Errorf("PASE handshake failed: %w", err)
 	}
 

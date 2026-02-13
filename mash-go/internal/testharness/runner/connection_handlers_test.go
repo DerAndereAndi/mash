@@ -114,7 +114,7 @@ func TestHandlePing(t *testing.T) {
 	}
 
 	// Simulate connected.
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	out, _ = r.handlePing(context.Background(), &loader.Step{}, state)
 	if out["pong_received"] != true {
 		t.Error("expected pong_received=true when connected")
@@ -123,7 +123,7 @@ func TestHandlePing(t *testing.T) {
 
 func TestHandlePing_EnrichedFields(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	state := newTestState()
 
 	// First ping should set pong_seq=1.
@@ -148,7 +148,7 @@ func TestHandlePing_EnrichedFields(t *testing.T) {
 
 func TestHandlePingMultiple(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	state := newTestState()
 
 	step := &loader.Step{Params: map[string]any{"count": float64(5)}}
@@ -170,7 +170,7 @@ func TestHandleVerifyKeepalive(t *testing.T) {
 		t.Error("expected keepalive_active=false when not connected")
 	}
 
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	out, _ = r.handleVerifyKeepalive(context.Background(), &loader.Step{}, state)
 	if out["keepalive_active"] != true {
 		t.Error("expected keepalive_active=true when connected")
@@ -291,7 +291,7 @@ func TestCborEncodeIntKeyMap_StringKeys(t *testing.T) {
 
 func TestHandleSendRaw_EmptyData(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	state := newTestState()
 
 	// No data params at all -> empty message error.
@@ -321,7 +321,7 @@ func TestHandleSendRaw_NotConnected(t *testing.T) {
 
 func TestHandleSendRaw_HexDecode(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	state := newTestState()
 
 	// Invalid hex should error.
@@ -469,7 +469,7 @@ func TestPing_ZoneRouting(t *testing.T) {
 	}
 
 	// Non-existent zone falls back to main connection.
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	step = &loader.Step{Params: map[string]any{"connection": "nonexistent"}}
 	out, _ = r.handleSendPing(context.Background(), step, state)
 	if out["pong_received"] != true {
@@ -477,7 +477,7 @@ func TestPing_ZoneRouting(t *testing.T) {
 	}
 
 	// No connection at all.
-	r.conn.state = ConnDisconnected
+	r.pool.Main().state = ConnDisconnected
 	step = &loader.Step{Params: map[string]any{"connection": "nonexistent"}}
 	out, _ = r.handleSendPing(context.Background(), step, state)
 	if out["pong_received"] != false {
@@ -488,10 +488,10 @@ func TestPing_ZoneRouting(t *testing.T) {
 // C10: send_ping without connection param uses main connection.
 func TestPing_FallbackToMainConnection(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	state := newTestState()
 
-	// No connection/zone param -> falls back to r.conn.
+	// No connection/zone param -> falls back to main connection.
 	step := &loader.Step{Params: map[string]any{}}
 	out, _ := r.handleSendPing(context.Background(), step, state)
 	if out["pong_received"] != true {
@@ -599,7 +599,7 @@ func TestReadAsZone_AfterOtherZoneDisconnect(t *testing.T) {
 
 func TestSubscribeMultiple_NeitherParam(t *testing.T) {
 	r := newTestRunner()
-	r.conn.state = ConnOperational
+	r.pool.Main().state = ConnOperational
 	state := newTestState()
 
 	step := &loader.Step{Params: map[string]any{
@@ -619,11 +619,11 @@ func TestSubscribeMultiple_NeitherParam(t *testing.T) {
 func newPipedRunner() (*Runner, net.Conn) {
 	client, server := net.Pipe()
 	r := newTestRunner()
-	r.conn = &Connection{
+	r.pool.SetMain(&Connection{
 		conn:   client,
 		framer: transport.NewFramer(client),
 		state:  ConnOperational,
-	}
+	})
 	return r, server
 }
 
@@ -910,7 +910,7 @@ func TestHandleSendRawFrame_ZeroLength(t *testing.T) {
 func TestHandleSendRawBytes_BytesHex(t *testing.T) {
 	r, server := newPipedRunner()
 	defer server.Close()
-	r.conn.tlsConn = nil // raw bytes uses getWriteConn which falls back to conn
+	r.pool.Main().tlsConn = nil // raw bytes uses getWriteConn which falls back to conn
 	state := newTestState()
 
 	go func() {
@@ -936,7 +936,7 @@ func TestHandleSendRawBytes_BytesHex(t *testing.T) {
 func TestHandleSendRawBytes_FollowedByCborPayload(t *testing.T) {
 	r, server := newPipedRunner()
 	defer server.Close()
-	r.conn.tlsConn = nil
+	r.pool.Main().tlsConn = nil
 	state := newTestState()
 
 	go func() {
@@ -976,7 +976,7 @@ func TestHandleSendRawBytes_FollowedByCborPayload(t *testing.T) {
 func TestHandleSendRawBytes_FollowedByBytes(t *testing.T) {
 	r, server := newPipedRunner()
 	defer server.Close()
-	r.conn.tlsConn = nil
+	r.pool.Main().tlsConn = nil
 	state := newTestState()
 
 	go func() {
@@ -1004,7 +1004,7 @@ func TestHandleSendRawBytes_FollowedByBytes(t *testing.T) {
 func TestHandleSendRawBytes_RemainingBytes(t *testing.T) {
 	r, server := newPipedRunner()
 	defer server.Close()
-	r.conn.tlsConn = nil
+	r.pool.Main().tlsConn = nil
 	state := newTestState()
 
 	go func() {

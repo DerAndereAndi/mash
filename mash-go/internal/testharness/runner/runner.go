@@ -15,7 +15,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -35,64 +34,30 @@ type Runner struct {
 	engine       *engine.Engine
 	engineConfig *engine.EngineConfig
 	reporter     reporter.Reporter
-	conn         *Connection
 	resolver     *Resolver
-	messageID    uint32 // Atomic counter for message IDs
 	paseState    *PASEState
 	pics         *loader.PICSFile // Cached PICS for handler access
 
-	// zoneCA is the Zone CA generated during commissioning cert exchange.
-	zoneCA *cert.ZoneCA
+	// Components (interface-typed for testability)
+	suite       SuiteSession
+	pool        ConnPool
+	coordinator Coordinator
 
-	// controllerCert is the controller operational cert generated during commissioning.
-	controllerCert *cert.OperationalCert
-
-	// issuedDeviceCert is the operational cert issued to the device during cert exchange.
-	// Used by verify_device_cert to validate the cert even before operational TLS reconnect.
+	// Working crypto: the "current" cert material used by operationalTLSConfig()
+	// and handlers. Restored from suite.Crypto() when reconnecting after
+	// backward transitions.
+	zoneCA           *cert.ZoneCA
+	controllerCert   *cert.OperationalCert
 	issuedDeviceCert *x509.Certificate
+	zoneCAPool       *x509.CertPool
 
-	// zoneCAPool holds the Zone CA certificate pool obtained during commissioning.
-	// Used for TLS verification on operational (non-commissioning) connections.
-	zoneCAPool *x509.CertPool
-
-	// activeZoneConns tracks zone connections across tests so they can be
-	// cleaned up between test cases. Without this, connections from a prior
-	// test leak and prevent the device from accepting new ones (all zones
-	// appear "connected" on the device side).
-	activeZoneConns map[string]*Connection
-
-	// lastDeviceConnClose records when closeActiveZoneConns last closed
-	// real device connections. This allows PrecondTwoZonesConnected to
-	// wait for the device to process zone removals even when the current
-	// test's hadActive is false.
-	lastDeviceConnClose time.Time
-
-	// activeZoneIDs maps zone names to their derived zone IDs (from PASE
-	// session keys). Used by closeActiveZoneConns to send explicit
-	// RemoveZone commands before closing connections.
-	activeZoneIDs map[string]string
-
-	// suite manages the suite-level zone that persists across tests.
-	// It is the single source of truth for zone crypto material.
-	suite SuiteSession
-
-	// commissionZoneType overrides the zone type used when generating the
-	// Zone CA during performCertExchange. Defaults to ZoneTypeLocal if zero.
+	// Commissioning state
 	commissionZoneType cert.ZoneType
-
-	// deviceStateModified is set when a trigger modifies device state.
-	// Used by setupPreconditions to send TriggerResetTestState between tests.
 	deviceStateModified bool
 
-	// pendingNotifications buffers notification frames that arrived while
-	// reading a command response (interleaved with the response).
-	pendingNotifications [][]byte
-
-	// activeSubscriptionIDs tracks subscription IDs created during the
-	// current test. In teardownTest, the runner sends Unsubscribe for each
-	// tracked ID to prevent subscription leakage between tests when
-	// sessions are reused.
-	activeSubscriptionIDs []uint32
+	// lastDeviceConnClose records when closeActiveZoneConns last closed
+	// real device connections.
+	lastDeviceConnClose time.Time
 
 	// pairingAdvertiser is a real mDNS advertiser used by announce_pairing_request
 	// to advertise _mashp._udp services. Cleaned up in Close().
@@ -223,7 +188,7 @@ type Connection struct {
 
 // transitionTo changes the connection state. Any transition to ConnDisconnected
 // closes the underlying socket but does NOT nil the connection/framer pointers.
-// This is critical: handlers spawn goroutines that hold references to r.conn.framer
+// This is critical: handlers spawn goroutines that hold references to r.pool.Main().framer
 // for async reads. If transitionTo nilled the framer, those goroutines would
 // panic on nil dereference. Instead, the closed socket causes ReadFrame/WriteFrame
 // to return an error, which is the safe way to signal goroutines.
@@ -325,16 +290,29 @@ func New(config *Config) *Runner {
 	}
 
 	r := &Runner{
-		config:          config,
-		engine:          engine.NewWithConfig(engineConfig),
-		engineConfig:    engineConfig,
-		conn:            &Connection{},
-		resolver:        NewResolver(),
-		activeZoneConns: make(map[string]*Connection),
-		activeZoneIDs:   make(map[string]string),
-		pics:            pics,
-		suite:           NewSuiteSession(),
+		config:       config,
+		engine:       engine.NewWithConfig(engineConfig),
+		engineConfig: engineConfig,
+		resolver:     NewResolver(),
+		pics:         pics,
+		suite:        NewSuiteSession(),
 	}
+
+	// Initialize connection pool. The onZoneClose callback sends protocol-level
+	// RemoveZone + ControlClose before the pool closes each zone socket.
+	r.pool = NewConnPool(r.debugf, func(conn *Connection, zoneID string) {
+		if conn.framer != nil {
+			r.sendRemoveZoneOnConn(conn, zoneID)
+			closeMsg := &wire.ControlMessage{Type: wire.ControlClose}
+			if closeData, err := wire.EncodeControlMessage(closeMsg); err == nil {
+				_ = conn.framer.WriteFrame(closeData)
+			}
+		}
+	})
+	r.pool.SetMain(&Connection{})
+
+	// Initialize coordinator (not yet wired -- Steps 5-7 will delegate to it).
+	r.coordinator = NewCoordinator(r.suite, r.pool, r, r.config, r.debugf)
 
 	// Set precondition callback (must be after r is created since it's a method on r).
 	// This works because NewWithConfig stores the *EngineConfig pointer.
@@ -365,9 +343,9 @@ func New(config *Config) *Runner {
 	return r
 }
 
-// nextMessageID returns the next message ID.
+// nextMessageID returns the next message ID (delegates to pool).
 func (r *Runner) nextMessageID() uint32 {
-	return atomic.AddUint32(&r.messageID, 1)
+	return r.pool.NextMessageID()
 }
 
 // getTarget returns the host:port for connections.
@@ -677,87 +655,14 @@ func (r *Runner) verifyPeerCertAgainstZoneCA(rawCerts [][]byte, _ [][]*x509.Cert
 	return nil
 }
 
-// trackSubscription adds a subscription ID to the active tracking list.
+// trackSubscription adds a subscription ID to the active tracking list (delegates to pool).
 func (r *Runner) trackSubscription(subID uint32) {
-	r.activeSubscriptionIDs = append(r.activeSubscriptionIDs, subID)
+	r.pool.TrackSubscription(subID)
 }
 
-// removeActiveSubscription removes a subscription ID from tracking.
-// Called when a test step explicitly unsubscribes so we don't double-unsubscribe.
+// removeActiveSubscription removes a subscription ID from tracking (delegates to pool).
 func (r *Runner) removeActiveSubscription(subID uint32) {
-	for i, id := range r.activeSubscriptionIDs {
-		if id == subID {
-			r.activeSubscriptionIDs = append(r.activeSubscriptionIDs[:i], r.activeSubscriptionIDs[i+1:]...)
-			return
-		}
-	}
-}
-
-// sendUnsubscribe sends an unsubscribe request for the given subscription ID.
-// This is best-effort cleanup; errors are ignored.
-// sendUnsubscribe sends an Unsubscribe request and reads the response,
-// discarding any interleaved notification frames. This acts as a wire-level
-// drain: all stale notifications that arrived before the unsubscribe
-// response are consumed and discarded, leaving the connection clean for the
-// next test. Uses a 2s deadline to avoid blocking if the device is
-// unresponsive.
-func (r *Runner) sendUnsubscribe(conn *Connection, subID uint32) {
-	if conn == nil || !conn.isConnected() || conn.framer == nil {
-		return
-	}
-	req := &wire.Request{
-		MessageID:  r.nextMessageID(),
-		Operation:  wire.OpSubscribe,
-		EndpointID: 0,
-		FeatureID:  0,
-		Payload:    &wire.UnsubscribePayload{SubscriptionID: subID},
-	}
-	data, err := wire.EncodeRequest(req)
-	if err != nil {
-		return
-	}
-	if err := conn.framer.WriteFrame(data); err != nil {
-		return
-	}
-
-	// Read frames until the unsubscribe response arrives, discarding any
-	// interleaved notifications. The 2s deadline is set once before the
-	// loop (safe for Go TLS -- the deadline only fires between reads,
-	// not mid-record, because each ReadFrame completes a full framed
-	// message).
-	if conn.tlsConn != nil {
-		_ = conn.tlsConn.SetReadDeadline(time.Now().Add(2 * time.Second))
-		defer func() {
-			if conn.tlsConn != nil {
-				_ = conn.tlsConn.SetReadDeadline(time.Time{})
-			}
-		}()
-	}
-	drained := 0
-	for range 20 {
-		respData, err := conn.framer.ReadFrame()
-		if err != nil {
-			break
-		}
-		resp, decErr := wire.DecodeResponse(respData)
-		if decErr != nil {
-			break
-		}
-		if resp.MessageID == 0 {
-			drained++ // Discard stale notification
-			continue
-		}
-		if resp.MessageID != req.MessageID {
-			r.debugf("sendUnsubscribe(%d): discarding orphaned response (got msgID=%d, want %d)", subID, resp.MessageID, req.MessageID)
-			drained++
-			continue
-		}
-		// Got the unsubscribe response -- wire is clean.
-		break
-	}
-	if drained > 0 {
-		r.debugf("sendUnsubscribe(%d): discarded %d stale frames", subID, drained)
-	}
+	r.pool.RemoveSubscription(subID)
 }
 
 // Close cleans up runner resources. It sends RemoveZone on the main
@@ -769,11 +674,11 @@ func (r *Runner) Close() error {
 		r.pairingAdvertiser = nil
 	}
 	r.closeActiveZoneConns()
-	if r.conn != nil {
-		if r.conn.isConnected() {
+	if r.pool.Main() != nil {
+		if r.pool.Main().isConnected() {
 			r.sendRemoveZone()
 		}
-		return r.conn.Close()
+		return r.pool.Main().Close()
 	}
 	return nil
 }
@@ -1036,8 +941,8 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	_, hasCertChain := step.Params["cert_chain"]
 	_, hasKeyGroups := step.Params["key_exchange_groups"]
 	_, hasALPN := step.Params["alpn"]
-	if !commissioning && clientCertSpec == "" && !hasCertChain && !hasKeyGroups && !hasALPN && r.conn != nil && r.conn.isConnected() && r.conn.tlsConn != nil {
-		cs := r.conn.tlsConn.ConnectionState()
+	if !commissioning && clientCertSpec == "" && !hasCertChain && !hasKeyGroups && !hasALPN && r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().tlsConn != nil {
+		cs := r.pool.Main().tlsConn.ConnectionState()
 		hasPeerCerts := len(cs.PeerCertificates) > 0
 		serverCertCNPrefix := ""
 		serverCertSelfSigned := false
@@ -1051,7 +956,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			serverCertSelfSigned = bytes.Equal(cert.RawIssuer, cert.RawSubject)
 		}
 		chainValidated := len(cs.VerifiedChains) > 0 || (hasPeerCerts && (insecure || r.zoneCAPool != nil))
-		presentedClientCert := len(r.conn.tlsConn.ConnectionState().PeerCertificates) > 0
+		presentedClientCert := len(r.pool.Main().tlsConn.ConnectionState().PeerCertificates) > 0
 		return map[string]any{
 			KeyConnectionEstablished:  true,
 			KeyConnected:              true,
@@ -1073,7 +978,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			KeyFullHandshake:          !cs.DidResume,
 			KeyPSKUsed:                cs.DidResume,
 			KeyEarlyDataAccepted:      false,
-			KeyConnectedAddressType:   classifyRemoteAddress(r.conn.tlsConn.RemoteAddr()),
+			KeyConnectedAddressType:   classifyRemoteAddress(r.pool.Main().tlsConn.RemoteAddr()),
 			KeyInterfaceCorrect:       true, // reused connection was already validated
 		}, nil
 	}
@@ -1095,14 +1000,14 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		}
 	}
 	needsDisconnectWait := false
-	if (clientCertParam == CertTypeControllerOperational || isOperationalChain) && r.conn != nil && r.conn.tlsConn != nil {
-		r.conn.transitionTo(ConnDisconnected)
+	if (clientCertParam == CertTypeControllerOperational || isOperationalChain) && r.pool.Main() != nil && r.pool.Main().tlsConn != nil {
+		r.pool.Main().transitionTo(ConnDisconnected)
 		needsDisconnectWait = true
 	}
 	// Also retry when reconnecting operationally after a disconnect (e.g.
 	// invoke_with_disconnect → connect). The device may not have detected
 	// our TCP close yet and rejects the new connection for the same zone.
-	if !needsDisconnectWait && !commissioning && r.zoneCAPool != nil && r.conn != nil && !r.conn.isConnected() {
+	if !needsDisconnectWait && !commissioning && r.zoneCAPool != nil && r.pool.Main() != nil && !r.pool.Main().isConnected() {
 		needsDisconnectWait = true
 	}
 
@@ -1234,7 +1139,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	state.Set(StateEndTime, time.Now())
 
 	// If an invalid test cert was used (expired, wrong_zone, etc.) and the
-	// probe didn't detect rejection (timeout), don't replace r.conn. These
+	// probe didn't detect rejection (timeout), don't replace r.pool.Main(). These
 	// connections are diagnostic -- they must never corrupt the runner's
 	// primary connection, which may be the suite zone's operational link.
 	// Only guard for known-invalid cert types; valid certs (operational,
@@ -1258,22 +1163,22 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	// Close the previous TLS connection before replacing it. Without
 	// this, the device still sees the old TCP connection as an active
 	// zone, preventing it from re-entering commissioning mode.
-	if r.conn.tlsConn != nil && r.conn.tlsConn != conn {
-		_ = r.conn.tlsConn.Close()
+	if r.pool.Main().tlsConn != nil && r.pool.Main().tlsConn != conn {
+		_ = r.pool.Main().tlsConn.Close()
 	}
-	r.conn.tlsConn = conn
-	r.conn.framer = transport.NewFramer(conn)
-	r.conn.state = ConnTLSConnected
-	r.conn.hadConnection = true
+	r.pool.Main().tlsConn = conn
+	r.pool.Main().framer = transport.NewFramer(conn)
+	r.pool.Main().state = ConnTLSConnected
+	r.pool.Main().hadConnection = true
 
 	// Set up protocol logging if configured
 	if r.config.ProtocolLogger != nil {
 		connID := generateConnectionID()
-		r.conn.framer.SetLogger(r.config.ProtocolLogger, connID)
+		r.pool.Main().framer.SetLogger(r.config.ProtocolLogger, connID)
 	}
 
 	// Store connection info in state
-	state.Set(StateConnection, r.conn)
+	state.Set(StateConnection, r.pool.Main())
 
 	// Extract TLS connection details.
 	cs := conn.ConnectionState()
@@ -1353,7 +1258,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 // handleDisconnect closes the connection. If graceful=true, sends a
 // ControlClose frame and waits for acknowledgement before closing TCP.
 func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return map[string]any{KeyDisconnected: true, KeyConnectionClosed: true, KeyCloseAcknowledged: true}, nil
 	}
 
@@ -1369,11 +1274,11 @@ func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state 
 		out[KeyDisconnected] = true
 		// Clear subscription state.
 		state.Set(StatePrimingData, nil)
-		r.pendingNotifications = nil
+		r.pool.ClearNotifications()
 		return out, nil
 	}
 
-	err := r.conn.Close()
+	err := r.pool.Main().Close()
 	if err != nil {
 		return nil, fmt.Errorf("failed to disconnect: %w", err)
 	}
@@ -1381,7 +1286,7 @@ func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state 
 	// Clear subscription state so stale priming data / notifications don't
 	// leak into subsequent steps after the session is gone.
 	state.Set(StatePrimingData, nil)
-	r.pendingNotifications = nil
+	r.pool.ClearNotifications()
 
 	return map[string]any{KeyDisconnected: true, KeyConnectionClosed: true}, nil
 }
@@ -1393,67 +1298,12 @@ func (r *Runner) handleDisconnect(ctx context.Context, step *loader.Step, state 
 // whose MessageID matches is accepted. Orphaned responses from previous
 // operations (e.g. simulate_no_response) are discarded with a warning.
 func (r *Runner) sendRequest(data []byte, op string, expectedMsgID uint32) (*wire.Response, error) {
-	return r.sendRequestWithDeadline(context.Background(), data, op, expectedMsgID)
+	return r.pool.SendRequest(data, op, expectedMsgID)
 }
 
-// sendRequestWithDeadline is like sendRequest but respects the context deadline
-// for the read timeout. Used by callers that need a shorter timeout than the
-// default 30 seconds (e.g., sendTriggerViaZone during test setup).
+// sendRequestWithDeadline is like sendRequest but respects the context deadline (delegates to pool).
 func (r *Runner) sendRequestWithDeadline(ctx context.Context, data []byte, op string, expectedMsgID uint32) (*wire.Response, error) {
-	if err := r.conn.framer.WriteFrame(data); err != nil {
-		r.conn.transitionTo(ConnDisconnected)
-		return nil, fmt.Errorf("failed to send %s request: %w", op, err)
-	}
-
-	// Set a read deadline so we don't block forever if the device
-	// never responds. Use context deadline if available, otherwise 30s.
-	// Clear it after reading completes.
-	if r.conn.tlsConn != nil {
-		deadline := time.Now().Add(30 * time.Second)
-		if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-			deadline = ctxDeadline
-		}
-		_ = r.conn.tlsConn.SetReadDeadline(deadline)
-		defer func() {
-			if r.conn.tlsConn != nil {
-				_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
-			}
-		}()
-	}
-
-	// Read frames until we get a matching response. Skip notifications
-	// (messageId=0) and discard orphaned responses from previous operations.
-	for i := 0; i < 10; i++ {
-		respData, err := r.conn.framer.ReadFrame()
-		if err != nil {
-			r.conn.transitionTo(ConnDisconnected)
-			return nil, fmt.Errorf("failed to read %s response: %w", op, err)
-		}
-
-		resp, err := wire.DecodeResponse(respData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode %s response: %w", op, err)
-		}
-
-		// Notifications have messageId=0. Queue them for later consumption
-		// and keep reading for the actual command response.
-		if resp.MessageID == 0 {
-			r.debugf("sendRequest(%s): skipping notification frame (buffered)", op)
-			r.pendingNotifications = append(r.pendingNotifications, respData)
-			continue
-		}
-
-		// Discard orphaned responses from previous operations (e.g.
-		// simulate_no_response sends a request but never reads the reply).
-		if resp.MessageID != expectedMsgID {
-			r.debugf("sendRequest(%s): discarding orphaned response (got msgID=%d, want %d)", op, resp.MessageID, expectedMsgID)
-			continue
-		}
-
-		return resp, nil
-	}
-
-	return nil, fmt.Errorf("failed to read %s response: too many interleaved frames", op)
+	return r.pool.SendRequestWithDeadline(ctx, data, op, expectedMsgID)
 }
 
 // handleRead sends a read request and returns the response.
@@ -1467,7 +1317,7 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		}, nil
 	}
 
-	if !r.conn.isConnected() {
+	if !r.pool.Main().isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1554,7 +1404,7 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 	// RC5c: simulate_no_response -- send request but don't wait for response.
 	if toBool(params[ParamSimulateNoResponse]) {
 		state.Set(StateStartTime, time.Now())
-		if sendErr := r.conn.framer.WriteFrame(data); sendErr != nil {
+		if sendErr := r.pool.Main().framer.WriteFrame(data); sendErr != nil {
 			state.Set(StateEndTime, time.Now())
 			return map[string]any{
 				KeyReadSuccess: false,
@@ -1695,7 +1545,7 @@ func isEmptyValue(v any) bool {
 
 // handleWrite sends a write request.
 func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.isConnected() {
+	if !r.pool.Main().isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1772,7 +1622,7 @@ func (r *Runner) handleWrite(ctx context.Context, step *loader.Step, state *engi
 
 // handleSubscribe sends a subscribe request.
 func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.isConnected() {
+	if !r.pool.Main().isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1965,7 +1815,7 @@ func extractPrimingData(payload any) any {
 
 // handleInvoke sends an invoke request.
 func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if !r.conn.isConnected() {
+	if !r.pool.Main().isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -2535,7 +2385,7 @@ func classifyTestCertRejection(certType string, err error) string {
 // isInvalidTestCert returns true for test cert types that are known to be
 // invalid and expected to be rejected by the server. When such a cert
 // survives the post-handshake probe (timeout), the connection should be
-// closed without replacing r.conn, since a delayed rejection would corrupt
+// closed without replacing the main connection, since a delayed rejection would corrupt
 // the runner's primary operational link.
 func isInvalidTestCert(certType string) bool {
 	switch certType {

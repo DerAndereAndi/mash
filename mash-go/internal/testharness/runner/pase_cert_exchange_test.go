@@ -118,15 +118,16 @@ func TestCertExchange_FullFlow(t *testing.T) {
 	// Set up runner with a fake PASE session key.
 	r := &Runner{
 		config: &Config{},
-		conn: &Connection{
-			framer: clientFramer,
-			state:  ConnTLSConnected,
-		},
+		pool:   NewConnPool(func(string, ...any) {}, nil),
 		paseState: &PASEState{
 			sessionKey: []byte("test-session-key-for-zone-deriv"),
 			completed:  true,
 		},
 	}
+	r.pool.SetMain(&Connection{
+		framer: clientFramer,
+		state:  ConnTLSConnected,
+	})
 
 	// Perform cert exchange.
 	ctx := context.Background()

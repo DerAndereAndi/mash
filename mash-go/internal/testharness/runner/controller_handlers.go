@@ -257,18 +257,18 @@ func (r *Runner) handleSetCommissioningWindowDuration(ctx context.Context, step 
 
 // sendSetCommWindowDuration sends the setCommissioningWindowDuration command
 // to the real device over an operational zone connection. Falls back to
-// zone connections (from the connection tracker) when r.conn is not
-// available (e.g. after device_zones_full precondition).
+// zone connections (from the connection tracker) when the main connection
+// is not available (e.g. after device_zones_full precondition).
 // Returns true if the command was successfully sent and acknowledged.
 func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine.ExecutionState) bool {
 	if r.config.EnableKey == "" {
 		return false
 	}
 
-	// Find a usable connection: prefer r.conn, fall back to per-test zone
-	// connections, then runner-level activeZoneConns (which includes the
+	// Find a usable connection: prefer main, fall back to per-test zone
+	// connections, then pool-level zone connections (which includes the
 	// suite zone). This mirrors sendTriggerViaZone's fallback chain.
-	conn := r.conn
+	conn := r.pool.Main()
 	if conn == nil || !conn.isConnected() || !conn.isOperational() {
 		conn = nil
 		ct := getConnectionTracker(state)
@@ -280,8 +280,8 @@ func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine
 		}
 	}
 	if conn == nil {
-		for _, c := range r.activeZoneConns {
-			if c.isConnected() && c.framer != nil {
+		for _, key := range r.pool.ZoneKeys() {
+			if c := r.pool.Zone(key); c != nil && c.isConnected() && c.framer != nil {
 				conn = c
 				break
 			}

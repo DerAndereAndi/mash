@@ -9,3 +9,6 @@ packages:
       dir: '{{.InterfaceDir}}/mocks'
     interfaces:
       SuiteSession: {}
+      ConnPool: {}
+      CommissioningOps: {}
+      Coordinator: {}

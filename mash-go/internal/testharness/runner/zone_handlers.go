@@ -385,8 +385,8 @@ func (r *Runner) handleVerifyZoneBinding(ctx context.Context, step *loader.Step,
 
 	// Check if the discovered zone ID matches any active zone.
 	zoneMatches := false
-	for _, id := range r.activeZoneIDs {
-		if id == zoneID {
+	for _, key := range r.pool.ZoneKeys() {
+		if r.pool.ZoneID(key) == zoneID {
 			zoneMatches = true
 			break
 		}
@@ -486,9 +486,9 @@ func (r *Runner) handleDisconnectZone(ctx context.Context, step *loader.Step, st
 	}
 
 	// No tracked zone connection -- fall back to runner's main connection.
-	if zoneID == "" && r.conn != nil && r.conn.isConnected() {
-		_ = r.conn.Close()
-		r.conn.transitionTo(ConnDisconnected)
+	if zoneID == "" && r.pool.Main() != nil && r.pool.Main().isConnected() {
+		_ = r.pool.Main().Close()
+		r.pool.Main().transitionTo(ConnDisconnected)
 		return map[string]any{KeyZoneDisconnected: true, KeyConnectionClosed: true}, nil
 	}
 
@@ -604,8 +604,8 @@ func (r *Runner) visibleZoneCount(rawCount int) int {
 	if r.suite.ZoneID() == "" || rawCount <= 0 {
 		return rawCount
 	}
-	suiteConn, exists := r.activeZoneConns[r.suite.ConnKey()]
-	if exists && suiteConn.isConnected() {
+	suiteConn := r.pool.Zone(r.suite.ConnKey())
+	if suiteConn != nil && suiteConn.isConnected() {
 		return rawCount - 1
 	}
 	return rawCount
@@ -630,18 +630,19 @@ func toIntValue(v any) int {
 }
 
 // findOtherZoneConn finds a live connection for a zone ID by matching it
-// against the zone IDs stored in r.activeZoneIDs.
+// against the zone IDs stored in the connection pool.
 func (r *Runner) findOtherZoneConn(zoneID string) *Connection {
-	for name, id := range r.activeZoneIDs {
-		if id == zoneID {
-			if conn, ok := r.activeZoneConns[name]; ok && conn.isConnected() {
+	for _, key := range r.pool.ZoneKeys() {
+		if r.pool.ZoneID(key) == zoneID {
+			if conn := r.pool.Zone(key); conn != nil && conn.isConnected() {
 				return conn
 			}
 		}
 	}
 	// Also check connections stored via ZoneConnectionStateKey.
-	for name, conn := range r.activeZoneConns {
-		if conn.isConnected() && name != "GRID" && name != "main-"+zoneID {
+	for _, key := range r.pool.ZoneKeys() {
+		conn := r.pool.Zone(key)
+		if conn != nil && conn.isConnected() && key != "GRID" && key != "main-"+zoneID {
 			// Return any live zone connection that isn't the removed zone.
 			return conn
 		}
@@ -652,7 +653,7 @@ func (r *Runner) findOtherZoneConn(zoneID string) *Connection {
 // handleVerifyBidirectionalActive verifies bidirectional communication is active.
 func (r *Runner) handleVerifyBidirectionalActive(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Check connection is alive.
-	active := r.conn != nil && r.conn.isConnected()
+	active := r.pool.Main() != nil && r.pool.Main().isConnected()
 
 	return map[string]any{
 		KeyBidirectionalActive: active,
@@ -662,7 +663,7 @@ func (r *Runner) handleVerifyBidirectionalActive(ctx context.Context, step *load
 // handleVerifyRestoreSequence verifies restore sequence after reconnection.
 func (r *Runner) handleVerifyRestoreSequence(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Verify connection is re-established.
-	restored := r.conn != nil && r.conn.isConnected()
+	restored := r.pool.Main() != nil && r.pool.Main().isConnected()
 
 	// Check if queued commands were replayed by verifying the connection
 	// is operational and the device is responding.
@@ -684,14 +685,14 @@ func (r *Runner) handleVerifyRestoreSequence(ctx context.Context, step *loader.S
 func (r *Runner) handleVerifyTLSState(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() || r.pool.Main().tlsConn == nil {
 		return map[string]any{
 			KeyTLSActive:  false,
 			KeyTLSVersion: 0,
 		}, nil
 	}
 
-	tlsState := r.conn.tlsConn.ConnectionState()
+	tlsState := r.pool.Main().tlsConn.ConnectionState()
 	expectedVersion := paramFloat(params, "expected_version", 0)
 
 	versionMatch := true

@@ -229,8 +229,9 @@ func TestPASEStateInitialization(t *testing.T) {
 	// Verify that a new Runner has nil paseState
 	r := &Runner{
 		config: &Config{},
-		conn:   &Connection{},
+		pool:   NewConnPool(func(string, ...any) {}, nil),
 	}
+	r.pool.SetMain(&Connection{})
 	if r.paseState != nil {
 		t.Error("expected nil paseState on new Runner")
 	}

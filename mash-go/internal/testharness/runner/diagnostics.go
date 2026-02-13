@@ -134,8 +134,8 @@ func (r *Runner) requestDeviceState(ctx context.Context, state *engine.Execution
 // findZoneConnection returns the first usable operational connection,
 // searching: main conn -> per-test zone conns -> activeZoneConns (suite zone).
 func (r *Runner) findZoneConnection(state *engine.ExecutionState) *Connection {
-	if r.conn != nil && r.conn.isConnected() && r.conn.framer != nil {
-		return r.conn
+	if r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().framer != nil {
+		return r.pool.Main()
 	}
 	if state != nil {
 		ct := getConnectionTracker(state)
@@ -145,8 +145,8 @@ func (r *Runner) findZoneConnection(state *engine.ExecutionState) *Connection {
 			}
 		}
 	}
-	for _, c := range r.activeZoneConns {
-		if c.isConnected() && c.framer != nil {
+	for _, key := range r.pool.ZoneKeys() {
+		if c := r.pool.Zone(key); c != nil && c.isConnected() && c.framer != nil {
 			return c
 		}
 	}

@@ -64,8 +64,8 @@ func (r *Runner) snapshot() RunnerSnapshot {
 		CommissionZoneType:  int(r.commissionZoneType),
 	}
 
-	if r.conn != nil {
-		s.MainConn = connSnapshot(r.conn)
+	if r.pool.Main() != nil {
+		s.MainConn = connSnapshot(r.pool.Main())
 	}
 
 	if r.paseState != nil {
@@ -73,11 +73,13 @@ func (r *Runner) snapshot() RunnerSnapshot {
 		s.HasSessionKey = r.paseState.sessionKey != nil
 	}
 
-	for name, conn := range r.activeZoneConns {
-		s.ActiveZones[name] = connSnapshot(conn)
+	for _, key := range r.pool.ZoneKeys() {
+		if conn := r.pool.Zone(key); conn != nil {
+			s.ActiveZones[key] = connSnapshot(conn)
+		}
 	}
-	for name, id := range r.activeZoneIDs {
-		s.ActiveZoneIDs[name] = id
+	for _, key := range r.pool.ZoneKeys() {
+		s.ActiveZoneIDs[key] = r.pool.ZoneID(key)
 	}
 
 	return s

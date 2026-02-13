@@ -60,9 +60,10 @@ func TestVerifyPeerCert_AcceptsZoneCASigned(t *testing.T) {
 
 	r := &Runner{
 		config:     &Config{},
-		conn:       &Connection{},
+		pool:       NewConnPool(func(string, ...any) {}, nil),
 		zoneCAPool: zoneCA.TLSClientCAs(),
 	}
+	r.pool.SetMain(&Connection{})
 
 	// This cert has no localhost SAN -- normal TLS would reject it.
 	err = r.verifyPeerCertAgainstZoneCA([][]byte{opCert.Certificate.Raw}, nil)
@@ -90,9 +91,10 @@ func TestVerifyPeerCert_RejectsUntrustedCA(t *testing.T) {
 
 	r := &Runner{
 		config:     &Config{},
-		conn:       &Connection{},
+		pool:       NewConnPool(func(string, ...any) {}, nil),
 		zoneCAPool: trustedCA.TLSClientCAs(), // Only trust the first CA
 	}
+	r.pool.SetMain(&Connection{})
 
 	err = r.verifyPeerCertAgainstZoneCA([][]byte{opCert.Certificate.Raw}, nil)
 	if err == nil {
@@ -110,9 +112,10 @@ func TestVerifyPeerCert_RejectsExpiredCert(t *testing.T) {
 
 	r := &Runner{
 		config:     &Config{},
-		conn:       &Connection{},
+		pool:       NewConnPool(func(string, ...any) {}, nil),
 		zoneCAPool: zoneCA.TLSClientCAs(),
 	}
+	r.pool.SetMain(&Connection{})
 
 	err = r.verifyPeerCertAgainstZoneCA([][]byte{expiredCert.Raw}, nil)
 	if err == nil {
@@ -123,9 +126,10 @@ func TestVerifyPeerCert_RejectsExpiredCert(t *testing.T) {
 func TestVerifyPeerCert_RejectsNoCerts(t *testing.T) {
 	r := &Runner{
 		config:     &Config{},
-		conn:       &Connection{},
+		pool:       NewConnPool(func(string, ...any) {}, nil),
 		zoneCAPool: x509.NewCertPool(),
 	}
+	r.pool.SetMain(&Connection{})
 
 	err := r.verifyPeerCertAgainstZoneCA(nil, nil)
 	if err == nil {
@@ -146,11 +150,12 @@ func TestOperationalTLSConfig_PresentsControllerCert(t *testing.T) {
 
 	r := &Runner{
 		config:         &Config{},
-		conn:           &Connection{},
+		pool:           NewConnPool(func(string, ...any) {}, nil),
 		zoneCA:         zoneCA,
 		zoneCAPool:     zoneCA.TLSClientCAs(),
 		controllerCert: controllerCert,
 	}
+	r.pool.SetMain(&Connection{})
 
 	tlsConfig := r.operationalTLSConfig()
 
@@ -178,8 +183,9 @@ func TestOperationalTLSConfig_PresentsControllerCert(t *testing.T) {
 func TestOperationalTLSConfig_NoZoneCA_FallsBack(t *testing.T) {
 	r := &Runner{
 		config: &Config{InsecureSkipVerify: true},
-		conn:   &Connection{},
+		pool:   NewConnPool(func(string, ...any) {}, nil),
 	}
+	r.pool.SetMain(&Connection{})
 
 	tlsConfig := r.operationalTLSConfig()
 
@@ -234,8 +240,9 @@ func TestTLSVersionName(t *testing.T) {
 func TestHandleConnectOperational_ErrorOutputs(t *testing.T) {
 	r := &Runner{
 		config: &Config{Target: "127.0.0.1:1"},
-		conn:   &Connection{},
+		pool:   NewConnPool(func(string, ...any) {}, nil),
 	}
+	r.pool.SetMain(&Connection{})
 	state := newTestState()
 
 	step := &loader.Step{Params: map[string]any{

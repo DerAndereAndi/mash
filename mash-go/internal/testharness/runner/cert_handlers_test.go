@@ -52,7 +52,7 @@ func TestHandleVerifyCommissioningState(t *testing.T) {
 	}
 
 	// CONNECTED state.
-	r.conn.state = ConnTLSConnected
+	r.pool.Main().state = ConnTLSConnected
 	step = &loader.Step{Params: map[string]any{ParamExpectedState: CommissioningStateConnected}}
 	out, _ = r.handleVerifyCommissioningState(context.Background(), step, state)
 	if out[KeyCommissioningState] != CommissioningStateConnected {
@@ -60,8 +60,8 @@ func TestHandleVerifyCommissioningState(t *testing.T) {
 	}
 
 	// ADVERTISING state: was connected but now disconnected.
-	r.conn.state = ConnDisconnected
-	r.conn.hadConnection = true
+	r.pool.Main().state = ConnDisconnected
+	r.pool.Main().hadConnection = true
 	r.paseState = nil
 	step = &loader.Step{Params: map[string]any{ParamExpectedState: CommissioningStateAdvertising}}
 	out, _ = r.handleVerifyCommissioningState(context.Background(), step, state)
@@ -70,7 +70,7 @@ func TestHandleVerifyCommissioningState(t *testing.T) {
 	}
 
 	// COMMISSIONED state.
-	r.conn.hadConnection = false
+	r.pool.Main().hadConnection = false
 	r.paseState = &PASEState{completed: true}
 	step = &loader.Step{Params: map[string]any{ParamExpectedState: CommissioningStateCommissioned}}
 	out, _ = r.handleVerifyCommissioningState(context.Background(), step, state)
@@ -286,8 +286,8 @@ func TestHandleVerifyCertificate_WithZoneCA(t *testing.T) {
 	}
 	defer tlsConn.Close()
 
-	r.conn.tlsConn = tlsConn
-	r.conn.state = ConnOperational
+	r.pool.Main().tlsConn = tlsConn
+	r.pool.Main().state = ConnOperational
 
 	out, err := r.handleVerifyCertificate(context.Background(), &loader.Step{}, state)
 	if err != nil {
@@ -307,15 +307,12 @@ func TestHandleVerifyCertificate_WithZoneCA(t *testing.T) {
 
 func TestFindZoneConn(t *testing.T) {
 	r := newTestRunner()
-	r.activeZoneIDs = make(map[string]string)
 
 	connA := &Connection{state: ConnOperational}
 	connB := &Connection{state: ConnOperational}
 
-	r.activeZoneConns["step-zone1"] = connA
-	r.activeZoneIDs["step-zone1"] = "zone1"
-	r.activeZoneConns["step-zone2"] = connB
-	r.activeZoneIDs["step-zone2"] = "zone2"
+	r.pool.TrackZone("step-zone1", connA, "zone1")
+	r.pool.TrackZone("step-zone2", connB, "zone2")
 
 	// Found.
 	if got := r.findZoneConn("zone1"); got != connA {
@@ -333,7 +330,6 @@ func TestFindZoneConn(t *testing.T) {
 
 func TestHandleExtractCertDeviceID_ZoneAware(t *testing.T) {
 	r := newTestRunner()
-	r.activeZoneIDs = make(map[string]string)
 	state := newTestState()
 
 	// Generate two zone CAs and device certs with different device IDs.
@@ -400,11 +396,9 @@ func TestHandleExtractCertDeviceID_ZoneAware(t *testing.T) {
 	conn1 := &Connection{tlsConn: tls1, state: ConnOperational}
 	conn2 := &Connection{tlsConn: tls2, state: ConnOperational}
 
-	r.activeZoneConns["step-z1"] = conn1
-	r.activeZoneIDs["step-z1"] = "z1"
-	r.activeZoneConns["step-z2"] = conn2
-	r.activeZoneIDs["step-z2"] = "z2"
-	r.conn = conn2 // r.conn points to zone 2
+	r.pool.TrackZone("step-z1", conn1, "z1")
+	r.pool.TrackZone("step-z2", conn2, "z2")
+	r.pool.SetMain(conn2) // main conn points to zone 2
 
 	// Extract from zone 1 via zone_id parameter.
 	state.Set("my_zone", "z1")

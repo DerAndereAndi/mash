@@ -284,7 +284,7 @@ func (r *Runner) resolveTriggerForSetValue(featureRaw any, attribute string, val
 
 // invokeTriggerTestEvent sends a TriggerTestEvent invoke to the device's TestControl feature.
 func (r *Runner) invokeTriggerTestEvent(trigger uint64) (string, error) {
-	if !r.conn.isConnected() {
+	if !r.pool.Main().isConnected() {
 		return "", fmt.Errorf("not connected")
 	}
 
@@ -493,11 +493,11 @@ var operatingStateTriggers = map[string]uint64{
 
 // sendTriggerViaZone sends a triggerTestEvent invoke to the device using any
 // available zone connection. This is used when the main runner connection
-// (r.conn) is not available, e.g. in multi-zone tests where the runner
+// is not available, e.g. in multi-zone tests where the runner
 // connection was detached after commissioning.
 func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *engine.ExecutionState) error {
 	// Try main connection first.
-	if r.conn != nil && r.conn.isConnected() && r.conn.framer != nil {
+	if r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().framer != nil {
 		_, err := r.sendTrigger(ctx, trigger, state)
 		if err == nil {
 			r.deviceStateModified = true
@@ -506,7 +506,7 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 	}
 
 	// Find any zone connection to use: per-test tracker first, then
-	// runner-level activeZoneConns (which includes the suite zone).
+	// pool-level zone connections (which includes the suite zone).
 	ct := getConnectionTracker(state)
 	var conn *Connection
 	for _, c := range ct.zoneConnections {
@@ -516,8 +516,8 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 		}
 	}
 	if conn == nil {
-		for _, c := range r.activeZoneConns {
-			if c.isConnected() && c.framer != nil {
+		for _, key := range r.pool.ZoneKeys() {
+			if c := r.pool.Zone(key); c != nil && c.isConnected() && c.framer != nil {
 				conn = c
 				break
 			}
@@ -947,8 +947,8 @@ func (r *Runner) handleFactoryReset(ctx context.Context, step *loader.Step, stat
 	}
 
 	// Close and reset connection state -- the device is starting fresh.
-	if r.conn != nil && r.conn.isConnected() {
-		_ = r.conn.Close()
+	if r.pool.Main() != nil && r.pool.Main().isConnected() {
+		_ = r.pool.Main().Close()
 	}
 	r.paseState = nil
 
@@ -967,8 +967,8 @@ func (r *Runner) handlePowerCycle(ctx context.Context, step *loader.Step, state 
 	ds.processState = ProcessStateNone
 
 	// Close connection if any.
-	if r.conn != nil && r.conn.isConnected() {
-		_ = r.conn.Close()
+	if r.pool.Main() != nil && r.pool.Main().isConnected() {
+		_ = r.pool.Main().Close()
 	}
 
 	return map[string]any{

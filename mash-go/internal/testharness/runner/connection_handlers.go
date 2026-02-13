@@ -156,7 +156,7 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	state.Set(ZoneConnectionStateKey(zoneID), newConn)
 
 	// Track at runner level so connections are cleaned up between tests.
-	r.activeZoneConns[zoneID] = newConn
+	r.pool.TrackZone(zoneID, newConn, zoneID)
 
 	return map[string]any{
 		KeyConnectionEstablished: true,
@@ -482,9 +482,9 @@ func (r *Runner) handleWaitForNotificationAsZone(ctx context.Context, step *load
 	}
 
 	// Check for notifications buffered by sendTriggerViaZone.
-	// When r.conn and the zone connection are the same object (after
-	// two_zones_connected restores r.conn), sendTrigger buffers
-	// notifications to r.pendingNotifications via sendRequestAndRead.
+	// When the main connection and the zone connection are the same object
+	// (after two_zones_connected restores the main connection), sendTrigger
+	// buffers notifications to the pool via sendRequestAndRead.
 	// Check both buffers.
 	if len(conn.pendingNotifications) > 0 {
 		data := conn.pendingNotifications[0]
@@ -494,9 +494,8 @@ func (r *Runner) handleWaitForNotificationAsZone(ctx context.Context, step *load
 			KeyNotificationData:     data,
 		}, nil
 	}
-	if conn == r.conn && len(r.pendingNotifications) > 0 {
-		data := r.pendingNotifications[0]
-		r.pendingNotifications = r.pendingNotifications[1:]
+	if conn == r.pool.Main() && len(r.pool.PendingNotifications()) > 0 {
+		data, _ := r.pool.ShiftNotification()
 		return map[string]any{
 			KeyNotificationReceived: true,
 			KeyNotificationData:     data,
@@ -560,7 +559,7 @@ func (r *Runner) handleConnectWithTiming(ctx context.Context, step *loader.Step,
 
 // handleSendClose sends a ControlClose frame then closes the TCP connection.
 func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return map[string]any{KeyCloseSent: false, KeyCloseAckReceived: false}, nil
 	}
 
@@ -570,12 +569,12 @@ func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *
 		if sent, ok := rs.(bool); ok && sent {
 			// An async request was sent -- read the pending response
 			// before we close, so it's not lost.
-			if r.conn.tlsConn != nil {
-				_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-				if data, err := r.conn.framer.ReadFrame(); err == nil {
-					r.pendingNotifications = append(r.pendingNotifications, data)
+			if r.pool.Main().tlsConn != nil {
+				_ = r.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+				if data, err := r.pool.Main().framer.ReadFrame(); err == nil {
+					r.pool.AppendNotification(data)
 				}
-				_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+				_ = r.pool.Main().tlsConn.SetReadDeadline(time.Time{})
 			}
 			pendingResponseReceived = true
 		}
@@ -585,7 +584,7 @@ func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *
 	closeMsg := &wire.ControlMessage{Type: wire.ControlClose}
 	closeData, err := wire.EncodeControlMessage(closeMsg)
 	if err == nil {
-		_ = r.conn.framer.WriteFrame(closeData) // Best effort.
+		_ = r.pool.Main().framer.WriteFrame(closeData) // Best effort.
 	}
 
 	// Try to read close_ack with a short timeout before closing TCP.
@@ -598,7 +597,7 @@ func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *
 		err  error
 	}
 	ch := make(chan readResult, 1)
-	framer := r.conn.framer // capture locally -- r.conn may be replaced
+	framer := r.pool.Main().framer // capture locally -- main connection may be replaced
 	go func() {
 		d, e := framer.ReadFrame()
 		ch <- readResult{d, e}
@@ -612,7 +611,7 @@ func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *
 		// Timeout -- no ack received.
 	}
 
-	err = r.conn.Close()
+	err = r.pool.Main().Close()
 	state.Set(StateGracefullyClosed, true)
 	return map[string]any{
 		KeyCloseSent:                true,
@@ -626,11 +625,11 @@ func (r *Runner) handleSendClose(ctx context.Context, step *loader.Step, state *
 
 // handleSimultaneousClose sends close while reading for close from peer.
 func (r *Runner) handleSimultaneousClose(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return map[string]any{KeyCloseSent: false, KeyBothCloseReceived: false}, nil
 	}
 
-	err := r.conn.Close()
+	err := r.pool.Main().Close()
 	closed := err == nil
 	return map[string]any{
 		KeyCloseSent:         closed,
@@ -646,7 +645,7 @@ func (r *Runner) handleWaitDisconnect(ctx context.Context, step *loader.Step, st
 
 	timeoutMs := paramInt(params, KeyTimeoutMs, 10000)
 
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return map[string]any{KeyDisconnected: true}, nil
 	}
 
@@ -654,7 +653,7 @@ func (r *Runner) handleWaitDisconnect(ctx context.Context, step *loader.Step, st
 	defer cancel()
 
 	ch := make(chan error, 1)
-	framer := r.conn.framer // capture locally -- r.conn may be replaced
+	framer := r.pool.Main().framer // capture locally -- main connection may be replaced
 	go func() {
 		_, err := framer.ReadFrame()
 		ch <- err
@@ -664,7 +663,7 @@ func (r *Runner) handleWaitDisconnect(ctx context.Context, step *loader.Step, st
 	case err := <-ch:
 		// EOF or error means disconnected.
 		if err != nil {
-			r.conn.transitionTo(ConnDisconnected)
+			r.pool.Main().transitionTo(ConnDisconnected)
 			return map[string]any{KeyDisconnected: true}, nil
 		}
 		return map[string]any{KeyDisconnected: false}, nil
@@ -703,8 +702,8 @@ func (r *Runner) handleMonitorReconnect(ctx context.Context, step *loader.Step, 
 func (r *Runner) handleDisconnectAndMonitorBackoff(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	ct := getConnectionTracker(state)
 
-	if r.conn != nil && r.conn.isConnected() {
-		_ = r.conn.Close()
+	if r.pool.Main() != nil && r.pool.Main().isConnected() {
+		_ = r.pool.Main().Close()
 	}
 
 	ct.backoffState = &backoffTracker{
@@ -735,7 +734,7 @@ func (r *Runner) handlePing(ctx context.Context, step *loader.Step, state *engin
 		} else {
 			return map[string]any{KeyPingSent: true, KeyPongReceived: false, KeyError: fmt.Sprintf("no active connection for zone %s", zoneID)}, nil
 		}
-	} else if r.conn == nil || !r.conn.isConnected() {
+	} else if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		errMsg := "not connected"
 		if gc, ok := state.Get(StateGracefullyClosed); ok {
 			if closed, ok := gc.(bool); ok && closed {
@@ -806,7 +805,7 @@ func (r *Runner) handlePingMultiple(ctx context.Context, step *loader.Step, stat
 
 // handleVerifyKeepalive verifies keep-alive is active.
 func (r *Runner) handleVerifyKeepalive(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	active := r.conn != nil && r.conn.isConnected()
+	active := r.pool.Main() != nil && r.pool.Main().isConnected()
 
 	// Check if a ping has been sent by looking at pong sequence state.
 	pingSent := false
@@ -854,7 +853,7 @@ func (r *Runner) handleVerifyKeepalive(ctx context.Context, step *loader.Step, s
 func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -960,8 +959,8 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 		}, nil
 	}
 
-	r.debugf("handleSendRaw: about to write %d bytes, conn.state=%v", len(data), r.conn.state)
-	err = r.conn.framer.WriteFrame(data)
+	r.debugf("handleSendRaw: about to write %d bytes, conn.state=%v", len(data), r.pool.Main().state)
+	err = r.pool.Main().framer.WriteFrame(data)
 	if err != nil {
 		return map[string]any{
 			KeyRawSent: false,
@@ -983,7 +982,7 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 		err  error
 	}
 	ch := make(chan readResult, 1)
-	framer := r.conn.framer // capture locally -- r.conn may be replaced
+	framer := r.pool.Main().framer // capture locally -- main connection may be replaced
 	go func() {
 		d, e := framer.ReadFrame()
 		ch <- readResult{d, e}
@@ -1116,7 +1115,7 @@ func normalizeMapKeys(m map[any]any) map[any]any {
 func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1144,7 +1143,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 	if rb, ok := params[ParamRemainingBytes]; ok {
 		n := int(toFloat(rb))
 		payload := make([]byte, n)
-		err := r.conn.framer.WriteFrame(payload)
+		err := r.pool.Main().framer.WriteFrame(payload)
 		if err != nil {
 			return map[string]any{
 				KeyRawBytesSent: false,
@@ -1153,7 +1152,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 		}
 		outputs := map[string]any{
 			KeyRawBytesSent: true,
-			KeyConnectionOpen: r.conn.isConnected(),
+			KeyConnectionOpen: r.pool.Main().isConnected(),
 		}
 		// Try to read framed response.
 		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -1163,7 +1162,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 			err  error
 		}
 		ch := make(chan rr, 1)
-		framer := r.conn.framer // capture locally -- r.conn may be replaced
+		framer := r.pool.Main().framer // capture locally -- main connection may be replaced
 		go func() {
 			d, e := framer.ReadFrame()
 			ch <- rr{d, e}
@@ -1191,7 +1190,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 
 	outputs := map[string]any{
 		KeyRawBytesSent:   true,
-		KeyConnectionOpen: r.conn.isConnected(),
+		KeyConnectionOpen: r.pool.Main().isConnected(),
 	}
 
 	// Append followed_by_bytes: N zero bytes after the raw bytes.
@@ -1212,7 +1211,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 			size = int(toFloat(ps))
 		}
 		payload := generateValidCBORPayload(size, 1)
-		err := r.conn.framer.WriteFrame(payload)
+		err := r.pool.Main().framer.WriteFrame(payload)
 		if err != nil {
 			outputs[KeyParseSuccess] = false
 			return outputs, nil
@@ -1227,7 +1226,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 			err  error
 		}
 		ch := make(chan rr, 1)
-		framer := r.conn.framer // capture locally -- r.conn may be replaced
+		framer := r.pool.Main().framer // capture locally -- main connection may be replaced
 		go func() {
 			d, e := framer.ReadFrame()
 			ch <- rr{d, e}
@@ -1254,7 +1253,7 @@ func (r *Runner) handleSendRawBytes(ctx context.Context, step *loader.Step, stat
 func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1280,7 +1279,7 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 		defer cancel()
 
 		ch := make(chan error, 1)
-		framer := r.conn.framer // capture locally -- r.conn may be replaced
+		framer := r.pool.Main().framer // capture locally -- main connection may be replaced
 		go func() {
 			_, err := framer.ReadFrame()
 			ch <- err
@@ -1289,7 +1288,7 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 		select {
 		case err := <-ch:
 			if err != nil {
-				r.conn.transitionTo(ConnDisconnected)
+				r.pool.Main().transitionTo(ConnDisconnected)
 				return map[string]any{
 					KeyConnectionClosed: true,
 					KeyError:            "FATAL",
@@ -1301,7 +1300,7 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 				KeyResponseReceived: true,
 			}, nil
 		case <-readCtx.Done():
-			r.conn.transitionTo(ConnDisconnected)
+			r.pool.Main().transitionTo(ConnDisconnected)
 			return map[string]any{
 				KeyConnectionClosed: true,
 				KeyError:            "FATAL",
@@ -1313,7 +1312,7 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 	if ps, ok := params[ParamPayloadSize]; ok {
 		size := int(toFloat(ps))
 		payload := generateValidCBORPayload(size, r.nextMessageID())
-		err := r.conn.framer.WriteFrame(payload)
+		err := r.pool.Main().framer.WriteFrame(payload)
 		if err != nil {
 			return map[string]any{
 				KeyRawSent:      false,
@@ -1336,7 +1335,7 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 			err  error
 		}
 		ch := make(chan readResult, 1)
-		framer := r.conn.framer // capture locally -- r.conn may be replaced
+		framer := r.pool.Main().framer // capture locally -- main connection may be replaced
 		go func() {
 			d, e := framer.ReadFrame()
 			ch <- readResult{d, e}
@@ -1362,11 +1361,11 @@ func (r *Runner) handleSendRawFrame(ctx context.Context, step *loader.Step, stat
 // getWriteConn returns the underlying io.Writer for raw writes bypassing the framer.
 // Prefers tlsConn (for TLS connections) but falls back to plain conn.
 func (r *Runner) getWriteConn() io.Writer {
-	if r.conn.tlsConn != nil {
-		return r.conn.tlsConn
+	if r.pool.Main().tlsConn != nil {
+		return r.pool.Main().tlsConn
 	}
-	if r.conn.conn != nil {
-		return r.conn.conn
+	if r.pool.Main().conn != nil {
+		return r.pool.Main().conn
 	}
 	return nil
 }
@@ -1413,15 +1412,15 @@ func generateValidCBORPayload(targetSize int, messageID uint32) []byte {
 // side open, then attempts a short read to detect the peer's close_notify. An
 // io.EOF on read indicates the peer responded with close_notify before closing.
 func (r *Runner) handleSendTLSAlert(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.conn == nil || !r.conn.isConnected() || r.conn.tlsConn == nil {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() || r.pool.Main().tlsConn == nil {
 		return nil, fmt.Errorf("not connected")
 	}
 
 	// Send close_notify via CloseWrite (keeps read side open).
-	err := r.conn.tlsConn.CloseWrite()
+	err := r.pool.Main().tlsConn.CloseWrite()
 	if err != nil {
 		// CloseWrite failed -- close fully and report.
-		_ = r.conn.Close()
+		_ = r.pool.Main().Close()
 		return map[string]any{
 			KeyAlertSent:       false,
 			KeyPeerCloseNotify: false,
@@ -1431,16 +1430,16 @@ func (r *Runner) handleSendTLSAlert(ctx context.Context, step *loader.Step, stat
 
 	// Try to detect peer's close_notify by reading with a short deadline.
 	// When the peer sends close_notify, Go's TLS returns io.EOF.
-	_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = r.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	buf := make([]byte, 1)
-	_, readErr := r.conn.tlsConn.Read(buf)
+	_, readErr := r.pool.Main().tlsConn.Read(buf)
 
 	// io.EOF means the peer sent close_notify and closed gracefully.
 	// A net timeout means the peer didn't respond within the deadline.
 	peerCloseNotify := isEOFOrCloseNotify(readErr)
 
 	// Clean up connection state.
-	r.conn.transitionTo(ConnDisconnected)
+	r.pool.Main().transitionTo(ConnDisconnected)
 
 	return map[string]any{
 		KeyAlertSent:        true,
@@ -1515,7 +1514,7 @@ func (r *Runner) handleWaitForQueuedResult(ctx context.Context, step *loader.Ste
 func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return nil, fmt.Errorf("not connected")
 	}
 
@@ -1541,7 +1540,7 @@ func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loa
 			if err != nil {
 				break
 			}
-			if err := r.conn.framer.WriteFrame(data); err != nil {
+			if err := r.pool.Main().framer.WriteFrame(data); err != nil {
 				break
 			}
 			sent++
@@ -1573,7 +1572,7 @@ func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loa
 			if err != nil {
 				break
 			}
-			if err := r.conn.framer.WriteFrame(data); err != nil {
+			if err := r.pool.Main().framer.WriteFrame(data); err != nil {
 				break
 			}
 			sent++
@@ -1581,7 +1580,7 @@ func (r *Runner) handleSendMultipleThenDisconnect(ctx context.Context, step *loa
 		outputs[KeyMessagesSent] = sent
 	}
 
-	_ = r.conn.Close()
+	_ = r.pool.Main().Close()
 
 	return outputs, nil
 }
@@ -1729,7 +1728,7 @@ func (r *Runner) handleInvokeWithDisconnect(ctx context.Context, step *loader.St
 	result, err := r.handleInvoke(ctx, step, state)
 	if err != nil {
 		// If invoke itself fails, still report the disconnect.
-		_ = r.conn.Close()
+		_ = r.pool.Main().Close()
 		return map[string]any{
 			KeyDisconnectedAfterInvoke: true,
 			KeyInvokeSuccess:           false,
@@ -1738,7 +1737,7 @@ func (r *Runner) handleInvokeWithDisconnect(ctx context.Context, step *loader.St
 		}, nil
 	}
 
-	_ = r.conn.Close()
+	_ = r.pool.Main().Close()
 	result[KeyDisconnectedAfterInvoke] = true
 
 	// When disconnect_before_response was requested, mark outcome as UNKNOWN
@@ -1905,7 +1904,7 @@ func (r *Runner) handleUnsubscribe(ctx context.Context, step *loader.Step, state
 		}, nil
 	}
 
-	if !r.conn.isConnected() {
+	if !r.pool.Main().isConnected() {
 		return map[string]any{
 			KeyUnsubscribeSuccess: false,
 			KeyError:              "not connected",
@@ -1943,7 +1942,7 @@ func (r *Runner) handleUnsubscribe(ctx context.Context, step *loader.Step, state
 	// wait_for_notification doesn't return stale data.
 	state.Set(StatePrimingData, nil)
 	state.Set(StatePrimingAttrCount, nil)
-	r.pendingNotifications = nil
+	r.pool.ClearNotifications()
 
 	return map[string]any{
 		KeyUnsubscribeSuccess: resp.IsSuccess(),

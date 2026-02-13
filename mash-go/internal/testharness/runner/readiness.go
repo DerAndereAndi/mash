@@ -34,7 +34,7 @@ func (r *Runner) waitForCommissioningMode(ctx context.Context, timeout time.Dura
 // responding. Returns nil if the session is healthy, an error otherwise.
 // Used by setupPreconditions to detect corrupted sessions before reuse.
 func (r *Runner) probeSessionHealth() error {
-	if r.conn == nil || !r.conn.isConnected() || r.conn.framer == nil {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() || r.pool.Main().framer == nil {
 		return fmt.Errorf("no active connection")
 	}
 
@@ -50,17 +50,17 @@ func (r *Runner) probeSessionHealth() error {
 		return fmt.Errorf("encode health probe: %w", err)
 	}
 
-	if err := r.conn.framer.WriteFrame(data); err != nil {
-		r.conn.transitionTo(ConnDisconnected)
+	if err := r.pool.Main().framer.WriteFrame(data); err != nil {
+		r.pool.Main().transitionTo(ConnDisconnected)
 		return fmt.Errorf("send health probe: %w", err)
 	}
 
 	// Short timeout -- we just need to know the connection is alive.
-	if r.conn.tlsConn != nil {
-		_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if r.pool.Main().tlsConn != nil {
+		_ = r.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		defer func() {
-			if r.conn.tlsConn != nil {
-				_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+			if r.pool.Main().tlsConn != nil {
+				_ = r.pool.Main().tlsConn.SetReadDeadline(time.Time{})
 			}
 		}()
 	}
@@ -69,9 +69,9 @@ func (r *Runner) probeSessionHealth() error {
 	// orphaned responses from previous operations (mismatched messageId).
 	drained := 0
 	for range 20 {
-		respData, err := r.conn.framer.ReadFrame()
+		respData, err := r.pool.Main().framer.ReadFrame()
 		if err != nil {
-			r.conn.transitionTo(ConnDisconnected)
+			r.pool.Main().transitionTo(ConnDisconnected)
 			return fmt.Errorf("read health probe response: %w", err)
 		}
 		resp, err := wire.DecodeResponse(respData)
@@ -105,7 +105,7 @@ func (r *Runner) probeSessionHealth() error {
 // a fixed duration, we perform a protocol-level probe that returns as soon as
 // the device is ready.
 func (r *Runner) waitForOperationalReady(timeout time.Duration) error {
-	if r.conn == nil || !r.conn.isConnected() {
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return fmt.Errorf("not connected")
 	}
 
@@ -124,26 +124,26 @@ func (r *Runner) waitForOperationalReady(timeout time.Duration) error {
 	}
 
 	// Send the subscribe frame.
-	if err := r.conn.framer.WriteFrame(data); err != nil {
-		r.conn.transitionTo(ConnDisconnected)
+	if err := r.pool.Main().framer.WriteFrame(data); err != nil {
+		r.pool.Main().transitionTo(ConnDisconnected)
 		return fmt.Errorf("send readiness probe: %w", err)
 	}
 
 	// Set a tight read deadline so we don't block long on an unresponsive device.
-	if r.conn.tlsConn != nil {
-		_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(timeout))
+	if r.pool.Main().tlsConn != nil {
+		_ = r.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(timeout))
 		defer func() {
-			if r.conn.tlsConn != nil {
-				_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+			if r.pool.Main().tlsConn != nil {
+				_ = r.pool.Main().tlsConn.SetReadDeadline(time.Time{})
 			}
 		}()
 	}
 
 	// Read response, skipping notifications and orphaned responses.
 	for range 10 {
-		respData, err := r.conn.framer.ReadFrame()
+		respData, err := r.pool.Main().framer.ReadFrame()
 		if err != nil {
-			r.conn.transitionTo(ConnDisconnected)
+			r.pool.Main().transitionTo(ConnDisconnected)
 			return fmt.Errorf("read readiness response: %w", err)
 		}
 		resp, err := wire.DecodeResponse(respData)
@@ -152,7 +152,7 @@ func (r *Runner) waitForOperationalReady(timeout time.Duration) error {
 		}
 		// Notifications have messageId=0; buffer them for later consumption.
 		if resp.MessageID == 0 {
-			r.pendingNotifications = append(r.pendingNotifications, respData)
+			r.pool.AppendNotification(respData)
 			continue
 		}
 		if resp.MessageID != req.MessageID {

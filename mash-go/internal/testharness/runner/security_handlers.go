@@ -226,8 +226,8 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	secState.pool.mu.Unlock()
 
 	// Also set as main connection if not already connected
-	if !r.conn.isConnected() {
-		r.conn = newConn
+	if !r.pool.Main().isConnected() {
+		r.pool.SetMain(newConn)
 	}
 
 	// DEC-061: When send_pase is true on a fresh connection (no existing
@@ -559,7 +559,7 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 	}
 
 	// Send trigger if connected.
-	if r.conn != nil && r.conn.isConnected() && r.config.EnableKey != "" {
+	if r.pool.Main() != nil && r.pool.Main().isConnected() && r.config.EnableKey != "" {
 		triggerResult, err := r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
 		if err == nil {
 			triggerResult[KeyCommissioningModeEntered] = true
@@ -572,7 +572,7 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 	// When no connection is available, deliver the trigger via a temporary
 	// zone. This handles backoff tests where only raw PASE attempts were
 	// made and the harness has no operational connection.
-	if r.config.EnableKey != "" && r.config.Target != "" && (r.conn == nil || !r.conn.isConnected()) {
+	if r.config.EnableKey != "" && r.config.Target != "" && (r.pool.Main() == nil || !r.pool.Main().isConnected()) {
 		if triggerResult, err := r.deliverTriggerViaTemporaryZone(features.TriggerEnterCommissioningMode, state); err == nil {
 			// Restore commissioning state that handleCommission changed.
 			secState.commissioningActive = true
@@ -601,7 +601,7 @@ func (r *Runner) handleExitCommissioningMode(ctx context.Context, step *loader.S
 	state.Set(StateCommissioningActive, false)
 
 	// Send trigger if connected.
-	if r.conn != nil && r.conn.isConnected() && r.config.EnableKey != "" {
+	if r.pool.Main() != nil && r.pool.Main().isConnected() && r.config.EnableKey != "" {
 		triggerResult, err := r.sendTrigger(ctx, features.TriggerExitCommissioningMode, state)
 		if err == nil {
 			triggerResult[KeyCommissioningModeExited] = true
@@ -614,14 +614,14 @@ func (r *Runner) handleExitCommissioningMode(ctx context.Context, step *loader.S
 	// attempts), try sending the trigger via a zone connection from the
 	// connection tracker. This ensures exit_commissioning_mode reaches the
 	// device even when the harness has no operational main connection.
-	if r.config.EnableKey != "" && (r.conn == nil || !r.conn.isConnected()) {
+	if r.config.EnableKey != "" && (r.pool.Main() == nil || !r.pool.Main().isConnected()) {
 		ct := getConnectionTracker(state)
 		for _, zc := range ct.zoneConnections {
 			if zc.isConnected() {
-				saved := r.conn
-				r.conn = zc
+				saved := r.pool.Main()
+				r.pool.SetMain(zc)
 				triggerResult, err := r.sendTrigger(ctx, features.TriggerExitCommissioningMode, state)
-				r.conn = saved
+				r.pool.SetMain(saved)
 				if err == nil {
 					triggerResult[KeyCommissioningModeExited] = true
 					return triggerResult, nil
@@ -634,7 +634,7 @@ func (r *Runner) handleExitCommissioningMode(ctx context.Context, step *loader.S
 	// Last resort: deliver the trigger via a temporary zone when no
 	// connections exist. Commissions with correct setup code, sends
 	// trigger, then tears down. Accepts backoff delay from prior failures.
-	if r.config.EnableKey != "" && r.config.Target != "" && (r.conn == nil || !r.conn.isConnected()) {
+	if r.config.EnableKey != "" && r.config.Target != "" && (r.pool.Main() == nil || !r.pool.Main().isConnected()) {
 		if triggerResult, err := r.deliverTriggerViaTemporaryZone(features.TriggerExitCommissioningMode, state); err == nil {
 			secState.commissioningActive = false
 			state.Set(StateCommissioningActive, false)
@@ -689,8 +689,8 @@ func (r *Runner) deliverTriggerViaTemporaryZone(trigger uint64, state *engine.Ex
 	// ControlClose). The suite zone (if any) is preserved.
 	r.closeActiveZoneConns()
 	if r.suite.ZoneID() != "" {
-		// Preserve suite zone state; just detach r.conn from the temp zone.
-		r.conn = &Connection{}
+		// Preserve suite zone state; just detach main connection from the temp zone.
+		r.pool.SetMain(&Connection{})
 		r.paseState = nil
 	} else {
 		r.ensureDisconnected()
@@ -731,7 +731,7 @@ func (r *Runner) handleSendPing(ctx context.Context, step *loader.Step, state *e
 	}
 
 	// Look up the connection from the connection tracker's zone connections,
-	// then fall back to state lookup, then fall back to r.conn.
+	// then fall back to state lookup, then fall back to r.pool.Main().
 	var conn *Connection
 	if connName != "" {
 		ct := getConnectionTracker(state)
@@ -746,8 +746,8 @@ func (r *Runner) handleSendPing(ctx context.Context, step *loader.Step, state *e
 		}
 	}
 	// Fall back to the runner's main connection.
-	if conn == nil && r.conn != nil && r.conn.isConnected() {
-		conn = r.conn
+	if conn == nil && r.pool.Main() != nil && r.pool.Main().isConnected() {
+		conn = r.pool.Main()
 	}
 
 	if conn == nil || !conn.isConnected() {
@@ -842,23 +842,23 @@ func (r *Runner) handleContinueSlowExchange(ctx context.Context, step *loader.St
 				KeyTotalDurationMs:          time.Since(start).Milliseconds(),
 			}, nil
 		case <-ticker.C:
-			if r.conn == nil || r.conn.tlsConn == nil {
+			if r.pool.Main() == nil || r.pool.Main().tlsConn == nil {
 				return map[string]any{
 					KeyConnectionClosedByDevice: true,
 					KeyTotalDurationMs:          time.Since(start).Milliseconds(),
 				}, nil
 			}
 			// Probe: attempt a read with a short deadline.
-			_ = r.conn.tlsConn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			_ = r.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 			buf := make([]byte, 1)
-			_, err := r.conn.tlsConn.Read(buf)
-			_ = r.conn.tlsConn.SetReadDeadline(time.Time{})
+			_, err := r.pool.Main().tlsConn.Read(buf)
+			_ = r.pool.Main().tlsConn.SetReadDeadline(time.Time{})
 			if err != nil {
 				// Distinguish timeout (connection alive, no data) from EOF/reset (closed).
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					continue // read timed out -- connection still alive
 				}
-				r.conn.transitionTo(ConnDisconnected)
+				r.pool.Main().transitionTo(ConnDisconnected)
 				return map[string]any{
 					KeyConnectionClosedByDevice: true,
 					KeyTotalDurationMs:          time.Since(start).Milliseconds(),
@@ -1301,8 +1301,8 @@ func (r *Runner) handleFillConnections(ctx context.Context, step *loader.Step, s
 		secState.pool.connections = append(secState.pool.connections, newConn)
 		secState.pool.mu.Unlock()
 
-		if !r.conn.isConnected() {
-			r.conn = newConn
+		if !r.pool.Main().isConnected() {
+			r.pool.SetMain(newConn)
 		}
 		opened++
 	}
