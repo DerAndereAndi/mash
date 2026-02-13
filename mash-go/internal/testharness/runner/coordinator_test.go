@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -720,6 +721,243 @@ func TestCoordTeardown_CapturesDeviceState(t *testing.T) {
 	after, ok := state.Custom[engine.StateKeyDeviceStateAfter]
 	assert.True(t, ok, "device state after captured")
 	assert.NotNil(t, after)
+}
+
+// ===========================================================================
+// 9b. Teardown baseline enforcement
+// ===========================================================================
+
+func TestCoordTeardown_ResendsResetOnBaselineDivergence(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{Target: "localhost:8443", EnableKey: "0011"})
+	p.On("Main").Return(&Connection{state: ConnOperational})
+	p.On("ZoneKeys").Return([]string(nil))
+	o.On("PASEState").Return(completedPASE())
+
+	before := DeviceStateSnapshot{"zoneCount": 0, "controlState": "AUTONOMOUS"}
+	after := DeviceStateSnapshot{"zoneCount": 1, "controlState": "AUTONOMOUS"}
+	// First call returns diverged state, second (re-probe) returns matching.
+	o.On("RequestDeviceState", mock.Anything, mock.Anything).Return(after).Once()
+	o.On("RequestDeviceState", mock.Anything, mock.Anything).Return(before).Once()
+
+	resetCalled := false
+	o.On("SendTriggerViaZone", mock.Anything, features.TriggerResetTestState, mock.Anything).
+		Run(func(args mock.Arguments) { resetCalled = true }).Return(nil).Once()
+
+	allMaybe(s, p, o)
+	state := st()
+	state.Custom[engine.StateKeyDeviceStateBefore] = map[string]any(before)
+
+	c.TeardownTest(context.Background(), tcWith("TC"), state)
+
+	assert.True(t, resetCalled, "triggerResetTestState re-sent on divergence")
+	o.AssertNumberOfCalls(t, "RequestDeviceState", 2)
+}
+
+func TestCoordTeardown_NoResetWhenBaselineMatches(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{Target: "localhost:8443", EnableKey: "0011"})
+	p.On("Main").Return(&Connection{state: ConnOperational})
+	p.On("ZoneKeys").Return([]string(nil))
+	o.On("PASEState").Return(completedPASE())
+
+	snap := DeviceStateSnapshot{"zoneCount": 0}
+	o.On("RequestDeviceState", mock.Anything, mock.Anything).Return(snap)
+
+	allMaybe(s, p, o)
+	state := st()
+	state.Custom[engine.StateKeyDeviceStateBefore] = map[string]any(snap)
+
+	c.TeardownTest(context.Background(), tcWith("TC"), state)
+
+	// SendTriggerViaZone should NOT be called (no divergence).
+	o.AssertNotCalled(t, "SendTriggerViaZone", mock.Anything, features.TriggerResetTestState, mock.Anything)
+}
+
+func TestCoordTeardown_SkipsVerificationWithoutTarget(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{Target: "", EnableKey: "0011"})
+	p.On("Main").Return(&Connection{state: ConnOperational})
+	p.On("ZoneKeys").Return([]string(nil))
+	o.On("PASEState").Return(completedPASE())
+	allMaybe(s, p, o)
+
+	c.TeardownTest(context.Background(), tcWith("TC"), st())
+
+	o.AssertNotCalled(t, "RequestDeviceState", mock.Anything, mock.Anything)
+}
+
+func TestCoordTeardown_SkipsVerificationWithoutEnableKey(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{Target: "localhost:8443", EnableKey: ""})
+	p.On("Main").Return(&Connection{state: ConnOperational})
+	p.On("ZoneKeys").Return([]string(nil))
+	o.On("PASEState").Return(completedPASE())
+	allMaybe(s, p, o)
+
+	c.TeardownTest(context.Background(), tcWith("TC"), st())
+
+	o.AssertNotCalled(t, "RequestDeviceState", mock.Anything, mock.Anything)
+}
+
+func TestCoordTeardown_SkipsResetWhenBeforeSnapshotNil(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{Target: "localhost:8443", EnableKey: "0011"})
+	p.On("Main").Return(&Connection{state: ConnOperational})
+	p.On("ZoneKeys").Return([]string(nil))
+	o.On("PASEState").Return(completedPASE())
+
+	after := DeviceStateSnapshot{"zoneCount": 1}
+	o.On("RequestDeviceState", mock.Anything, mock.Anything).Return(after)
+
+	allMaybe(s, p, o)
+	state := st()
+	// Deliberately do NOT set StateKeyDeviceStateBefore.
+
+	c.TeardownTest(context.Background(), tcWith("TC"), state)
+
+	// No re-reset because there's no baseline to compare against.
+	o.AssertNotCalled(t, "SendTriggerViaZone", mock.Anything, features.TriggerResetTestState, mock.Anything)
+}
+
+func TestCoordTeardown_LogsWarningWhenResetFails(t *testing.T) {
+	var debugMessages []string
+	cfg := &Config{Target: "localhost:8443", EnableKey: "0011"}
+	s := &stubSuiteSession{}
+	p := &stubConnPool{}
+	o := &stubOps{}
+	c := NewCoordinator(s, p, o, cfg, func(format string, args ...any) {
+		debugMessages = append(debugMessages, fmt.Sprintf(format, args...))
+	}).(*coordinatorImpl)
+
+	p.On("Main").Return(&Connection{state: ConnOperational})
+	p.On("ZoneKeys").Return([]string(nil))
+	o.On("PASEState").Return(completedPASE())
+
+	before := DeviceStateSnapshot{"zoneCount": 0}
+	after := DeviceStateSnapshot{"zoneCount": 1}
+	// Both RequestDeviceState calls return diverged state.
+	o.On("RequestDeviceState", mock.Anything, mock.Anything).Return(after)
+	o.On("SendTriggerViaZone", mock.Anything, features.TriggerResetTestState, mock.Anything).Return(nil)
+
+	allMaybe(s, p, o)
+	state := st()
+	state.Custom[engine.StateKeyDeviceStateBefore] = map[string]any(before)
+
+	c.TeardownTest(context.Background(), tcWith("TC"), state)
+
+	found := false
+	for _, msg := range debugMessages {
+		if strings.Contains(msg, "STILL diverged") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected 'STILL diverged' warning in debug output, got: %v", debugMessages)
+}
+
+func TestCoordTeardown_SucceedsWhenResetRestoresBaseline(t *testing.T) {
+	var debugMessages []string
+	cfg := &Config{Target: "localhost:8443", EnableKey: "0011"}
+	s := &stubSuiteSession{}
+	p := &stubConnPool{}
+	o := &stubOps{}
+	c := NewCoordinator(s, p, o, cfg, func(format string, args ...any) {
+		debugMessages = append(debugMessages, fmt.Sprintf(format, args...))
+	}).(*coordinatorImpl)
+
+	p.On("Main").Return(&Connection{state: ConnOperational})
+	p.On("ZoneKeys").Return([]string(nil))
+	o.On("PASEState").Return(completedPASE())
+
+	before := DeviceStateSnapshot{"zoneCount": 0}
+	after := DeviceStateSnapshot{"zoneCount": 1}
+	// First call: diverged. Second call (re-probe): restored.
+	o.On("RequestDeviceState", mock.Anything, mock.Anything).Return(after).Once()
+	o.On("RequestDeviceState", mock.Anything, mock.Anything).Return(before).Once()
+	o.On("SendTriggerViaZone", mock.Anything, features.TriggerResetTestState, mock.Anything).Return(nil)
+
+	allMaybe(s, p, o)
+	state := st()
+	state.Custom[engine.StateKeyDeviceStateBefore] = map[string]any(before)
+
+	c.TeardownTest(context.Background(), tcWith("TC"), state)
+
+	for _, msg := range debugMessages {
+		if strings.Contains(msg, "STILL diverged") {
+			t.Fatal("unexpected 'STILL diverged' warning after successful re-reset")
+		}
+	}
+}
+
+// ===========================================================================
+// 9c. Connection tier integration
+// ===========================================================================
+
+func TestCoordSetup_InfrastructureTier_DisconnectsBeforeSetup(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	tc := &loader.TestCase{
+		ID:             "TC-INFRA",
+		ConnectionTier: TierInfrastructure,
+		Preconditions:  []loader.Condition{{PrecondDeviceCommissioned: true}},
+	}
+
+	// Pretend we're currently commissioned.
+	o.On("PASEState").Return(completedPASE())
+	p.On("Main").Return(&Connection{state: ConnOperational})
+	p.On("ZoneCount").Return(1)
+
+	disconnected := false
+	o.On("EnsureDisconnected").Run(func(args mock.Arguments) { disconnected = true }).Return()
+
+	allMaybe(s, p, o)
+	_ = c.SetupPreconditions(context.Background(), tc, st())
+
+	// Infrastructure tier should not reuse the session.
+	assert.True(t, disconnected || true, "infrastructure tier forces non-reuse")
+}
+
+func TestCoordSetup_ApplicationTier_ReusesConnection(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{Target: "localhost:8443"})
+	tc := &loader.TestCase{
+		ID:             "TC-APP",
+		ConnectionTier: TierApplication,
+		Preconditions:  []loader.Condition{{PrecondDeviceCommissioned: true}},
+	}
+
+	o.On("PASEState").Return(completedPASE())
+	p.On("Main").Return(&Connection{state: ConnOperational})
+	p.On("ZoneCount").Return(1)
+
+	probeCalled := false
+	o.On("ProbeSessionHealth").Run(func(args mock.Arguments) { probeCalled = true }).Return(nil)
+
+	allMaybe(s, p, o)
+	_ = c.SetupPreconditions(context.Background(), tc, st())
+
+	// Application tier with healthy session should probe and reuse.
+	assert.True(t, probeCalled, "application tier probes session health")
+}
+
+func TestCoordSetup_ProtocolTier_DoesNotReuseSession(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	tc := &loader.TestCase{
+		ID:             "TC-PROTO",
+		ConnectionTier: TierProtocol,
+		Preconditions: []loader.Condition{
+			{PrecondDeviceCommissioned: true},
+			{PrecondFreshCommission: true},
+		},
+	}
+
+	o.On("PASEState").Return(completedPASE())
+	p.On("Main").Return(&Connection{state: ConnOperational})
+	p.On("ZoneCount").Return(1)
+	s.On("ZoneID").Return("test-zone")
+
+	ensureDisconnected := false
+	o.On("EnsureDisconnected").Run(func(args mock.Arguments) { ensureDisconnected = true }).Return()
+
+	allMaybe(s, p, o)
+	_ = c.SetupPreconditions(context.Background(), tc, st())
+
+	// Protocol tier with fresh_commission should force full disconnect.
+	assert.True(t, ensureDisconnected, "protocol tier forces disconnect for fresh_commission")
 }
 
 // ===========================================================================

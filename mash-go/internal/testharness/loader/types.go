@@ -33,6 +33,11 @@ type TestCase struct {
 	// Tags for categorizing tests.
 	Tags []string `yaml:"tags,omitempty"`
 
+	// ConnectionTier declares connection isolation: "infrastructure",
+	// "protocol", or "application". If empty, the tier is auto-inferred
+	// from preconditions.
+	ConnectionTier string `yaml:"connection_tier,omitempty"`
+
 	// Skip indicates this test should be skipped.
 	Skip bool `yaml:"skip,omitempty"`
 

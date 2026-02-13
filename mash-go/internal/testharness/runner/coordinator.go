@@ -166,10 +166,14 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		c.ops.ClearWorkingCrypto()
 	}
 
-	// Session reuse decision.
-	canReuseSession := current >= precondLevelCommissioned &&
+	// Connection tier determines session isolation strategy.
+	tier := connectionTierFor(tc)
+	c.debugf("preconditions: tier=%s needed=%d current=%d for %s", tier, needed, current, tc.ID)
+
+	// Session reuse decision: only application-tier tests can reuse.
+	canReuseSession := tier == TierApplication &&
+		current >= precondLevelCommissioned &&
 		needed >= precondLevelCommissioned &&
-		!needsFreshCommission(tc.Preconditions) &&
 		!needsZoneConns &&
 		!hasPrecondition(tc.Preconditions, PrecondDeviceZonesFull) &&
 		!hasPrecondition(tc.Preconditions, PrecondDeviceHasGridZone) &&
@@ -501,7 +505,21 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, _ *loader.TestCase, st
 							}
 						}
 						state.Custom[engine.StateKeyDeviceStateDiffs] = diffMaps
-						c.debugf("teardown: device state diffs: %d fields changed", len(diffs))
+						c.debugf("teardown: baseline diverged on %d fields, re-resetting", len(diffs))
+
+						// Re-reset and verify baseline is restored.
+						resetCtx, resetCancel := context.WithTimeout(context.Background(), 5*time.Second)
+						_ = c.ops.SendTriggerViaZone(resetCtx, features.TriggerResetTestState, state)
+						resetCancel()
+
+						verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 3*time.Second)
+						if recheck := c.ops.RequestDeviceState(verifyCtx, state); recheck != nil {
+							recheckDiffs := diffSnapshots(DeviceStateSnapshot(before), recheck)
+							if len(recheckDiffs) > 0 {
+								c.debugf("teardown: baseline STILL diverged after re-reset (%d fields)", len(recheckDiffs))
+							}
+						}
+						verifyCancel()
 					}
 				}
 			}

@@ -479,17 +479,10 @@ func (r *Runner) reconnectOperational() error {
 
 	tlsConfig := r.operationalTLSConfig()
 	target := r.getTarget(nil)
-	var tlsConn *tls.Conn
-	var dialErr error
-	for attempt := range 3 {
+	tlsConn, dialErr := dialWithRetry(context.Background(), 3, func() (*tls.Conn, error) {
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
-		if dialErr == nil {
-			break
-		}
-		r.debugf("reconnectOperational: dial attempt %d failed: %v", attempt+1, dialErr)
-		time.Sleep(200 * time.Millisecond)
-	}
+		return tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+	})
 	if dialErr != nil {
 		return fmt.Errorf("operational reconnection failed: %w", dialErr)
 	}

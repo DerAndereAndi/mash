@@ -705,7 +705,7 @@ func (r *Runner) deliverTriggerViaTemporaryZone(trigger uint64, state *engine.Ex
 	// commission above set lastCommissioningAttempt; without this wait,
 	// the next PASE attempt (from the same or next test) would hit a
 	// "busy" rejection that incorrectly increments the backoff tracker.
-	time.Sleep(600 * time.Millisecond)
+	_ = contextSleep(commCtx, 600*time.Millisecond)
 
 	if triggerErr != nil {
 		return nil, fmt.Errorf("trigger delivery: %w", triggerErr)
@@ -1388,7 +1388,7 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			r.debugf("handleBusyPASEExchange: retry %d/%d after transient error: %v", attempt, maxAttempts-1, lastErr)
-			time.Sleep(retryDelay)
+			_ = contextSleep(context.Background(), retryDelay)
 		}
 
 		conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)

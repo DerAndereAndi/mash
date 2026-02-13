@@ -42,6 +42,7 @@ type Runner struct {
 	pool        ConnPool
 	coordinator Coordinator
 	dialer      Dialer
+	connMgr     ConnectionManager
 
 	// Working crypto: the "current" cert material used by operationalTLSConfig()
 	// and handlers. Restored from suite.Crypto() when reconnecting after
@@ -314,6 +315,22 @@ func New(config *Config) *Runner {
 	// Initialize dialer for TLS connection establishment.
 	r.dialer = NewDialer(config.InsecureSkipVerify, r.debugf)
 
+	// Initialize connection manager with callbacks into Runner for
+	// handler-dependent operations (PASE, mDNS, message IDs).
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{
+		connectFn: func(ctx context.Context, state *engine.ExecutionState) error {
+			return r.ensureConnected(ctx, state)
+		},
+		commissionFn: func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+			return r.handleCommission(ctx, step, state)
+		},
+		browseFn: func(ctx context.Context, serviceType string, params map[string]any, timeoutMs int) (int, error) {
+			services, err := r.browseMDNSOnce(ctx, serviceType, params, timeoutMs)
+			return len(services), err
+		},
+		nextMsgIDFn: func() uint32 { return r.nextMessageID() },
+	})
+
 	// Initialize coordinator (not yet wired -- Steps 5-7 will delegate to it).
 	r.coordinator = NewCoordinator(r.suite, r.pool, r, r.config, r.debugf)
 
@@ -471,50 +488,6 @@ func needsSuiteCommissioning(cases []*loader.TestCase, r *Runner) bool {
 		}
 	}
 	return false
-}
-
-// commissionSuiteZone performs one-time suite-level commissioning.
-// The suite zone is commissioned as ZoneTypeTest so it doesn't count
-// against the device's MaxZones and is transparent to device logic.
-func (r *Runner) commissionSuiteZone(ctx context.Context) error {
-	r.debugf("commissionSuiteZone: commissioning device for suite")
-	state := engine.NewExecutionState(ctx)
-
-	r.commissionZoneType = cert.ZoneTypeTest
-	if err := r.ensureCommissioned(ctx, state); err != nil {
-		r.commissionZoneType = 0
-		return fmt.Errorf("suite commissioning: %w", err)
-	}
-	r.commissionZoneType = 0
-
-	r.recordSuiteZone()
-	r.debugf("commissionSuiteZone: suite zone established (id=%s key=%s)", r.suite.ZoneID(), r.suite.ConnKey())
-	return nil
-}
-
-// recordSuiteZone captures the current commissioned zone as the suite zone.
-// It also saves the crypto state so it can be restored after lower-level
-// tests clear the working crypto (non-commissioned tests nil out zoneCA
-// and zoneCAPool to avoid stale TLS configs).
-func (r *Runner) recordSuiteZone() {
-	if r.paseState == nil || r.paseState.sessionKey == nil {
-		return
-	}
-	zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
-	r.suite.Record(zoneID, CryptoState{
-		ZoneCA:           r.zoneCA,
-		ControllerCert:   r.controllerCert,
-		ZoneCAPool:       r.zoneCAPool,
-		IssuedDeviceCert: r.issuedDeviceCert,
-	})
-}
-
-// removeSuiteZone sends RemoveZone for the suite zone and clears all state.
-func (r *Runner) removeSuiteZone() {
-	r.debugf("removeSuiteZone: tearing down suite zone %s", r.suite.ZoneID())
-	r.sendRemoveZone()
-	r.closeAllZoneConns()
-	r.ensureDisconnected()
 }
 
 // runAutoPICS commissions the device, reads its capabilities, and builds a
@@ -954,23 +927,14 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 
 	// Connect with timeout. If we just closed an existing connection,
 	// retry briefly in case the device hasn't detected the disconnect yet.
-	var conn *tls.Conn
-	var err error
 	maxAttempts := 1
 	if needsDisconnectWait {
 		maxAttempts = 5
 	}
-	for attempt := range maxAttempts {
+	conn, err := dialWithRetry(ctx, maxAttempts, func() (*tls.Conn, error) {
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		conn, err = tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
-		if err == nil {
-			break
-		}
-		if attempt < maxAttempts-1 {
-			r.debugf("handleConnect: dial attempt %d failed: %v, retrying", attempt+1, err)
-			time.Sleep(50 * time.Millisecond)
-		}
-	}
+		return tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+	})
 	if err != nil {
 		state.Set(StateEndTime, time.Now())
 		errorCode := classifyConnectError(err)

@@ -200,7 +200,9 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		if wait := cooldownRemaining(err); wait > 0 {
 			r.debugf("handleCommission: cooldown active, waiting %s and retrying", wait.Round(time.Millisecond))
 			r.pool.Main().transitionTo(ConnDisconnected)
-			time.Sleep(wait)
+			if err := contextSleep(ctx, wait); err != nil {
+				return nil, fmt.Errorf("cooldown wait cancelled: %w", err)
+			}
 
 			// Reconnect and retry PASE.
 			target := r.getTarget(params)
@@ -235,7 +237,9 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			code == commissioning.ErrCodeBusy && cooldownRemaining(err) == 0 {
 			r.debugf("handleCommission: device busy (stale session), waiting 500ms and retrying")
 			r.pool.Main().transitionTo(ConnDisconnected)
-			time.Sleep(500 * time.Millisecond)
+			if err := contextSleep(ctx, 500*time.Millisecond); err != nil {
+				return nil, fmt.Errorf("stale session wait cancelled: %w", err)
+			}
 
 			target := r.getTarget(params)
 			tlsConn, retryErr := r.dialer.DialCommissioning(ctx, target)
@@ -345,17 +349,10 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		// Retry the dial briefly in case the device hasn't registered the
 		// zone as awaiting reconnection yet.
 		tlsConfig := r.operationalTLSConfig()
-		var opConn *tls.Conn
-		var opErr error
-		for attempt := range 3 {
+		opConn, opErr := dialWithRetry(ctx, 3, func() (*tls.Conn, error) {
 			dialer := &net.Dialer{Timeout: 10 * time.Second}
-			opConn, opErr = tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
-			if opErr == nil {
-				break
-			}
-			r.debugf("handleCommission: operational dial attempt %d failed: %v", attempt+1, opErr)
-			time.Sleep(50 * time.Millisecond)
-		}
+			return tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		})
 
 		if opErr == nil && doTransition {
 			// Explicit transition: close commissioning conn, replace r.pool.Main().
