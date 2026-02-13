@@ -266,10 +266,37 @@ func (r *JSONReporter) ReportSuite(result *engine.SuiteResult) {
 	r.writeJSON(jr)
 }
 
-// ReportSummary delegates to ReportSuite for JSON since the output must be
-// a single complete JSON object.
+// JSONSummaryResult is a lightweight summary emitted after streamed tests.
+type JSONSummaryResult struct {
+	SuiteName   string  `json:"suite_name"`
+	Duration    string  `json:"duration"`
+	Total       int     `json:"total"`
+	Passed      int     `json:"passed"`
+	Failed      int     `json:"failed"`
+	Skipped     int     `json:"skipped"`
+	PassRate    float64 `json:"pass_rate"`
+	ShuffleSeed int64   `json:"shuffle_seed,omitempty"`
+}
+
+// ReportSummary emits a lightweight summary JSON object (no embedded tests)
+// after individual tests have already been streamed via ReportTest.
 func (r *JSONReporter) ReportSummary(result *engine.SuiteResult) {
-	r.ReportSuite(result)
+	total := result.PassCount + result.FailCount
+	var passRate float64
+	if total > 0 {
+		passRate = float64(result.PassCount) / float64(total) * 100
+	}
+
+	r.writeJSON(JSONSummaryResult{
+		SuiteName:   result.SuiteName,
+		Duration:    result.Duration.Round(time.Millisecond).String(),
+		Total:       len(result.Results),
+		Passed:      result.PassCount,
+		Failed:      result.FailCount,
+		Skipped:     result.SkipCount,
+		PassRate:    passRate,
+		ShuffleSeed: result.ShuffleSeed,
+	})
 }
 
 // ReportTest reports a single test result in JSON format.

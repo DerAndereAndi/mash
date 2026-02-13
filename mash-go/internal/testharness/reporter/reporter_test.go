@@ -397,6 +397,47 @@ func TestReportSummary_SkippedExcludedFromSlowest(t *testing.T) {
 	}
 }
 
+func TestJSONReporterSummary(t *testing.T) {
+	var buf bytes.Buffer
+	r := reporter.NewJSONReporter(&buf, true)
+
+	suite := createSuiteResult()
+	r.ReportSummary(suite)
+
+	var result reporter.JSONSummaryResult
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("Failed to parse JSON summary: %v", err)
+	}
+
+	if result.SuiteName != "Test Suite" {
+		t.Errorf("Expected suite name 'Test Suite', got %s", result.SuiteName)
+	}
+	if result.Total != 3 {
+		t.Errorf("Expected 3 total, got %d", result.Total)
+	}
+	if result.Passed != 1 {
+		t.Errorf("Expected 1 passed, got %d", result.Passed)
+	}
+	if result.Failed != 1 {
+		t.Errorf("Expected 1 failed, got %d", result.Failed)
+	}
+	if result.Skipped != 1 {
+		t.Errorf("Expected 1 skipped, got %d", result.Skipped)
+	}
+	if result.PassRate != 50.0 {
+		t.Errorf("Expected 50%% pass rate, got %.1f%%", result.PassRate)
+	}
+
+	// Verify this is a summary-only object (no "tests" key).
+	var raw map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &raw); err != nil {
+		t.Fatalf("Failed to parse raw JSON: %v", err)
+	}
+	if _, hasTests := raw["tests"]; hasTests {
+		t.Error("Summary JSON should not contain 'tests' array")
+	}
+}
+
 // TestJSONReporter_CBORMaps verifies that map[interface{}]interface{} values
 // (produced by CBOR decoders) in step outputs, expect results, and device
 // state snapshots are serialized successfully instead of producing marshal errors.
