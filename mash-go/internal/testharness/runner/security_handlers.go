@@ -688,7 +688,7 @@ func (r *Runner) deliverTriggerViaTemporaryZone(trigger uint64, state *engine.Ex
 	// Clean up: close temporary zone connections (sends RemoveZone +
 	// ControlClose). The suite zone (if any) is preserved.
 	r.closeActiveZoneConns()
-	if r.suiteZoneID != "" {
+	if r.suite.ZoneID() != "" {
 		// Preserve suite zone state; just detach r.conn from the temp zone.
 		r.conn = &Connection{}
 		r.paseState = nil

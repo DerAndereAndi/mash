@@ -14,6 +14,7 @@ func newTestRunner() *Runner {
 		config:          &Config{},
 		conn:            &Connection{},
 		activeZoneConns: make(map[string]*Connection),
+		suite:           NewSuiteSession(),
 	}
 }
 

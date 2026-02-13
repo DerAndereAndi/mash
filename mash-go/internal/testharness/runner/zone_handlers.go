@@ -601,10 +601,10 @@ func (r *Runner) handleVerifyOtherZone(ctx context.Context, step *loader.Step, s
 // two_zones_connected removes the suite zone during setup; without this check,
 // the count would be over-reduced.
 func (r *Runner) visibleZoneCount(rawCount int) int {
-	if r.suiteZoneID == "" || rawCount <= 0 {
+	if r.suite.ZoneID() == "" || rawCount <= 0 {
 		return rawCount
 	}
-	suiteConn, exists := r.activeZoneConns[r.suiteZoneKey]
+	suiteConn, exists := r.activeZoneConns[r.suite.ConnKey()]
 	if exists && suiteConn.isConnected() {
 		return rawCount - 1
 	}

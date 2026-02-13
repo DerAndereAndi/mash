@@ -718,15 +718,13 @@ func TestEnsureCommissioned_RestoresSuiteZoneCrypto(t *testing.T) {
 	r := newTestRunner()
 	r.conn.state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
-	r.suiteZoneID = "suite-zone-123"
-	r.suiteZoneKey = "main-suite-zone-123"
-
 	// Simulate suite zone crypto saved during recordSuiteZone.
-	suitePool := x509.NewCertPool()
-	r.suiteZoneCA = &cert.ZoneCA{}
-	r.suiteControllerCert = &cert.OperationalCert{}
-	r.suiteZoneCAPool = suitePool
-	r.suiteIssuedDeviceCert = &x509.Certificate{}
+	r.suite.Record("suite-zone-123", CryptoState{
+		ZoneCA:           &cert.ZoneCA{},
+		ControllerCert:   &cert.OperationalCert{},
+		ZoneCAPool:       x509.NewCertPool(),
+		IssuedDeviceCert: &x509.Certificate{},
+	})
 
 	// Working crypto is nil (cleared by a previous non-commissioned test).
 	r.zoneCA = nil
@@ -746,10 +744,10 @@ func TestEnsureCommissioned_RestoresSuiteZoneCrypto(t *testing.T) {
 	if r.zoneCAPool == nil {
 		t.Error("expected zoneCAPool to be created during suite zone crypto restore")
 	}
-	if r.zoneCA != r.suiteZoneCA {
+	if r.zoneCA != r.suite.Crypto().ZoneCA {
 		t.Error("expected zoneCA to be restored from suite zone crypto")
 	}
-	if r.controllerCert != r.suiteControllerCert {
+	if r.controllerCert != r.suite.Crypto().ControllerCert {
 		t.Error("expected controllerCert to be restored from suite zone crypto")
 	}
 }
@@ -1557,14 +1555,13 @@ func TestEnsureDisconnected_ClearsSuiteCrypto(t *testing.T) {
 	r := newTestRunner()
 	r.conn.state = ConnOperational
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
-	r.suiteZoneID = "suite-zone-123"
-	r.suiteZoneKey = "main-suite-zone-123"
-
 	// Simulate suite zone crypto.
-	r.suiteZoneCA = &cert.ZoneCA{}
-	r.suiteControllerCert = &cert.OperationalCert{}
-	r.suiteZoneCAPool = x509.NewCertPool()
-	r.suiteIssuedDeviceCert = &x509.Certificate{}
+	r.suite.Record("suite-zone-123", CryptoState{
+		ZoneCA:           &cert.ZoneCA{},
+		ControllerCert:   &cert.OperationalCert{},
+		ZoneCAPool:       x509.NewCertPool(),
+		IssuedDeviceCert: &x509.Certificate{},
+	})
 
 	// Current crypto.
 	r.zoneCA = &cert.ZoneCA{}
@@ -1588,26 +1585,19 @@ func TestEnsureDisconnected_ClearsSuiteCrypto(t *testing.T) {
 		t.Error("expected issuedDeviceCert to be nil after ensureDisconnected")
 	}
 
-	// Suite zone ID and key should be cleared.
-	if r.suiteZoneID != "" {
-		t.Error("expected suiteZoneID to be empty after ensureDisconnected")
+	// Suite session should be fully cleared.
+	if r.suite.IsCommissioned() {
+		t.Error("expected suite to not be commissioned after ensureDisconnected")
 	}
-	if r.suiteZoneKey != "" {
-		t.Error("expected suiteZoneKey to be empty after ensureDisconnected")
+	if r.suite.ZoneID() != "" {
+		t.Error("expected suite ZoneID to be empty after ensureDisconnected")
 	}
-
-	// Suite crypto should also be cleared to prevent stale restore.
-	if r.suiteZoneCA != nil {
-		t.Error("expected suiteZoneCA to be nil after ensureDisconnected")
+	if r.suite.ConnKey() != "" {
+		t.Error("expected suite ConnKey to be empty after ensureDisconnected")
 	}
-	if r.suiteControllerCert != nil {
-		t.Error("expected suiteControllerCert to be nil after ensureDisconnected")
-	}
-	if r.suiteZoneCAPool != nil {
-		t.Error("expected suiteZoneCAPool to be nil after ensureDisconnected")
-	}
-	if r.suiteIssuedDeviceCert != nil {
-		t.Error("expected suiteIssuedDeviceCert to be nil after ensureDisconnected")
+	crypto := r.suite.Crypto()
+	if crypto.ZoneCA != nil || crypto.ControllerCert != nil || crypto.ZoneCAPool != nil || crypto.IssuedDeviceCert != nil {
+		t.Error("expected suite crypto to be nil after ensureDisconnected")
 	}
 }
 
@@ -1620,14 +1610,8 @@ func TestEnsureCommissioned_NoStaleSuiteRestore_AfterEnsureDisconnected(t *testi
 	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
 
 	// Simulate state after ensureDisconnected + fresh commission:
-	// suiteZoneID is empty, suite crypto is nil, current crypto is from
-	// the fresh commission.
-	r.suiteZoneID = ""
-	r.suiteZoneKey = ""
-	r.suiteZoneCA = nil
-	r.suiteControllerCert = nil
-	r.suiteZoneCAPool = nil
-	r.suiteIssuedDeviceCert = nil
+	// Suite session is empty (simulating state after ensureDisconnected + fresh commission).
+	// NewSuiteSession() starts empty, so no explicit setup needed.
 
 	// Current crypto from the fresh commission.
 	freshCA := &cert.ZoneCA{}
@@ -1654,7 +1638,7 @@ func TestEnsureCommissioned_NoStaleSuiteRestore_AfterEnsureDisconnected(t *testi
 
 func TestIsSuiteZoneCommission_NoSuiteZone(t *testing.T) {
 	r := newTestRunner()
-	r.suiteZoneID = ""
+	// suite starts empty (not commissioned)
 	if r.isSuiteZoneCommission() {
 		t.Error("expected false when no suite zone exists")
 	}
@@ -1664,8 +1648,7 @@ func TestIsSuiteZoneCommission_SuiteZoneAlive(t *testing.T) {
 	// When the suite zone connection is alive, a new commission is for a
 	// secondary zone (GRID/LOCAL), not the suite zone itself.
 	r := newTestRunner()
-	r.suiteZoneID = "suite-123"
-	r.suiteZoneKey = "main-suite-123"
+	r.suite.Record("suite-123", CryptoState{})
 	suiteConn := &Connection{state: ConnOperational}
 	r.activeZoneConns["main-suite-123"] = suiteConn
 
@@ -1677,8 +1660,7 @@ func TestIsSuiteZoneCommission_SuiteZoneAlive(t *testing.T) {
 func TestIsSuiteZoneCommission_SuiteZoneDead(t *testing.T) {
 	// When the suite zone connection is dead, a new commission replaces it.
 	r := newTestRunner()
-	r.suiteZoneID = "suite-123"
-	r.suiteZoneKey = "main-suite-123"
+	r.suite.Record("suite-123", CryptoState{})
 	suiteConn := &Connection{state: ConnDisconnected}
 	r.activeZoneConns["main-suite-123"] = suiteConn
 
@@ -1691,8 +1673,7 @@ func TestIsSuiteZoneCommission_SuiteZoneMissing(t *testing.T) {
 	// When the suite zone connection is not in activeZoneConns (cleaned up),
 	// a new commission replaces it.
 	r := newTestRunner()
-	r.suiteZoneID = "suite-123"
-	r.suiteZoneKey = "main-suite-123"
+	r.suite.Record("suite-123", CryptoState{})
 
 	if !r.isSuiteZoneCommission() {
 		t.Error("expected true when suite zone connection is missing from activeZoneConns")

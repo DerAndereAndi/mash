@@ -72,6 +72,10 @@ type Runner struct {
 	// RemoveZone commands before closing connections.
 	activeZoneIDs map[string]string
 
+	// suite manages the suite-level zone that persists across tests.
+	// It is the single source of truth for zone crypto material.
+	suite SuiteSession
+
 	// commissionZoneType overrides the zone type used when generating the
 	// Zone CA during performCertExchange. Defaults to ZoneTypeLocal if zero.
 	commissionZoneType cert.ZoneType
@@ -79,21 +83,6 @@ type Runner struct {
 	// deviceStateModified is set when a trigger modifies device state.
 	// Used by setupPreconditions to send TriggerResetTestState between tests.
 	deviceStateModified bool
-
-	// suiteZoneID is the zone ID from suite-level commissioning.
-	// When set, closeActiveZoneConns skips this zone between tests.
-	suiteZoneID string
-
-	// suiteZoneKey is the key in activeZoneConns for the suite zone
-	// (typically "main-" + suiteZoneID).
-	suiteZoneKey string
-
-	// Suite zone crypto: saved when the suite zone is commissioned so it
-	// can be restored after lower-level tests clear the working crypto.
-	suiteZoneCA           *cert.ZoneCA
-	suiteControllerCert   *cert.OperationalCert
-	suiteZoneCAPool       *x509.CertPool
-	suiteIssuedDeviceCert *x509.Certificate
 
 	// pendingNotifications buffers notification frames that arrived while
 	// reading a command response (interleaved with the response).
@@ -344,6 +333,7 @@ func New(config *Config) *Runner {
 		activeZoneConns: make(map[string]*Connection),
 		activeZoneIDs:   make(map[string]string),
 		pics:            pics,
+		suite:           NewSuiteSession(),
 	}
 
 	// Set precondition callback (must be after r is created since it's a method on r).
@@ -458,7 +448,7 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 
 	// Suite setup: commission once before any test runs if L3 tests exist.
 	// If autoPICS already established a suite zone, skip this.
-	if r.suiteZoneID == "" && needsSuiteCommissioning(cases, r) {
+	if r.suite.ZoneID() == "" && needsSuiteCommissioning(cases, r) {
 		if err := r.commissionSuiteZone(ctx); err != nil {
 			stdlog.Printf("Suite commissioning failed: %v (tests will commission lazily)", err)
 		}
@@ -478,7 +468,7 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 	}
 
 	// Suite teardown: remove the suite zone and close all connections.
-	if r.suiteZoneKey != "" {
+	if r.suite.ConnKey() != "" {
 		r.removeSuiteZone()
 	}
 
@@ -517,7 +507,7 @@ func (r *Runner) commissionSuiteZone(ctx context.Context) error {
 	r.commissionZoneType = 0
 
 	r.recordSuiteZone()
-	r.debugf("commissionSuiteZone: suite zone established (id=%s key=%s)", r.suiteZoneID, r.suiteZoneKey)
+	r.debugf("commissionSuiteZone: suite zone established (id=%s key=%s)", r.suite.ZoneID(), r.suite.ConnKey())
 	return nil
 }
 
@@ -530,18 +520,17 @@ func (r *Runner) recordSuiteZone() {
 		return
 	}
 	zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
-	connKey := "main-" + zoneID
-	r.suiteZoneID = zoneID
-	r.suiteZoneKey = connKey
-	r.suiteZoneCA = r.zoneCA
-	r.suiteControllerCert = r.controllerCert
-	r.suiteZoneCAPool = r.zoneCAPool
-	r.suiteIssuedDeviceCert = r.issuedDeviceCert
+	r.suite.Record(zoneID, CryptoState{
+		ZoneCA:           r.zoneCA,
+		ControllerCert:   r.controllerCert,
+		ZoneCAPool:       r.zoneCAPool,
+		IssuedDeviceCert: r.issuedDeviceCert,
+	})
 }
 
 // removeSuiteZone sends RemoveZone for the suite zone and clears all state.
 func (r *Runner) removeSuiteZone() {
-	r.debugf("removeSuiteZone: tearing down suite zone %s", r.suiteZoneID)
+	r.debugf("removeSuiteZone: tearing down suite zone %s", r.suite.ZoneID())
 	r.sendRemoveZone()
 	r.closeAllZoneConns()
 	r.ensureDisconnected()
@@ -592,7 +581,7 @@ func (r *Runner) runAutoPICS(ctx context.Context) error {
 	// Keep the auto-PICS session as the suite zone. Run() will check
 	// needsSuiteCommissioning and skip if suiteZoneID is already set.
 	r.recordSuiteZone()
-	r.debugf("auto-PICS: preserving session as suite zone (id=%s)", r.suiteZoneID)
+	r.debugf("auto-PICS: preserving session as suite zone (id=%s)", r.suite.ZoneID())
 
 	return nil
 }
