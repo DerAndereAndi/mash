@@ -8,35 +8,13 @@ import (
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/wire"
-)
-
-// testContext creates a context with zone ID and type injected via the
-// same mechanism the LimitResolver uses (injected functions).
-type testContextKey struct{ name string }
-
-var (
-	testZoneIDKey   = testContextKey{"zoneID"}
-	testZoneTypeKey = testContextKey{"zoneType"}
+	"github.com/mash-protocol/mash-go/pkg/zonecontext"
 )
 
 func testCtx(zoneID string, zoneType cert.ZoneType) context.Context {
-	ctx := context.WithValue(context.Background(), testZoneIDKey, zoneID)
-	ctx = context.WithValue(ctx, testZoneTypeKey, zoneType)
+	ctx := zonecontext.ContextWithCallerZoneID(context.Background(), zoneID)
+	ctx = zonecontext.ContextWithCallerZoneType(ctx, zoneType)
 	return ctx
-}
-
-func testZoneIDFromCtx(ctx context.Context) string {
-	if v, ok := ctx.Value(testZoneIDKey).(string); ok {
-		return v
-	}
-	return ""
-}
-
-func testZoneTypeFromCtx(ctx context.Context) cert.ZoneType {
-	if v, ok := ctx.Value(testZoneTypeKey).(cert.ZoneType); ok {
-		return v
-	}
-	return 0
 }
 
 func newTestResolver() *LimitResolver {
@@ -44,10 +22,7 @@ func newTestResolver() *LimitResolver {
 	_ = ec.SetControlState(ControlStateControlled)
 	ec.SetCapabilities(true, false, false, false, false, false, false)
 
-	lr := NewLimitResolver(ec)
-	lr.ZoneIDFromContext = testZoneIDFromCtx
-	lr.ZoneTypeFromContext = testZoneTypeFromCtx
-	return lr
+	return NewLimitResolver(ec)
 }
 
 func intPtr(v int64) *int64 { return &v }

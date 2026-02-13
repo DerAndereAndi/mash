@@ -482,12 +482,7 @@ func createDevice() (*model.Device, *features.LimitResolver, discovery.DeviceCat
 			NominalMinPower:       1380000,
 			SupportsBidirectional: false,
 		})
-		resolver := evse.LimitResolver()
-		resolver.ZoneIDFromContext = service.CallerZoneIDFromContext
-		resolver.ZoneTypeFromContext = func(ctx context.Context) cert.ZoneType {
-			return service.CallerZoneTypeFromContext(ctx)
-		}
-		return evse.Device(), resolver, discovery.CategoryEMobility
+		return evse.Device(), evse.LimitResolver(), discovery.CategoryEMobility
 
 	case DeviceTypeInverter:
 		device, resolver := createInverterDevice()
@@ -637,12 +632,7 @@ func createHeatPumpDevice() (*model.Device, *features.LimitResolver) {
 		NominalMinPower:    1500000, // 1.5 kW
 		MaxCurrentPerPhase: 12000,   // 12A
 	})
-	resolver := hp.LimitResolver()
-	resolver.ZoneIDFromContext = service.CallerZoneIDFromContext
-	resolver.ZoneTypeFromContext = func(ctx context.Context) cert.ZoneType {
-		return service.CallerZoneTypeFromContext(ctx)
-	}
-	return hp.Device(), resolver
+	return hp.Device(), hp.LimitResolver()
 }
 
 // setupEnergyControlHandler configures the SetLimit/ClearLimit handlers
@@ -650,10 +640,6 @@ func createHeatPumpDevice() (*model.Device, *features.LimitResolver) {
 // Returns the resolver so the caller can wire the OnZoneMyChange callback.
 func setupEnergyControlHandler(energyControl *features.EnergyControl) *features.LimitResolver {
 	resolver := features.NewLimitResolver(energyControl)
-	resolver.ZoneIDFromContext = service.CallerZoneIDFromContext
-	resolver.ZoneTypeFromContext = func(ctx context.Context) cert.ZoneType {
-		return service.CallerZoneTypeFromContext(ctx)
-	}
 	resolver.Register()
 	return resolver
 }

@@ -265,12 +265,6 @@ func TestZoneInteraction(t *testing.T) {
 
 	evseServer := interaction.NewServer(evse.Device())
 
-	// Wire LimitResolver context extractors so it can identify zones
-	evse.LimitResolver().ZoneIDFromContext = service.CallerZoneIDFromContext
-	evse.LimitResolver().ZoneTypeFromContext = func(ctx context.Context) cert.ZoneType {
-		return service.CallerZoneTypeFromContext(ctx)
-	}
-
 	// Mark EVSE as accepting control
 	evse.AcceptController()
 

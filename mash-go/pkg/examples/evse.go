@@ -182,8 +182,7 @@ func (e *EVSE) setupChargerEndpoint(cfg EVSEConfig) {
 
 func (e *EVSE) setupCommandHandlers() {
 	// Multi-zone limit handling via LimitResolver.
-	// Context extractors (ZoneIDFromContext, ZoneTypeFromContext) must be
-	// injected by the caller before limits can be accepted.
+	// Zone identity is extracted from context via pkg/zonecontext.
 	e.limitResolver = features.NewLimitResolver(e.energyControl)
 	e.limitResolver.MaxConsumption = e.electrical.NominalMaxConsumption()
 	e.limitResolver.Register()
@@ -372,7 +371,7 @@ func (e *EVSE) GetEffectiveLimit() *int64 {
 }
 
 // LimitResolver returns the LimitResolver for external wiring
-// (e.g., injecting ZoneIDFromContext, ZoneTypeFromContext, OnZoneMyChange).
+// (e.g., setting OnZoneMyChange callback).
 func (e *EVSE) LimitResolver() *features.LimitResolver {
 	return e.limitResolver
 }

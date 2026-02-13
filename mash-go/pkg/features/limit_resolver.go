@@ -7,18 +7,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/duration"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 	"github.com/mash-protocol/mash-go/pkg/zone"
+	"github.com/mash-protocol/mash-go/pkg/zonecontext"
 )
 
 // LimitResolver tracks per-zone limits and resolves the effective limit
 // using "most restrictive wins" semantics. It manages duration timers
 // per zone and updates the EnergyControl feature attributes when limits change.
 //
-// Context extraction functions are injected as fields to avoid import cycles
-// with pkg/service.
+// Zone identity is extracted from context via pkg/zonecontext.
 type LimitResolver struct {
 	mu sync.Mutex
 
@@ -39,10 +38,6 @@ type LimitResolver struct {
 	// MaxProduction is the device's nominal maximum production power (mW).
 	// If > 0, SetLimit rejects productionLimit values above this threshold.
 	MaxProduction int64
-
-	// Injected context extractors (avoids import cycle with pkg/service).
-	ZoneIDFromContext   func(ctx context.Context) string
-	ZoneTypeFromContext func(ctx context.Context) cert.ZoneType
 
 	// OnZoneMyChange is called when a zone's "my" attribute values change.
 	// The callback receives the zone ID and a map of changed attribute IDs to values.
@@ -79,10 +74,7 @@ func (lr *LimitResolver) Register() {
 			return nil, false
 		}
 
-		zoneID := ""
-		if lr.ZoneIDFromContext != nil {
-			zoneID = lr.ZoneIDFromContext(ctx)
-		}
+		zoneID := zonecontext.CallerZoneIDFromContext(ctx)
 		if zoneID == "" {
 			return nil, true
 		}
@@ -111,10 +103,7 @@ func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest
 	defer lr.mu.Unlock()
 
 	// Extract zone identity from context
-	zoneID := ""
-	if lr.ZoneIDFromContext != nil {
-		zoneID = lr.ZoneIDFromContext(ctx)
-	}
+	zoneID := zonecontext.CallerZoneIDFromContext(ctx)
 	if zoneID == "" {
 		reason := LimitRejectReasonInvalidValue
 		return SetLimitResponse{
@@ -124,10 +113,7 @@ func (lr *LimitResolver) HandleSetLimit(ctx context.Context, req SetLimitRequest
 		}, nil
 	}
 
-	var zoneType cert.ZoneType
-	if lr.ZoneTypeFromContext != nil {
-		zoneType = lr.ZoneTypeFromContext(ctx)
-	}
+	zoneType := zonecontext.CallerZoneTypeFromContext(ctx)
 
 	// Validate negative values
 	if req.ConsumptionLimit != nil && *req.ConsumptionLimit < 0 {
@@ -251,10 +237,7 @@ func (lr *LimitResolver) HandleClearLimit(ctx context.Context, req ClearLimitReq
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
 
-	zoneID := ""
-	if lr.ZoneIDFromContext != nil {
-		zoneID = lr.ZoneIDFromContext(ctx)
-	}
+	zoneID := zonecontext.CallerZoneIDFromContext(ctx)
 	if zoneID == "" {
 		return nil
 	}

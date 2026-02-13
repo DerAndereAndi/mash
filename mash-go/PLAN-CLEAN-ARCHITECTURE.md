@@ -494,7 +494,7 @@ type DeviceModel interface {
 | 1 | 1.1 Split CommissioningOps | [x] Done | StateAccessor, LifecycleOps, WireOps, DiagnosticsOps, PreconditionHandler |
 | 1 | 1.2 Split ConnPool | [x] Done | ConnReader, ConnWriter, ConnLifecycle, RequestSender, NotificationBuffer |
 | 1 | 1.3 Add ConnectionManager to mockery | [x] Done | MockConnectionManager generated |
-| 2 | 2.1 Create pkg/zonecontext | [ ] Not started | |
+| 2 | 2.1 Create pkg/zonecontext | [x] Done | Context keys extracted, LimitResolver uses direct import, injection wiring removed |
 | 3 | 3.1 ZoneManager interface | [ ] Not started | |
 | 3 | 3.2 SubscriptionTracker interface | [ ] Not started | |
 | 3 | 3.3 DeviceModel interface | [ ] Not started | |

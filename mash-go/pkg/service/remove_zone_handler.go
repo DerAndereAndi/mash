@@ -6,6 +6,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/zonecontext"
 )
 
 // registerDeviceCommands registers service-level commands on the device's features.
@@ -48,42 +49,28 @@ func (s *DeviceService) registerDeviceCommands() {
 	deviceInfo.AddCommand(removeZoneCmd)
 }
 
-// callerZoneIDKey is the context key for storing the caller's zone ID.
-type callerZoneIDKey struct{}
-
 // ContextWithCallerZoneID returns a new context with the caller's zone ID.
+// Delegates to pkg/zonecontext.
 func ContextWithCallerZoneID(ctx context.Context, zoneID string) context.Context {
-	return context.WithValue(ctx, callerZoneIDKey{}, zoneID)
+	return zonecontext.ContextWithCallerZoneID(ctx, zoneID)
 }
 
 // CallerZoneIDFromContext extracts the caller's zone ID from the context.
-// Returns empty string if not set.
+// Returns empty string if not set. Delegates to pkg/zonecontext.
 func CallerZoneIDFromContext(ctx context.Context) string {
-	if v := ctx.Value(callerZoneIDKey{}); v != nil {
-		if zoneID, ok := v.(string); ok {
-			return zoneID
-		}
-	}
-	return ""
+	return zonecontext.CallerZoneIDFromContext(ctx)
 }
 
-// callerZoneTypeKey is the context key for storing the caller's zone type.
-type callerZoneTypeKey struct{}
-
 // ContextWithCallerZoneType returns a new context with the caller's zone type.
+// Delegates to pkg/zonecontext.
 func ContextWithCallerZoneType(ctx context.Context, zoneType cert.ZoneType) context.Context {
-	return context.WithValue(ctx, callerZoneTypeKey{}, zoneType)
+	return zonecontext.ContextWithCallerZoneType(ctx, zoneType)
 }
 
 // CallerZoneTypeFromContext extracts the caller's zone type from the context.
-// Returns 0 (invalid) if not set.
+// Returns 0 (invalid) if not set. Delegates to pkg/zonecontext.
 func CallerZoneTypeFromContext(ctx context.Context) cert.ZoneType {
-	if v := ctx.Value(callerZoneTypeKey{}); v != nil {
-		if zt, ok := v.(cert.ZoneType); ok {
-			return zt
-		}
-	}
-	return 0
+	return zonecontext.CallerZoneTypeFromContext(ctx)
 }
 
 // makeRemoveZoneHandler creates a command handler for the RemoveZone command.
