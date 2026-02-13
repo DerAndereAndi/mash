@@ -399,6 +399,23 @@ func (s *DeviceService) buildOperationalTLSConfig() {
 	}
 }
 
+// refreshTLSCert updates s.tlsCert to a remaining zone's operational cert.
+// Called after RemoveZone to avoid presenting a stale cert from a removed zone.
+// Caller must hold s.mu.Lock.
+func (s *DeviceService) refreshTLSCert() {
+	if s.certStore == nil {
+		return
+	}
+	for _, zoneID := range s.certStore.ListZones() {
+		if opCert, err := s.certStore.GetOperationalCert(zoneID); err == nil {
+			s.tlsCert = opCert.TLSCertificate()
+			s.buildOperationalTLSConfig()
+			return
+		}
+	}
+	// No zones left -- config will be rebuilt on next commissioning.
+}
+
 // getConfigForClient is the TLS callback that routes connections based on ALPN.
 // Commissioning connections (mash-comm/1) get a NoClientCert config with the
 // self-signed commissioning cert. Operational connections (mash/1) get a
@@ -2325,6 +2342,13 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 	if s.certStore != nil {
 		_ = s.certStore.RemoveOperationalCert(zoneID)
 	}
+
+	// Update s.tlsCert to a remaining zone's cert. Without this, the device
+	// presents a stale cert from the removed zone during TLS handshake,
+	// which controllers cannot verify against their Zone CA pool.
+	s.mu.Lock()
+	s.refreshTLSCert()
+	s.mu.Unlock()
 
 	// Save state to persist the removal
 	_ = s.SaveState() // Ignore error - zone is already removed from memory

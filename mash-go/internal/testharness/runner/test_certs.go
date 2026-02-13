@@ -14,6 +14,26 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/cert"
 )
 
+// Test certificate type constants for negative TLS testing.
+const (
+	CertTypeControllerExpired     = "controller_expired"
+	CertTypeControllerNotYetValid = "controller_not_yet_valid"
+	CertTypeControllerWrongZone   = "controller_wrong_zone"
+	CertTypeControllerNoClientAuth = "controller_no_client_auth"
+	CertTypeControllerCaTrue      = "controller_ca_true"
+	CertTypeControllerSelfSigned  = "controller_self_signed"
+	CertTypeControllerOperational = "controller_operational"
+
+	// cert_chain single-cert types (from buildCertChain).
+	CertTypeInvalidSignature = "invalid_signature_cert"
+	CertTypeExpired          = "expired_cert"
+	CertTypeWrongZone        = "wrong_zone_cert"
+
+	// Synthetic types assigned during handleConnect (not from cert generators).
+	CertTypeDeepChain = "deep_chain"
+	CertTypeNoALPN    = "no_alpn"
+)
+
 // generateTestClientCert creates a test client certificate with specific properties
 // for negative TLS testing. Returns a tls.Certificate ready for tlsConfig.Certificates.
 //
@@ -57,15 +77,15 @@ func generateTestClientCert(certType string, zoneCA *cert.ZoneCA) (tls.Certifica
 	signerKey := zoneCA.PrivateKey
 
 	switch certType {
-	case "controller_not_yet_valid":
+	case CertTypeControllerNotYetValid:
 		template.NotBefore = now.Add(24 * time.Hour)
 		template.NotAfter = now.Add(48 * time.Hour)
 
-	case "controller_expired":
+	case CertTypeControllerExpired:
 		template.NotBefore = now.Add(-48 * time.Hour)
 		template.NotAfter = now.Add(-24 * time.Hour)
 
-	case "controller_wrong_zone":
+	case CertTypeControllerWrongZone:
 		// Generate a separate CA and sign with it.
 		wrongCA, caErr := cert.GenerateZoneCA("wrong-zone-id", cert.ZoneTypeLocal)
 		if caErr != nil {
@@ -74,15 +94,15 @@ func generateTestClientCert(certType string, zoneCA *cert.ZoneCA) (tls.Certifica
 		signerCert = wrongCA.Certificate
 		signerKey = wrongCA.PrivateKey
 
-	case "controller_no_client_auth":
+	case CertTypeControllerNoClientAuth:
 		// Only ServerAuth -- missing ClientAuth.
 		template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
 
-	case "controller_ca_true":
+	case CertTypeControllerCaTrue:
 		template.IsCA = true
 		template.BasicConstraintsValid = true
 
-	case "controller_self_signed":
+	case CertTypeControllerSelfSigned:
 		// Self-signed: use the cert's own key as signer (not the zone CA).
 		signerCert = template
 		signerKey = privKey
@@ -131,18 +151,18 @@ func buildCertChain(specs []string, controllerCert *cert.OperationalCert, zoneCA
 	// Single special cert types (no chain composition needed).
 	if len(specs) == 1 {
 		switch specs[0] {
-		case "invalid_signature_cert":
+		case CertTypeInvalidSignature:
 			return generateInvalidSignatureCert(zoneCA)
-		case "expired_cert":
+		case CertTypeExpired:
 			if zoneCA == nil {
 				return tls.Certificate{}, fmt.Errorf("expired_cert requires a zone CA")
 			}
-			return generateTestClientCert("controller_expired", zoneCA)
-		case "wrong_zone_cert":
+			return generateTestClientCert(CertTypeControllerExpired, zoneCA)
+		case CertTypeWrongZone:
 			if zoneCA == nil {
 				return tls.Certificate{}, fmt.Errorf("wrong_zone_cert requires a zone CA")
 			}
-			return generateTestClientCert("controller_wrong_zone", zoneCA)
+			return generateTestClientCert(CertTypeControllerWrongZone, zoneCA)
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -47,7 +48,7 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondDeviceBCertExpired:          true,
 	PrecondTwoDevicesSameDiscriminator: true,
 	// Commissioning window simulation.
-	PrecondCommissioningWindowAt95s:     true,
+	PrecondCommissioningWindowAt95s: true,
 	// Environment / capacity simulation.
 	PrecondDeviceZonesFull:              true,
 	PrecondNoDevicesAdvertising:         true,
@@ -1061,17 +1062,6 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 			r.debugf("ensureCommissioned FAILED for %s: %v", tc.ID, setupErr)
 			return setupErr
 		}
-		// If the session was reused (same PASE state, not freshly commissioned),
-		// restore the crypto state that matches the actual connection. Without
-		// this, device_has_grid_zone leaves r.controllerCert signed by a Zone CA
-		// the device doesn't know, causing "unknown_ca" on new connections.
-		if r.paseState == savedPASE && savedPASE != nil && savedPASE.completed {
-			r.zoneCA = savedZoneCA
-			r.controllerCert = savedControllerCert
-			r.zoneCAPool = savedZoneCAPool
-			r.issuedDeviceCert = savedIssuedDeviceCert
-			r.debugf("restored crypto state after session reuse for %s", tc.ID)
-		}
 		// Store the commissioned zone ID for test interpolation
 		// (e.g. {{ grid_zone_id }}, {{ local_zone_id }}).
 		// Also update the simulated zone state entry with the actual
@@ -1152,6 +1142,20 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 			r.lastDeviceConnClose = time.Now()
 		}
 		state.Set(StateCommissioningActive, true)
+	}
+
+	// If no fresh PASE occurred and a precondition handler replaced the
+	// crypto (zoneCA changed), restore the pre-handler crypto. This only
+	// applies when there's no suite zone -- with a suite zone,
+	// ensureCommissioned already handles restoration unconditionally.
+	if r.suiteZoneID == "" &&
+		r.paseState == savedPASE && savedPASE != nil && savedPASE.completed &&
+		r.zoneCA != savedZoneCA {
+		r.zoneCA = savedZoneCA
+		r.controllerCert = savedControllerCert
+		r.zoneCAPool = savedZoneCAPool
+		r.issuedDeviceCert = savedIssuedDeviceCert
+		r.debugf("restored crypto state after session reuse for %s", tc.ID)
 	}
 
 	// Send control/process state triggers on real devices so the device
@@ -1313,6 +1317,28 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 	if r.paseState != nil && r.paseState.completed {
 		if wasConnected {
 			r.debugf("ensureCommissioned: reusing existing PASE session")
+			// Always restore suite zone crypto when reusing a session.
+			// Precondition handlers may have replaced it (device_has_grid_zone
+			// generates a new Zone CA), and lower-level tests may have cleared
+			// it (non-commissioned tests nil out zoneCA/zoneCAPool). The suite
+			// zone crypto is the only crypto that matches the device's actual
+			// TLS config for the reused session.
+			if r.suiteZoneCAPool != nil {
+				r.zoneCA = r.suiteZoneCA
+				r.controllerCert = r.suiteControllerCert
+				r.issuedDeviceCert = r.suiteIssuedDeviceCert
+				// Ensure suite zone CA is in the pool without replacing it.
+				// The accumulated pool may contain CAs from other zones the
+				// device still knows about. Replacing it with suiteZoneCAPool
+				// loses those CAs (the device may present a cert from any zone).
+				if r.zoneCAPool == nil {
+					r.zoneCAPool = x509.NewCertPool()
+				}
+				if r.suiteZoneCA != nil && r.suiteZoneCA.Certificate != nil {
+					r.zoneCAPool.AddCert(r.suiteZoneCA.Certificate)
+				}
+				r.debugf("ensureCommissioned: restored suite zone crypto")
+			}
 			state.Set(KeySessionEstablished, true)
 			state.Set(KeyConnectionEstablished, true)
 			if r.paseState.sessionKey != nil {
@@ -1370,7 +1396,17 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 			if r.paseState == nil || !r.paseState.completed {
 				return fmt.Errorf("precondition commission: PASE did not complete after cooldown retry")
 			}
-			return r.transitionToOperational(state)
+			if err := r.transitionToOperational(state); err != nil {
+				return err
+			}
+			if r.isSuiteZoneCommission() {
+				r.suiteZoneCA = r.zoneCA
+				r.suiteControllerCert = r.controllerCert
+				r.suiteZoneCAPool = r.zoneCAPool
+				r.suiteIssuedDeviceCert = r.issuedDeviceCert
+				r.debugf("ensureCommissioned: updated suite zone crypto after cooldown retry commission")
+			}
+			return nil
 		}
 
 		// Device errors (wrong setup code, zone type exists) are not retryable.
@@ -1399,7 +1435,17 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 					if r.paseState == nil || !r.paseState.completed {
 						return fmt.Errorf("precondition commission: PASE did not complete on retry %d", retry)
 					}
-					return r.transitionToOperational(state)
+					if trErr := r.transitionToOperational(state); trErr != nil {
+						return trErr
+					}
+					if r.isSuiteZoneCommission() {
+						r.suiteZoneCA = r.zoneCA
+						r.suiteControllerCert = r.controllerCert
+						r.suiteZoneCAPool = r.zoneCAPool
+						r.suiteIssuedDeviceCert = r.issuedDeviceCert
+						r.debugf("ensureCommissioned: updated suite zone crypto after infra retry commission")
+					}
+					return nil
 				}
 				retryClassified := classifyPASEError(err)
 				if Category(retryClassified) != ErrCatInfrastructure {
@@ -1419,7 +1465,42 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 		return fmt.Errorf("precondition commission: PASE handshake did not complete")
 	}
 
-	return r.transitionToOperational(state)
+	if err := r.transitionToOperational(state); err != nil {
+		return err
+	}
+
+	// After a fresh commission that re-creates the suite zone, update the
+	// saved suite crypto so subsequent session-reuse restores use the correct
+	// (current) crypto. Only update when this commission IS the suite zone;
+	// secondary zones (GRID/LOCAL from two_zones_connected) must not
+	// overwrite suite crypto.
+	if r.isSuiteZoneCommission() {
+		r.suiteZoneCA = r.zoneCA
+		r.suiteControllerCert = r.controllerCert
+		r.suiteZoneCAPool = r.zoneCAPool
+		r.suiteIssuedDeviceCert = r.issuedDeviceCert
+		r.debugf("ensureCommissioned: updated suite zone crypto after fresh commission")
+	}
+
+	return nil
+}
+
+// isSuiteZoneCommission returns true when the most recent commission created
+// (or re-created) the suite zone. Secondary zones such as GRID/LOCAL from
+// two_zones_connected must not overwrite the suite zone's saved crypto.
+//
+// Heuristic: if the suite zone connection is still alive, this commission
+// created a secondary zone alongside it. If the suite zone connection is
+// dead or gone, this commission replaces it.
+func (r *Runner) isSuiteZoneCommission() bool {
+	if r.suiteZoneID == "" {
+		return false
+	}
+	suiteConn, exists := r.activeZoneConns[r.suiteZoneKey]
+	if exists && suiteConn.isConnected() {
+		return false
+	}
+	return true
 }
 
 // transitionToOperational closes the commissioning connection and establishes
@@ -1501,7 +1582,16 @@ func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
 		return fmt.Errorf("no suite zone to reconnect to")
 	}
 	if r.zoneCAPool == nil || r.controllerCert == nil {
-		return fmt.Errorf("no crypto material for reconnection")
+		// Try restoring from saved suite zone crypto.
+		if r.suiteZoneCAPool != nil && r.suiteControllerCert != nil {
+			r.zoneCA = r.suiteZoneCA
+			r.controllerCert = r.suiteControllerCert
+			r.zoneCAPool = r.suiteZoneCAPool
+			r.issuedDeviceCert = r.suiteIssuedDeviceCert
+			r.debugf("reconnectToZone: restored suite zone crypto")
+		} else {
+			return fmt.Errorf("no crypto material for reconnection")
+		}
 	}
 
 	r.debugf("reconnectToZone: reconnecting to zone %s", r.suiteZoneID)
@@ -1668,6 +1758,11 @@ func (r *Runner) disconnectConnection() {
 
 // ensureDisconnected closes the connection AND clears all crypto material.
 // Used when abandoning the suite zone entirely (suite teardown, fresh_commission).
+// Clears both current AND suite crypto to prevent stale suite crypto from being
+// restored by ensureCommissioned's session-reuse path. Without clearing suite
+// crypto, a subsequent fresh commission creates new crypto but suiteZoneCAPool
+// still points to the old CA, causing "unknown_ca" TLS failures when the
+// session-reuse path restores the stale suite crypto.
 func (r *Runner) ensureDisconnected() {
 	r.disconnectConnection()
 	r.zoneCA = nil
@@ -1676,6 +1771,10 @@ func (r *Runner) ensureDisconnected() {
 	r.issuedDeviceCert = nil
 	r.suiteZoneID = ""
 	r.suiteZoneKey = ""
+	r.suiteZoneCA = nil
+	r.suiteControllerCert = nil
+	r.suiteZoneCAPool = nil
+	r.suiteIssuedDeviceCert = nil
 }
 
 // sendRemoveZone sends a RemoveZone invoke to the device so it re-enters

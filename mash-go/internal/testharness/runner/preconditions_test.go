@@ -711,6 +711,49 @@ func TestSetupPreconditions_ClearsZoneCAForNonCommissionedTests(t *testing.T) {
 	}
 }
 
+func TestEnsureCommissioned_RestoresSuiteZoneCrypto(t *testing.T) {
+	// When a lower-level test clears zoneCAPool and a subsequent
+	// commissioned test reuses the suite zone session, ensureCommissioned
+	// must restore the crypto from the saved suite zone state.
+	r := newTestRunner()
+	r.conn.state = ConnOperational
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.suiteZoneID = "suite-zone-123"
+	r.suiteZoneKey = "main-suite-zone-123"
+
+	// Simulate suite zone crypto saved during recordSuiteZone.
+	suitePool := x509.NewCertPool()
+	r.suiteZoneCA = &cert.ZoneCA{}
+	r.suiteControllerCert = &cert.OperationalCert{}
+	r.suiteZoneCAPool = suitePool
+	r.suiteIssuedDeviceCert = &x509.Certificate{}
+
+	// Working crypto is nil (cleared by a previous non-commissioned test).
+	r.zoneCA = nil
+	r.controllerCert = nil
+	r.zoneCAPool = nil
+	r.issuedDeviceCert = nil
+
+	state := engine.NewExecutionState(context.Background())
+	err := r.ensureCommissioned(context.Background(), state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have restored from suite zone crypto.
+	// The pool is created fresh (since it was nil) and suite CA cert is added
+	// if non-nil. With a nil Certificate in suiteZoneCA the pool is empty but non-nil.
+	if r.zoneCAPool == nil {
+		t.Error("expected zoneCAPool to be created during suite zone crypto restore")
+	}
+	if r.zoneCA != r.suiteZoneCA {
+		t.Error("expected zoneCA to be restored from suite zone crypto")
+	}
+	if r.controllerCert != r.suiteControllerCert {
+		t.Error("expected controllerCert to be restored from suite zone crypto")
+	}
+}
+
 func TestSetupPreconditions_TwoZonesConnected_PreservesZoneCA(t *testing.T) {
 	r := newTestRunner()
 	state := engine.NewExecutionState(context.Background())
@@ -1502,5 +1545,156 @@ func TestCooldownRemaining(t *testing.T) {
 				t.Errorf("expected 0, got %v", d)
 			}
 		})
+	}
+}
+
+func TestEnsureDisconnected_ClearsSuiteCrypto(t *testing.T) {
+	// When ensureDisconnected is called (fresh_commission, suite teardown),
+	// it must clear both current AND suite crypto. Without this, a subsequent
+	// fresh commission creates new crypto but suiteZoneCAPool still points
+	// to the old CA, causing "unknown_ca" TLS failures when ensureCommissioned's
+	// session-reuse path restores the stale suite crypto.
+	r := newTestRunner()
+	r.conn.state = ConnOperational
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.suiteZoneID = "suite-zone-123"
+	r.suiteZoneKey = "main-suite-zone-123"
+
+	// Simulate suite zone crypto.
+	r.suiteZoneCA = &cert.ZoneCA{}
+	r.suiteControllerCert = &cert.OperationalCert{}
+	r.suiteZoneCAPool = x509.NewCertPool()
+	r.suiteIssuedDeviceCert = &x509.Certificate{}
+
+	// Current crypto.
+	r.zoneCA = &cert.ZoneCA{}
+	r.controllerCert = &cert.OperationalCert{}
+	r.zoneCAPool = x509.NewCertPool()
+	r.issuedDeviceCert = &x509.Certificate{}
+
+	r.ensureDisconnected()
+
+	// All current crypto should be cleared.
+	if r.zoneCA != nil {
+		t.Error("expected zoneCA to be nil after ensureDisconnected")
+	}
+	if r.controllerCert != nil {
+		t.Error("expected controllerCert to be nil after ensureDisconnected")
+	}
+	if r.zoneCAPool != nil {
+		t.Error("expected zoneCAPool to be nil after ensureDisconnected")
+	}
+	if r.issuedDeviceCert != nil {
+		t.Error("expected issuedDeviceCert to be nil after ensureDisconnected")
+	}
+
+	// Suite zone ID and key should be cleared.
+	if r.suiteZoneID != "" {
+		t.Error("expected suiteZoneID to be empty after ensureDisconnected")
+	}
+	if r.suiteZoneKey != "" {
+		t.Error("expected suiteZoneKey to be empty after ensureDisconnected")
+	}
+
+	// Suite crypto should also be cleared to prevent stale restore.
+	if r.suiteZoneCA != nil {
+		t.Error("expected suiteZoneCA to be nil after ensureDisconnected")
+	}
+	if r.suiteControllerCert != nil {
+		t.Error("expected suiteControllerCert to be nil after ensureDisconnected")
+	}
+	if r.suiteZoneCAPool != nil {
+		t.Error("expected suiteZoneCAPool to be nil after ensureDisconnected")
+	}
+	if r.suiteIssuedDeviceCert != nil {
+		t.Error("expected suiteIssuedDeviceCert to be nil after ensureDisconnected")
+	}
+}
+
+func TestEnsureCommissioned_NoStaleSuiteRestore_AfterEnsureDisconnected(t *testing.T) {
+	// After ensureDisconnected clears suite crypto, ensureCommissioned's
+	// session-reuse path must NOT restore stale suite crypto.
+	// This tests the fix for TC-IPV6-004/TC-TLS-CTRL-006 shuffle failures.
+	r := newTestRunner()
+	r.conn.state = ConnOperational
+	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+
+	// Simulate state after ensureDisconnected + fresh commission:
+	// suiteZoneID is empty, suite crypto is nil, current crypto is from
+	// the fresh commission.
+	r.suiteZoneID = ""
+	r.suiteZoneKey = ""
+	r.suiteZoneCA = nil
+	r.suiteControllerCert = nil
+	r.suiteZoneCAPool = nil
+	r.suiteIssuedDeviceCert = nil
+
+	// Current crypto from the fresh commission.
+	freshCA := &cert.ZoneCA{}
+	freshPool := x509.NewCertPool()
+	r.zoneCA = freshCA
+	r.controllerCert = &cert.OperationalCert{}
+	r.zoneCAPool = freshPool
+	r.issuedDeviceCert = &x509.Certificate{}
+
+	state := engine.NewExecutionState(context.Background())
+	err := r.ensureCommissioned(context.Background(), state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Current crypto should remain unchanged (not replaced by nil suite crypto).
+	if r.zoneCA != freshCA {
+		t.Error("expected zoneCA to remain as fresh commission crypto")
+	}
+	if r.zoneCAPool != freshPool {
+		t.Error("expected zoneCAPool to remain as fresh commission crypto")
+	}
+}
+
+func TestIsSuiteZoneCommission_NoSuiteZone(t *testing.T) {
+	r := newTestRunner()
+	r.suiteZoneID = ""
+	if r.isSuiteZoneCommission() {
+		t.Error("expected false when no suite zone exists")
+	}
+}
+
+func TestIsSuiteZoneCommission_SuiteZoneAlive(t *testing.T) {
+	// When the suite zone connection is alive, a new commission is for a
+	// secondary zone (GRID/LOCAL), not the suite zone itself.
+	r := newTestRunner()
+	r.suiteZoneID = "suite-123"
+	r.suiteZoneKey = "main-suite-123"
+	suiteConn := &Connection{state: ConnOperational}
+	r.activeZoneConns["main-suite-123"] = suiteConn
+
+	if r.isSuiteZoneCommission() {
+		t.Error("expected false when suite zone connection is alive")
+	}
+}
+
+func TestIsSuiteZoneCommission_SuiteZoneDead(t *testing.T) {
+	// When the suite zone connection is dead, a new commission replaces it.
+	r := newTestRunner()
+	r.suiteZoneID = "suite-123"
+	r.suiteZoneKey = "main-suite-123"
+	suiteConn := &Connection{state: ConnDisconnected}
+	r.activeZoneConns["main-suite-123"] = suiteConn
+
+	if !r.isSuiteZoneCommission() {
+		t.Error("expected true when suite zone connection is dead")
+	}
+}
+
+func TestIsSuiteZoneCommission_SuiteZoneMissing(t *testing.T) {
+	// When the suite zone connection is not in activeZoneConns (cleaned up),
+	// a new commission replaces it.
+	r := newTestRunner()
+	r.suiteZoneID = "suite-123"
+	r.suiteZoneKey = "main-suite-123"
+
+	if !r.isSuiteZoneCommission() {
+		t.Error("expected true when suite zone connection is missing from activeZoneConns")
 	}
 }

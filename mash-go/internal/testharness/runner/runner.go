@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
@@ -86,6 +87,13 @@ type Runner struct {
 	// suiteZoneKey is the key in activeZoneConns for the suite zone
 	// (typically "main-" + suiteZoneID).
 	suiteZoneKey string
+
+	// Suite zone crypto: saved when the suite zone is commissioned so it
+	// can be restored after lower-level tests clear the working crypto.
+	suiteZoneCA           *cert.ZoneCA
+	suiteControllerCert   *cert.OperationalCert
+	suiteZoneCAPool       *x509.CertPool
+	suiteIssuedDeviceCert *x509.Certificate
 
 	// pendingNotifications buffers notification frames that arrived while
 	// reading a command response (interleaved with the response).
@@ -206,7 +214,7 @@ const (
 
 // Connection represents a connection to the target.
 type Connection struct {
-	conn   net.Conn
+	conn    net.Conn
 	tlsConn *tls.Conn
 	framer  *transport.Framer
 	state   ConnState
@@ -514,6 +522,9 @@ func (r *Runner) commissionSuiteZone(ctx context.Context) error {
 }
 
 // recordSuiteZone captures the current commissioned zone as the suite zone.
+// It also saves the crypto state so it can be restored after lower-level
+// tests clear the working crypto (non-commissioned tests nil out zoneCA
+// and zoneCAPool to avoid stale TLS configs).
 func (r *Runner) recordSuiteZone() {
 	if r.paseState == nil || r.paseState.sessionKey == nil {
 		return
@@ -522,6 +533,10 @@ func (r *Runner) recordSuiteZone() {
 	connKey := "main-" + zoneID
 	r.suiteZoneID = zoneID
 	r.suiteZoneKey = connKey
+	r.suiteZoneCA = r.zoneCA
+	r.suiteControllerCert = r.controllerCert
+	r.suiteZoneCAPool = r.zoneCAPool
+	r.suiteIssuedDeviceCert = r.issuedDeviceCert
 }
 
 // removeSuiteZone sends RemoveZone for the suite zone and clears all state.
@@ -658,6 +673,15 @@ func (r *Runner) verifyPeerCertAgainstZoneCA(rawCerts [][]byte, _ [][]*x509.Cert
 	}
 
 	if _, err := leaf.Verify(opts); err != nil {
+		leafFP := sha256.Sum256(leaf.Raw)
+		issuerFP := sha256.Sum256(leaf.RawIssuer)
+		r.debugf("verifyPeerCert FAILED: leaf.CN=%s leaf.FP=%x issuer.FP=%x pool=%p err=%v",
+			leaf.Subject.CommonName, leafFP[:4], issuerFP[:4], r.zoneCAPool, err)
+		if r.zoneCA != nil {
+			caFP := sha256.Sum256(r.zoneCA.Certificate.Raw)
+			r.debugf("verifyPeerCert: zoneCA.CN=%s zoneCA.FP=%x",
+				r.zoneCA.Certificate.Subject.CommonName, caFP[:4])
+		}
 		return fmt.Errorf("certificate chain verification failed: %w", err)
 	}
 
@@ -951,12 +975,12 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	// Translate boolean cert test params to client_cert type.
 	if _, ok := step.Params["client_cert"]; !ok {
 		if toBool(step.Params["use_expired_cert"]) {
-			step.Params["client_cert"] = "controller_expired"
+			step.Params["client_cert"] = CertTypeControllerExpired
 			r.debugf("handleConnect: translated use_expired_cert to client_cert=controller_expired, zoneCA=%v", r.zoneCA != nil)
 		} else if toBool(step.Params["use_wrong_zone_cert"]) {
-			step.Params["client_cert"] = "controller_wrong_zone"
+			step.Params["client_cert"] = CertTypeControllerWrongZone
 		} else if toBool(step.Params["use_operational_cert"]) {
-			step.Params["client_cert"] = "controller_operational"
+			step.Params["client_cert"] = CertTypeControllerOperational
 		}
 	}
 
@@ -965,13 +989,13 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		if _, hasCC := step.Params["client_cert"]; !hasCC {
 			switch certType {
 			case "expired":
-				step.Params["client_cert"] = "controller_expired"
+				step.Params["client_cert"] = CertTypeControllerExpired
 			case "wrong_zone_ca":
-				step.Params["client_cert"] = "controller_wrong_zone"
+				step.Params["client_cert"] = CertTypeControllerWrongZone
 			case "self_signed":
-				step.Params["client_cert"] = "controller_self_signed"
+				step.Params["client_cert"] = CertTypeControllerSelfSigned
 			case "valid":
-				step.Params["client_cert"] = "controller_operational"
+				step.Params["client_cert"] = CertTypeControllerOperational
 			default:
 				step.Params["client_cert"] = "controller_" + certType
 			}
@@ -994,7 +1018,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		tlsConfig.Certificates = []tls.Certificate{certChain}
 	} else if clientCertType, ok := step.Params["client_cert"].(string); ok && clientCertType != "" {
 		switch clientCertType {
-		case "controller_operational":
+		case CertTypeControllerOperational:
 			// Use default r.controllerCert -- already set by operationalTLSConfig.
 		case "none":
 			tlsConfig.Certificates = nil
@@ -1082,7 +1106,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		}
 	}
 	needsDisconnectWait := false
-	if (clientCertParam == "controller_operational" || isOperationalChain) && r.conn != nil && r.conn.tlsConn != nil {
+	if (clientCertParam == CertTypeControllerOperational || isOperationalChain) && r.conn != nil && r.conn.tlsConn != nil {
 		r.conn.transitionTo(ConnDisconnected)
 		needsDisconnectWait = true
 	}
@@ -1099,7 +1123,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	var err error
 	maxAttempts := 1
 	if needsDisconnectWait {
-		maxAttempts = 3
+		maxAttempts = 5
 	}
 	for attempt := range maxAttempts {
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
@@ -1109,7 +1133,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		}
 		if attempt < maxAttempts-1 {
 			r.debugf("handleConnect: dial attempt %d failed: %v, retrying", attempt+1, err)
-			time.Sleep(25 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 		}
 	}
 	if err != nil {
@@ -1161,12 +1185,12 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	hasClockOffset := clockOffset != nil && clockOffset != int64(0) && clockOffset != 0
 	probeForRejection := len(tlsConfig.Certificates) > 0 && clientCertType != "" &&
 		clientCertType != "leaf_cert" &&
-		(clientCertType != "controller_operational" || hasClockOffset)
+		(clientCertType != CertTypeControllerOperational || hasClockOffset)
 	// Also probe for deep chains (3+ certs) -- the device rejects chain depth > 2.
 	if !probeForRejection {
 		if chainSpec, ok := step.Params["cert_chain"].([]any); ok && len(chainSpec) > 2 {
 			probeForRejection = true
-			clientCertType = "deep_chain"
+			clientCertType = CertTypeDeepChain
 		}
 	}
 	// Also probe when ALPN is null (no ALPN extension sent) -- the device
@@ -1174,7 +1198,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	if !probeForRejection {
 		if val, hasALPN := step.Params["alpn"]; hasALPN && val == nil {
 			probeForRejection = true
-			clientCertType = "no_alpn"
+			clientCertType = CertTypeNoALPN
 		}
 	}
 	if probeForRejection {
@@ -1219,6 +1243,28 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 
 	// Record end time for verify_timing.
 	state.Set(StateEndTime, time.Now())
+
+	// If an invalid test cert was used (expired, wrong_zone, etc.) and the
+	// probe didn't detect rejection (timeout), don't replace r.conn. These
+	// connections are diagnostic -- they must never corrupt the runner's
+	// primary connection, which may be the suite zone's operational link.
+	// Only guard for known-invalid cert types; valid certs (operational,
+	// deep chains) that survived the probe should proceed normally.
+	if probeForRejection && isInvalidTestCert(clientCertType) {
+		cs := conn.ConnectionState()
+		_ = conn.Close()
+		return map[string]any{
+			KeyConnectionEstablished: true,
+			KeyConnected:             true,
+			KeyTLSHandshakeSuccess:   true,
+			KeyTarget:                target,
+			KeyTLSVersion:            tlsVersionName(cs.Version),
+			KeyNegotiatedVersion:     tlsVersionName(cs.Version),
+			KeyNegotiatedCipher:      tls.CipherSuiteName(cs.CipherSuite),
+			KeyNegotiatedProtocol:    cs.NegotiatedProtocol,
+			KeyNegotiatedALPN:        cs.NegotiatedProtocol,
+		}, nil
+	}
 
 	// Close the previous TLS connection before replacing it. Without
 	// this, the device still sees the old TCP connection as an active
@@ -1510,9 +1556,9 @@ func (r *Runner) handleRead(ctx context.Context, step *loader.Step, state *engin
 		// RC5b: MessageID=0 is rejected by EncodeRequest (wire validation).
 		// Return as output, not a Go error, so YAML can assert on it.
 		return map[string]any{
-			KeyReadSuccess:    false,
+			KeyReadSuccess:     false,
 			KeyConnectionError: true,
-			KeyError:          err.Error(),
+			KeyError:           err.Error(),
 		}, nil
 	}
 
@@ -1887,14 +1933,14 @@ func (r *Runner) handleSubscribe(ctx context.Context, step *loader.Step, state *
 	}
 
 	outputs := map[string]any{
-		KeySubscribeSuccess:         resp.IsSuccess(),
-		KeySubscriptionID:           subscriptionID,
-		KeySubscriptionIDReturned:   subscriptionID != nil,
-		KeySubscriptionIDSaved:      subscriptionID != nil,
-		KeySubscriptionIDPresent:    subscriptionID != nil,
-		KeyPrimingReceived:          primingData != nil,
-		KeyPrimingIsPrimingFlag:     primingData != nil,
-		KeyStatus:                   resp.Status,
+		KeySubscribeSuccess:       resp.IsSuccess(),
+		KeySubscriptionID:         subscriptionID,
+		KeySubscriptionIDReturned: subscriptionID != nil,
+		KeySubscriptionIDSaved:    subscriptionID != nil,
+		KeySubscriptionIDPresent:  subscriptionID != nil,
+		KeyPrimingReceived:        primingData != nil,
+		KeyPrimingIsPrimingFlag:   primingData != nil,
+		KeyStatus:                 resp.Status,
 	}
 	if saveAs, ok := params[ParamSaveSubscriptionID].(string); ok && saveAs != "" {
 		outputs[KeySaveSubscriptionID] = saveAs
@@ -2472,29 +2518,50 @@ func classifyTestCertRejection(certType string, err error) string {
 	// Infer from the test cert type we sent (supports both client_cert
 	// names like "controller_expired" and cert_chain names like "expired_cert").
 	switch certType {
-	case "controller_expired", "expired_cert":
+	case CertTypeControllerExpired, CertTypeExpired:
 		return "certificate_expired"
-	case "controller_not_yet_valid":
+	case CertTypeControllerNotYetValid:
 		return "certificate_expired"
-	case "controller_wrong_zone", "wrong_zone_cert":
+	case CertTypeControllerWrongZone, CertTypeWrongZone:
 		return "unknown_ca"
-	case "controller_no_client_auth", "invalid_signature_cert":
+	case CertTypeControllerNoClientAuth, CertTypeInvalidSignature:
 		return "bad_certificate"
-	case "controller_ca_true":
+	case CertTypeControllerCaTrue:
 		return "bad_certificate"
-	case "controller_self_signed":
+	case CertTypeControllerSelfSigned:
 		return "unknown_ca"
-	case "controller_operational":
+	case CertTypeControllerOperational:
 		// A valid operational cert rejected post-handshake is typically
 		// due to clock skew making the cert appear expired or not-yet-valid.
 		return "certificate_expired"
-	case "deep_chain":
+	case CertTypeDeepChain:
 		return "chain_too_deep"
-	case "no_alpn":
+	case CertTypeNoALPN:
 		return "no_application_protocol"
 	default:
 		return "certificate_rejected"
 	}
+}
+
+// isInvalidTestCert returns true for test cert types that are known to be
+// invalid and expected to be rejected by the server. When such a cert
+// survives the post-handshake probe (timeout), the connection should be
+// closed without replacing r.conn, since a delayed rejection would corrupt
+// the runner's primary operational link.
+func isInvalidTestCert(certType string) bool {
+	switch certType {
+	case CertTypeControllerExpired, CertTypeExpired,
+		CertTypeControllerNotYetValid,
+		CertTypeControllerWrongZone, CertTypeWrongZone,
+		CertTypeControllerSelfSigned,
+		CertTypeControllerNoClientAuth,
+		CertTypeControllerCaTrue,
+		CertTypeInvalidSignature,
+		CertTypeDeepChain,
+		CertTypeNoALPN:
+		return true
+	}
+	return false
 }
 
 // rejectReasonToErrorCode maps an invoke response rejectReason value to

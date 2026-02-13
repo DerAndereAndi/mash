@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -101,7 +102,12 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 	}
 	if zoneCA, err := cert.GenerateZoneCA(zoneID, zt); err == nil {
 		r.zoneCA = zoneCA
-		r.zoneCAPool = zoneCA.TLSClientCAs()
+		// Accumulate rather than replace so CAs from previous zones
+		// (including the suite zone) remain trusted for TLS verification.
+		if r.zoneCAPool == nil {
+			r.zoneCAPool = x509.NewCertPool()
+		}
+		r.zoneCAPool.AddCert(zoneCA.Certificate)
 		zone.CAFingerprint = certFingerprint(zoneCA.Certificate)
 		fingerprint = zone.CAFingerprint
 
@@ -565,7 +571,7 @@ func (r *Runner) handleVerifyOtherZone(ctx context.Context, step *loader.Step, s
 
 		return map[string]any{
 			"other_zone_active": true,
-			KeyZoneCount:       zoneCount,
+			KeyZoneCount:       r.visibleZoneCount(zoneCount),
 		}, nil
 	}
 
@@ -583,6 +589,26 @@ func (r *Runner) handleVerifyOtherZone(ctx context.Context, step *loader.Step, s
 		KeyConnected:        zone.Connected,
 		KeyZoneCount:        len(zs.zones),
 	}, nil
+}
+
+// visibleZoneCount adjusts a raw zone count read from the real device by
+// subtracting the suite zone. The suite zone is a test harness implementation
+// detail and should never be visible to test expectations. Only use this for
+// counts read from the device; simulated zone state never includes the suite
+// zone, so it does not need adjustment.
+//
+// Only subtracts when the suite zone connection is still alive on the device.
+// two_zones_connected removes the suite zone during setup; without this check,
+// the count would be over-reduced.
+func (r *Runner) visibleZoneCount(rawCount int) int {
+	if r.suiteZoneID == "" || rawCount <= 0 {
+		return rawCount
+	}
+	suiteConn, exists := r.activeZoneConns[r.suiteZoneKey]
+	if exists && suiteConn.isConnected() {
+		return rawCount - 1
+	}
+	return rawCount
 }
 
 // toIntValue converts a CBOR-decoded numeric value to int.

@@ -19,7 +19,7 @@ func newTestZoneCA(t *testing.T) *cert.ZoneCA {
 
 func TestGenerateTestClientCert_NotYetValid(t *testing.T) {
 	ca := newTestZoneCA(t)
-	tlsCert, err := generateTestClientCert("controller_not_yet_valid", ca)
+	tlsCert, err := generateTestClientCert(CertTypeControllerNotYetValid, ca)
 	if err != nil {
 		t.Fatalf("generateTestClientCert: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestGenerateTestClientCert_NotYetValid(t *testing.T) {
 
 func TestGenerateTestClientCert_Expired(t *testing.T) {
 	ca := newTestZoneCA(t)
-	tlsCert, err := generateTestClientCert("controller_expired", ca)
+	tlsCert, err := generateTestClientCert(CertTypeControllerExpired, ca)
 	if err != nil {
 		t.Fatalf("generateTestClientCert: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestGenerateTestClientCert_Expired(t *testing.T) {
 
 func TestGenerateTestClientCert_WrongZone(t *testing.T) {
 	ca := newTestZoneCA(t)
-	tlsCert, err := generateTestClientCert("controller_wrong_zone", ca)
+	tlsCert, err := generateTestClientCert(CertTypeControllerWrongZone, ca)
 	if err != nil {
 		t.Fatalf("generateTestClientCert: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestGenerateTestClientCert_WrongZone(t *testing.T) {
 
 func TestGenerateTestClientCert_NoClientAuth(t *testing.T) {
 	ca := newTestZoneCA(t)
-	tlsCert, err := generateTestClientCert("controller_no_client_auth", ca)
+	tlsCert, err := generateTestClientCert(CertTypeControllerNoClientAuth, ca)
 	if err != nil {
 		t.Fatalf("generateTestClientCert: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestGenerateTestClientCert_NoClientAuth(t *testing.T) {
 
 func TestGenerateTestClientCert_CATrue(t *testing.T) {
 	ca := newTestZoneCA(t)
-	tlsCert, err := generateTestClientCert("controller_ca_true", ca)
+	tlsCert, err := generateTestClientCert(CertTypeControllerCaTrue, ca)
 	if err != nil {
 		t.Fatalf("generateTestClientCert: %v", err)
 	}
