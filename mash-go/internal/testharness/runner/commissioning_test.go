@@ -180,7 +180,7 @@ func TestIsSuiteZoneCommission_SuiteZoneAlive(t *testing.T) {
 	r := newTestRunner()
 	r.suite.Record("suite-123", CryptoState{})
 	suiteConn := &Connection{state: ConnOperational}
-	r.pool.TrackZone("main-suite-123", suiteConn, "suite-123")
+	r.suite.SetConn(suiteConn)
 
 	if r.isSuiteZoneCommission() {
 		t.Error("expected false when suite zone connection is alive")
@@ -192,21 +192,20 @@ func TestIsSuiteZoneCommission_SuiteZoneDead(t *testing.T) {
 	r := newTestRunner()
 	r.suite.Record("suite-123", CryptoState{})
 	suiteConn := &Connection{state: ConnDisconnected}
-	r.pool.TrackZone("main-suite-123", suiteConn, "suite-123")
+	r.suite.SetConn(suiteConn)
 
 	if !r.isSuiteZoneCommission() {
 		t.Error("expected true when suite zone connection is dead")
 	}
 }
 
-func TestIsSuiteZoneCommission_SuiteZoneMissing(t *testing.T) {
-	// When the suite zone connection is not in pool zones (cleaned up),
-	// a new commission replaces it.
+func TestIsSuiteZoneCommission_SuiteConnNil(t *testing.T) {
+	// When suite.Conn() is nil, a new commission replaces it.
 	r := newTestRunner()
 	r.suite.Record("suite-123", CryptoState{})
 
 	if !r.isSuiteZoneCommission() {
-		t.Error("expected true when suite zone connection is missing from pool zones")
+		t.Error("expected true when suite conn is nil")
 	}
 }
 

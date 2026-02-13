@@ -231,8 +231,7 @@ func (r *Runner) isSuiteZoneCommission() bool {
 	if r.suite.ZoneID() == "" {
 		return false
 	}
-	suiteConn := r.pool.Zone(r.suite.ConnKey())
-	if suiteConn != nil && suiteConn.isConnected() {
+	if r.suite.Conn() != nil && r.suite.Conn().isConnected() {
 		return false
 	}
 	return true
@@ -350,8 +349,8 @@ func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
 		return fmt.Errorf("reconnectToZone readiness failed: %w", err)
 	}
 
-	// Re-register in pool zone tracking.
-	r.pool.TrackZone(r.suite.ConnKey(), newConn, r.suite.ZoneID())
+	// Store on suite session (not in pool -- suite zone lives outside pool).
+	r.suite.SetConn(newConn)
 	r.debugf("reconnectToZone: reconnected to zone %s", r.suite.ZoneID())
 
 	return nil
@@ -429,6 +428,9 @@ func (r *Runner) commissionSuiteZone(ctx context.Context) error {
 // It also saves the crypto state so it can be restored after lower-level
 // tests clear the working crypto (non-commissioned tests nil out zoneCA
 // and zoneCAPool to avoid stale TLS configs).
+//
+// The suite zone connection is moved out of the ConnPool so that pool-level
+// operations (close, scan, cleanup) never touch it.
 func (r *Runner) recordSuiteZone() {
 	if r.paseState == nil || r.paseState.sessionKey == nil {
 		return
@@ -440,6 +442,15 @@ func (r *Runner) recordSuiteZone() {
 		ZoneCAPool:       r.zoneCAPool,
 		IssuedDeviceCert: r.issuedDeviceCert,
 	})
+
+	// Move the suite zone connection from pool to suite session.
+	connKey := r.suite.ConnKey()
+	if conn := r.pool.Zone(connKey); conn != nil {
+		r.suite.SetConn(conn)
+		r.pool.UntrackZone(connKey)
+	} else if r.pool.Main() != nil && r.pool.Main().isConnected() {
+		r.suite.SetConn(r.pool.Main())
+	}
 }
 
 // removeSuiteZone sends RemoveZone for the suite zone and clears all state.

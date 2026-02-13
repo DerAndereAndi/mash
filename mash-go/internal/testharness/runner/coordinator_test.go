@@ -27,6 +27,14 @@ func (s *stubSuiteSession) ZoneID() string                 { return s.Called().S
 func (s *stubSuiteSession) ConnKey() string                { return s.Called().String(0) }
 func (s *stubSuiteSession) IsCommissioned() bool           { return s.Called().Bool(0) }
 func (s *stubSuiteSession) Crypto() CryptoState            { return s.Called().Get(0).(CryptoState) }
+func (s *stubSuiteSession) Conn() *Connection {
+	ret := s.Called()
+	if ret.Get(0) == nil {
+		return nil
+	}
+	return ret.Get(0).(*Connection)
+}
+func (s *stubSuiteSession) SetConn(conn *Connection) { s.Called(conn) }
 func (s *stubSuiteSession) Record(z string, c CryptoState) { s.Called(z, c) }
 func (s *stubSuiteSession) Clear()                         { s.Called() }
 
@@ -219,6 +227,8 @@ func allMaybe(s *stubSuiteSession, p *stubConnPool, o *stubOps) {
 	s.On("ConnKey").Return("").Maybe()
 	s.On("IsCommissioned").Return(false).Maybe()
 	s.On("Crypto").Return(CryptoState{}).Maybe()
+	s.On("Conn").Return((*Connection)(nil)).Maybe()
+	s.On("SetConn", mock.Anything).Return().Maybe()
 	s.On("Record", mock.Anything, mock.Anything).Return().Maybe()
 	s.On("Clear").Return().Maybe()
 

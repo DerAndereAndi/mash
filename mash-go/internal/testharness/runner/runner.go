@@ -476,18 +476,12 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 	return result, nil
 }
 
-// needsSuiteCommissioning returns true if the test suite contains any test
-// that requires a commissioned device (level 3), and the runner has a target.
-func needsSuiteCommissioning(cases []*loader.TestCase, r *Runner) bool {
-	if r.config.Target == "" {
-		return false
-	}
-	for _, tc := range cases {
-		if r.preconditionLevel(tc.Preconditions) >= precondLevelCommissioned {
-			return true
-		}
-	}
-	return false
+// needsSuiteCommissioning returns true when the runner has a target and an
+// enable key, meaning it can commission a suite zone for trigger delivery.
+// The suite zone is the control channel for all infrastructure commands
+// (reset, enter/exit commissioning mode, fault injection).
+func needsSuiteCommissioning(_ []*loader.TestCase, r *Runner) bool {
+	return r.config.Target != "" && r.config.EnableKey != ""
 }
 
 // runAutoPICS commissions the device, reads its capabilities, and builds a

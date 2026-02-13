@@ -205,17 +205,16 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		}
 		if needsFreshCommission(tc.Preconditions) && c.suite.ZoneID() != "" {
 			c.debugf("fresh_commission: removing suite zone %s", c.suite.ZoneID())
-			c.pool.CloseAllZones()
 			c.ops.EnsureDisconnected()
-		} else {
-			c.pool.CloseZonesExcept(c.suite.ConnKey())
 		}
+		// Suite zone lives on suite.Conn(), not in the pool. Close all pool zones.
+		c.pool.CloseAllZones()
 	} else {
-		// Clean up extra non-suite zones from previous multi-zone tests.
+		// Clean up extra zones from previous multi-zone tests.
 		if !needsZoneConns {
 			for _, id := range c.pool.ZoneKeys() {
 				conn := c.pool.Zone(id)
-				if id == c.suite.ConnKey() || conn == c.pool.Main() {
+				if conn == c.pool.Main() {
 					continue
 				}
 				c.debugf("reusing session: cleaning up extra zone %s", id)

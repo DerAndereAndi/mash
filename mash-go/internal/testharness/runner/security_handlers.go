@@ -558,31 +558,14 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 		state.Set(StateCommWindowStart, time.Now())
 	}
 
-	// Send trigger if connected.
-	if r.pool.Main() != nil && r.pool.Main().isConnected() && r.config.EnableKey != "" {
-		triggerResult, err := r.sendTrigger(ctx, features.TriggerEnterCommissioningMode, state)
-		if err == nil {
-			triggerResult[KeyCommissioningModeEntered] = true
-			triggerResult["commissioning_mode_entered"] = true
-			return triggerResult, nil
+	// Send trigger via main connection or suite zone connection.
+	if r.config.EnableKey != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerEnterCommissioningMode, state); err == nil {
+			return map[string]any{
+				KeyCommissioningModeEntered:      true,
+				KeyCommissioningModeEnteredAlias: true,
+			}, nil
 		}
-		// Fall through to temporary zone or stub if trigger fails.
-	}
-
-	// When no connection is available, deliver the trigger via a temporary
-	// zone. This handles backoff tests where only raw PASE attempts were
-	// made and the harness has no operational connection.
-	if r.config.EnableKey != "" && r.config.Target != "" && (r.pool.Main() == nil || !r.pool.Main().isConnected()) {
-		if triggerResult, err := r.deliverTriggerViaTemporaryZone(features.TriggerEnterCommissioningMode, state); err == nil {
-			// Restore commissioning state that handleCommission changed.
-			secState.commissioningActive = true
-			state.Set(StateCommissioningActive, true)
-			state.Set(StateCommissioningCompleted, false)
-			triggerResult[KeyCommissioningModeEntered] = true
-			triggerResult["commissioning_mode_entered"] = true
-			return triggerResult, nil
-		}
-		// Fall through to stub if trigger delivery fails.
 	}
 
 	return map[string]any{
@@ -600,119 +583,18 @@ func (r *Runner) handleExitCommissioningMode(ctx context.Context, step *loader.S
 	secState.commissioningActive = false
 	state.Set(StateCommissioningActive, false)
 
-	// Send trigger if connected.
-	if r.pool.Main() != nil && r.pool.Main().isConnected() && r.config.EnableKey != "" {
-		triggerResult, err := r.sendTrigger(ctx, features.TriggerExitCommissioningMode, state)
-		if err == nil {
-			triggerResult[KeyCommissioningModeExited] = true
-			return triggerResult, nil
+	// Send trigger via main connection or suite zone connection.
+	if r.config.EnableKey != "" {
+		if err := r.sendTriggerViaZone(ctx, features.TriggerExitCommissioningMode, state); err == nil {
+			return map[string]any{
+				KeyCommissioningModeExited: true,
+			}, nil
 		}
-		// Fall through to zone connections or stub if trigger fails.
-	}
-
-	// When main connection is unavailable (e.g., after many failed PASE
-	// attempts), try sending the trigger via a zone connection from the
-	// connection tracker. This ensures exit_commissioning_mode reaches the
-	// device even when the harness has no operational main connection.
-	if r.config.EnableKey != "" && (r.pool.Main() == nil || !r.pool.Main().isConnected()) {
-		ct := getConnectionTracker(state)
-		for _, zc := range ct.zoneConnections {
-			if zc.isConnected() {
-				saved := r.pool.Main()
-				r.pool.SetMain(zc)
-				triggerResult, err := r.sendTrigger(ctx, features.TriggerExitCommissioningMode, state)
-				r.pool.SetMain(saved)
-				if err == nil {
-					triggerResult[KeyCommissioningModeExited] = true
-					return triggerResult, nil
-				}
-				break
-			}
-		}
-	}
-
-	// Last resort: deliver the trigger via a temporary zone when no
-	// connections exist. Commissions with correct setup code, sends
-	// trigger, then tears down. Accepts backoff delay from prior failures.
-	if r.config.EnableKey != "" && r.config.Target != "" && (r.pool.Main() == nil || !r.pool.Main().isConnected()) {
-		if triggerResult, err := r.deliverTriggerViaTemporaryZone(features.TriggerExitCommissioningMode, state); err == nil {
-			secState.commissioningActive = false
-			state.Set(StateCommissioningActive, false)
-			triggerResult[KeyCommissioningModeExited] = true
-			return triggerResult, nil
-		}
-		// Fall through to stub if trigger delivery fails.
 	}
 
 	return map[string]any{
 		KeyCommissioningModeExited: true,
 	}, nil
-}
-
-// deliverTriggerViaTemporaryZone commissions a temporary test zone to
-// deliver a test trigger when no operational connection is available. This
-// handles the case where tests (e.g., backoff tests) have only done raw
-// PASE attempts, leaving no connection for trigger delivery.
-//
-// Flow: commission with correct code -> send trigger -> remove zone -> clean up.
-func (r *Runner) deliverTriggerViaTemporaryZone(trigger uint64, state *engine.ExecutionState) (map[string]any, error) {
-	if r.config.Target == "" || r.config.EnableKey == "" {
-		return nil, fmt.Errorf("target and enable-key required for trigger delivery via temporary zone")
-	}
-
-	r.debugf("deliverTriggerViaTemporaryZone: commissioning temporary zone for trigger 0x%016x", trigger)
-
-	// Use a dedicated context with enough headroom for PASE backoff (up
-	// to 10s at tier 4) plus handshake + cert exchange + reconnect time.
-	// The step's default 10s timeout is too short when backoff is active.
-	commCtx, commCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer commCancel()
-
-	// Commission with transition_to_operational to get an operational connection.
-	commStep := &loader.Step{
-		Action: "commission",
-		Params: map[string]any{
-			ParamTransitionToOperational: true,
-		},
-	}
-	if _, err := r.handleCommission(commCtx, commStep, state); err != nil {
-		return nil, fmt.Errorf("temporary zone commission: %w", err)
-	}
-
-	// Send the trigger on the new operational connection.
-	result, triggerErr := r.sendTrigger(commCtx, trigger, state)
-	if triggerErr != nil {
-		r.debugf("deliverTriggerViaTemporaryZone: trigger failed: %v", triggerErr)
-	}
-
-	// Clean up: close temporary zone connections (sends RemoveZone +
-	// ControlClose). The suite zone (if any) is preserved.
-	r.closeActiveZoneConns()
-	if r.suite.ZoneID() != "" {
-		// Preserve suite zone state; just detach main connection from the temp zone.
-		r.pool.SetMain(&Connection{})
-		r.paseState = nil
-	} else {
-		r.ensureDisconnected()
-	}
-
-	// Wait for device to return to commissioning mode after zone removal.
-	if err := r.waitForCommissioningMode(commCtx, 3*time.Second); err != nil {
-		r.debugf("deliverTriggerViaTemporaryZone: %v (continuing)", err)
-	}
-
-	// Wait for the device's connection cooldown (500ms) to expire. The
-	// commission above set lastCommissioningAttempt; without this wait,
-	// the next PASE attempt (from the same or next test) would hit a
-	// "busy" rejection that incorrectly increments the backoff tracker.
-	_ = contextSleep(commCtx, 600*time.Millisecond)
-
-	if triggerErr != nil {
-		return nil, fmt.Errorf("trigger delivery: %w", triggerErr)
-	}
-
-	r.debugf("deliverTriggerViaTemporaryZone: trigger 0x%016x delivered successfully", trigger)
-	return result, nil
 }
 
 // handleSendPing sends a ping on a specific connection.

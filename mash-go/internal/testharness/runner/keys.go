@@ -22,12 +22,14 @@ const (
 
 // Device state preconditions.
 const (
-	PrecondDeviceReset                = "device_reset"
-	PrecondDeviceHasGridZone          = "device_has_grid_zone"
-	PrecondDeviceHasLocalZone         = "device_has_local_zone"
-	PrecondDeviceInLocalZone          = "device_in_local_zone"
-	PrecondSessionPreviouslyConnected = "session_previously_connected"
-	PrecondFreshCommission            = "fresh_commission"
+	PrecondDeviceReset                 = "device_reset"
+	PrecondDeviceHasGridZone           = "device_has_grid_zone"
+	PrecondDeviceHasLocalZone          = "device_has_local_zone"
+	PrecondDeviceInLocalZone           = "device_in_local_zone"
+	PrecondSessionPreviouslyConnected  = "session_previously_connected"
+	PrecondFreshCommission             = "fresh_commission"
+	PrecondDeviceHasOneZone            = "device_has_one_zone"
+	PrecondDeviceHasAvailableZoneSlot  = "device_has_available_zone_slot"
 )
 
 // IPv6 / multi-interface preconditions.

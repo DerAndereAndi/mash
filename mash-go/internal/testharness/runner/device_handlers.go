@@ -491,12 +491,10 @@ var operatingStateTriggers = map[string]uint64{
 	"FAULT":   features.TriggerFault,
 }
 
-// sendTriggerViaZone sends a triggerTestEvent invoke to the device using any
-// available zone connection. This is used when the main runner connection
-// is not available, e.g. in multi-zone tests where the runner
-// connection was detached after commissioning.
+// sendTriggerViaZone sends a triggerTestEvent invoke to the device using the
+// main connection or the suite zone connection (the control channel).
 func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *engine.ExecutionState) error {
-	// Try main connection first.
+	// Try main connection first (L3 tests where Main is operational).
 	if r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().framer != nil {
 		_, err := r.sendTrigger(ctx, trigger, state)
 		if err == nil {
@@ -505,26 +503,10 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 		return err
 	}
 
-	// Find any zone connection to use: per-test tracker first, then
-	// pool-level zone connections (which includes the suite zone).
-	ct := getConnectionTracker(state)
-	var conn *Connection
-	for _, c := range ct.zoneConnections {
-		if c.isConnected() && c.framer != nil {
-			conn = c
-			break
-		}
-	}
-	if conn == nil {
-		for _, key := range r.pool.ZoneKeys() {
-			if c := r.pool.Zone(key); c != nil && c.isConnected() && c.framer != nil {
-				conn = c
-				break
-			}
-		}
-	}
-	if conn == nil {
-		return fmt.Errorf("no zone connection available for trigger")
+	// Use suite zone connection (the control channel).
+	conn := r.suite.Conn()
+	if conn == nil || !conn.isConnected() || conn.framer == nil {
+		return fmt.Errorf("no suite zone connection available for trigger")
 	}
 
 	enableKey := r.config.EnableKey

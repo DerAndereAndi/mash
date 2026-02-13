@@ -2733,6 +2733,52 @@ func (_c *MockSuiteSession_Clear_Call) RunAndReturn(run func()) *MockSuiteSessio
 	return _c
 }
 
+// Conn provides a mock function for the type MockSuiteSession
+func (_mock *MockSuiteSession) Conn() *runner.Connection {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Conn")
+	}
+
+	var r0 *runner.Connection
+	if returnFunc, ok := ret.Get(0).(func() *runner.Connection); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*runner.Connection)
+		}
+	}
+	return r0
+}
+
+// MockSuiteSession_Conn_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Conn'
+type MockSuiteSession_Conn_Call struct {
+	*mock.Call
+}
+
+// Conn is a helper method to define mock.On call
+func (_e *MockSuiteSession_Expecter) Conn() *MockSuiteSession_Conn_Call {
+	return &MockSuiteSession_Conn_Call{Call: _e.mock.On("Conn")}
+}
+
+func (_c *MockSuiteSession_Conn_Call) Run(run func()) *MockSuiteSession_Conn_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSuiteSession_Conn_Call) Return(connection *runner.Connection) *MockSuiteSession_Conn_Call {
+	_c.Call.Return(connection)
+	return _c
+}
+
+func (_c *MockSuiteSession_Conn_Call) RunAndReturn(run func() *runner.Connection) *MockSuiteSession_Conn_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ConnKey provides a mock function for the type MockSuiteSession
 func (_mock *MockSuiteSession) ConnKey() string {
 	ret := _mock.Called()
@@ -2907,6 +2953,46 @@ func (_c *MockSuiteSession_Record_Call) Return() *MockSuiteSession_Record_Call {
 }
 
 func (_c *MockSuiteSession_Record_Call) RunAndReturn(run func(zoneID string, crypto runner.CryptoState)) *MockSuiteSession_Record_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetConn provides a mock function for the type MockSuiteSession
+func (_mock *MockSuiteSession) SetConn(conn *runner.Connection) {
+	_mock.Called(conn)
+	return
+}
+
+// MockSuiteSession_SetConn_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetConn'
+type MockSuiteSession_SetConn_Call struct {
+	*mock.Call
+}
+
+// SetConn is a helper method to define mock.On call
+//   - conn *runner.Connection
+func (_e *MockSuiteSession_Expecter) SetConn(conn interface{}) *MockSuiteSession_SetConn_Call {
+	return &MockSuiteSession_SetConn_Call{Call: _e.mock.On("SetConn", conn)}
+}
+
+func (_c *MockSuiteSession_SetConn_Call) Run(run func(conn *runner.Connection)) *MockSuiteSession_SetConn_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 *runner.Connection
+		if args[0] != nil {
+			arg0 = args[0].(*runner.Connection)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockSuiteSession_SetConn_Call) Return() *MockSuiteSession_SetConn_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSuiteSession_SetConn_Call) RunAndReturn(run func(conn *runner.Connection)) *MockSuiteSession_SetConn_Call {
 	_c.Run(run)
 	return _c
 }

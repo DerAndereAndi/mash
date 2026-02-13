@@ -788,6 +788,8 @@ func TestPreconditionLevel_DeviceStateKeys(t *testing.T) {
 		{"device_reset", PrecondDeviceReset, precondLevelCommissioned},
 		{"device_has_grid_zone", PrecondDeviceHasGridZone, precondLevelCommissioned},
 		{"device_has_local_zone", PrecondDeviceHasLocalZone, precondLevelCommissioned},
+		{"device_has_one_zone", PrecondDeviceHasOneZone, precondLevelCommissioned},
+		{"device_has_available_zone_slot", PrecondDeviceHasAvailableZoneSlot, precondLevelCommissioned},
 	}
 
 	for _, tt := range tests {

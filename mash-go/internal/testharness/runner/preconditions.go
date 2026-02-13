@@ -63,6 +63,8 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondDeviceHasLocalZone:         true,
 	PrecondDeviceInLocalZone:          true,
 	PrecondSessionPreviouslyConnected: true,
+	PrecondDeviceHasOneZone:           true,
+	PrecondDeviceHasAvailableZoneSlot: true,
 	// State-machine simulation.
 	PrecondControlState:          true,
 	PrecondInitialControlState:   true,
@@ -141,8 +143,10 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceHasGridZone:          precondLevelCommissioned,
 	PrecondDeviceHasLocalZone:         precondLevelCommissioned,
 	PrecondDeviceInLocalZone:          precondLevelCommissioned,
-	PrecondSessionPreviouslyConnected: precondLevelCommissioned,
-	PrecondFreshCommission:            precondLevelCommissioned,
+	PrecondSessionPreviouslyConnected:  precondLevelCommissioned,
+	PrecondFreshCommission:             precondLevelCommissioned,
+	PrecondDeviceHasOneZone:            precondLevelCommissioned,
+	PrecondDeviceHasAvailableZoneSlot:  precondLevelCommissioned,
 
 	// State-machine preconditions (require commissioned session).
 	PrecondControlState:          precondLevelCommissioned,
@@ -341,10 +345,10 @@ func (r *Runner) ensureConnected(ctx context.Context, state *engine.ExecutionSta
 
 
 // closeActiveZoneConns closes runner-tracked zone connections from previous
-// tests. The suite zone (if any) is preserved -- only non-suite connections
-// are removed. Use closeAllZoneConns for full cleanup (suite teardown).
+// tests. The suite zone lives on suite.Conn() (outside the pool), so it is
+// not affected. Use closeAllZoneConns for full cleanup (suite teardown).
 func (r *Runner) closeActiveZoneConns() {
-	r.closeActiveZoneConnsExcept(r.suite.ConnKey())
+	r.closeActiveZoneConnsExcept("")
 }
 
 // closeAllZoneConns closes ALL zone connections including the suite zone.
@@ -438,6 +442,7 @@ func (r *Runner) ensureDisconnected() {
 	r.controllerCert = nil
 	r.zoneCAPool = nil
 	r.issuedDeviceCert = nil
+	// suite.Clear() closes the suite zone connection and nils all suite state.
 	r.suite.Clear()
 }
 
