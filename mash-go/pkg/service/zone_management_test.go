@@ -505,3 +505,169 @@ func createTestDeviceServiceWithTestMode(t *testing.T) *DeviceService {
 
 	return svc
 }
+
+// --- Cert-based zone identification tests (TDD) ---
+
+func TestMatchZoneByPeerCert_DeterministicMatch(t *testing.T) {
+	svc := createTestDeviceServiceWithTestMode(t)
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer svc.Stop()
+
+	// Generate two Zone CAs with distinct keys
+	zoneCA1, err := cert.GenerateZoneCA("zone-grid-001", cert.ZoneTypeGrid)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA zone1: %v", err)
+	}
+	zoneCA2, err := cert.GenerateZoneCA("zone-local-001", cert.ZoneTypeLocal)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA zone2: %v", err)
+	}
+
+	// Store Zone CA certs so the device knows both zones
+	if err := svc.certStore.SetZoneCACert("zone-grid-001", zoneCA1.Certificate); err != nil {
+		t.Fatalf("SetZoneCACert zone1: %v", err)
+	}
+	if err := svc.certStore.SetZoneCACert("zone-local-001", zoneCA2.Certificate); err != nil {
+		t.Fatalf("SetZoneCACert zone2: %v", err)
+	}
+
+	// Register both zones as disconnected (awaiting reconnection)
+	svc.RegisterZoneAwaitingConnection("zone-grid-001", cert.ZoneTypeGrid)
+	svc.RegisterZoneAwaitingConnection("zone-local-001", cert.ZoneTypeLocal)
+
+	// Generate controller operational cert signed by zone1's CA
+	keyPair, err := cert.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	csrDER, err := cert.CreateCSR(keyPair, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "controller-001"},
+	})
+	if err != nil {
+		t.Fatalf("CreateCSR: %v", err)
+	}
+	opCert1, err := cert.SignCSR(zoneCA1, csrDER)
+	if err != nil {
+		t.Fatalf("SignCSR with zone1 CA: %v", err)
+	}
+
+	// matchZoneByPeerCert must deterministically select zone-grid-001
+	matched := svc.matchZoneByPeerCert(opCert1)
+	if matched != "zone-grid-001" {
+		t.Errorf("matchZoneByPeerCert(zone1 cert) = %q, want %q", matched, "zone-grid-001")
+	}
+
+	// Generate controller cert signed by zone2's CA
+	csrDER2, err := cert.CreateCSR(keyPair, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "controller-002"},
+	})
+	if err != nil {
+		t.Fatalf("CreateCSR: %v", err)
+	}
+	opCert2, err := cert.SignCSR(zoneCA2, csrDER2)
+	if err != nil {
+		t.Fatalf("SignCSR with zone2 CA: %v", err)
+	}
+
+	matched2 := svc.matchZoneByPeerCert(opCert2)
+	if matched2 != "zone-local-001" {
+		t.Errorf("matchZoneByPeerCert(zone2 cert) = %q, want %q", matched2, "zone-local-001")
+	}
+
+	// Run 100 iterations to prove determinism (old code was 50% wrong due to map iteration)
+	for i := 0; i < 100; i++ {
+		m := svc.matchZoneByPeerCert(opCert1)
+		if m != "zone-grid-001" {
+			t.Fatalf("iteration %d: matchZoneByPeerCert() = %q, want %q (non-deterministic!)", i, m, "zone-grid-001")
+		}
+	}
+}
+
+func TestMatchZoneByPeerCert_SkipsConnectedZone(t *testing.T) {
+	svc := createTestDeviceServiceWithTestMode(t)
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer svc.Stop()
+
+	zoneCA, err := cert.GenerateZoneCA("zone-001", cert.ZoneTypeGrid)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA: %v", err)
+	}
+	if err := svc.certStore.SetZoneCACert("zone-001", zoneCA.Certificate); err != nil {
+		t.Fatalf("SetZoneCACert: %v", err)
+	}
+
+	// Zone is CONNECTED (not awaiting reconnection)
+	svc.HandleZoneConnect("zone-001", cert.ZoneTypeGrid)
+
+	keyPair, err := cert.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	csrDER, err := cert.CreateCSR(keyPair, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "controller"},
+	})
+	if err != nil {
+		t.Fatalf("CreateCSR: %v", err)
+	}
+	opCert, err := cert.SignCSR(zoneCA, csrDER)
+	if err != nil {
+		t.Fatalf("SignCSR: %v", err)
+	}
+
+	// Connected zone should NOT be matched
+	matched := svc.matchZoneByPeerCert(opCert)
+	if matched != "" {
+		t.Errorf("matchZoneByPeerCert() = %q, want empty (zone is already connected)", matched)
+	}
+}
+
+func TestMatchZoneByPeerCert_UnknownCA(t *testing.T) {
+	svc := createTestDeviceServiceWithTestMode(t)
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer svc.Stop()
+
+	// Register a zone with its CA
+	zoneCA, err := cert.GenerateZoneCA("zone-001", cert.ZoneTypeGrid)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA: %v", err)
+	}
+	if err := svc.certStore.SetZoneCACert("zone-001", zoneCA.Certificate); err != nil {
+		t.Fatalf("SetZoneCACert: %v", err)
+	}
+	svc.RegisterZoneAwaitingConnection("zone-001", cert.ZoneTypeGrid)
+
+	// Generate an operational cert signed by an UNKNOWN CA
+	unknownCA, err := cert.GenerateZoneCA("zone-unknown", cert.ZoneTypeLocal)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA unknown: %v", err)
+	}
+	keyPair, err := cert.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	csrDER, err := cert.CreateCSR(keyPair, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "controller"},
+	})
+	if err != nil {
+		t.Fatalf("CreateCSR: %v", err)
+	}
+	opCert, err := cert.SignCSR(unknownCA, csrDER)
+	if err != nil {
+		t.Fatalf("SignCSR: %v", err)
+	}
+
+	// Unknown CA should not match any zone
+	matched := svc.matchZoneByPeerCert(opCert)
+	if matched != "" {
+		t.Errorf("matchZoneByPeerCert() = %q, want empty (unknown CA)", matched)
+	}
+}

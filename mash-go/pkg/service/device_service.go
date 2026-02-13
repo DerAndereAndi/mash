@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -626,16 +627,55 @@ func (s *DeviceService) handleIncomingConnection(conn net.Conn, baseTLS *tls.Con
 	s.handleOperationalConnection(conn, tlsConn, releaseActiveConn)
 }
 
+// matchZoneByPeerCert identifies the zone a reconnecting controller belongs to
+// by matching the peer certificate's AuthorityKeyId against each zone's Zone CA
+// SubjectKeyId. Returns the zone ID of the matching disconnected zone, or ""
+// if no match is found.
+//
+// This replaces non-deterministic Go map iteration with cryptographic identity:
+// each Zone CA has a unique SubjectKeyId (SHA-256 of the CA's public key), and
+// every operational cert signed by that CA carries the same value as AuthorityKeyId.
+//
+// Caller must hold s.mu.RLock or s.mu.Lock.
+func (s *DeviceService) matchZoneByPeerCert(peerCert *x509.Certificate) string {
+	if peerCert == nil || len(peerCert.AuthorityKeyId) == 0 {
+		return ""
+	}
+
+	for zoneID, cz := range s.connectedZones {
+		if cz.Connected {
+			continue
+		}
+		zoneCACert, err := s.certStore.GetZoneCACert(zoneID)
+		if err != nil {
+			continue
+		}
+		if bytes.Equal(peerCert.AuthorityKeyId, zoneCACert.SubjectKeyId) {
+			return zoneID
+		}
+	}
+	return ""
+}
+
 // handleOperationalConnection handles a reconnection from a known zone.
 // rawConn is the underlying net.Conn from Accept, used for connTracker removal.
 func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.Conn, releaseActiveConn func()) {
-	s.mu.RLock()
-	// Find a known zone that isn't currently connected
+	// Identify which zone this connection belongs to using the peer certificate's
+	// AuthorityKeyId (matches the Zone CA's SubjectKeyId).
 	var targetZoneID string
-	for zoneID, cz := range s.connectedZones {
-		if !cz.Connected {
-			targetZoneID = zoneID
-			break
+	peerCerts := conn.ConnectionState().PeerCertificates
+	s.mu.RLock()
+	if len(peerCerts) > 0 {
+		targetZoneID = s.matchZoneByPeerCert(peerCerts[0])
+	}
+	// Fallback: if cert-based matching fails (e.g. missing AuthorityKeyId),
+	// pick any disconnected zone (preserves backward compatibility).
+	if targetZoneID == "" {
+		for zoneID, cz := range s.connectedZones {
+			if !cz.Connected {
+				targetZoneID = zoneID
+				break
+			}
 		}
 	}
 	s.mu.RUnlock()
@@ -961,19 +1001,20 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	// Persist state immediately after commissioning
 	_ = s.SaveState()
 
-	// Exit commissioning mode after successful commission
-	// The device should no longer advertise as commissionable
-	if err := s.ExitCommissioningMode(); err != nil {
-		s.debugLog("handleCommissioningConnection: failed to exit commissioning mode", "error", err)
-	}
-
 	// Signal handleOperationalConnection to re-enter commissioning mode
-	// after the operational TLS reconnect succeeds. This replaces the old
-	// sleep-based goroutine with a flag consumed on the next connection.
+	// after the operational TLS reconnect succeeds. Set BEFORE ExitCommissioningMode
+	// to avoid a race: the operational handler goroutine can start and check
+	// this flag before the commissioning handler goroutine reaches this point.
 	if s.isEnableKeyValid() {
 		s.mu.Lock()
 		s.autoReentryPending = true
 		s.mu.Unlock()
+	}
+
+	// Exit commissioning mode after successful commission
+	// The device should no longer advertise as commissionable
+	if err := s.ExitCommissioningMode(); err != nil {
+		s.debugLog("handleCommissioningConnection: failed to exit commissioning mode", "error", err)
 	}
 
 	// DEC-066: Close the commissioning connection. The controller must
