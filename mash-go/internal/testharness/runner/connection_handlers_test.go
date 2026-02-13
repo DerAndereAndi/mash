@@ -2,9 +2,15 @@ package runner
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"testing"
 	"time"
@@ -391,6 +397,83 @@ func TestHandleConnect_HostPortIntPort(t *testing.T) {
 	out, _ := r.handleConnect(context.Background(), step, state)
 	if out["target"] != "10.0.0.1:9443" {
 		t.Errorf("expected target=10.0.0.1:9443, got %v", out["target"])
+	}
+}
+
+// Verify that TLS-affecting params skip connection reuse.
+// Without this fix, handleConnect reuses the existing operational connection
+// even when tls_max_version is specified, causing TC-CONN-CAP-003 to pass
+// when it should observe a TLS handshake failure.
+func TestHandleConnect_TLSParamsSkipReuse(t *testing.T) {
+	// Set up a local TLS server so we can give Main() a real *tls.Conn.
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		DNSNames:     []string{"localhost"},
+	}
+	certDER, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	serverCert := tls.Certificate{
+		Certificate: [][]byte{certDER},
+		PrivateKey:  key,
+	}
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+	})
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 1)
+		conn.Read(buf) // keep alive
+	}()
+
+	tlsConn, err := tls.Dial("tcp", listener.Addr().String(), &tls.Config{
+		InsecureSkipVerify: true,
+		MinVersion:         tls.VersionTLS13,
+	})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer tlsConn.Close()
+
+	r := newTestRunner()
+	r.config.Target = "127.0.0.1:1" // unreachable port for fresh dials
+	r.pool.Main().tlsConn = tlsConn
+	r.pool.Main().state = ConnOperational
+	state := newTestState()
+
+	// Without TLS params: reuse should happen, connection_established=true.
+	step := &loader.Step{Params: map[string]any{}}
+	out, _ := r.handleConnect(context.Background(), step, state)
+	if out[KeyConnectionEstablished] != true {
+		t.Fatalf("expected connection reuse (connection_established=true), got %v", out[KeyConnectionEstablished])
+	}
+
+	// With tls_max_version: reuse must be skipped, dial to unreachable port fails.
+	step = &loader.Step{Params: map[string]any{"tls_max_version": "1.2"}}
+	out, _ = r.handleConnect(context.Background(), step, state)
+	if out[KeyConnectionEstablished] == true {
+		t.Error("expected connection reuse to be skipped when tls_max_version is present")
+	}
+
+	// Same for tls_version.
+	step = &loader.Step{Params: map[string]any{"tls_version": "1.2"}}
+	out, _ = r.handleConnect(context.Background(), step, state)
+	if out[KeyConnectionEstablished] == true {
+		t.Error("expected connection reuse to be skipped when tls_version is present")
+	}
+
+	// Same for cipher_suites.
+	step = &loader.Step{Params: map[string]any{"cipher_suites": []any{"TLS_AES_128_GCM_SHA256"}}}
+	out, _ = r.handleConnect(context.Background(), step, state)
+	if out[KeyConnectionEstablished] == true {
+		t.Error("expected connection reuse to be skipped when cipher_suites is present")
 	}
 }
 

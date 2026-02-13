@@ -843,13 +843,17 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	// If an operational connection is already active (e.g. from precondition
 	// commissioning) and no special TLS params are requested, reuse it.
 	// This avoids "zone already connected" rejection from the device.
-	// Skip reuse when TLS-affecting params are present (key_exchange_groups,
-	// cert_chain, alpn) since those require a fresh TLS handshake.
+	// Skip reuse when TLS-affecting params are present since those require
+	// a fresh TLS handshake.
 	clientCertSpec, _ := step.Params["client_cert"].(string)
 	_, hasCertChain := step.Params["cert_chain"]
 	_, hasKeyGroups := step.Params["key_exchange_groups"]
 	_, hasALPN := step.Params["alpn"]
-	if !commissioning && clientCertSpec == "" && !hasCertChain && !hasKeyGroups && !hasALPN && r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().tlsConn != nil {
+	_, hasTLSVersion := step.Params["tls_version"]
+	_, hasTLSMaxVersion := step.Params["tls_max_version"]
+	_, hasCipherSuites := step.Params["cipher_suites"]
+	hasTLSOverrides := hasCertChain || hasKeyGroups || hasALPN || hasTLSVersion || hasTLSMaxVersion || hasCipherSuites
+	if !commissioning && clientCertSpec == "" && !hasTLSOverrides && r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().tlsConn != nil {
 		cs := r.pool.Main().tlsConn.ConnectionState()
 		hasPeerCerts := len(cs.PeerCertificates) > 0
 		serverCertCNPrefix := ""
