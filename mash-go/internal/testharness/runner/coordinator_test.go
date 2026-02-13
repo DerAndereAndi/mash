@@ -1200,3 +1200,64 @@ func TestCoordSetup_CommissioningModeSetsStateFlag(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, true, val)
 }
+
+// ===========================================================================
+// Interface Segregation: narrow sub-interface tests
+// ===========================================================================
+
+// Verify that stubOps satisfies each narrow sub-interface individually.
+// This is a compile-time check: if stubOps fails to implement any of these,
+// the test file won't compile.
+var (
+	_ StateAccessor    = (*stubOps)(nil)
+	_ LifecycleOps     = (*stubOps)(nil)
+	_ WireOps          = (*stubOps)(nil)
+	_ DiagnosticsOps   = (*stubOps)(nil)
+	_ PreconditionHandler = (*stubOps)(nil)
+)
+
+// TestNarrowInterface_StateAccessor verifies that a function accepting only
+// StateAccessor can read/write state without requiring the full CommissioningOps.
+func TestNarrowInterface_StateAccessor(t *testing.T) {
+	var accessor StateAccessor = &stubOps{}
+	stub := accessor.(*stubOps)
+	stub.On("PASEState").Return(completedPASE())
+	stub.On("WorkingCrypto").Return(CryptoState{})
+	stub.On("CommissionZoneType").Return(cert.ZoneType(0))
+	stub.On("DeviceStateModified").Return(false)
+	stub.On("DiscoveredDiscriminator").Return(uint16(0))
+	stub.On("LastDeviceConnClose").Return(time.Time{})
+	stub.On("IsSuiteZoneCommission").Return(false)
+
+	assert.True(t, accessor.PASEState().Completed())
+	assert.Equal(t, cert.ZoneType(0), accessor.CommissionZoneType())
+	assert.False(t, accessor.DeviceStateModified())
+}
+
+// TestNarrowInterface_LifecycleOps verifies that a function accepting only
+// LifecycleOps can manage connection transitions.
+func TestNarrowInterface_LifecycleOps(t *testing.T) {
+	var lifecycle LifecycleOps = &stubOps{}
+	stub := lifecycle.(*stubOps)
+	stub.On("EnsureConnected", mock.Anything, mock.Anything).Return(nil)
+	stub.On("DisconnectConnection").Return()
+	stub.On("EnsureDisconnected").Return()
+
+	assert.NoError(t, lifecycle.EnsureConnected(context.Background(), st()))
+	lifecycle.DisconnectConnection()
+	lifecycle.EnsureDisconnected()
+}
+
+// TestNarrowInterface_WireOps verifies that a function accepting only
+// WireOps can send protocol messages.
+func TestNarrowInterface_WireOps(t *testing.T) {
+	var wireOps WireOps = &stubOps{}
+	stub := wireOps.(*stubOps)
+	stub.On("SendRemoveZone").Return()
+	stub.On("SendTriggerViaZone", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	stub.On("SendClearLimitInvoke", mock.Anything).Return(nil)
+
+	wireOps.SendRemoveZone()
+	assert.NoError(t, wireOps.SendTriggerViaZone(context.Background(), 1, st()))
+	assert.NoError(t, wireOps.SendClearLimitInvoke(context.Background()))
+}

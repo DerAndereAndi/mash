@@ -9,76 +9,60 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
-// ConnPool manages connections to the device under test.
-type ConnPool interface {
-	// Main returns the current main connection, or nil if not connected.
+// ConnReader provides read-only access to pool state.
+// Used by handlers that need to inspect connections and zone state.
+type ConnReader interface {
 	Main() *Connection
-
-	// SetMain replaces the main connection.
-	SetMain(conn *Connection)
-
-	// NextMessageID returns the next atomic message ID.
-	NextMessageID() uint32
-
-	// SendRequest sends a request on the main connection and reads the response.
-	// Handles notification interleaving and orphaned response filtering.
-	// On IO error, transitions the main connection to ConnDisconnected.
-	SendRequest(data []byte, op string, expectedMsgID uint32) (*wire.Response, error)
-
-	// SendRequestWithDeadline is like SendRequest but respects the context deadline.
-	SendRequestWithDeadline(ctx context.Context, data []byte, op string, expectedMsgID uint32) (*wire.Response, error)
-
-	// Zone returns the connection for the given zone key, or nil if not tracked.
 	Zone(key string) *Connection
-
-	// TrackZone registers a connection under the given key with its zone ID.
-	TrackZone(key string, conn *Connection, zoneID string)
-
-	// CloseZonesExcept closes and removes all tracked zone connections except
-	// the one matching exceptKey. Calls onZoneClose before closing each socket.
-	// Returns the time of the last real connection close, or zero if none.
-	CloseZonesExcept(exceptKey string) time.Time
-
-	// CloseAllZones closes all tracked zone connections including the suite zone.
-	CloseAllZones() time.Time
-
-	// ZoneCount returns the number of tracked zone connections.
-	ZoneCount() int
-
-	// ZoneKeys returns all tracked zone connection keys.
-	ZoneKeys() []string
-
-	// TrackSubscription records an active subscription ID for later cleanup.
-	TrackSubscription(subID uint32)
-
-	// RemoveSubscription removes a subscription ID from tracking.
-	RemoveSubscription(subID uint32)
-
-	// Subscriptions returns the current list of tracked subscription IDs.
-	Subscriptions() []uint32
-
-	// UnsubscribeAll sends Unsubscribe for all tracked subscription IDs
-	// on the given connection, then clears the tracking list.
-	UnsubscribeAll(conn *Connection)
-
-	// ZoneID returns the zone ID for a tracked zone connection key.
 	ZoneID(key string) string
+	ZoneCount() int
+	ZoneKeys() []string
+	NextMessageID() uint32
+	Subscriptions() []uint32
+}
 
-	// UntrackZone removes a zone from tracking without closing the connection.
+// ConnWriter provides mutating pool operations.
+// Used by handlers that manage zone lifecycle and subscription tracking.
+type ConnWriter interface {
+	SetMain(conn *Connection)
+	TrackZone(key string, conn *Connection, zoneID string)
 	UntrackZone(key string)
+	TrackSubscription(subID uint32)
+	RemoveSubscription(subID uint32)
+}
 
-	// PendingNotifications returns all buffered notification frames without clearing.
+// ConnLifecycle manages connection close and cleanup operations.
+// Used by Coordinator teardown and preconditions.
+type ConnLifecycle interface {
+	CloseZonesExcept(exceptKey string) time.Time
+	CloseAllZones() time.Time
+	UnsubscribeAll(conn *Connection)
+}
+
+// RequestSender sends wire-level requests and reads responses.
+// Used by handlers for protocol operations.
+type RequestSender interface {
+	SendRequest(data []byte, op string, expectedMsgID uint32) (*wire.Response, error)
+	SendRequestWithDeadline(ctx context.Context, data []byte, op string, expectedMsgID uint32) (*wire.Response, error)
+}
+
+// NotificationBuffer manages the notification queue.
+// Used by utility handlers for notification inspection.
+type NotificationBuffer interface {
 	PendingNotifications() [][]byte
-
-	// ShiftNotification pops and returns the first buffered notification.
-	// Returns nil, false if no notifications are buffered.
 	ShiftNotification() ([]byte, bool)
-
-	// AppendNotification buffers a notification frame.
 	AppendNotification(data []byte)
-
-	// ClearNotifications discards all buffered notification frames.
 	ClearNotifications()
+}
+
+// ConnPool manages connections to the device under test.
+// It composes the focused sub-interfaces above for backward compatibility.
+type ConnPool interface {
+	ConnReader
+	ConnWriter
+	ConnLifecycle
+	RequestSender
+	NotificationBuffer
 }
 
 type connPoolImpl struct {

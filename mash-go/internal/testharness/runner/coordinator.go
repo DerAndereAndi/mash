@@ -30,28 +30,9 @@ type Coordinator interface {
 	CurrentLevel() int
 }
 
-// CommissioningOps defines the operations the coordinator needs from the
-// runner to manage test lifecycle. Runner implements this interface with
-// exported wrappers around its private methods.
-type CommissioningOps interface {
-	// Connection lifecycle
-	EnsureConnected(ctx context.Context, state *engine.ExecutionState) error
-	EnsureCommissioned(ctx context.Context, state *engine.ExecutionState) error
-	DisconnectConnection()
-	EnsureDisconnected()
-	ReconnectToZone(state *engine.ExecutionState) error
-
-	// Session health
-	ProbeSessionHealth() error
-	WaitForCommissioningMode(ctx context.Context, timeout time.Duration) error
-
-	// Wire operations
-	SendRemoveZone()
-	SendRemoveZoneOnConn(conn *Connection, zoneID string)
-	SendTriggerViaZone(ctx context.Context, trigger uint64, state *engine.ExecutionState) error
-	SendClearLimitInvoke(ctx context.Context) error
-
-	// State accessors
+// StateAccessor provides read/write access to commissioning metadata.
+// Used by Coordinator.SetupPreconditions and TeardownTest for state queries.
+type StateAccessor interface {
 	PASEState() *PASEState
 	SetPASEState(ps *PASEState)
 	DeviceStateModified() bool
@@ -65,14 +46,52 @@ type CommissioningOps interface {
 	LastDeviceConnClose() time.Time
 	SetLastDeviceConnClose(t time.Time)
 	IsSuiteZoneCommission() bool
+}
 
-	// Diagnostics
+// LifecycleOps manages connection and commissioning transitions.
+// Used by Coordinator.SetupPreconditions and TeardownTest for state transitions.
+type LifecycleOps interface {
+	EnsureConnected(ctx context.Context, state *engine.ExecutionState) error
+	EnsureCommissioned(ctx context.Context, state *engine.ExecutionState) error
+	DisconnectConnection()
+	EnsureDisconnected()
+	ReconnectToZone(state *engine.ExecutionState) error
+}
+
+// WireOps sends protocol-level control messages.
+// Used by Coordinator.TeardownTest for cleanup.
+type WireOps interface {
+	SendRemoveZone()
+	SendRemoveZoneOnConn(conn *Connection, zoneID string)
+	SendTriggerViaZone(ctx context.Context, trigger uint64, state *engine.ExecutionState) error
+	SendClearLimitInvoke(ctx context.Context) error
+}
+
+// DiagnosticsOps provides health inspection and state capture.
+// Used by Coordinator for session probing and device state snapshots.
+type DiagnosticsOps interface {
+	ProbeSessionHealth() error
 	RequestDeviceState(ctx context.Context, state *engine.ExecutionState) DeviceStateSnapshot
 	DebugSnapshot(label string)
+}
 
-	// Precondition handler cases (380-line switch stays on Runner)
+// PreconditionHandler dispatches precondition setup logic.
+// Used by Coordinator.SetupPreconditions.
+type PreconditionHandler interface {
+	WaitForCommissioningMode(ctx context.Context, timeout time.Duration) error
 	HandlePreconditionCases(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState,
 		preconds []loader.Condition, needsMultiZone *bool) error
+}
+
+// CommissioningOps defines the operations the coordinator needs from the
+// runner to manage test lifecycle. It composes the focused sub-interfaces
+// above for backward compatibility. Runner implements all methods.
+type CommissioningOps interface {
+	StateAccessor
+	LifecycleOps
+	WireOps
+	DiagnosticsOps
+	PreconditionHandler
 }
 
 // coordinatorImpl is the production implementation of Coordinator.

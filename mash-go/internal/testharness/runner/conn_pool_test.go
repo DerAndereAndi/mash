@@ -512,3 +512,73 @@ func TestConnPool_ClearNotifications(t *testing.T) {
 		t.Errorf("expected empty after ClearNotifications, got %d", len(pending))
 	}
 }
+
+// --- Narrow sub-interface compile-time checks ---
+
+// Verify connPoolImpl satisfies each narrow sub-interface.
+var (
+	_ ConnReader         = (*connPoolImpl)(nil)
+	_ ConnWriter         = (*connPoolImpl)(nil)
+	_ ConnLifecycle      = (*connPoolImpl)(nil)
+	_ RequestSender      = (*connPoolImpl)(nil)
+	_ NotificationBuffer = (*connPoolImpl)(nil)
+)
+
+// TestNarrowConnReader verifies that a function accepting only ConnReader
+// can read pool state without access to mutating operations.
+func TestNarrowConnReader(t *testing.T) {
+	pool := NewConnPool(nil, nil)
+	pool.TrackZone("z1", &Connection{state: ConnOperational}, "id1")
+
+	// Use ConnReader to read state.
+	var reader ConnReader = pool.(ConnReader)
+	if reader.ZoneCount() != 1 {
+		t.Errorf("expected 1 zone, got %d", reader.ZoneCount())
+	}
+	if reader.ZoneID("z1") != "id1" {
+		t.Errorf("expected id1, got %s", reader.ZoneID("z1"))
+	}
+}
+
+// TestNarrowRequestSender verifies that a function accepting only
+// RequestSender can send protocol requests.
+func TestNarrowRequestSender(t *testing.T) {
+	pool, server := newPipedPool()
+	defer server.Close()
+
+	msgID := pool.NextMessageID()
+
+	go func() {
+		framer := transport.NewFramer(server)
+		_, _ = framer.ReadFrame()
+		resp := &wire.Response{MessageID: msgID, Status: wire.StatusSuccess}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = framer.WriteFrame(respData)
+	}()
+
+	// Use RequestSender to send and receive.
+	var sender RequestSender = pool.(RequestSender)
+	req := &wire.Request{MessageID: msgID, Operation: wire.OpRead, EndpointID: 0, FeatureID: 1}
+	data, _ := wire.EncodeRequest(req)
+
+	resp, err := sender.SendRequest(data, "read", msgID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.MessageID != msgID {
+		t.Errorf("expected msgID=%d, got %d", msgID, resp.MessageID)
+	}
+}
+
+// TestNarrowNotificationBuffer verifies that a function accepting only
+// NotificationBuffer can manage the notification queue.
+func TestNarrowNotificationBuffer(t *testing.T) {
+	pool := NewConnPool(nil, nil)
+
+	var buf NotificationBuffer = pool.(NotificationBuffer)
+	buf.AppendNotification([]byte{42})
+	data, ok := buf.ShiftNotification()
+	if !ok || data[0] != 42 {
+		t.Errorf("expected [42], got %v ok=%v", data, ok)
+	}
+}

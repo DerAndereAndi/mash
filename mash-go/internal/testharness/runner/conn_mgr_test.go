@@ -11,6 +11,9 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+// Compile-time check: connMgrImpl satisfies ConnectionManager.
+var _ ConnectionManager = (*connMgrImpl)(nil)
+
 // newTestConnMgr creates a connMgrImpl with stubbed dependencies for testing.
 func newTestConnMgr(t *testing.T) (*connMgrImpl, *stubConnPool, *stubSuiteSession) {
 	t.Helper()
