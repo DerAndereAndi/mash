@@ -161,9 +161,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		target := r.getTarget(params)
 
 		r.debugf("handleCommission: dialing new commissioning connection to %s", target)
-		tlsConfig := transport.NewCommissioningTLSConfig()
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		tlsConn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		tlsConn, err := r.dialer.DialCommissioning(ctx, target)
 		if err != nil {
 			r.debugf("handleCommission: dial failed: %v", err)
 			return nil, fmt.Errorf("failed to connect for commissioning: %w", err)
@@ -206,9 +204,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 
 			// Reconnect and retry PASE.
 			target := r.getTarget(params)
-			tlsConfig := transport.NewCommissioningTLSConfig()
-			dialer := &net.Dialer{Timeout: 10 * time.Second}
-			tlsConn, retryErr := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+			tlsConn, retryErr := r.dialer.DialCommissioning(ctx, target)
 			if retryErr != nil {
 				return nil, fmt.Errorf("cooldown retry connect failed: %w", retryErr)
 			}
@@ -242,9 +238,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			time.Sleep(500 * time.Millisecond)
 
 			target := r.getTarget(params)
-			tlsConfig := transport.NewCommissioningTLSConfig()
-			dialer := &net.Dialer{Timeout: 10 * time.Second}
-			tlsConn, retryErr := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+			tlsConn, retryErr := r.dialer.DialCommissioning(ctx, target)
 			if retryErr == nil {
 				r.pool.Main().tlsConn = tlsConn
 				r.pool.Main().framer = transport.NewFramer(tlsConn)

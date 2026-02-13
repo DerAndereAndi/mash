@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
@@ -42,6 +41,7 @@ type Runner struct {
 	suite       SuiteSession
 	pool        ConnPool
 	coordinator Coordinator
+	dialer      Dialer
 
 	// Working crypto: the "current" cert material used by operationalTLSConfig()
 	// and handlers. Restored from suite.Crypto() when reconnecting after
@@ -310,6 +310,9 @@ func New(config *Config) *Runner {
 		}
 	})
 	r.pool.SetMain(&Connection{})
+
+	// Initialize dialer for TLS connection establishment.
+	r.dialer = NewDialer(config.InsecureSkipVerify, r.debugf)
 
 	// Initialize coordinator (not yet wired -- Steps 5-7 will delegate to it).
 	r.coordinator = NewCoordinator(r.suite, r.pool, r, r.config, r.debugf)
@@ -582,77 +585,15 @@ func (f *framerSyncConn) ReadFrame() ([]byte, error) {
 }
 
 // operationalTLSConfig builds a TLS config for operational (post-commissioning) connections.
-// It uses the Zone CA for chain validation but skips hostname verification since
-// MASH identifies peers by device ID in the certificate CN, not DNS hostname.
+// It delegates to buildOperationalTLSConfig using the runner's current working crypto.
 func (r *Runner) operationalTLSConfig() *tls.Config {
-	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		NextProtos: []string{transport.ALPNProtocol},
-		// Explicit curve preferences to match the MASH spec and avoid
-		// Go 1.24+ defaulting to post-quantum X25519MLKEM768.
-		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256},
-	}
-
-	if r.zoneCAPool != nil {
-		// Skip hostname verification but validate the cert chain against Zone CA.
-		tlsConfig.InsecureSkipVerify = true
-		tlsConfig.VerifyPeerCertificate = r.verifyPeerCertAgainstZoneCA
-	} else if r.config.InsecureSkipVerify {
-		tlsConfig.InsecureSkipVerify = true
-	}
-
-	// Present controller cert for mutual TLS if available.
-	if r.controllerCert != nil {
-		tlsConfig.Certificates = []tls.Certificate{r.controllerCert.TLSCertificate()}
-	}
-
-	return tlsConfig
+	return buildOperationalTLSConfig(r.WorkingCrypto(), r.config.InsecureSkipVerify, r.debugf)
 }
 
 // verifyPeerCertAgainstZoneCA validates the peer certificate chain against
-// the Zone CA pool without checking hostname. This is used for operational
-// connections where MASH identifies peers by device ID in the cert CN.
-func (r *Runner) verifyPeerCertAgainstZoneCA(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-	if len(rawCerts) == 0 {
-		return fmt.Errorf("no peer certificates presented")
-	}
-
-	// Parse the leaf certificate.
-	leaf, err := x509.ParseCertificate(rawCerts[0])
-	if err != nil {
-		return fmt.Errorf("parse peer certificate: %w", err)
-	}
-
-	// Build intermediate pool from any additional certs.
-	intermediates := x509.NewCertPool()
-	for _, raw := range rawCerts[1:] {
-		c, err := x509.ParseCertificate(raw)
-		if err != nil {
-			continue
-		}
-		intermediates.AddCert(c)
-	}
-
-	// Verify the chain against the Zone CA pool.
-	opts := x509.VerifyOptions{
-		Roots:         r.zoneCAPool,
-		Intermediates: intermediates,
-	}
-
-	if _, err := leaf.Verify(opts); err != nil {
-		leafFP := sha256.Sum256(leaf.Raw)
-		issuerFP := sha256.Sum256(leaf.RawIssuer)
-		r.debugf("verifyPeerCert FAILED: leaf.CN=%s leaf.FP=%x issuer.FP=%x pool=%p err=%v",
-			leaf.Subject.CommonName, leafFP[:4], issuerFP[:4], r.zoneCAPool, err)
-		if r.zoneCA != nil {
-			caFP := sha256.Sum256(r.zoneCA.Certificate.Raw)
-			r.debugf("verifyPeerCert: zoneCA.CN=%s zoneCA.FP=%x",
-				r.zoneCA.Certificate.Subject.CommonName, caFP[:4])
-		}
-		return fmt.Errorf("certificate chain verification failed: %w", err)
-	}
-
-	return nil
+// the Zone CA pool. Delegates to the standalone verifyPeerCert function.
+func (r *Runner) verifyPeerCertAgainstZoneCA(rawCerts [][]byte, chains [][]*x509.Certificate) error {
+	return verifyPeerCert(rawCerts, chains, r.zoneCAPool, r.zoneCA, r.debugf)
 }
 
 // trackSubscription adds a subscription ID to the active tracking list (delegates to pool).

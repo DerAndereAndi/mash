@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	mathrand "math/rand"
-	"net"
 	"sort"
 	"strings"
 	"time"
@@ -594,13 +593,12 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 	// the zone as awaiting reconnection.
 	r.debugf("transitionToOperational: reconnecting with operational TLS")
 
-	tlsConfig := r.operationalTLSConfig()
 	target := r.getTarget(nil)
+	ctx := context.Background()
 	var tlsConn *tls.Conn
 	var dialErr error
 	for attempt := range 3 {
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		tlsConn, dialErr = r.dialer.DialOperational(ctx, target, r.WorkingCrypto())
 		if dialErr == nil {
 			break
 		}
@@ -658,13 +656,12 @@ func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
 
 	r.debugf("reconnectToZone: reconnecting to zone %s", r.suite.ZoneID())
 
-	tlsConfig := r.operationalTLSConfig()
 	target := r.getTarget(nil)
+	ctx := context.Background()
 	var tlsConn *tls.Conn
 	var dialErr error
 	for attempt := range 3 {
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		tlsConn, dialErr = tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+		tlsConn, dialErr = r.dialer.DialOperational(ctx, target, r.WorkingCrypto())
 		if dialErr == nil {
 			break
 		}

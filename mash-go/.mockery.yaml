@@ -12,3 +12,4 @@ packages:
       ConnPool: {}
       CommissioningOps: {}
       Coordinator: {}
+      Dialer: {}
