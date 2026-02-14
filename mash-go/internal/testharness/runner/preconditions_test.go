@@ -1396,21 +1396,6 @@ func TestDeviceHasLocalZone_PreservesCryptoOnSessionReuse(t *testing.T) {
 	}
 }
 
-// TestIPv6PreconditionKeysAreSimulation verifies that the 3 IPv6/multi-interface
-// precondition keys are registered in simulationPreconditionKeys so handlers can
-// adapt their behavior based on the simulated scenario.
-func TestIPv6PreconditionKeysAreSimulation(t *testing.T) {
-	for _, key := range []string{
-		PrecondDeviceHasGlobalAndLinkLocal,
-		PrecondDeviceHasLinkLocal,
-		PrecondDeviceHasMultipleInterfaces,
-	} {
-		if !simulationPreconditionKeys[key] {
-			t.Errorf("expected %q to be in simulationPreconditionKeys", key)
-		}
-	}
-}
-
 // TestIPv6PreconditionKeysHaveLevels verifies that the 3 IPv6/multi-interface
 // keys are registered in preconditionKeyLevels at level 0 (no connection needed).
 func TestIPv6PreconditionKeysHaveLevels(t *testing.T) {

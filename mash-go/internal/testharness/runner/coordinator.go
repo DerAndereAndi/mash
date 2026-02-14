@@ -363,10 +363,6 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 			c.debugf("ensureCommissioned FAILED for %s: %v", tc.ID, setupErr)
 			return setupErr
 		}
-		// After commissioning, the device IS in a zone. Auto-set so
-		// browse_mdns simulation returns operational records without
-		// requiring an explicit device_in_zone precondition in YAML.
-		state.Set(PrecondDeviceInZone, true)
 		// Store zone IDs for test interpolation.
 		if !needsZoneConns && c.ops.PASEState().Completed() && c.ops.PASEState().SessionKey() != nil {
 			zID := deriveZoneIDFromSecret(c.ops.PASEState().SessionKey())
