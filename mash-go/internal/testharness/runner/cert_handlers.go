@@ -60,9 +60,9 @@ func (r *Runner) handleVerifyCertificate(ctx context.Context, step *loader.Step,
 		// VerifiedChains. Fall back to manual verification.
 		if len(tlsState.VerifiedChains) > 0 {
 			chainValid = true
-		} else if r.zoneCAPool != nil {
+		} else if r.connMgr.ZoneCAPool() != nil {
 			_, err := cert.Verify(x509.VerifyOptions{
-				Roots:     r.zoneCAPool,
+				Roots:     r.connMgr.ZoneCAPool(),
 				KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 			})
 			chainValid = err == nil
@@ -88,8 +88,8 @@ func (r *Runner) handleVerifyCertSubject(ctx context.Context, step *loader.Step,
 
 	// Prefer the issued device cert over the TLS peer cert.
 	var cert *x509.Certificate
-	if r.issuedDeviceCert != nil {
-		cert = r.issuedDeviceCert
+	if r.connMgr.IssuedDeviceCert() != nil {
+		cert = r.connMgr.IssuedDeviceCert()
 	} else if r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().tlsConn != nil {
 		cs := r.pool.Main().tlsConn.ConnectionState()
 		if len(cs.PeerCertificates) > 0 {
@@ -139,8 +139,8 @@ func (r *Runner) handleVerifyDeviceCert(ctx context.Context, step *loader.Step, 
 	// TLS peer cert, which may still be the commissioning self-signed cert
 	// if the connection hasn't been upgraded to operational TLS yet.
 	var deviceCert *x509.Certificate
-	if r.issuedDeviceCert != nil {
-		deviceCert = r.issuedDeviceCert
+	if r.connMgr.IssuedDeviceCert() != nil {
+		deviceCert = r.connMgr.IssuedDeviceCert()
 		hasOperationalCert = true
 	} else if r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().tlsConn != nil {
 		cs := r.pool.Main().tlsConn.ConnectionState()
@@ -155,8 +155,8 @@ func (r *Runner) handleVerifyDeviceCert(ctx context.Context, step *loader.Step, 
 		certValidityDays = int(math.Round(deviceCert.NotAfter.Sub(deviceCert.NotBefore).Hours() / 24))
 
 		// Verify against Zone CA pool if available.
-		if r.zoneCAPool != nil {
-			opts := x509.VerifyOptions{Roots: r.zoneCAPool}
+		if r.connMgr.ZoneCAPool() != nil {
+			opts := x509.VerifyOptions{Roots: r.connMgr.ZoneCAPool()}
 			_, verifyErr := deviceCert.Verify(opts)
 			certSignedByZoneCA = verifyErr == nil
 		}
@@ -181,8 +181,8 @@ func (r *Runner) handleVerifyDeviceCertStore(ctx context.Context, step *loader.S
 	}
 
 	// The runner stores Zone CA and issued device cert during commissioning.
-	zoneCAStored := r.zoneCAPool != nil
-	operationalCertStored := r.issuedDeviceCert != nil
+	zoneCAStored := r.connMgr.ZoneCAPool() != nil
+	operationalCertStored := r.connMgr.IssuedDeviceCert() != nil
 
 	return map[string]any{
 		KeyCertStoreValid:        hasCerts || operationalCertStored,
@@ -196,9 +196,9 @@ func (r *Runner) handleVerifyDeviceCertStore(ctx context.Context, step *loader.S
 // Prefers the controller's own cert; falls back to the TLS peer cert.
 func (r *Runner) handleGetCertFingerprint(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Prefer the runner's own controller cert (used by controller_action dispatch).
-	if r.controllerCert != nil && r.controllerCert.Certificate != nil {
+	if r.connMgr.ControllerCert() != nil && r.connMgr.ControllerCert().Certificate != nil {
 		return map[string]any{
-			KeyFingerprint: certFingerprint(r.controllerCert.Certificate),
+			KeyFingerprint: certFingerprint(r.connMgr.ControllerCert().Certificate),
 		}, nil
 	}
 
@@ -285,7 +285,7 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 	expectedState, _ := params[ParamExpectedState].(string)
 
 	// Check PASE state.
-	paseCompleted := r.paseState != nil && r.paseState.completed
+	paseCompleted := r.connMgr.PASEState() != nil && r.connMgr.PASEState().completed
 
 	// Probe the connection to detect remote closure (e.g., after PASE timeout).
 	connected := r.pool.Main() != nil && r.pool.Main().isConnected()
@@ -339,7 +339,7 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 
 // handleResetPASESession resets the PASE state for a new attempt.
 func (r *Runner) handleResetPASESession(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	r.paseState = nil
+	r.connMgr.SetPASEState(nil)
 
 	state.Set(KeySessionEstablished, false)
 	state.Set(StatePasePending, false)
@@ -373,7 +373,7 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 	if err != nil {
 		// Write failed -- connection is dead, clean up.
 		r.pool.Main().transitionTo(ConnDisconnected)
-		r.paseState = nil
+		r.connMgr.SetPASEState(nil)
 		return outputs, err
 	}
 
@@ -381,7 +381,7 @@ func (r *Runner) handleSendPASEX(ctx context.Context, step *loader.Step, state *
 		// Device closes connection for invalid point -- close our side too
 		// so subsequent tests don't inherit a dead socket.
 		r.pool.Main().transitionTo(ConnDisconnected)
-		r.paseState = nil
+		r.connMgr.SetPASEState(nil)
 		outputs[KeyConnectionClosed] = true
 		outputs[KeyError] = "INVALID_PARAMETER"
 		return outputs, nil
@@ -451,9 +451,9 @@ func (r *Runner) handleDeviceVerifyPeer(ctx context.Context, step *loader.Step, 
 		verificationSuccess = true // peer cert exists
 
 		// If Zone CA is available, verify peer cert against it.
-		if r.zoneCAPool != nil {
+		if r.connMgr.ZoneCAPool() != nil {
 			opts := x509.VerifyOptions{
-				Roots:     r.zoneCAPool,
+				Roots:     r.connMgr.ZoneCAPool(),
 				KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 			}
 			if _, err := tlsState.PeerCertificates[0].Verify(opts); err != nil {

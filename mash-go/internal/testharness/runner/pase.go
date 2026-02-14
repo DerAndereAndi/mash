@@ -79,11 +79,11 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		requestedZoneType = strings.ToUpper(zt)
 		switch requestedZoneType {
 		case "GRID":
-			r.commissionZoneType = cert.ZoneTypeGrid
+			r.connMgr.SetCommissionZoneType(cert.ZoneTypeGrid)
 		case "LOCAL":
-			r.commissionZoneType = cert.ZoneTypeLocal
+			r.connMgr.SetCommissionZoneType(cert.ZoneTypeLocal)
 		case "TEST":
-			r.commissionZoneType = cert.ZoneTypeTest
+			r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 		}
 	}
 
@@ -140,15 +140,15 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// commissioning socket after cert exchange. If a previous commission step
 	// in this test completed, the main conn still references the dead socket at
 	// ConnTLSConnected. Clean it up so we dial fresh below.
-	if r.pool.Main().state == ConnTLSConnected && r.paseState != nil && r.paseState.completed {
+	if r.pool.Main().state == ConnTLSConnected && r.connMgr.PASEState() != nil && r.connMgr.PASEState().completed {
 		r.debugf("handleCommission: cleaning up dead post-commission socket")
 		r.pool.Main().transitionTo(ConnDisconnected)
 		r.pool.Main().clearConnectionRefs()
-		r.paseState = nil
+		r.connMgr.SetPASEState(nil)
 	}
 
 	r.debugf("handleCommission: conn.state=%v tlsConn=%v paseState=%v",
-		r.pool.Main().state, r.pool.Main().tlsConn != nil, r.paseState != nil)
+		r.pool.Main().state, r.pool.Main().tlsConn != nil, r.connMgr.PASEState() != nil)
 
 	// Establish commissioning connection if not already connected
 	// This ensures connection + PASE happen atomically
@@ -264,10 +264,10 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	}
 	if err != nil {
 		// Store failed state for debugging
-		r.paseState = &PASEState{
+		r.connMgr.SetPASEState(&PASEState{
 			session:   session,
 			completed: false,
-		}
+		})
 		// The handshake writes/reads on the connection. If it fails,
 		// the connection is in an unusable state (the device closes
 		// it on PASE failure per the MASH spec).
@@ -303,11 +303,11 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	}
 
 	// Store successful state
-	r.paseState = &PASEState{
+	r.connMgr.SetPASEState(&PASEState{
 		session:    session,
 		sessionKey: sessionKey,
 		completed:  true,
-	}
+	})
 
 	// Perform certificate exchange after PASE (MsgType 30-33).
 	// This is required: the device blocks waiting for the cert exchange
@@ -325,7 +325,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 				for _, c := range cs.PeerCertificates {
 					pool.AddCert(c)
 				}
-				r.zoneCAPool = pool
+				r.connMgr.SetZoneCAPool(pool)
 			}
 		}
 	}
@@ -366,8 +366,8 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			if err := r.waitForOperationalReady(2 * time.Second); err != nil {
 				r.debugf("handleCommission: %v (continuing)", err)
 			}
-			if r.paseState != nil && r.paseState.sessionKey != nil {
-				zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+			if r.connMgr.PASEState() != nil && r.connMgr.PASEState().sessionKey != nil {
+				zoneID := deriveZoneIDFromSecret(r.connMgr.PASEState().sessionKey)
 				connKey := "step-" + zoneID
 				r.pool.TrackZone(connKey, r.pool.Main(), zoneID)
 				r.debugf("handleCommission: transitioned to operational, zone %s", zoneID)
@@ -376,8 +376,8 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 			// Implicit tracking: create a separate Connection for cleanup.
 			// The main connection remains the (dead) commissioning connection so test
 			// steps aren't disrupted by an unexpected operational connection.
-			if r.paseState != nil && r.paseState.sessionKey != nil {
-				zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+			if r.connMgr.PASEState() != nil && r.connMgr.PASEState().sessionKey != nil {
+				zoneID := deriveZoneIDFromSecret(r.connMgr.PASEState().sessionKey)
 				connKey := "step-" + zoneID
 				trackConn := &Connection{
 					tlsConn: opConn,
@@ -422,8 +422,8 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// Use the real derived zone ID when available for consistency with
 	// preconditions code and to match what the device stores.
 	derivedZoneID := ""
-	if r.paseState != nil && r.paseState.sessionKey != nil {
-		derivedZoneID = deriveZoneIDFromSecret(r.paseState.sessionKey)
+	if r.connMgr.PASEState() != nil && r.connMgr.PASEState().sessionKey != nil {
+		derivedZoneID = deriveZoneIDFromSecret(r.connMgr.PASEState().sessionKey)
 		// Set current_zone_id so tests can reference {{ current_zone_id }}.
 		state.Set(StateCurrentZoneID, derivedZoneID)
 	}
@@ -500,7 +500,7 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 // It generates a Zone CA, uses IssueInitialCertSync to exchange certs with
 // the device, and stores the resulting certs on the runner for later TLS use.
 func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
-	if r.paseState == nil || r.paseState.sessionKey == nil {
+	if r.connMgr.PASEState() == nil || r.connMgr.PASEState().sessionKey == nil {
 		return "", fmt.Errorf("no PASE session key")
 	}
 	if r.pool.Main() == nil || !r.pool.Main().isConnected() || r.pool.Main().framer == nil {
@@ -508,10 +508,10 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 	}
 
 	// Derive zone ID from PASE shared secret (same derivation as device).
-	zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+	zoneID := deriveZoneIDFromSecret(r.connMgr.PASEState().sessionKey)
 
 	// Use the configured zone type, defaulting to LOCAL.
-	zt := r.commissionZoneType
+	zt := r.connMgr.CommissionZoneType()
 	if zt == 0 {
 		zt = cert.ZoneTypeLocal
 	}
@@ -535,11 +535,11 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 	// Store Zone CA and accumulate the CA pool for operational TLS.
 	// We accumulate rather than replace so that multiple commissions
 	// (multi-zone) can coexist -- each zone's CA must be trusted.
-	r.zoneCA = zoneCA
-	if r.zoneCAPool == nil {
-		r.zoneCAPool = x509.NewCertPool()
+	r.connMgr.SetZoneCA(zoneCA)
+	if r.connMgr.ZoneCAPool() == nil {
+		r.connMgr.SetZoneCAPool(x509.NewCertPool())
 	}
-	r.zoneCAPool.AddCert(zoneCA.Certificate)
+	r.connMgr.ZoneCAPool().AddCert(zoneCA.Certificate)
 
 	// Generate controller operational cert for mutual TLS.
 	controllerID := "test-controller"
@@ -547,10 +547,10 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("generate controller cert: %w", err)
 	}
-	r.controllerCert = controllerCert
+	r.connMgr.SetControllerCert(controllerCert)
 
 	// Store the issued device cert for verify_device_cert.
-	r.issuedDeviceCert = deviceCert
+	r.connMgr.SetIssuedDeviceCert(deviceCert)
 
 	// Extract device ID from the signed certificate.
 	deviceID, _ := cert.ExtractDeviceID(deviceCert)
@@ -586,10 +586,10 @@ func (r *Runner) handlePASERequest(ctx context.Context, step *loader.Step, state
 	}
 
 	// Initialize state - we'll perform full handshake on pase_receive_verify
-	r.paseState = &PASEState{
+	r.connMgr.SetPASEState(&PASEState{
 		session:   session,
 		completed: false,
-	}
+	})
 
 	// Store params for the deferred handshake
 	state.Set(StatePasePending, true)
@@ -603,7 +603,7 @@ func (r *Runner) handlePASERequest(ctx context.Context, step *loader.Step, state
 // handlePASEReceiveResponse handles the legacy pase_receive_response action.
 // Since the handshake is atomic, this just returns the expected outputs.
 func (r *Runner) handlePASEReceiveResponse(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.paseState == nil || r.paseState.session == nil {
+	if r.connMgr.PASEState() == nil || r.connMgr.PASEState().session == nil {
 		return nil, fmt.Errorf("no PASE session in progress: call pase_request first")
 	}
 
@@ -616,7 +616,7 @@ func (r *Runner) handlePASEReceiveResponse(ctx context.Context, step *loader.Ste
 // handlePASEConfirm handles the legacy pase_confirm action.
 // Since the handshake is atomic, this just returns the expected outputs.
 func (r *Runner) handlePASEConfirm(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.paseState == nil || r.paseState.session == nil {
+	if r.connMgr.PASEState() == nil || r.connMgr.PASEState().session == nil {
 		return nil, fmt.Errorf("no PASE session in progress")
 	}
 
@@ -628,7 +628,7 @@ func (r *Runner) handlePASEConfirm(ctx context.Context, step *loader.Step, state
 // handlePASEReceiveVerify handles the legacy pase_receive_verify action.
 // This is where we actually perform the handshake for legacy test cases.
 func (r *Runner) handlePASEReceiveVerify(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.paseState == nil || r.paseState.session == nil {
+	if r.connMgr.PASEState() == nil || r.connMgr.PASEState().session == nil {
 		return nil, fmt.Errorf("no PASE session in progress")
 	}
 
@@ -637,15 +637,15 @@ func (r *Runner) handlePASEReceiveVerify(ctx context.Context, step *loader.Step,
 	}
 
 	// Perform the actual handshake now
-	sessionKey, err := r.paseState.session.Handshake(ctx, r.pool.Main().tlsConn)
+	sessionKey, err := r.connMgr.PASEState().session.Handshake(ctx, r.pool.Main().tlsConn)
 	if err != nil {
 		r.pool.Main().transitionTo(ConnDisconnected)
 		return nil, fmt.Errorf("PASE handshake failed: %w", err)
 	}
 
 	// Update state
-	r.paseState.sessionKey = sessionKey
-	r.paseState.completed = true
+	r.connMgr.PASEState().sessionKey = sessionKey
+	r.connMgr.PASEState().completed = true
 
 	state.Set(KeySessionEstablished, true)
 	state.Set(StateSessionKey, sessionKey)
@@ -658,15 +658,15 @@ func (r *Runner) handlePASEReceiveVerify(ctx context.Context, step *loader.Step,
 
 // handleVerifySessionKey verifies the derived session key.
 func (r *Runner) handleVerifySessionKey(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.paseState == nil {
+	if r.connMgr.PASEState() == nil {
 		return nil, fmt.Errorf("no PASE session: commissioning not performed")
 	}
 
-	if !r.paseState.completed {
+	if !r.connMgr.PASEState().completed {
 		return nil, fmt.Errorf("PASE session not completed")
 	}
 
-	key := r.paseState.sessionKey
+	key := r.connMgr.PASEState().sessionKey
 
 	return map[string]any{
 		KeyKeyLength:  len(key),

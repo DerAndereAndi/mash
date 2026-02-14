@@ -508,7 +508,7 @@ func TestDeviceStateModified_SetByTrigger(t *testing.T) {
 	defer server.Close()
 	go serverEchoResponse(server)
 
-	if r.deviceStateModified {
+	if r.connMgr.DeviceStateModified() {
 		t.Fatal("expected deviceStateModified=false initially")
 	}
 
@@ -518,7 +518,7 @@ func TestDeviceStateModified_SetByTrigger(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !r.deviceStateModified {
+	if !r.connMgr.DeviceStateModified() {
 		t.Error("expected deviceStateModified=true after trigger send")
 	}
 }

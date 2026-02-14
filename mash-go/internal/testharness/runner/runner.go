@@ -34,7 +34,6 @@ type Runner struct {
 	engineConfig *engine.EngineConfig
 	reporter     reporter.Reporter
 	resolver     *Resolver
-	paseState    *PASEState
 	pics         *loader.PICSFile // Cached PICS for handler access
 
 	// Components (interface-typed for testability)
@@ -44,29 +43,9 @@ type Runner struct {
 	dialer      Dialer
 	connMgr     ConnectionManager
 
-	// Working crypto: the "current" cert material used by operationalTLSConfig()
-	// and handlers. Restored from suite.Crypto() when reconnecting after
-	// backward transitions.
-	zoneCA           *cert.ZoneCA
-	controllerCert   *cert.OperationalCert
-	issuedDeviceCert *x509.Certificate
-	zoneCAPool       *x509.CertPool
-
-	// Commissioning state
-	commissionZoneType cert.ZoneType
-	deviceStateModified bool
-
-	// lastDeviceConnClose records when closeActiveZoneConns last closed
-	// real device connections.
-	lastDeviceConnClose time.Time
-
 	// pairingAdvertiser is a real mDNS advertiser used by announce_pairing_request
 	// to advertise _mashp._udp services. Cleaned up in Close().
 	pairingAdvertiser *discovery.MDNSAdvertiser
-
-	// discoveredDiscriminator is the device's discriminator from mDNS.
-	// Set during auto-PICS browse and injected into test state.
-	discoveredDiscriminator uint16
 }
 
 // Config configures the test runner.
@@ -492,12 +471,12 @@ func (r *Runner) runAutoPICS(ctx context.Context) error {
 
 	// Commission the device as ZoneTypeTest so the suite zone doesn't
 	// count against MaxZones and is transparent to device logic.
-	r.commissionZoneType = cert.ZoneTypeTest
+	r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 	if err := r.ensureCommissioned(ctx, state); err != nil {
-		r.commissionZoneType = 0
+		r.connMgr.SetCommissionZoneType(0)
 		return fmt.Errorf("commissioning for auto-PICS: %w", err)
 	}
-	r.commissionZoneType = 0
+	r.connMgr.SetCommissionZoneType(0)
 
 	pf, err := r.buildAutoPICS(ctx)
 	if err != nil {
@@ -560,7 +539,7 @@ func (r *Runner) operationalTLSConfig() *tls.Config {
 // verifyPeerCertAgainstZoneCA validates the peer certificate chain against
 // the Zone CA pool. Delegates to the standalone verifyPeerCert function.
 func (r *Runner) verifyPeerCertAgainstZoneCA(rawCerts [][]byte, chains [][]*x509.Certificate) error {
-	return verifyPeerCert(rawCerts, chains, r.zoneCAPool, r.zoneCA, r.debugf)
+	return verifyPeerCert(rawCerts, chains, r.connMgr.ZoneCAPool(), r.connMgr.ZoneCA(), r.debugf)
 }
 
 // trackSubscription adds a subscription ID to the active tracking list (delegates to pool).
@@ -681,7 +660,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	if commissioning {
 		// Use proper commissioning TLS config for PASE
 		tlsConfig = transport.NewCommissioningTLSConfig()
-	} else if r.zoneCAPool != nil {
+	} else if r.connMgr.ZoneCAPool() != nil {
 		// Use operational TLS config with Zone CA validation (no hostname check).
 		tlsConfig = r.operationalTLSConfig()
 	} else {
@@ -778,7 +757,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	if _, ok := step.Params["client_cert"]; !ok {
 		if toBool(step.Params["use_expired_cert"]) {
 			step.Params["client_cert"] = CertTypeControllerExpired
-			r.debugf("handleConnect: translated use_expired_cert to client_cert=controller_expired, zoneCA=%v", r.zoneCA != nil)
+			r.debugf("handleConnect: translated use_expired_cert to client_cert=controller_expired, zoneCA=%v", r.connMgr.ZoneCA() != nil)
 		} else if toBool(step.Params["use_wrong_zone_cert"]) {
 			step.Params["client_cert"] = CertTypeControllerWrongZone
 		} else if toBool(step.Params["use_operational_cert"]) {
@@ -813,7 +792,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 				specs = append(specs, name)
 			}
 		}
-		certChain, chainErr := buildCertChain(specs, r.controllerCert, r.zoneCA)
+		certChain, chainErr := buildCertChain(specs, r.connMgr.ControllerCert(), r.connMgr.ZoneCA())
 		if chainErr != nil {
 			return nil, fmt.Errorf("building cert chain: %w", chainErr)
 		}
@@ -825,10 +804,10 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		case "none":
 			tlsConfig.Certificates = nil
 		default:
-			if r.zoneCA == nil {
+			if r.connMgr.ZoneCA() == nil {
 				return nil, fmt.Errorf("client_cert %q requires a zone CA (commission first)", clientCertType)
 			}
-			testCert, certErr := generateTestClientCert(clientCertType, r.zoneCA)
+			testCert, certErr := generateTestClientCert(clientCertType, r.connMgr.ZoneCA())
 			if certErr != nil {
 				return nil, fmt.Errorf("generating test client cert %q: %w", clientCertType, certErr)
 			}
@@ -867,7 +846,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 			}
 			serverCertSelfSigned = bytes.Equal(cert.RawIssuer, cert.RawSubject)
 		}
-		chainValidated := len(cs.VerifiedChains) > 0 || (hasPeerCerts && (insecure || r.zoneCAPool != nil))
+		chainValidated := len(cs.VerifiedChains) > 0 || (hasPeerCerts && (insecure || r.connMgr.ZoneCAPool() != nil))
 		presentedClientCert := len(r.pool.Main().tlsConn.ConnectionState().PeerCertificates) > 0
 		return map[string]any{
 			KeyConnectionEstablished:  true,
@@ -919,7 +898,7 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	// Also retry when reconnecting operationally after a disconnect (e.g.
 	// invoke_with_disconnect → connect). The device may not have detected
 	// our TCP close yet and rejects the new connection for the same zone.
-	if !needsDisconnectWait && !commissioning && r.zoneCAPool != nil && r.pool.Main() != nil && !r.pool.Main().isConnected() {
+	if !needsDisconnectWait && !commissioning && r.connMgr.ZoneCAPool() != nil && r.pool.Main() != nil && !r.pool.Main().isConnected() {
 		needsDisconnectWait = true
 	}
 
@@ -1110,9 +1089,9 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		if idx := strings.Index(cert.Subject.CommonName, "-"); idx >= 0 {
 			serverCertCNPrefix = cert.Subject.CommonName[:idx+1]
 			// Store device discriminator from commissioning cert CN (MASH-1234).
-			if r.discoveredDiscriminator == 0 {
+			if r.connMgr.DiscoveredDiscriminator() == 0 {
 				if d, err := strconv.ParseUint(cert.Subject.CommonName[idx+1:], 10, 16); err == nil {
-					r.discoveredDiscriminator = uint16(d)
+					r.connMgr.SetDiscoveredDiscriminator(uint16(d))
 				}
 			}
 		} else {

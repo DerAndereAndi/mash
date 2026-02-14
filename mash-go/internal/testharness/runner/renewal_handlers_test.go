@@ -56,7 +56,7 @@ func TestHandleVerifyConnectionState_PASECompletedNotReconnected(t *testing.T) {
 	// PASE completed but still on the commissioning connection (not yet reconnected).
 	r := newTestRunner()
 	r.pool.Main().state = ConnTLSConnected
-	r.paseState = &PASEState{completed: true}
+	r.connMgr.SetPASEState(&PASEState{completed: true})
 	state := newTestState()
 
 	out, _ := r.handleVerifyConnectionState(context.Background(), &loader.Step{}, state)
@@ -78,7 +78,7 @@ func TestHandleVerifyConnectionState_Operational(t *testing.T) {
 	// After commission + operational reconnect.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true}
+	r.connMgr.SetPASEState(&PASEState{completed: true})
 	state := newTestState()
 
 	out, _ := r.handleVerifyConnectionState(context.Background(), &loader.Step{}, state)

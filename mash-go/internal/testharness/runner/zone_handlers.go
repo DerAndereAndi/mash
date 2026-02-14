@@ -101,18 +101,18 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 		zt = cert.ZoneTypeTest
 	}
 	if zoneCA, err := cert.GenerateZoneCA(zoneID, zt); err == nil {
-		r.zoneCA = zoneCA
+		r.connMgr.SetZoneCA(zoneCA)
 		// Accumulate rather than replace so CAs from previous zones
 		// (including the suite zone) remain trusted for TLS verification.
-		if r.zoneCAPool == nil {
-			r.zoneCAPool = x509.NewCertPool()
+		if r.connMgr.ZoneCAPool() == nil {
+			r.connMgr.SetZoneCAPool(x509.NewCertPool())
 		}
-		r.zoneCAPool.AddCert(zoneCA.Certificate)
+		r.connMgr.ZoneCAPool().AddCert(zoneCA.Certificate)
 		zone.CAFingerprint = certFingerprint(zoneCA.Certificate)
 		fingerprint = zone.CAFingerprint
 
 		if controllerCert, err := cert.GenerateControllerOperationalCert(zoneCA, "test-controller"); err == nil {
-			r.controllerCert = controllerCert
+			r.connMgr.SetControllerCert(controllerCert)
 		}
 	}
 
@@ -307,8 +307,8 @@ func (r *Runner) handleGetZoneMetadata(ctx context.Context, step *loader.Step, s
 // handleGetZoneCAFingerprint returns the Zone CA fingerprint.
 func (r *Runner) handleGetZoneCAFingerprint(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Prefer the real Zone CA cert fingerprint when available.
-	if r.zoneCA != nil && r.zoneCA.Certificate != nil {
-		return map[string]any{KeyFingerprint: certFingerprint(r.zoneCA.Certificate)}, nil
+	if r.connMgr.ZoneCA() != nil && r.connMgr.ZoneCA().Certificate != nil {
+		return map[string]any{KeyFingerprint: certFingerprint(r.connMgr.ZoneCA().Certificate)}, nil
 	}
 
 	params := engine.InterpolateParams(step.Params, state)
@@ -347,8 +347,8 @@ func (r *Runner) handleVerifyZoneCA(ctx context.Context, step *loader.Step, stat
 	}
 
 	// Add cert details from the runner's Zone CA if available.
-	if r.zoneCA != nil && r.zoneCA.Certificate != nil {
-		cert := r.zoneCA.Certificate
+	if r.connMgr.ZoneCA() != nil && r.connMgr.ZoneCA().Certificate != nil {
+		cert := r.connMgr.ZoneCA().Certificate
 		outputs[KeyPathLength] = cert.MaxPathLen
 		outputs[KeyAlgorithm] = cert.SignatureAlgorithm.String()
 		outputs[KeyBasicConstraintsCA] = cert.IsCA

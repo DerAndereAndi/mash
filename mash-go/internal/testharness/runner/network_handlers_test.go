@@ -165,7 +165,7 @@ func TestHandleAdjustClock_SendsTrigger(t *testing.T) {
 	}
 
 	// Verify device state was modified (trigger was sent).
-	if !r.deviceStateModified {
+	if !r.connMgr.DeviceStateModified() {
 		t.Error("expected deviceStateModified=true after sending clock trigger to device")
 	}
 }
@@ -199,7 +199,7 @@ func TestHandleAdjustClock_NoTriggerWithoutTarget(t *testing.T) {
 	}
 
 	// No trigger should have been sent (no target).
-	if r.deviceStateModified {
+	if r.connMgr.DeviceStateModified() {
 		t.Error("expected deviceStateModified=false when no target is set")
 	}
 }

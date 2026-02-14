@@ -31,11 +31,21 @@ type ConnectionManager interface {
 	WaitForOperationalReady(timeout time.Duration) error
 	WaitForCommissioningMode(ctx context.Context, timeout time.Duration) error
 
-	// Crypto state
+	// Crypto state (bundled)
 	WorkingCrypto() CryptoState
 	SetWorkingCrypto(crypto CryptoState)
 	ClearWorkingCrypto()
 	OperationalTLSConfig() *tls.Config
+
+	// Crypto state (individual field access)
+	ZoneCA() *cert.ZoneCA
+	SetZoneCA(z *cert.ZoneCA)
+	ControllerCert() *cert.OperationalCert
+	SetControllerCert(c *cert.OperationalCert)
+	IssuedDeviceCert() *x509.Certificate
+	SetIssuedDeviceCert(c *x509.Certificate)
+	ZoneCAPool() *x509.CertPool
+	SetZoneCAPool(p *x509.CertPool)
 
 	// PASE state
 	PASEState() *PASEState
@@ -160,6 +170,18 @@ func (m *connMgrImpl) ClearWorkingCrypto() {
 func (m *connMgrImpl) OperationalTLSConfig() *tls.Config {
 	return buildOperationalTLSConfig(m.WorkingCrypto(), m.config.InsecureSkipVerify, m.debugf)
 }
+
+// Individual crypto field accessors -- used by handlers that read/write
+// a single crypto field rather than the full CryptoState bundle.
+
+func (m *connMgrImpl) ZoneCA() *cert.ZoneCA           { return m.zoneCA }
+func (m *connMgrImpl) SetZoneCA(z *cert.ZoneCA)        { m.zoneCA = z }
+func (m *connMgrImpl) ControllerCert() *cert.OperationalCert { return m.controllerCert }
+func (m *connMgrImpl) SetControllerCert(c *cert.OperationalCert) { m.controllerCert = c }
+func (m *connMgrImpl) IssuedDeviceCert() *x509.Certificate { return m.issuedDeviceCert }
+func (m *connMgrImpl) SetIssuedDeviceCert(c *x509.Certificate) { m.issuedDeviceCert = c }
+func (m *connMgrImpl) ZoneCAPool() *x509.CertPool     { return m.zoneCAPool }
+func (m *connMgrImpl) SetZoneCAPool(p *x509.CertPool) { m.zoneCAPool = p }
 
 // ---------------------------------------------------------------------------
 // Connection lifecycle

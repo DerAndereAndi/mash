@@ -14,10 +14,10 @@ func TestHandleResetPASESession(t *testing.T) {
 	state := newTestState()
 
 	// Set up some PASE state.
-	r.paseState = &PASEState{
+	r.connMgr.SetPASEState(&PASEState{
 		sessionKey: []byte{1, 2, 3},
 		completed:  true,
-	}
+	})
 	state.Set(PrecondSessionEstablished, true)
 
 	out, err := r.handleResetPASESession(context.Background(), &loader.Step{}, state)
@@ -27,7 +27,7 @@ func TestHandleResetPASESession(t *testing.T) {
 	if out["pase_reset"] != true {
 		t.Error("expected pase_reset=true")
 	}
-	if r.paseState != nil {
+	if r.connMgr.PASEState() != nil {
 		t.Error("expected paseState to be nil after reset")
 	}
 
@@ -62,7 +62,7 @@ func TestHandleVerifyCommissioningState(t *testing.T) {
 	// ADVERTISING state: was connected but now disconnected.
 	r.pool.Main().state = ConnDisconnected
 	r.pool.Main().hadConnection = true
-	r.paseState = nil
+	r.connMgr.SetPASEState(nil)
 	step = &loader.Step{Params: map[string]any{ParamExpectedState: CommissioningStateAdvertising}}
 	out, _ = r.handleVerifyCommissioningState(context.Background(), step, state)
 	if out[KeyCommissioningState] != CommissioningStateAdvertising {
@@ -71,7 +71,7 @@ func TestHandleVerifyCommissioningState(t *testing.T) {
 
 	// COMMISSIONED state.
 	r.pool.Main().hadConnection = false
-	r.paseState = &PASEState{completed: true}
+	r.connMgr.SetPASEState(&PASEState{completed: true})
 	step = &loader.Step{Params: map[string]any{ParamExpectedState: CommissioningStateCommissioned}}
 	out, _ = r.handleVerifyCommissioningState(context.Background(), step, state)
 	if out[KeyCommissioningState] != CommissioningStateCommissioned {
@@ -228,7 +228,7 @@ func TestHandleVerifyCertificate_WithZoneCA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate zone CA: %v", err)
 	}
-	r.zoneCAPool = zoneCA.TLSClientCAs()
+	r.connMgr.SetZoneCAPool(zoneCA.TLSClientCAs())
 
 	// Generate a device key pair and CSR.
 	keyPair, err := cert.GenerateKeyPair()

@@ -199,8 +199,8 @@ func (r *Runner) handleSendCertInstall(ctx context.Context, step *loader.Step, s
 
 	// Sign the CSR using the runner's Zone CA to produce a valid certificate
 	var signedCertBytes []byte
-	if r.zoneCA != nil {
-		signedCert, err := cert.SignCSR(r.zoneCA, csrBytes)
+	if r.connMgr.ZoneCA() != nil {
+		signedCert, err := cert.SignCSR(r.connMgr.ZoneCA(), csrBytes)
 		if err != nil {
 			return nil, fmt.Errorf("sign CSR: %w", err)
 		}
@@ -381,7 +381,7 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 
 	// If connection is dead but we have operational certs, attempt reconnection.
 	// Skip when the connection was gracefully closed (TC-CLOSE tests).
-	if (r.pool.Main() == nil || !r.pool.Main().isConnected()) && r.controllerCert != nil && r.zoneCAPool != nil && !gracefullyClosed {
+	if (r.pool.Main() == nil || !r.pool.Main().isConnected()) && r.connMgr.ControllerCert() != nil && r.connMgr.ZoneCAPool() != nil && !gracefullyClosed {
 		r.debugf("verify_connection_state: connection lost, attempting operational reconnection")
 		if err := r.reconnectOperational(); err != nil {
 			r.debugf("verify_connection_state: reconnection failed: %v", err)
@@ -389,7 +389,7 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 	}
 
 	sameConn := r.pool.Main() != nil && r.pool.Main().isConnected()
-	pasePerformed := r.paseState != nil && r.paseState.completed
+	pasePerformed := r.connMgr.PASEState() != nil && r.connMgr.PASEState().completed
 	connOperational := r.pool.Main() != nil && r.pool.Main().isOperational()
 	operationalActive := sameConn && pasePerformed && connOperational
 
@@ -404,7 +404,7 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 		// (for device-ID-based CN instead of DNS hostname), so Go never
 		// populates VerifiedChains. The connection being operational means
 		// our custom VerifyPeerCertificate callback already validated the chain.
-		if !mutualTLS && connOperational && hasPeerCerts && r.controllerCert != nil {
+		if !mutualTLS && connOperational && hasPeerCerts && r.connMgr.ControllerCert() != nil {
 			mutualTLS = true
 		}
 	}

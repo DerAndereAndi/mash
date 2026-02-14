@@ -41,11 +41,11 @@ func TestSnapshot_Connected(t *testing.T) {
 func TestSnapshot_Commissioned(t *testing.T) {
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{
+	r.connMgr.SetPASEState(&PASEState{
 		completed:  true,
 		sessionKey: []byte{1, 2, 3},
-	}
-	r.zoneCA = &cert.ZoneCA{}
+	})
+	r.connMgr.SetZoneCA(&cert.ZoneCA{})
 
 	s := r.snapshot()
 	if !s.PASECompleted {
@@ -119,7 +119,7 @@ func TestSnapshot_PhantomZoneSocket(t *testing.T) {
 func TestSnapshot_String(t *testing.T) {
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1}})
 	r.pool.TrackZone("GRID", &Connection{state: ConnOperational}, "")
 
 	s := r.snapshot()

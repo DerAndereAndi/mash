@@ -59,11 +59,14 @@ func TestVerifyPeerCert_AcceptsZoneCASigned(t *testing.T) {
 	}
 
 	r := &Runner{
-		config:     &Config{},
-		pool:       NewConnPool(func(string, ...any) {}, nil),
-		zoneCAPool: zoneCA.TLSClientCAs(),
+		config: &Config{},
+		pool:   NewConnPool(func(string, ...any) {}, nil),
+		suite:  NewSuiteSession(),
 	}
 	r.pool.SetMain(&Connection{})
+	r.dialer = NewDialer(false, r.debugf)
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{})
+	r.connMgr.SetZoneCAPool(zoneCA.TLSClientCAs())
 
 	// This cert has no localhost SAN -- normal TLS would reject it.
 	err = r.verifyPeerCertAgainstZoneCA([][]byte{opCert.Certificate.Raw}, nil)
@@ -90,11 +93,14 @@ func TestVerifyPeerCert_RejectsUntrustedCA(t *testing.T) {
 	}
 
 	r := &Runner{
-		config:     &Config{},
-		pool:       NewConnPool(func(string, ...any) {}, nil),
-		zoneCAPool: trustedCA.TLSClientCAs(), // Only trust the first CA
+		config: &Config{},
+		pool:   NewConnPool(func(string, ...any) {}, nil),
+		suite:  NewSuiteSession(),
 	}
 	r.pool.SetMain(&Connection{})
+	r.dialer = NewDialer(false, r.debugf)
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{})
+	r.connMgr.SetZoneCAPool(trustedCA.TLSClientCAs()) // Only trust the first CA
 
 	err = r.verifyPeerCertAgainstZoneCA([][]byte{opCert.Certificate.Raw}, nil)
 	if err == nil {
@@ -111,11 +117,14 @@ func TestVerifyPeerCert_RejectsExpiredCert(t *testing.T) {
 	expiredCert, _ := generateExpiredCert(zoneCA)
 
 	r := &Runner{
-		config:     &Config{},
-		pool:       NewConnPool(func(string, ...any) {}, nil),
-		zoneCAPool: zoneCA.TLSClientCAs(),
+		config: &Config{},
+		pool:   NewConnPool(func(string, ...any) {}, nil),
+		suite:  NewSuiteSession(),
 	}
 	r.pool.SetMain(&Connection{})
+	r.dialer = NewDialer(false, r.debugf)
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{})
+	r.connMgr.SetZoneCAPool(zoneCA.TLSClientCAs())
 
 	err = r.verifyPeerCertAgainstZoneCA([][]byte{expiredCert.Raw}, nil)
 	if err == nil {
@@ -125,11 +134,14 @@ func TestVerifyPeerCert_RejectsExpiredCert(t *testing.T) {
 
 func TestVerifyPeerCert_RejectsNoCerts(t *testing.T) {
 	r := &Runner{
-		config:     &Config{},
-		pool:       NewConnPool(func(string, ...any) {}, nil),
-		zoneCAPool: x509.NewCertPool(),
+		config: &Config{},
+		pool:   NewConnPool(func(string, ...any) {}, nil),
+		suite:  NewSuiteSession(),
 	}
 	r.pool.SetMain(&Connection{})
+	r.dialer = NewDialer(false, r.debugf)
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{})
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	err := r.verifyPeerCertAgainstZoneCA(nil, nil)
 	if err == nil {
@@ -149,13 +161,16 @@ func TestOperationalTLSConfig_PresentsControllerCert(t *testing.T) {
 	}
 
 	r := &Runner{
-		config:         &Config{},
-		pool:           NewConnPool(func(string, ...any) {}, nil),
-		zoneCA:         zoneCA,
-		zoneCAPool:     zoneCA.TLSClientCAs(),
-		controllerCert: controllerCert,
+		config: &Config{},
+		pool:   NewConnPool(func(string, ...any) {}, nil),
+		suite:  NewSuiteSession(),
 	}
 	r.pool.SetMain(&Connection{})
+	r.dialer = NewDialer(false, r.debugf)
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{})
+	r.connMgr.SetZoneCA(zoneCA)
+	r.connMgr.SetZoneCAPool(zoneCA.TLSClientCAs())
+	r.connMgr.SetControllerCert(controllerCert)
 
 	tlsConfig := r.operationalTLSConfig()
 
@@ -184,8 +199,11 @@ func TestOperationalTLSConfig_NoZoneCA_FallsBack(t *testing.T) {
 	r := &Runner{
 		config: &Config{InsecureSkipVerify: true},
 		pool:   NewConnPool(func(string, ...any) {}, nil),
+		suite:  NewSuiteSession(),
 	}
 	r.pool.SetMain(&Connection{})
+	r.dialer = NewDialer(false, r.debugf)
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{})
 
 	tlsConfig := r.operationalTLSConfig()
 
@@ -241,8 +259,11 @@ func TestHandleConnectOperational_ErrorOutputs(t *testing.T) {
 	r := &Runner{
 		config: &Config{Target: "127.0.0.1:1"},
 		pool:   NewConnPool(func(string, ...any) {}, nil),
+		suite:  NewSuiteSession(),
 	}
 	r.pool.SetMain(&Connection{})
+	r.dialer = NewDialer(false, r.debugf)
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{})
 	state := newTestState()
 
 	step := &loader.Step{Params: map[string]any{

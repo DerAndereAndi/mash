@@ -17,6 +17,7 @@ func newTestRunner() *Runner {
 	}
 	r.pool.SetMain(&Connection{})
 	r.dialer = NewDialer(false, r.debugf)
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{})
 	r.coordinator = NewCoordinator(r.suite, r.pool, r, r.config, r.debugf)
 	return r
 }

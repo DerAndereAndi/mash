@@ -115,7 +115,7 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	// When no Zone CA exists, default to InsecureSkipVerify since there's
 	// no trusted root to verify against.
 	var tlsConfig *tls.Config
-	if r.zoneCAPool != nil {
+	if r.connMgr.ZoneCAPool() != nil {
 		tlsConfig = r.operationalTLSConfig()
 	} else {
 		tlsConfig = &tls.Config{

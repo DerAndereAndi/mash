@@ -25,13 +25,13 @@ func TestStateIsolation_CommissionedToCommissioning(t *testing.T) {
 
 	// Simulate test A completing with a commissioned connection.
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{
+	r.connMgr.SetPASEState(&PASEState{
 		completed:  true,
 		sessionKey: []byte{0xDE, 0xAD},
-	}
-	r.zoneCA = &cert.ZoneCA{}
-	r.controllerCert = &cert.OperationalCert{}
-	r.zoneCAPool = x509.NewCertPool()
+	})
+	r.connMgr.SetZoneCA(&cert.ZoneCA{})
+	r.connMgr.SetControllerCert(&cert.OperationalCert{})
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	// Now run setupPreconditions for a test that needs commissioning mode.
 	state := engine.NewExecutionState(context.Background())
@@ -73,13 +73,13 @@ func TestStateIsolation_CommissionedToTwoZones(t *testing.T) {
 
 	// Simulate test A completing with a commissioned connection.
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{
+	r.connMgr.SetPASEState(&PASEState{
 		completed:  true,
 		sessionKey: []byte{0xDE, 0xAD},
-	}
-	r.zoneCA = &cert.ZoneCA{}
-	r.controllerCert = &cert.OperationalCert{}
-	r.zoneCAPool = x509.NewCertPool()
+	})
+	r.connMgr.SetZoneCA(&cert.ZoneCA{})
+	r.connMgr.SetControllerCert(&cert.OperationalCert{})
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	// Now run setupPreconditions for a test needing two zones.
 	state := engine.NewExecutionState(context.Background())
@@ -134,8 +134,8 @@ func TestStateIsolation_TwoZonesToCommissioning(t *testing.T) {
 	// Simulate two_zones_connected state from a previous test.
 	r.pool.TrackZone("GRID", &Connection{state: ConnOperational}, "aabbccdd")
 	r.pool.TrackZone("LOCAL", &Connection{state: ConnOperational}, "11223344")
-	r.zoneCA = &cert.ZoneCA{}
-	r.zoneCAPool = x509.NewCertPool()
+	r.connMgr.SetZoneCA(&cert.ZoneCA{})
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	// Transition to commissioning mode.
 	state := engine.NewExecutionState(context.Background())
@@ -251,8 +251,8 @@ func TestStateIsolation_ZoneCAPreservedForTwoZones(t *testing.T) {
 
 	// Simulate commissioned state with zone CA.
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1}}
-	r.zoneCAPool = x509.NewCertPool()
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1}})
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	// First: transition to commissioning (clears certs).
 	state1 := engine.NewExecutionState(context.Background())
@@ -263,12 +263,12 @@ func TestStateIsolation_ZoneCAPreservedForTwoZones(t *testing.T) {
 		},
 	}
 	_ = r.setupPreconditions(context.Background(), tc1, state1)
-	if r.zoneCAPool != nil {
+	if r.connMgr.ZoneCAPool() != nil {
 		t.Error("zoneCAPool should be cleared for commissioning mode")
 	}
 
 	// Restore zone CA (simulating a fresh commission in between).
-	r.zoneCAPool = x509.NewCertPool()
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	// Second: transition to two_zones_connected (should preserve).
 	state2 := engine.NewExecutionState(context.Background())
@@ -282,7 +282,7 @@ func TestStateIsolation_ZoneCAPreservedForTwoZones(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupPreconditions: %v", err)
 	}
-	if r.zoneCAPool == nil {
+	if r.connMgr.ZoneCAPool() == nil {
 		t.Error("zoneCAPool should be preserved for two_zones_connected")
 	}
 }
@@ -295,10 +295,10 @@ func TestStateIsolation_ThreeTestSequence(t *testing.T) {
 
 	// --- Test A: session_established (level 3) ---
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{0xAB}}
-	r.zoneCA = &cert.ZoneCA{}
-	r.controllerCert = &cert.OperationalCert{}
-	r.zoneCAPool = x509.NewCertPool()
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{0xAB}})
+	r.connMgr.SetZoneCA(&cert.ZoneCA{})
+	r.connMgr.SetControllerCert(&cert.OperationalCert{})
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	stateA := engine.NewExecutionState(context.Background())
 	tcA := &loader.TestCase{
@@ -398,7 +398,7 @@ func TestStateIsolation_FourMultiZoneTests(t *testing.T) {
 		// (since we have no real target, ensureCommissioned would fail).
 		if tt.precond == PrecondSessionEstablished {
 			r.pool.Main().state = ConnOperational
-			r.paseState = &PASEState{completed: true, sessionKey: []byte{byte(i)}}
+			r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{byte(i)}})
 		}
 
 		// Track old zone connections for cleanup verification.
@@ -447,7 +447,7 @@ func TestStateIsolation_DebugEnabled(t *testing.T) {
 
 	// Simulate commissioned state.
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1}})
 
 	// Backward transition with debug enabled.
 	state := engine.NewExecutionState(context.Background())

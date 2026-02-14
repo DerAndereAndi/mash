@@ -55,22 +55,22 @@ type ConnSnapshot struct {
 func (r *Runner) snapshot() RunnerSnapshot {
 	s := RunnerSnapshot{
 		Timestamp:           time.Now(),
-		HasZoneCA:           r.zoneCA != nil,
-		HasControllerCert:   r.controllerCert != nil,
-		HasZoneCAPool:       r.zoneCAPool != nil,
+		HasZoneCA:           r.connMgr.ZoneCA() != nil,
+		HasControllerCert:   r.connMgr.ControllerCert() != nil,
+		HasZoneCAPool:       r.connMgr.ZoneCAPool() != nil,
 		ActiveZones:         make(map[string]ConnSnapshot),
 		ActiveZoneIDs:       make(map[string]string),
-		LastDeviceConnClose: r.lastDeviceConnClose,
-		CommissionZoneType:  int(r.commissionZoneType),
+		LastDeviceConnClose: r.connMgr.LastDeviceConnClose(),
+		CommissionZoneType:  int(r.connMgr.CommissionZoneType()),
 	}
 
 	if r.pool.Main() != nil {
 		s.MainConn = connSnapshot(r.pool.Main())
 	}
 
-	if r.paseState != nil {
-		s.PASECompleted = r.paseState.completed
-		s.HasSessionKey = r.paseState.sessionKey != nil
+	if ps := r.connMgr.PASEState(); ps != nil {
+		s.PASECompleted = ps.completed
+		s.HasSessionKey = ps.sessionKey != nil
 	}
 
 	for _, key := range r.pool.ZoneKeys() {

@@ -498,7 +498,7 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 	if r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().framer != nil {
 		_, err := r.sendTrigger(ctx, trigger, state)
 		if err == nil {
-			r.deviceStateModified = true
+			r.connMgr.SetDeviceStateModified(true)
 		}
 		return err
 	}
@@ -567,7 +567,7 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 			return fmt.Errorf("trigger failed with status %d", resp.Status)
 		}
 
-		r.deviceStateModified = true
+		r.connMgr.SetDeviceStateModified(true)
 		return nil
 	}
 
@@ -703,8 +703,8 @@ func (r *Runner) handleVerifyDeviceState(ctx context.Context, step *loader.Step,
 
 	// Check if device ID matches the cert CN.
 	certCN := ""
-	if r.issuedDeviceCert != nil {
-		certCN = r.issuedDeviceCert.Subject.CommonName
+	if r.connMgr.IssuedDeviceCert() != nil {
+		certCN = r.connMgr.IssuedDeviceCert().Subject.CommonName
 	}
 	idMatchesCN := hasDeviceID && certCN != "" && deviceIDStr == certCN
 
@@ -932,7 +932,7 @@ func (r *Runner) handleFactoryReset(ctx context.Context, step *loader.Step, stat
 	if r.pool.Main() != nil && r.pool.Main().isConnected() {
 		_ = r.pool.Main().Close()
 	}
-	r.paseState = nil
+	r.connMgr.SetPASEState(nil)
 
 	return map[string]any{
 		KeyFactoryReset:     true,

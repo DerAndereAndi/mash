@@ -61,8 +61,8 @@ func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params 
 		}
 		for svc := range added {
 			// Store discovered discriminator on runner for {{ device_discriminator }}.
-			if r.discoveredDiscriminator == 0 && svc.Discriminator > 0 {
-				r.discoveredDiscriminator = svc.Discriminator
+			if r.connMgr.DiscoveredDiscriminator() == 0 && svc.Discriminator > 0 {
+				r.connMgr.SetDiscoveredDiscriminator(svc.Discriminator)
 			}
 			catParts := make([]string, len(svc.Categories))
 			for i, c := range svc.Categories {

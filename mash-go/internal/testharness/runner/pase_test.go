@@ -232,7 +232,8 @@ func TestPASEStateInitialization(t *testing.T) {
 		pool:   NewConnPool(func(string, ...any) {}, nil),
 	}
 	r.pool.SetMain(&Connection{})
-	if r.paseState != nil {
+	r.connMgr = NewConnectionManager(r.pool, nil, nil, r.config, r.debugf, connMgrDeps{})
+	if r.connMgr.PASEState() != nil {
 		t.Error("expected nil paseState on new Runner")
 	}
 	// Verify other fields are accessible

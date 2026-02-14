@@ -398,8 +398,8 @@ func (r *Runner) closeActiveZoneConnsExcept(exceptKey string) {
 		r.pool.UntrackZone(key)
 	}
 	if closedAny {
-		r.paseState = nil
-		r.lastDeviceConnClose = time.Now()
+		r.connMgr.SetPASEState(nil)
+		r.connMgr.SetLastDeviceConnClose(time.Now())
 	}
 }
 
@@ -426,7 +426,7 @@ func (r *Runner) disconnectConnection() {
 		// mid-handler.
 		r.pool.Main().clearConnectionRefs()
 	}
-	r.paseState = nil
+	r.connMgr.SetPASEState(nil)
 }
 
 // ensureDisconnected closes the connection AND clears all crypto material.
@@ -438,10 +438,10 @@ func (r *Runner) disconnectConnection() {
 // session-reuse path restores the stale suite crypto.
 func (r *Runner) ensureDisconnected() {
 	r.disconnectConnection()
-	r.zoneCA = nil
-	r.controllerCert = nil
-	r.zoneCAPool = nil
-	r.issuedDeviceCert = nil
+	r.connMgr.SetZoneCA(nil)
+	r.connMgr.SetControllerCert(nil)
+	r.connMgr.SetZoneCAPool(nil)
+	r.connMgr.SetIssuedDeviceCert(nil)
 	// suite.Clear() closes the suite zone connection and nils all suite state.
 	r.suite.Clear()
 }
@@ -453,12 +453,13 @@ func (r *Runner) sendRemoveZone() {
 	if r.pool.Main() == nil || !r.pool.Main().isConnected() || r.pool.Main().framer == nil {
 		return
 	}
-	if r.paseState == nil || !r.paseState.completed || r.paseState.sessionKey == nil {
+	ps := r.connMgr.PASEState()
+	if ps == nil || !ps.completed || ps.sessionKey == nil {
 		return
 	}
 
 	// Derive zone ID from shared secret (same derivation as device).
-	zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+	zoneID := deriveZoneIDFromSecret(ps.sessionKey)
 
 	// Build RemoveZone invoke: endpoint 0, DeviceInfo feature (1), command 0x10.
 	req := &wire.Request{
@@ -601,75 +602,64 @@ func (r *Runner) SendClearLimitInvoke(ctx context.Context) error {
 	return r.sendClearLimitInvoke(ctx)
 }
 
-// PASEState returns the current PASE state.
+// PASEState returns the current PASE state (delegates to connMgr).
 func (r *Runner) PASEState() *PASEState {
-	return r.paseState
+	return r.connMgr.PASEState()
 }
 
-// SetPASEState sets the current PASE state.
+// SetPASEState sets the current PASE state (delegates to connMgr).
 func (r *Runner) SetPASEState(ps *PASEState) {
-	r.paseState = ps
+	r.connMgr.SetPASEState(ps)
 }
 
-// DeviceStateModified returns whether device state has been modified.
+// DeviceStateModified returns whether device state has been modified (delegates to connMgr).
 func (r *Runner) DeviceStateModified() bool {
-	return r.deviceStateModified
+	return r.connMgr.DeviceStateModified()
 }
 
-// SetDeviceStateModified sets the device state modified flag.
+// SetDeviceStateModified sets the device state modified flag (delegates to connMgr).
 func (r *Runner) SetDeviceStateModified(modified bool) {
-	r.deviceStateModified = modified
+	r.connMgr.SetDeviceStateModified(modified)
 }
 
-// WorkingCrypto returns the current working crypto material.
+// WorkingCrypto returns the current working crypto material (delegates to connMgr).
 func (r *Runner) WorkingCrypto() CryptoState {
-	return CryptoState{
-		ZoneCA:           r.zoneCA,
-		ControllerCert:   r.controllerCert,
-		ZoneCAPool:       r.zoneCAPool,
-		IssuedDeviceCert: r.issuedDeviceCert,
-	}
+	return r.connMgr.WorkingCrypto()
 }
 
-// SetWorkingCrypto replaces the working crypto material.
+// SetWorkingCrypto replaces the working crypto material (delegates to connMgr).
 func (r *Runner) SetWorkingCrypto(crypto CryptoState) {
-	r.zoneCA = crypto.ZoneCA
-	r.controllerCert = crypto.ControllerCert
-	r.zoneCAPool = crypto.ZoneCAPool
-	r.issuedDeviceCert = crypto.IssuedDeviceCert
+	r.connMgr.SetWorkingCrypto(crypto)
 }
 
-// ClearWorkingCrypto nils all working crypto fields.
+// ClearWorkingCrypto nils all working crypto fields (delegates to connMgr).
 func (r *Runner) ClearWorkingCrypto() {
-	r.zoneCA = nil
-	r.controllerCert = nil
-	r.zoneCAPool = nil
-	r.issuedDeviceCert = nil
+	r.connMgr.ClearWorkingCrypto()
 }
 
-// CommissionZoneType returns the current commission zone type.
+// CommissionZoneType returns the current commission zone type (delegates to connMgr).
 func (r *Runner) CommissionZoneType() cert.ZoneType {
-	return r.commissionZoneType
+	return r.connMgr.CommissionZoneType()
 }
 
-// SetCommissionZoneType sets the commission zone type.
+// SetCommissionZoneType sets the commission zone type (delegates to connMgr).
 func (r *Runner) SetCommissionZoneType(zt cert.ZoneType) {
-	r.commissionZoneType = zt
+	r.connMgr.SetCommissionZoneType(zt)
 }
 
-// DiscoveredDiscriminator returns the mDNS-discovered discriminator.
+// DiscoveredDiscriminator returns the mDNS-discovered discriminator (delegates to connMgr).
 func (r *Runner) DiscoveredDiscriminator() uint16 {
-	return r.discoveredDiscriminator
+	return r.connMgr.DiscoveredDiscriminator()
 }
 
-// LastDeviceConnClose returns when zone connections were last closed.
+// LastDeviceConnClose returns when zone connections were last closed (delegates to connMgr).
 func (r *Runner) LastDeviceConnClose() time.Time {
-	return r.lastDeviceConnClose
+	return r.connMgr.LastDeviceConnClose()
 }
 
-// SetLastDeviceConnClose sets the last device connection close time.
+// SetLastDeviceConnClose sets the last device connection close time (delegates to connMgr).
 func (r *Runner) SetLastDeviceConnClose(t time.Time) {
-	r.lastDeviceConnClose = t
+	r.connMgr.SetLastDeviceConnClose(t)
 }
 
 // IsSuiteZoneCommission wraps isSuiteZoneCommission.
@@ -701,7 +691,7 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 			switch key {
 			case PrecondZoneCreated, PrecondControllerHasCert:
 				// Create a default zone (generates Zone CA + controller cert).
-				if r.zoneCA == nil {
+				if r.connMgr.ZoneCA() == nil {
 					step := &loader.Step{Params: map[string]any{KeyZoneType: "LOCAL"}}
 					_, _ = r.handleCreateZone(ctx, step, state)
 				}
@@ -711,14 +701,14 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeGrid, KeyZoneID: "GRID"}}
 					_, _ = r.handleCreateZone(ctx, step, state)
 				}
-				r.commissionZoneType = cert.ZoneTypeGrid
+				r.connMgr.SetCommissionZoneType(cert.ZoneTypeGrid)
 			case PrecondDeviceHasLocalZone:
 				zs := getZoneState(state)
 				if !hasZoneOfType(zs, ZoneTypeLocal) {
 					step := &loader.Step{Params: map[string]any{KeyZoneType: ZoneTypeLocal, KeyZoneID: "LOCAL"}}
 					_, _ = r.handleCreateZone(ctx, step, state)
 				}
-				r.commissionZoneType = cert.ZoneTypeLocal
+				r.connMgr.SetCommissionZoneType(cert.ZoneTypeLocal)
 			case PrecondDeviceInLocalZone:
 				zs := getZoneState(state)
 				if !hasZoneOfType(zs, ZoneTypeLocal) {
@@ -738,7 +728,7 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 					zs.zoneOrder = append(zs.zoneOrder, zoneID)
 					state.Set(StateLocalZoneID, zoneID)
 				}
-				r.commissionZoneType = cert.ZoneTypeLocal
+				r.connMgr.SetCommissionZoneType(cert.ZoneTypeLocal)
 			case PrecondNoZonesConfigured:
 				zs := getZoneState(state)
 				zs.zones = make(map[string]*zoneInfo)
@@ -820,7 +810,7 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 				}
 				if r.config.Target != "" {
 					r.debugf("two_zones_connected: commissioning against real device")
-					if !r.lastDeviceConnClose.IsZero() {
+					if !r.connMgr.LastDeviceConnClose().IsZero() {
 						if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
 							r.debugf("two_zones_connected: %v (continuing)", err)
 						}
@@ -833,19 +823,20 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 						r.debugf("two_zones_connected: commissioning zone %s (type=%d)", z.name, z.zt)
 						r.debugSnapshot("two_zones_connected BEFORE commission " + z.name)
 
-						if r.pool.Main() != nil && r.pool.Main().isConnected() && r.paseState != nil && r.paseState.completed {
+						ps := r.connMgr.PASEState()
+						if r.pool.Main() != nil && r.pool.Main().isConnected() && ps != nil && ps.completed {
 							r.debugf("two_zones_connected: sending RemoveZone before disconnect (zone %d)", i)
 							r.sendRemoveZone()
 						}
 
-						savedPool := r.zoneCAPool
+						savedPool := r.connMgr.ZoneCAPool()
 						r.disconnectConnection()
-						r.zoneCA = nil
-						r.controllerCert = nil
-						r.zoneCAPool = savedPool
-						r.issuedDeviceCert = nil
+						r.connMgr.SetZoneCA(nil)
+						r.connMgr.SetControllerCert(nil)
+						r.connMgr.SetZoneCAPool(savedPool)
+						r.connMgr.SetIssuedDeviceCert(nil)
 
-						r.commissionZoneType = z.zt
+						r.connMgr.SetCommissionZoneType(z.zt)
 
 						if err := r.ensureCommissioned(ctx, state); err != nil {
 							r.debugf("two_zones_connected: PASE FAILED for zone %s: %v", z.name, err)
@@ -859,8 +850,9 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 						ct.zoneConnections[z.name] = zoneConn
 						state.Set(ZoneConnectionStateKey(z.name), zoneConn)
 
-						if r.paseState != nil && r.paseState.sessionKey != nil {
-							zID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+						ps = r.connMgr.PASEState()
+						if ps != nil && ps.sessionKey != nil {
+							zID := deriveZoneIDFromSecret(ps.sessionKey)
 							r.pool.TrackZone(z.name, zoneConn, zID)
 
 							var stateKey string
@@ -902,7 +894,7 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 					if localID, ok := state.Get(StateLocalZoneID); ok {
 						state.Set(StateOtherZoneID, localID)
 					}
-					r.commissionZoneType = 0
+					r.connMgr.SetCommissionZoneType(0)
 				} else {
 					for _, z := range zones {
 						if _, exists := ct.zoneConnections[z.name]; exists {
@@ -918,7 +910,7 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 					r.debugf("device_zones_full: commissioning zones to fill device slots")
 					ct := getConnectionTracker(state)
 
-					if !r.lastDeviceConnClose.IsZero() {
+					if !r.connMgr.LastDeviceConnClose().IsZero() {
 						if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
 							r.debugf("device_zones_full: %v (continuing)", err)
 						}
@@ -939,19 +931,20 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 						}
 						r.debugf("device_zones_full: commissioning zone %s (type=%d)", z.name, z.zt)
 
-						if r.pool.Main() != nil && r.pool.Main().isConnected() && r.paseState != nil && r.paseState.completed {
+						ps := r.connMgr.PASEState()
+						if r.pool.Main() != nil && r.pool.Main().isConnected() && ps != nil && ps.completed {
 							r.debugf("device_zones_full: sending RemoveZone before disconnect (zone %d)", i)
 							r.sendRemoveZone()
 						}
 
-						savedPool := r.zoneCAPool
+						savedPool := r.connMgr.ZoneCAPool()
 						r.disconnectConnection()
-						r.zoneCA = nil
-						r.controllerCert = nil
-						r.zoneCAPool = savedPool
-						r.issuedDeviceCert = nil
+						r.connMgr.SetZoneCA(nil)
+						r.connMgr.SetControllerCert(nil)
+						r.connMgr.SetZoneCAPool(savedPool)
+						r.connMgr.SetIssuedDeviceCert(nil)
 
-						r.commissionZoneType = z.zt
+						r.connMgr.SetCommissionZoneType(z.zt)
 						if err := r.ensureCommissioned(ctx, state); err != nil {
 							r.debugf("device_zones_full: commission zone %s FAILED: %v", z.name, err)
 							return fmt.Errorf("precondition device_zones_full commission zone %s: %w", z.name, err)
@@ -963,8 +956,9 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 						ct.zoneConnections[z.name] = zoneConn
 						state.Set(ZoneConnectionStateKey(z.name), zoneConn)
 
-						if r.paseState != nil && r.paseState.sessionKey != nil {
-							zID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+						ps = r.connMgr.PASEState()
+						if ps != nil && ps.sessionKey != nil {
+							zID := deriveZoneIDFromSecret(ps.sessionKey)
 							r.pool.TrackZone(z.name, zoneConn, zID)
 
 							var stateKey string
@@ -1001,8 +995,8 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 						r.debugf("device_zones_full: post-fill %v (continuing)", err)
 					}
 
-					r.commissionZoneType = 0
-					r.paseState = nil
+					r.connMgr.SetCommissionZoneType(0)
+					r.connMgr.SetPASEState(nil)
 				}
 			}
 		}

@@ -301,7 +301,7 @@ func TestCurrentLevel(t *testing.T) {
 			name: "commissioned",
 			setup: func(r *Runner) {
 				r.pool.Main().state = ConnOperational
-				r.paseState = &PASEState{completed: true}
+				r.connMgr.SetPASEState(&PASEState{completed: true})
 			},
 			wantLevel: precondLevelCommissioned,
 		},
@@ -309,7 +309,7 @@ func TestCurrentLevel(t *testing.T) {
 			name: "pase incomplete treated as connected",
 			setup: func(r *Runner) {
 				r.pool.Main().state = ConnTLSConnected
-				r.paseState = &PASEState{completed: false}
+				r.connMgr.SetPASEState(&PASEState{completed: false})
 			},
 			wantLevel: precondLevelConnected,
 		},
@@ -331,7 +331,7 @@ func TestSetupPreconditions_BackwardsTransition(t *testing.T) {
 	// Commissioned runner + commissioning-level test -> should disconnect.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -349,7 +349,7 @@ func TestSetupPreconditions_BackwardsTransition(t *testing.T) {
 	if r.pool.Main().isConnected() {
 		t.Error("expected connection to be closed for backwards transition")
 	}
-	if r.paseState != nil {
+	if r.connMgr.PASEState() != nil {
 		t.Error("expected paseState to be nil after backwards transition")
 	}
 }
@@ -530,7 +530,7 @@ func TestSendRemoveZone_NilPaseState(t *testing.T) {
 	// sendRemoveZone should be a no-op when not commissioned.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = nil
+	r.connMgr.SetPASEState(nil)
 
 	// Should not panic.
 	r.sendRemoveZone()
@@ -539,7 +539,7 @@ func TestSendRemoveZone_NilPaseState(t *testing.T) {
 func TestSendRemoveZone_NoSessionKey(t *testing.T) {
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: nil}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: nil})
 
 	// Should not panic.
 	r.sendRemoveZone()
@@ -551,10 +551,10 @@ func TestSetupPreconditions_BackwardsFromCommissioned_SendsRemoveZone(t *testing
 	// the send will silently fail but the transition should still complete.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{
+	r.connMgr.SetPASEState(&PASEState{
 		completed:  true,
 		sessionKey: []byte{0xDE, 0xAD, 0xBE, 0xEF},
-	}
+	})
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -574,7 +574,7 @@ func TestSetupPreconditions_BackwardsFromCommissioned_SendsRemoveZone(t *testing
 		t.Error("expected connection to be closed")
 	}
 	// PASE state should be cleared
-	if r.paseState != nil {
+	if r.connMgr.PASEState() != nil {
 		t.Error("expected paseState to be nil")
 	}
 }
@@ -636,7 +636,7 @@ func TestSetupPreconditions_ClearsZoneCAForNonCommissionedTests(t *testing.T) {
 	state := engine.NewExecutionState(context.Background())
 
 	// Simulate stale zone CA from a previous commissioned test.
-	r.zoneCAPool = x509.NewCertPool()
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	// A level-2 test (connection_established) should clear the stale pool.
 	tc := &loader.TestCase{
@@ -650,7 +650,7 @@ func TestSetupPreconditions_ClearsZoneCAForNonCommissionedTests(t *testing.T) {
 	// that zoneCAPool was cleared before the connection attempt.
 	_ = r.setupPreconditions(context.Background(), tc, state)
 
-	if r.zoneCAPool != nil {
+	if r.connMgr.ZoneCAPool() != nil {
 		t.Error("expected zoneCAPool to be nil for non-commissioned (level 2) test")
 	}
 }
@@ -660,7 +660,7 @@ func TestSetupPreconditions_TwoZonesConnected_PreservesZoneCA(t *testing.T) {
 	state := engine.NewExecutionState(context.Background())
 
 	// Simulate zone CA from a previous commissioned test.
-	r.zoneCAPool = x509.NewCertPool()
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	tc := &loader.TestCase{
 		ID: "TC-MULTI-003",
@@ -676,7 +676,7 @@ func TestSetupPreconditions_TwoZonesConnected_PreservesZoneCA(t *testing.T) {
 
 	// two_zones_connected needs the zone CA for operational TLS, so it
 	// should NOT be cleared even though the precondition level is 0.
-	if r.zoneCAPool == nil {
+	if r.connMgr.ZoneCAPool() == nil {
 		t.Error("expected zoneCAPool to be preserved for two_zones_connected")
 	}
 }
@@ -686,7 +686,7 @@ func TestSetupPreconditions_ClearsZoneCA_ForNonZoneTests(t *testing.T) {
 	state := engine.NewExecutionState(context.Background())
 
 	// Simulate stale zone CA from a previous commissioned test.
-	r.zoneCAPool = x509.NewCertPool()
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	tc := &loader.TestCase{
 		ID: "TC-SIMPLE-001",
@@ -701,7 +701,7 @@ func TestSetupPreconditions_ClearsZoneCA_ForNonZoneTests(t *testing.T) {
 	}
 
 	// Level 0 test without two_zones_connected should clear stale zone CA.
-	if r.zoneCAPool != nil {
+	if r.connMgr.ZoneCAPool() != nil {
 		t.Error("expected zoneCAPool to be nil for simple level-0 test")
 	}
 }
@@ -760,19 +760,19 @@ func TestEnsureDisconnected_ClearsZoneCA(t *testing.T) {
 	r.pool.Main().state = ConnOperational
 
 	// Simulate state left over from a previous commissioned test.
-	r.zoneCA = &cert.ZoneCA{}
-	r.controllerCert = &cert.OperationalCert{}
-	r.zoneCAPool = x509.NewCertPool()
+	r.connMgr.SetZoneCA(&cert.ZoneCA{})
+	r.connMgr.SetControllerCert(&cert.OperationalCert{})
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	r.ensureDisconnected()
 
-	if r.zoneCA != nil {
+	if r.connMgr.ZoneCA() != nil {
 		t.Error("expected zoneCA to be nil after ensureDisconnected")
 	}
-	if r.controllerCert != nil {
+	if r.connMgr.ControllerCert() != nil {
 		t.Error("expected controllerCert to be nil after ensureDisconnected")
 	}
-	if r.zoneCAPool != nil {
+	if r.connMgr.ZoneCAPool() != nil {
 		t.Error("expected zoneCAPool to be nil after ensureDisconnected")
 	}
 }
@@ -806,7 +806,7 @@ func TestPreconditionLevel_DeviceStateKeys(t *testing.T) {
 func TestSetupPreconditions_DeviceHasGridZone(t *testing.T) {
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -844,7 +844,7 @@ func TestSetupPreconditions_DeviceHasGridZone(t *testing.T) {
 func TestSetupPreconditions_DeviceHasBothZones(t *testing.T) {
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -896,12 +896,12 @@ func TestPreconditionLevel_SessionPreviouslyConnected(t *testing.T) {
 func TestSetupPreconditions_SessionPreviouslyConnected(t *testing.T) {
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3, 4}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3, 4}})
 
 	// Set up zone crypto state (simulates what PASE would produce).
-	r.zoneCA = &cert.ZoneCA{}
-	r.controllerCert = &cert.OperationalCert{}
-	r.zoneCAPool = x509.NewCertPool()
+	r.connMgr.SetZoneCA(&cert.ZoneCA{})
+	r.connMgr.SetControllerCert(&cert.OperationalCert{})
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -922,18 +922,18 @@ func TestSetupPreconditions_SessionPreviouslyConnected(t *testing.T) {
 	}
 
 	// Zone crypto state should be preserved for reconnection.
-	if r.zoneCAPool == nil {
+	if r.connMgr.ZoneCAPool() == nil {
 		t.Error("expected zoneCAPool to be preserved")
 	}
-	if r.zoneCA == nil {
+	if r.connMgr.ZoneCA() == nil {
 		t.Error("expected zoneCA to be preserved")
 	}
-	if r.controllerCert == nil {
+	if r.connMgr.ControllerCert() == nil {
 		t.Error("expected controllerCert to be preserved")
 	}
 
 	// PASE state should be cleared (session is over).
-	if r.paseState != nil {
+	if r.connMgr.PASEState() != nil {
 		t.Error("expected paseState to be nil")
 	}
 }
@@ -977,7 +977,7 @@ func TestSetupPreconditions_SessionReuse_SkipsCloseZoneConns(t *testing.T) {
 	// Commissioned runner + session_established test -> session preserved.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
@@ -994,7 +994,8 @@ func TestSetupPreconditions_SessionReuse_SkipsCloseZoneConns(t *testing.T) {
 	if !r.pool.Main().isConnected() {
 		t.Error("expected connection to remain connected")
 	}
-	if r.paseState == nil || !r.paseState.completed {
+	ps := r.connMgr.PASEState()
+	if ps == nil || !ps.completed {
 		t.Error("expected PASE state to be preserved")
 	}
 	if r.pool.ZoneCount() != 1 {
@@ -1006,7 +1007,7 @@ func TestSetupPreconditions_FreshCommission_ClosesZoneConns(t *testing.T) {
 	// fresh_commission=true -> session torn down even at level 3 -> level 3.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
@@ -1033,7 +1034,7 @@ func TestSetupPreconditions_SessionReuse_TwoZonesConnectedForcesClose(t *testing
 	// two_zones_connected forces teardown even at level 3 -> level 3.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
@@ -1047,7 +1048,7 @@ func TestSetupPreconditions_SessionReuse_TwoZonesConnectedForcesClose(t *testing
 	_ = r.setupPreconditions(context.Background(), tc, state)
 
 	// The old main connection should have been closed by closeActiveZoneConns.
-	if r.paseState != nil {
+	if r.connMgr.PASEState() != nil {
 		t.Error("expected paseState cleared after two_zones_connected teardown")
 	}
 }
@@ -1056,7 +1057,7 @@ func TestSetupPreconditions_SessionReuse_DeviceHasGridZoneForcesClose(t *testing
 	// device_has_grid_zone forces teardown even at level 3 -> level 3.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
@@ -1079,7 +1080,7 @@ func TestSetupPreconditions_SessionReuse_BackwardsTransitionUnaffected(t *testin
 	// Level 3 -> level 1 still tears down (canReuseSession=false because needed < commissioned).
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
@@ -1098,7 +1099,7 @@ func TestSetupPreconditions_SessionReuse_BackwardsTransitionUnaffected(t *testin
 	if r.pool.Main().isConnected() {
 		t.Error("expected connection to be closed for backwards transition")
 	}
-	if r.paseState != nil {
+	if r.connMgr.PASEState() != nil {
 		t.Error("expected paseState to be nil after backwards transition")
 	}
 }
@@ -1249,7 +1250,7 @@ func TestSetupPreconditions_SessionReuse_FallsBackOnHealthCheckFailure(t *testin
 	r := newTestRunner()
 	r.config.Target = "127.0.0.1:9999"
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
@@ -1277,8 +1278,8 @@ func TestSetupPreconditions_SessionReuseNoResetWhenUnmodified(t *testing.T) {
 	// Verify that session reuse works correctly in this case.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
-	r.deviceStateModified = false
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
+	r.connMgr.SetDeviceStateModified(false)
 	r.pool.TrackZone("main-abc123", r.pool.Main(), "abc123")
 
 	state := engine.NewExecutionState(context.Background())
@@ -1307,17 +1308,17 @@ func TestDeviceHasGridZone_PreservesCryptoOnSessionReuse(t *testing.T) {
 	// crypto that matches the actual connection.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 
 	// Simulate existing suite zone crypto (what the device actually knows).
 	origZoneCA := &cert.ZoneCA{}
 	origControllerCert := &cert.OperationalCert{}
 	origZoneCAPool := x509.NewCertPool()
 	origIssuedDeviceCert := &x509.Certificate{}
-	r.zoneCA = origZoneCA
-	r.controllerCert = origControllerCert
-	r.zoneCAPool = origZoneCAPool
-	r.issuedDeviceCert = origIssuedDeviceCert
+	r.connMgr.SetZoneCA(origZoneCA)
+	r.connMgr.SetControllerCert(origControllerCert)
+	r.connMgr.SetZoneCAPool(origZoneCAPool)
+	r.connMgr.SetIssuedDeviceCert(origIssuedDeviceCert)
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -1333,23 +1334,23 @@ func TestDeviceHasGridZone_PreservesCryptoOnSessionReuse(t *testing.T) {
 	}
 
 	// The precondition handler should still have set commissionZoneType to GRID.
-	if r.commissionZoneType != cert.ZoneTypeGrid {
-		t.Errorf("expected commissionZoneType=GRID, got %v", r.commissionZoneType)
+	if r.connMgr.CommissionZoneType() != cert.ZoneTypeGrid {
+		t.Errorf("expected commissionZoneType=GRID, got %v", r.connMgr.CommissionZoneType())
 	}
 
 	// But the crypto state must match the original (suite zone) crypto,
 	// because the session was reused and the device doesn't know about
 	// the GRID crypto.
-	if r.zoneCA != origZoneCA {
+	if r.connMgr.ZoneCA() != origZoneCA {
 		t.Error("expected zoneCA to be restored to original after session reuse")
 	}
-	if r.controllerCert != origControllerCert {
+	if r.connMgr.ControllerCert() != origControllerCert {
 		t.Error("expected controllerCert to be restored to original after session reuse")
 	}
-	if r.zoneCAPool != origZoneCAPool {
+	if r.connMgr.ZoneCAPool() != origZoneCAPool {
 		t.Error("expected zoneCAPool to be restored to original after session reuse")
 	}
-	if r.issuedDeviceCert != origIssuedDeviceCert {
+	if r.connMgr.IssuedDeviceCert() != origIssuedDeviceCert {
 		t.Error("expected issuedDeviceCert to be restored to original after session reuse")
 	}
 }
@@ -1358,14 +1359,14 @@ func TestDeviceHasLocalZone_PreservesCryptoOnSessionReuse(t *testing.T) {
 	// Same as grid zone test but for device_has_local_zone.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 
 	origZoneCA := &cert.ZoneCA{}
 	origControllerCert := &cert.OperationalCert{}
 	origZoneCAPool := x509.NewCertPool()
-	r.zoneCA = origZoneCA
-	r.controllerCert = origControllerCert
-	r.zoneCAPool = origZoneCAPool
+	r.connMgr.SetZoneCA(origZoneCA)
+	r.connMgr.SetControllerCert(origControllerCert)
+	r.connMgr.SetZoneCAPool(origZoneCAPool)
 
 	state := engine.NewExecutionState(context.Background())
 	tc := &loader.TestCase{
@@ -1380,17 +1381,17 @@ func TestDeviceHasLocalZone_PreservesCryptoOnSessionReuse(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if r.commissionZoneType != cert.ZoneTypeLocal {
-		t.Errorf("expected commissionZoneType=LOCAL, got %v", r.commissionZoneType)
+	if r.connMgr.CommissionZoneType() != cert.ZoneTypeLocal {
+		t.Errorf("expected commissionZoneType=LOCAL, got %v", r.connMgr.CommissionZoneType())
 	}
 
-	if r.zoneCA != origZoneCA {
+	if r.connMgr.ZoneCA() != origZoneCA {
 		t.Error("expected zoneCA to be restored to original after session reuse")
 	}
-	if r.controllerCert != origControllerCert {
+	if r.connMgr.ControllerCert() != origControllerCert {
 		t.Error("expected controllerCert to be restored to original after session reuse")
 	}
-	if r.zoneCAPool != origZoneCAPool {
+	if r.connMgr.ZoneCAPool() != origZoneCAPool {
 		t.Error("expected zoneCAPool to be restored to original after session reuse")
 	}
 }
@@ -1417,10 +1418,10 @@ func TestDeviceHasGridZone_KeepsNewCryptoOnFreshCommission(t *testing.T) {
 	_ = r.setupPreconditions(context.Background(), tc, state)
 
 	// handleCreateZone should have set new GRID crypto.
-	if r.zoneCA == nil {
+	if r.connMgr.ZoneCA() == nil {
 		t.Error("expected zoneCA to be set by handleCreateZone (not restored to nil)")
 	}
-	if r.controllerCert == nil {
+	if r.connMgr.ControllerCert() == nil {
 		t.Error("expected controllerCert to be set by handleCreateZone (not restored to nil)")
 	}
 }

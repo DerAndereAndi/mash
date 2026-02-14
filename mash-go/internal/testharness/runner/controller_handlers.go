@@ -148,20 +148,22 @@ func (r *Runner) handleGetControllerID(ctx context.Context, step *loader.Step, s
 // handleVerifyControllerCert verifies the controller's own operational cert.
 func (r *Runner) handleVerifyControllerCert(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	// Check the runner's own controller certificate (not the TLS peer cert).
-	if r.controllerCert != nil && r.controllerCert.Certificate != nil {
-		c := r.controllerCert.Certificate
+	controllerCert := r.connMgr.ControllerCert()
+	if controllerCert != nil && controllerCert.Certificate != nil {
+		c := controllerCert.Certificate
 		notExpired := time.Now().Before(c.NotAfter)
 		validityDays := int(time.Until(c.NotAfter).Hours() / 24)
 
 		signedByZoneCA := false
 		issuerFP := ""
-		if r.zoneCA != nil && r.zoneCA.Certificate != nil {
+		zoneCA := r.connMgr.ZoneCA()
+		if zoneCA != nil && zoneCA.Certificate != nil {
 			opts := x509.VerifyOptions{
-				Roots: r.zoneCAPool,
+				Roots: r.connMgr.ZoneCAPool(),
 			}
 			_, err := c.Verify(opts)
 			signedByZoneCA = err == nil
-			issuerFP = certFingerprint(r.zoneCA.Certificate)
+			issuerFP = certFingerprint(zoneCA.Certificate)
 		}
 
 		return map[string]any{
@@ -400,12 +402,12 @@ func (r *Runner) handleRemoveDevice(ctx context.Context, step *loader.Step, stat
 // If a Zone CA is available, the controller cert is renewed locally without
 // the wire protocol. Otherwise it falls back to the full renewal flow.
 func (r *Runner) handleRenewCert(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
-	if r.zoneCA != nil {
-		newCert, err := cert.GenerateControllerOperationalCert(r.zoneCA, "test-controller")
+	if zoneCA := r.connMgr.ZoneCA(); zoneCA != nil {
+		newCert, err := cert.GenerateControllerOperationalCert(zoneCA, "test-controller")
 		if err != nil {
 			return nil, fmt.Errorf("renew controller cert: %w", err)
 		}
-		r.controllerCert = newCert
+		r.connMgr.SetControllerCert(newCert)
 		state.Set(StateRenewalComplete, true)
 
 		return map[string]any{
@@ -438,7 +440,7 @@ func (r *Runner) handleCheckRenewal(ctx context.Context, step *loader.Step, stat
 	}
 
 	// Also check controller cert directly.
-	if r.controllerCert != nil && r.controllerCert.NeedsRenewal() {
+	if cc := r.connMgr.ControllerCert(); cc != nil && cc.NeedsRenewal() {
 		renewalInitiated = true
 	}
 

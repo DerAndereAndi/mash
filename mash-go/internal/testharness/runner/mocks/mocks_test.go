@@ -7,6 +7,7 @@ package mocks
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -117,6 +118,52 @@ func (_c *MockConnectionManager_CommissionZoneType_Call) Return(zoneType cert.Zo
 }
 
 func (_c *MockConnectionManager_CommissionZoneType_Call) RunAndReturn(run func() cert.ZoneType) *MockConnectionManager_CommissionZoneType_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ControllerCert provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) ControllerCert() *cert.OperationalCert {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ControllerCert")
+	}
+
+	var r0 *cert.OperationalCert
+	if returnFunc, ok := ret.Get(0).(func() *cert.OperationalCert); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*cert.OperationalCert)
+		}
+	}
+	return r0
+}
+
+// MockConnectionManager_ControllerCert_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ControllerCert'
+type MockConnectionManager_ControllerCert_Call struct {
+	*mock.Call
+}
+
+// ControllerCert is a helper method to define mock.On call
+func (_e *MockConnectionManager_Expecter) ControllerCert() *MockConnectionManager_ControllerCert_Call {
+	return &MockConnectionManager_ControllerCert_Call{Call: _e.mock.On("ControllerCert")}
+}
+
+func (_c *MockConnectionManager_ControllerCert_Call) Run(run func()) *MockConnectionManager_ControllerCert_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_ControllerCert_Call) Return(operationalCert *cert.OperationalCert) *MockConnectionManager_ControllerCert_Call {
+	_c.Call.Return(operationalCert)
+	return _c
+}
+
+func (_c *MockConnectionManager_ControllerCert_Call) RunAndReturn(run func() *cert.OperationalCert) *MockConnectionManager_ControllerCert_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -433,6 +480,52 @@ func (_c *MockConnectionManager_IsSuiteZoneCommission_Call) RunAndReturn(run fun
 	return _c
 }
 
+// IssuedDeviceCert provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) IssuedDeviceCert() *x509.Certificate {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IssuedDeviceCert")
+	}
+
+	var r0 *x509.Certificate
+	if returnFunc, ok := ret.Get(0).(func() *x509.Certificate); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*x509.Certificate)
+		}
+	}
+	return r0
+}
+
+// MockConnectionManager_IssuedDeviceCert_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IssuedDeviceCert'
+type MockConnectionManager_IssuedDeviceCert_Call struct {
+	*mock.Call
+}
+
+// IssuedDeviceCert is a helper method to define mock.On call
+func (_e *MockConnectionManager_Expecter) IssuedDeviceCert() *MockConnectionManager_IssuedDeviceCert_Call {
+	return &MockConnectionManager_IssuedDeviceCert_Call{Call: _e.mock.On("IssuedDeviceCert")}
+}
+
+func (_c *MockConnectionManager_IssuedDeviceCert_Call) Run(run func()) *MockConnectionManager_IssuedDeviceCert_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_IssuedDeviceCert_Call) Return(certificate *x509.Certificate) *MockConnectionManager_IssuedDeviceCert_Call {
+	_c.Call.Return(certificate)
+	return _c
+}
+
+func (_c *MockConnectionManager_IssuedDeviceCert_Call) RunAndReturn(run func() *x509.Certificate) *MockConnectionManager_IssuedDeviceCert_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LastDeviceConnClose provides a mock function for the type MockConnectionManager
 func (_mock *MockConnectionManager) LastDeviceConnClose() time.Time {
 	ret := _mock.Called()
@@ -704,6 +797,46 @@ func (_c *MockConnectionManager_SetCommissionZoneType_Call) RunAndReturn(run fun
 	return _c
 }
 
+// SetControllerCert provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) SetControllerCert(c *cert.OperationalCert) {
+	_mock.Called(c)
+	return
+}
+
+// MockConnectionManager_SetControllerCert_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetControllerCert'
+type MockConnectionManager_SetControllerCert_Call struct {
+	*mock.Call
+}
+
+// SetControllerCert is a helper method to define mock.On call
+//   - c *cert.OperationalCert
+func (_e *MockConnectionManager_Expecter) SetControllerCert(c interface{}) *MockConnectionManager_SetControllerCert_Call {
+	return &MockConnectionManager_SetControllerCert_Call{Call: _e.mock.On("SetControllerCert", c)}
+}
+
+func (_c *MockConnectionManager_SetControllerCert_Call) Run(run func(c *cert.OperationalCert)) *MockConnectionManager_SetControllerCert_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 *cert.OperationalCert
+		if args[0] != nil {
+			arg0 = args[0].(*cert.OperationalCert)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_SetControllerCert_Call) Return() *MockConnectionManager_SetControllerCert_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockConnectionManager_SetControllerCert_Call) RunAndReturn(run func(c *cert.OperationalCert)) *MockConnectionManager_SetControllerCert_Call {
+	_c.Run(run)
+	return _c
+}
+
 // SetDeviceStateModified provides a mock function for the type MockConnectionManager
 func (_mock *MockConnectionManager) SetDeviceStateModified(modified bool) {
 	_mock.Called(modified)
@@ -780,6 +913,46 @@ func (_c *MockConnectionManager_SetDiscoveredDiscriminator_Call) Return() *MockC
 }
 
 func (_c *MockConnectionManager_SetDiscoveredDiscriminator_Call) RunAndReturn(run func(d uint16)) *MockConnectionManager_SetDiscoveredDiscriminator_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetIssuedDeviceCert provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) SetIssuedDeviceCert(c *x509.Certificate) {
+	_mock.Called(c)
+	return
+}
+
+// MockConnectionManager_SetIssuedDeviceCert_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetIssuedDeviceCert'
+type MockConnectionManager_SetIssuedDeviceCert_Call struct {
+	*mock.Call
+}
+
+// SetIssuedDeviceCert is a helper method to define mock.On call
+//   - c *x509.Certificate
+func (_e *MockConnectionManager_Expecter) SetIssuedDeviceCert(c interface{}) *MockConnectionManager_SetIssuedDeviceCert_Call {
+	return &MockConnectionManager_SetIssuedDeviceCert_Call{Call: _e.mock.On("SetIssuedDeviceCert", c)}
+}
+
+func (_c *MockConnectionManager_SetIssuedDeviceCert_Call) Run(run func(c *x509.Certificate)) *MockConnectionManager_SetIssuedDeviceCert_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 *x509.Certificate
+		if args[0] != nil {
+			arg0 = args[0].(*x509.Certificate)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_SetIssuedDeviceCert_Call) Return() *MockConnectionManager_SetIssuedDeviceCert_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockConnectionManager_SetIssuedDeviceCert_Call) RunAndReturn(run func(c *x509.Certificate)) *MockConnectionManager_SetIssuedDeviceCert_Call {
 	_c.Run(run)
 	return _c
 }
@@ -900,6 +1073,86 @@ func (_c *MockConnectionManager_SetWorkingCrypto_Call) Return() *MockConnectionM
 }
 
 func (_c *MockConnectionManager_SetWorkingCrypto_Call) RunAndReturn(run func(crypto runner.CryptoState)) *MockConnectionManager_SetWorkingCrypto_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetZoneCA provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) SetZoneCA(z *cert.ZoneCA) {
+	_mock.Called(z)
+	return
+}
+
+// MockConnectionManager_SetZoneCA_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetZoneCA'
+type MockConnectionManager_SetZoneCA_Call struct {
+	*mock.Call
+}
+
+// SetZoneCA is a helper method to define mock.On call
+//   - z *cert.ZoneCA
+func (_e *MockConnectionManager_Expecter) SetZoneCA(z interface{}) *MockConnectionManager_SetZoneCA_Call {
+	return &MockConnectionManager_SetZoneCA_Call{Call: _e.mock.On("SetZoneCA", z)}
+}
+
+func (_c *MockConnectionManager_SetZoneCA_Call) Run(run func(z *cert.ZoneCA)) *MockConnectionManager_SetZoneCA_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 *cert.ZoneCA
+		if args[0] != nil {
+			arg0 = args[0].(*cert.ZoneCA)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_SetZoneCA_Call) Return() *MockConnectionManager_SetZoneCA_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockConnectionManager_SetZoneCA_Call) RunAndReturn(run func(z *cert.ZoneCA)) *MockConnectionManager_SetZoneCA_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetZoneCAPool provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) SetZoneCAPool(p *x509.CertPool) {
+	_mock.Called(p)
+	return
+}
+
+// MockConnectionManager_SetZoneCAPool_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetZoneCAPool'
+type MockConnectionManager_SetZoneCAPool_Call struct {
+	*mock.Call
+}
+
+// SetZoneCAPool is a helper method to define mock.On call
+//   - p *x509.CertPool
+func (_e *MockConnectionManager_Expecter) SetZoneCAPool(p interface{}) *MockConnectionManager_SetZoneCAPool_Call {
+	return &MockConnectionManager_SetZoneCAPool_Call{Call: _e.mock.On("SetZoneCAPool", p)}
+}
+
+func (_c *MockConnectionManager_SetZoneCAPool_Call) Run(run func(p *x509.CertPool)) *MockConnectionManager_SetZoneCAPool_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 *x509.CertPool
+		if args[0] != nil {
+			arg0 = args[0].(*x509.CertPool)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_SetZoneCAPool_Call) Return() *MockConnectionManager_SetZoneCAPool_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockConnectionManager_SetZoneCAPool_Call) RunAndReturn(run func(p *x509.CertPool)) *MockConnectionManager_SetZoneCAPool_Call {
 	_c.Run(run)
 	return _c
 }
@@ -1103,6 +1356,98 @@ func (_c *MockConnectionManager_WorkingCrypto_Call) Return(cryptoState runner.Cr
 }
 
 func (_c *MockConnectionManager_WorkingCrypto_Call) RunAndReturn(run func() runner.CryptoState) *MockConnectionManager_WorkingCrypto_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ZoneCA provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) ZoneCA() *cert.ZoneCA {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ZoneCA")
+	}
+
+	var r0 *cert.ZoneCA
+	if returnFunc, ok := ret.Get(0).(func() *cert.ZoneCA); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*cert.ZoneCA)
+		}
+	}
+	return r0
+}
+
+// MockConnectionManager_ZoneCA_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ZoneCA'
+type MockConnectionManager_ZoneCA_Call struct {
+	*mock.Call
+}
+
+// ZoneCA is a helper method to define mock.On call
+func (_e *MockConnectionManager_Expecter) ZoneCA() *MockConnectionManager_ZoneCA_Call {
+	return &MockConnectionManager_ZoneCA_Call{Call: _e.mock.On("ZoneCA")}
+}
+
+func (_c *MockConnectionManager_ZoneCA_Call) Run(run func()) *MockConnectionManager_ZoneCA_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_ZoneCA_Call) Return(zoneCA *cert.ZoneCA) *MockConnectionManager_ZoneCA_Call {
+	_c.Call.Return(zoneCA)
+	return _c
+}
+
+func (_c *MockConnectionManager_ZoneCA_Call) RunAndReturn(run func() *cert.ZoneCA) *MockConnectionManager_ZoneCA_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ZoneCAPool provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) ZoneCAPool() *x509.CertPool {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for ZoneCAPool")
+	}
+
+	var r0 *x509.CertPool
+	if returnFunc, ok := ret.Get(0).(func() *x509.CertPool); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*x509.CertPool)
+		}
+	}
+	return r0
+}
+
+// MockConnectionManager_ZoneCAPool_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ZoneCAPool'
+type MockConnectionManager_ZoneCAPool_Call struct {
+	*mock.Call
+}
+
+// ZoneCAPool is a helper method to define mock.On call
+func (_e *MockConnectionManager_Expecter) ZoneCAPool() *MockConnectionManager_ZoneCAPool_Call {
+	return &MockConnectionManager_ZoneCAPool_Call{Call: _e.mock.On("ZoneCAPool")}
+}
+
+func (_c *MockConnectionManager_ZoneCAPool_Call) Run(run func()) *MockConnectionManager_ZoneCAPool_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_ZoneCAPool_Call) Return(certPool *x509.CertPool) *MockConnectionManager_ZoneCAPool_Call {
+	_c.Call.Return(certPool)
+	return _c
+}
+
+func (_c *MockConnectionManager_ZoneCAPool_Call) RunAndReturn(run func() *x509.CertPool) *MockConnectionManager_ZoneCAPool_Call {
 	_c.Call.Return(run)
 	return _c
 }

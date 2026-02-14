@@ -70,7 +70,7 @@ func TestEnterCommissioningMode_UsesSuiteConn(t *testing.T) {
 
 	// Simulate existing zone CA from the suite zone commission.
 	origZoneCAPool := x509.NewCertPool()
-	r.zoneCAPool = origZoneCAPool
+	r.connMgr.SetZoneCAPool(origZoneCAPool)
 
 	// Place the suite zone connection on suite.SetConn() (not in pool).
 	zoneConn, server := newPipeConnection()
@@ -96,12 +96,12 @@ func TestEnterCommissioningMode_UsesSuiteConn(t *testing.T) {
 	}
 
 	// Verify suite conn was used (not simulated): sendTriggerViaZone sets this on success.
-	if !r.deviceStateModified {
+	if !r.connMgr.DeviceStateModified() {
 		t.Error("expected deviceStateModified=true (proves suite conn was used, not stub simulation)")
 	}
 
 	// Verify zone CA pool was NOT corrupted.
-	if r.zoneCAPool != origZoneCAPool {
+	if r.connMgr.ZoneCAPool() != origZoneCAPool {
 		t.Error("expected zoneCAPool to be preserved")
 	}
 }
@@ -117,7 +117,7 @@ func TestTriggerTestEvent_UsesSuiteConn(t *testing.T) {
 	r.pool.Main().state = ConnDisconnected
 
 	origZoneCAPool := x509.NewCertPool()
-	r.zoneCAPool = origZoneCAPool
+	r.connMgr.SetZoneCAPool(origZoneCAPool)
 
 	// Place the suite zone connection on suite.SetConn() (not in pool).
 	zoneConn, server := newPipeConnection()
@@ -148,10 +148,10 @@ func TestTriggerTestEvent_UsesSuiteConn(t *testing.T) {
 	}
 
 	// Verify suite conn was actually used.
-	if !r.deviceStateModified {
+	if !r.connMgr.DeviceStateModified() {
 		t.Error("expected deviceStateModified=true (proves suite conn was used, not stub simulation)")
 	}
-	if r.zoneCAPool != origZoneCAPool {
+	if r.connMgr.ZoneCAPool() != origZoneCAPool {
 		t.Error("expected zoneCAPool to be preserved")
 	}
 }
@@ -168,7 +168,7 @@ func TestExitCommissioningMode_UsesSuiteConn(t *testing.T) {
 	r.pool.Main().state = ConnDisconnected
 
 	origZoneCAPool := x509.NewCertPool()
-	r.zoneCAPool = origZoneCAPool
+	r.connMgr.SetZoneCAPool(origZoneCAPool)
 
 	// Place the suite zone connection on suite.SetConn() (not in pool).
 	zoneConn, server := newPipeConnection()
@@ -193,10 +193,10 @@ func TestExitCommissioningMode_UsesSuiteConn(t *testing.T) {
 	}
 
 	// Verify suite conn was actually used.
-	if !r.deviceStateModified {
+	if !r.connMgr.DeviceStateModified() {
 		t.Error("expected deviceStateModified=true (proves suite conn was used, not stub simulation)")
 	}
-	if r.zoneCAPool != origZoneCAPool {
+	if r.connMgr.ZoneCAPool() != origZoneCAPool {
 		t.Error("expected zoneCAPool to be preserved")
 	}
 }

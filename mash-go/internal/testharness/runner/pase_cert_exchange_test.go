@@ -119,11 +119,14 @@ func TestCertExchange_FullFlow(t *testing.T) {
 	r := &Runner{
 		config: &Config{},
 		pool:   NewConnPool(func(string, ...any) {}, nil),
-		paseState: &PASEState{
-			sessionKey: []byte("test-session-key-for-zone-deriv"),
-			completed:  true,
-		},
+		suite:  NewSuiteSession(),
 	}
+	r.dialer = NewDialer(false, r.debugf)
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{})
+	r.connMgr.SetPASEState(&PASEState{
+		sessionKey: []byte("test-session-key-for-zone-deriv"),
+		completed:  true,
+	})
 	r.pool.SetMain(&Connection{
 		framer: clientFramer,
 		state:  ConnTLSConnected,
@@ -142,27 +145,27 @@ func TestCertExchange_FullFlow(t *testing.T) {
 	}
 
 	// Verify: zoneCA is set.
-	if r.zoneCA == nil {
+	if r.connMgr.ZoneCA() == nil {
 		t.Error("expected zoneCA to be set")
 	}
 
 	// Verify: zoneCAPool is set.
-	if r.zoneCAPool == nil {
+	if r.connMgr.ZoneCAPool() == nil {
 		t.Error("expected zoneCAPool to be set")
 	}
 
 	// Verify: controllerCert is set and signed by Zone CA.
-	if r.controllerCert == nil {
+	if r.connMgr.ControllerCert() == nil {
 		t.Fatal("expected controllerCert to be set")
 	}
-	if r.controllerCert.Certificate == nil {
+	if r.connMgr.ControllerCert().Certificate == nil {
 		t.Fatal("expected controllerCert.Certificate to be set")
 	}
 	// The controller cert's issuer should match the zone CA's subject.
-	if r.controllerCert.Certificate.Issuer.CommonName != r.zoneCA.Certificate.Subject.CommonName {
+	if r.connMgr.ControllerCert().Certificate.Issuer.CommonName != r.connMgr.ZoneCA().Certificate.Subject.CommonName {
 		t.Errorf("controller cert issuer %q != zone CA subject %q",
-			r.controllerCert.Certificate.Issuer.CommonName,
-			r.zoneCA.Certificate.Subject.CommonName)
+			r.connMgr.ControllerCert().Certificate.Issuer.CommonName,
+			r.connMgr.ZoneCA().Certificate.Subject.CommonName)
 	}
 
 	// Verify: device ID was extracted.
@@ -172,8 +175,8 @@ func TestCertExchange_FullFlow(t *testing.T) {
 
 	// Verify: zone ID derivation.
 	expectedZoneID := deriveZoneIDFromSecret([]byte("test-session-key-for-zone-deriv"))
-	if r.zoneCA.ZoneID != expectedZoneID {
-		t.Errorf("zone ID %q != expected %q", r.zoneCA.ZoneID, expectedZoneID)
+	if r.connMgr.ZoneCA().ZoneID != expectedZoneID {
+		t.Errorf("zone ID %q != expected %q", r.connMgr.ZoneCA().ZoneID, expectedZoneID)
 	}
 }
 

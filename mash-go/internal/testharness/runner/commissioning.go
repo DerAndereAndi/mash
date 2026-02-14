@@ -24,8 +24,8 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 
 	r.debugf("ensureCommissioned: wasConnected=%v paseState=%v paseCompleted=%v",
 		wasConnected,
-		r.paseState != nil,
-		r.paseState != nil && r.paseState.completed)
+		r.connMgr.PASEState() != nil,
+		r.connMgr.PASEState() != nil && r.connMgr.PASEState().completed)
 
 	// First ensure we're connected.
 	if err := r.ensureConnected(ctx, state); err != nil {
@@ -38,7 +38,7 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 	// connection was dead and ensureConnected created a new one, the
 	// old PASE session is invalid -- the device expects PASE on the
 	// new connection, so we must redo commissioning.
-	if r.paseState != nil && r.paseState.completed {
+	if r.connMgr.PASEState() != nil && r.connMgr.PASEState().completed {
 		if wasConnected {
 			r.debugf("ensureCommissioned: reusing existing PASE session")
 			// Always restore suite zone crypto when reusing a session.
@@ -49,32 +49,32 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 			// TLS config for the reused session.
 			crypto := r.suite.Crypto()
 			if crypto.ZoneCAPool != nil {
-				r.zoneCA = crypto.ZoneCA
-				r.controllerCert = crypto.ControllerCert
-				r.issuedDeviceCert = crypto.IssuedDeviceCert
+				r.connMgr.SetZoneCA(crypto.ZoneCA)
+				r.connMgr.SetControllerCert(crypto.ControllerCert)
+				r.connMgr.SetIssuedDeviceCert(crypto.IssuedDeviceCert)
 				// Ensure suite zone CA is in the pool without replacing it.
 				// The accumulated pool may contain CAs from other zones the
 				// device still knows about. Replacing it with the suite pool
 				// loses those CAs (the device may present a cert from any zone).
-				if r.zoneCAPool == nil {
-					r.zoneCAPool = x509.NewCertPool()
+				if r.connMgr.ZoneCAPool() == nil {
+					r.connMgr.SetZoneCAPool(x509.NewCertPool())
 				}
 				if crypto.ZoneCA != nil && crypto.ZoneCA.Certificate != nil {
-					r.zoneCAPool.AddCert(crypto.ZoneCA.Certificate)
+					r.connMgr.ZoneCAPool().AddCert(crypto.ZoneCA.Certificate)
 				}
 				r.debugf("ensureCommissioned: restored suite zone crypto")
 			}
 			state.Set(KeySessionEstablished, true)
 			state.Set(KeyConnectionEstablished, true)
-			if r.paseState.sessionKey != nil {
-				state.Set(StateSessionKey, r.paseState.sessionKey)
-				state.Set(StateSessionKeyLen, len(r.paseState.sessionKey))
+			if r.connMgr.PASEState().sessionKey != nil {
+				state.Set(StateSessionKey, r.connMgr.PASEState().sessionKey)
+				state.Set(StateSessionKeyLen, len(r.connMgr.PASEState().sessionKey))
 			}
 			return nil
 		}
 		// Connection was re-established -- old PASE session is stale.
 		r.debugf("ensureCommissioned: connection was re-established, clearing stale PASE state")
-		r.paseState = nil
+		r.connMgr.SetPASEState(nil)
 	}
 
 	// Create a synthetic step to drive handleCommission.
@@ -109,10 +109,7 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 			// Clear connection but preserve suite zone state so multi-zone
 			// precondition loops don't lose the suite zone on retry.
 			r.disconnectConnection()
-			r.zoneCA = nil
-			r.controllerCert = nil
-			r.zoneCAPool = nil
-			r.issuedDeviceCert = nil
+			r.connMgr.ClearWorkingCrypto()
 			if connErr := r.ensureConnected(ctx, state); connErr != nil {
 				return fmt.Errorf("precondition commission cooldown retry connect failed: %w", connErr)
 			}
@@ -120,19 +117,14 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 			if err != nil {
 				return fmt.Errorf("precondition commission failed after cooldown wait: %w", err)
 			}
-			if r.paseState == nil || !r.paseState.completed {
+			if r.connMgr.PASEState() == nil || !r.connMgr.PASEState().completed {
 				return fmt.Errorf("precondition commission: PASE did not complete after cooldown retry")
 			}
 			if err := r.transitionToOperational(state); err != nil {
 				return err
 			}
 			if r.isSuiteZoneCommission() {
-				r.suite.Record(r.suite.ZoneID(), CryptoState{
-					ZoneCA:           r.zoneCA,
-					ControllerCert:   r.controllerCert,
-					ZoneCAPool:       r.zoneCAPool,
-					IssuedDeviceCert: r.issuedDeviceCert,
-				})
+				r.suite.Record(r.suite.ZoneID(), r.connMgr.WorkingCrypto())
 				r.debugf("ensureCommissioned: updated suite zone crypto after cooldown retry commission")
 			}
 			return nil
@@ -151,10 +143,7 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 			for retry := 1; retry <= maxRetries; retry++ {
 				// Clear connection but preserve suite zone state.
 				r.disconnectConnection()
-				r.zoneCA = nil
-				r.controllerCert = nil
-				r.zoneCAPool = nil
-				r.issuedDeviceCert = nil
+				r.connMgr.ClearWorkingCrypto()
 				if err := contextSleep(ctx, 1*time.Second); err != nil {
 					return fmt.Errorf("infrastructure retry wait cancelled: %w", err)
 				}
@@ -163,19 +152,14 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 				}
 				_, err = r.handleCommission(ctx, step, state)
 				if err == nil {
-					if r.paseState == nil || !r.paseState.completed {
+					if r.connMgr.PASEState() == nil || !r.connMgr.PASEState().completed {
 						return fmt.Errorf("precondition commission: PASE did not complete on retry %d", retry)
 					}
 					if trErr := r.transitionToOperational(state); trErr != nil {
 						return trErr
 					}
 					if r.isSuiteZoneCommission() {
-						r.suite.Record(r.suite.ZoneID(), CryptoState{
-							ZoneCA:           r.zoneCA,
-							ControllerCert:   r.controllerCert,
-							ZoneCAPool:       r.zoneCAPool,
-							IssuedDeviceCert: r.issuedDeviceCert,
-						})
+						r.suite.Record(r.suite.ZoneID(), r.connMgr.WorkingCrypto())
 						r.debugf("ensureCommissioned: updated suite zone crypto after infra retry commission")
 					}
 					return nil
@@ -194,7 +178,7 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 
 	// handleCommission may return nil error for PASE protocol failures
 	// (device-sent error codes). Check paseState to detect these.
-	if r.paseState == nil || !r.paseState.completed {
+	if r.connMgr.PASEState() == nil || !r.connMgr.PASEState().completed {
 		return fmt.Errorf("precondition commission: PASE handshake did not complete")
 	}
 
@@ -208,12 +192,7 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 	// secondary zones (GRID/LOCAL from two_zones_connected) must not
 	// overwrite suite crypto.
 	if r.isSuiteZoneCommission() {
-		r.suite.Record(r.suite.ZoneID(), CryptoState{
-			ZoneCA:           r.zoneCA,
-			ControllerCert:   r.controllerCert,
-			ZoneCAPool:       r.zoneCAPool,
-			IssuedDeviceCert: r.issuedDeviceCert,
-		})
+		r.suite.Record(r.suite.ZoneID(), r.connMgr.WorkingCrypto())
 		r.debugf("ensureCommissioned: updated suite zone crypto after fresh commission")
 	}
 
@@ -248,11 +227,11 @@ func (r *Runner) isSuiteZoneCommission() bool {
 // Without this registration, the zone leaks on the device and subsequent
 // tests fail with "zone slots full".
 func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
-	if r.paseState == nil || r.paseState.sessionKey == nil {
+	if r.connMgr.PASEState() == nil || r.connMgr.PASEState().sessionKey == nil {
 		return fmt.Errorf("no PASE session to transition")
 	}
 
-	zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
+	zoneID := deriveZoneIDFromSecret(r.connMgr.PASEState().sessionKey)
 
 	// DEC-066: Close the commissioning connection.
 	// The device has already closed its end after sending CertInstallAck.
@@ -308,14 +287,14 @@ func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
 	if r.suite.ZoneID() == "" {
 		return fmt.Errorf("no suite zone to reconnect to")
 	}
-	if r.zoneCAPool == nil || r.controllerCert == nil {
+	if r.connMgr.ZoneCAPool() == nil || r.connMgr.ControllerCert() == nil {
 		// Try restoring from saved suite zone crypto.
 		crypto := r.suite.Crypto()
 		if crypto.ZoneCAPool != nil && crypto.ControllerCert != nil {
-			r.zoneCA = crypto.ZoneCA
-			r.controllerCert = crypto.ControllerCert
-			r.zoneCAPool = crypto.ZoneCAPool
-			r.issuedDeviceCert = crypto.IssuedDeviceCert
+			r.connMgr.SetZoneCA(crypto.ZoneCA)
+			r.connMgr.SetControllerCert(crypto.ControllerCert)
+			r.connMgr.SetZoneCAPool(crypto.ZoneCAPool)
+			r.connMgr.SetIssuedDeviceCert(crypto.IssuedDeviceCert)
 			r.debugf("reconnectToZone: restored suite zone crypto")
 		} else {
 			return fmt.Errorf("no crypto material for reconnection")
@@ -412,12 +391,12 @@ func (r *Runner) commissionSuiteZone(ctx context.Context) error {
 	r.debugf("commissionSuiteZone: commissioning device for suite")
 	state := engine.NewExecutionState(ctx)
 
-	r.commissionZoneType = cert.ZoneTypeTest
+	r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 	if err := r.ensureCommissioned(ctx, state); err != nil {
-		r.commissionZoneType = 0
+		r.connMgr.SetCommissionZoneType(0)
 		return fmt.Errorf("suite commissioning: %w", err)
 	}
-	r.commissionZoneType = 0
+	r.connMgr.SetCommissionZoneType(0)
 
 	r.recordSuiteZone()
 	r.debugf("commissionSuiteZone: suite zone established (id=%s key=%s)", r.suite.ZoneID(), r.suite.ConnKey())
@@ -432,16 +411,11 @@ func (r *Runner) commissionSuiteZone(ctx context.Context) error {
 // The suite zone connection is moved out of the ConnPool so that pool-level
 // operations (close, scan, cleanup) never touch it.
 func (r *Runner) recordSuiteZone() {
-	if r.paseState == nil || r.paseState.sessionKey == nil {
+	if r.connMgr.PASEState() == nil || r.connMgr.PASEState().sessionKey == nil {
 		return
 	}
-	zoneID := deriveZoneIDFromSecret(r.paseState.sessionKey)
-	r.suite.Record(zoneID, CryptoState{
-		ZoneCA:           r.zoneCA,
-		ControllerCert:   r.controllerCert,
-		ZoneCAPool:       r.zoneCAPool,
-		IssuedDeviceCert: r.issuedDeviceCert,
-	})
+	zoneID := deriveZoneIDFromSecret(r.connMgr.PASEState().sessionKey)
+	r.suite.Record(zoneID, r.connMgr.WorkingCrypto())
 
 	// Move the suite zone connection from pool to suite session.
 	connKey := r.suite.ConnKey()

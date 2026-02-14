@@ -13,10 +13,10 @@ import (
 func TestEnsureCommissioned_AlreadyDone(t *testing.T) {
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{
+	r.connMgr.SetPASEState(&PASEState{
 		completed:  true,
 		sessionKey: []byte{1, 2, 3, 4},
-	}
+	})
 	state := engine.NewExecutionState(context.Background())
 
 	err := r.ensureCommissioned(context.Background(), state)
@@ -48,7 +48,7 @@ func TestEnsureCommissioned_RestoresSuiteZoneCrypto(t *testing.T) {
 	// must restore the crypto from the saved suite zone state.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 	// Simulate suite zone crypto saved during recordSuiteZone.
 	r.suite.Record("suite-zone-123", CryptoState{
 		ZoneCA:           &cert.ZoneCA{},
@@ -58,10 +58,10 @@ func TestEnsureCommissioned_RestoresSuiteZoneCrypto(t *testing.T) {
 	})
 
 	// Working crypto is nil (cleared by a previous non-commissioned test).
-	r.zoneCA = nil
-	r.controllerCert = nil
-	r.zoneCAPool = nil
-	r.issuedDeviceCert = nil
+	r.connMgr.SetZoneCA(nil)
+	r.connMgr.SetControllerCert(nil)
+	r.connMgr.SetZoneCAPool(nil)
+	r.connMgr.SetIssuedDeviceCert(nil)
 
 	state := engine.NewExecutionState(context.Background())
 	err := r.ensureCommissioned(context.Background(), state)
@@ -72,13 +72,13 @@ func TestEnsureCommissioned_RestoresSuiteZoneCrypto(t *testing.T) {
 	// Should have restored from suite zone crypto.
 	// The pool is created fresh (since it was nil) and suite CA cert is added
 	// if non-nil. With a nil Certificate in suiteZoneCA the pool is empty but non-nil.
-	if r.zoneCAPool == nil {
+	if r.connMgr.ZoneCAPool() == nil {
 		t.Error("expected zoneCAPool to be created during suite zone crypto restore")
 	}
-	if r.zoneCA != r.suite.Crypto().ZoneCA {
+	if r.connMgr.ZoneCA() != r.suite.Crypto().ZoneCA {
 		t.Error("expected zoneCA to be restored from suite zone crypto")
 	}
-	if r.controllerCert != r.suite.Crypto().ControllerCert {
+	if r.connMgr.ControllerCert() != r.suite.Crypto().ControllerCert {
 		t.Error("expected controllerCert to be restored from suite zone crypto")
 	}
 }
@@ -89,7 +89,7 @@ func TestEnsureCommissioned_NoStaleSuiteRestore_AfterEnsureDisconnected(t *testi
 	// This tests the fix for TC-IPV6-004/TC-TLS-CTRL-006 shuffle failures.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 
 	// Simulate state after ensureDisconnected + fresh commission:
 	// Suite session is empty (simulating state after ensureDisconnected + fresh commission).
@@ -98,10 +98,10 @@ func TestEnsureCommissioned_NoStaleSuiteRestore_AfterEnsureDisconnected(t *testi
 	// Current crypto from the fresh commission.
 	freshCA := &cert.ZoneCA{}
 	freshPool := x509.NewCertPool()
-	r.zoneCA = freshCA
-	r.controllerCert = &cert.OperationalCert{}
-	r.zoneCAPool = freshPool
-	r.issuedDeviceCert = &x509.Certificate{}
+	r.connMgr.SetZoneCA(freshCA)
+	r.connMgr.SetControllerCert(&cert.OperationalCert{})
+	r.connMgr.SetZoneCAPool(freshPool)
+	r.connMgr.SetIssuedDeviceCert(&x509.Certificate{})
 
 	state := engine.NewExecutionState(context.Background())
 	err := r.ensureCommissioned(context.Background(), state)
@@ -110,10 +110,10 @@ func TestEnsureCommissioned_NoStaleSuiteRestore_AfterEnsureDisconnected(t *testi
 	}
 
 	// Current crypto should remain unchanged (not replaced by nil suite crypto).
-	if r.zoneCA != freshCA {
+	if r.connMgr.ZoneCA() != freshCA {
 		t.Error("expected zoneCA to remain as fresh commission crypto")
 	}
-	if r.zoneCAPool != freshPool {
+	if r.connMgr.ZoneCAPool() != freshPool {
 		t.Error("expected zoneCAPool to remain as fresh commission crypto")
 	}
 }
@@ -217,7 +217,7 @@ func TestEnsureDisconnected_ClearsSuiteCrypto(t *testing.T) {
 	// session-reuse path restores the stale suite crypto.
 	r := newTestRunner()
 	r.pool.Main().state = ConnOperational
-	r.paseState = &PASEState{completed: true, sessionKey: []byte{1, 2, 3}}
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
 	// Simulate suite zone crypto.
 	r.suite.Record("suite-zone-123", CryptoState{
 		ZoneCA:           &cert.ZoneCA{},
@@ -227,24 +227,24 @@ func TestEnsureDisconnected_ClearsSuiteCrypto(t *testing.T) {
 	})
 
 	// Current crypto.
-	r.zoneCA = &cert.ZoneCA{}
-	r.controllerCert = &cert.OperationalCert{}
-	r.zoneCAPool = x509.NewCertPool()
-	r.issuedDeviceCert = &x509.Certificate{}
+	r.connMgr.SetZoneCA(&cert.ZoneCA{})
+	r.connMgr.SetControllerCert(&cert.OperationalCert{})
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
+	r.connMgr.SetIssuedDeviceCert(&x509.Certificate{})
 
 	r.ensureDisconnected()
 
 	// All current crypto should be cleared.
-	if r.zoneCA != nil {
+	if r.connMgr.ZoneCA() != nil {
 		t.Error("expected zoneCA to be nil after ensureDisconnected")
 	}
-	if r.controllerCert != nil {
+	if r.connMgr.ControllerCert() != nil {
 		t.Error("expected controllerCert to be nil after ensureDisconnected")
 	}
-	if r.zoneCAPool != nil {
+	if r.connMgr.ZoneCAPool() != nil {
 		t.Error("expected zoneCAPool to be nil after ensureDisconnected")
 	}
-	if r.issuedDeviceCert != nil {
+	if r.connMgr.IssuedDeviceCert() != nil {
 		t.Error("expected issuedDeviceCert to be nil after ensureDisconnected")
 	}
 
