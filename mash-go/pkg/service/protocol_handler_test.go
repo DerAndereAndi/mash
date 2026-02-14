@@ -425,7 +425,7 @@ func TestProtocolHandler_SubscriptionManagerIntegration(t *testing.T) {
 	payload := resp.Payload.(*wire.SubscribeResponsePayload)
 
 	// Verify the subscription is tracked in the SubscriptionManager
-	subMgr := handler.SubscriptionManager()
+	subMgr := handler.SessionSubscriptions()
 	sub := subMgr.GetInbound(payload.SubscriptionID)
 	if sub == nil {
 		t.Error("Expected subscription to be tracked in SubscriptionManager")
@@ -636,7 +636,7 @@ func TestProtocolHandler_UnsubscribeRemovesFromManager(t *testing.T) {
 	subID := subPayload.SubscriptionID
 
 	// Verify subscription exists in manager
-	subMgr := handler.SubscriptionManager()
+	subMgr := handler.SessionSubscriptions()
 	if subMgr.GetInbound(subID) == nil {
 		t.Error("Expected subscription in manager before unsubscribe")
 	}

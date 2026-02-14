@@ -405,7 +405,7 @@ func (s *ZoneSession) ClearSubscriptions() {
 		connSender := func(data []byte) error { return s.conn.Send(data) }
 		s.dispatcherConnID = s.dispatcher.RegisterConnection(connSender)
 	} else {
-		s.handler.SubscriptionManager().ClearInbound()
+		s.handler.SessionSubscriptions().ClearInbound()
 	}
 }
 

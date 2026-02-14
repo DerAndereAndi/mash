@@ -13,9 +13,9 @@ type Subscription struct {
 	Attributes []uint16 // Empty means all attributes
 }
 
-// SubscriptionManager manages bidirectional subscriptions with separate
+// SessionSubscriptionTracker manages bidirectional subscriptions with separate
 // ID spaces for inbound (from remote to us) and outbound (from us to remote).
-type SubscriptionManager struct {
+type SessionSubscriptionTracker struct {
 	mu sync.RWMutex
 
 	// Inbound subscriptions: from remote side to our features
@@ -27,9 +27,9 @@ type SubscriptionManager struct {
 	nextOutboundID uint32
 }
 
-// NewSubscriptionManager creates a new subscription manager.
-func NewSubscriptionManager() *SubscriptionManager {
-	return &SubscriptionManager{
+// NewSessionSubscriptionTracker creates a new session subscription tracker.
+func NewSessionSubscriptionTracker() *SessionSubscriptionTracker {
+	return &SessionSubscriptionTracker{
 		inbound:  make(map[uint32]*Subscription),
 		outbound: make(map[uint32]*Subscription),
 	}
@@ -37,7 +37,7 @@ func NewSubscriptionManager() *SubscriptionManager {
 
 // AddInbound adds an inbound subscription (from remote to our features).
 // Returns the assigned subscription ID.
-func (m *SubscriptionManager) AddInbound(endpointID, featureID uint8, attributes []uint16) uint32 {
+func (m *SessionSubscriptionTracker) AddInbound(endpointID, featureID uint8, attributes []uint16) uint32 {
 	id := atomic.AddUint32(&m.nextInboundID, 1)
 
 	sub := &Subscription{
@@ -56,7 +56,7 @@ func (m *SubscriptionManager) AddInbound(endpointID, featureID uint8, attributes
 
 // AddOutbound adds an outbound subscription (from us to remote features).
 // Returns the assigned subscription ID.
-func (m *SubscriptionManager) AddOutbound(endpointID, featureID uint8, attributes []uint16) uint32 {
+func (m *SessionSubscriptionTracker) AddOutbound(endpointID, featureID uint8, attributes []uint16) uint32 {
 	id := atomic.AddUint32(&m.nextOutboundID, 1)
 
 	sub := &Subscription{
@@ -75,7 +75,7 @@ func (m *SubscriptionManager) AddOutbound(endpointID, featureID uint8, attribute
 
 // RemoveInbound removes an inbound subscription by ID.
 // Returns true if the subscription existed and was removed.
-func (m *SubscriptionManager) RemoveInbound(subscriptionID uint32) bool {
+func (m *SessionSubscriptionTracker) RemoveInbound(subscriptionID uint32) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -88,7 +88,7 @@ func (m *SubscriptionManager) RemoveInbound(subscriptionID uint32) bool {
 
 // RemoveOutbound removes an outbound subscription by ID.
 // Returns true if the subscription existed and was removed.
-func (m *SubscriptionManager) RemoveOutbound(subscriptionID uint32) bool {
+func (m *SessionSubscriptionTracker) RemoveOutbound(subscriptionID uint32) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -100,7 +100,7 @@ func (m *SubscriptionManager) RemoveOutbound(subscriptionID uint32) bool {
 }
 
 // GetInbound returns an inbound subscription by ID, or nil if not found.
-func (m *SubscriptionManager) GetInbound(subscriptionID uint32) *Subscription {
+func (m *SessionSubscriptionTracker) GetInbound(subscriptionID uint32) *Subscription {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -108,7 +108,7 @@ func (m *SubscriptionManager) GetInbound(subscriptionID uint32) *Subscription {
 }
 
 // GetOutbound returns an outbound subscription by ID, or nil if not found.
-func (m *SubscriptionManager) GetOutbound(subscriptionID uint32) *Subscription {
+func (m *SessionSubscriptionTracker) GetOutbound(subscriptionID uint32) *Subscription {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -116,7 +116,7 @@ func (m *SubscriptionManager) GetOutbound(subscriptionID uint32) *Subscription {
 }
 
 // ListInbound returns a copy of all inbound subscriptions.
-func (m *SubscriptionManager) ListInbound() []*Subscription {
+func (m *SessionSubscriptionTracker) ListInbound() []*Subscription {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -128,7 +128,7 @@ func (m *SubscriptionManager) ListInbound() []*Subscription {
 }
 
 // ListOutbound returns a copy of all outbound subscriptions.
-func (m *SubscriptionManager) ListOutbound() []*Subscription {
+func (m *SessionSubscriptionTracker) ListOutbound() []*Subscription {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -143,7 +143,7 @@ func (m *SubscriptionManager) ListOutbound() []*Subscription {
 // A subscription matches if it is for the same endpoint and feature, and either:
 // - The subscription has no attribute filter (empty Attributes slice means all attributes)
 // - The subscription's attribute filter includes the specified attributeID
-func (m *SubscriptionManager) GetMatchingInbound(endpointID, featureID uint8, attributeID uint16) []*Subscription {
+func (m *SessionSubscriptionTracker) GetMatchingInbound(endpointID, featureID uint8, attributeID uint16) []*Subscription {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -173,14 +173,14 @@ func (m *SubscriptionManager) GetMatchingInbound(endpointID, featureID uint8, at
 // ClearInbound removes all inbound subscriptions.
 // Used by TriggerResetTestState to stop notifications from leaking into the
 // next test when sessions are reused.
-func (m *SubscriptionManager) ClearInbound() {
+func (m *SessionSubscriptionTracker) ClearInbound() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.inbound = make(map[uint32]*Subscription)
 }
 
 // InboundCount returns the number of inbound subscriptions.
-func (m *SubscriptionManager) InboundCount() int {
+func (m *SessionSubscriptionTracker) InboundCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.inbound)

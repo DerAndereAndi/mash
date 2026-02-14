@@ -6,7 +6,7 @@ import (
 )
 
 func TestSubscriptionManager_AddInbound(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Add first subscription
 	id1 := sm.AddInbound(1, 2, []uint16{100, 101})
@@ -45,7 +45,7 @@ func TestSubscriptionManager_AddInbound(t *testing.T) {
 }
 
 func TestSubscriptionManager_AddOutbound(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Add first subscription
 	id1 := sm.AddOutbound(1, 2, []uint16{100, 101})
@@ -81,7 +81,7 @@ func TestSubscriptionManager_AddOutbound(t *testing.T) {
 }
 
 func TestSubscriptionManager_IDSpacesIndependent(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Add inbound subscription
 	inboundID := sm.AddInbound(1, 2, []uint16{100})
@@ -112,7 +112,7 @@ func TestSubscriptionManager_IDSpacesIndependent(t *testing.T) {
 }
 
 func TestSubscriptionManager_RemoveInbound(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Add subscription
 	id := sm.AddInbound(1, 2, []uint16{100})
@@ -139,7 +139,7 @@ func TestSubscriptionManager_RemoveInbound(t *testing.T) {
 }
 
 func TestSubscriptionManager_RemoveOutbound(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Add subscription
 	id := sm.AddOutbound(1, 2, []uint16{100})
@@ -166,7 +166,7 @@ func TestSubscriptionManager_RemoveOutbound(t *testing.T) {
 }
 
 func TestSubscriptionManager_GetInbound_NotFound(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Get non-existent subscription
 	sub := sm.GetInbound(9999)
@@ -176,7 +176,7 @@ func TestSubscriptionManager_GetInbound_NotFound(t *testing.T) {
 }
 
 func TestSubscriptionManager_GetOutbound_NotFound(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Get non-existent subscription
 	sub := sm.GetOutbound(9999)
@@ -186,7 +186,7 @@ func TestSubscriptionManager_GetOutbound_NotFound(t *testing.T) {
 }
 
 func TestSubscriptionManager_ListInbound(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Empty list initially
 	list := sm.ListInbound()
@@ -214,7 +214,7 @@ func TestSubscriptionManager_ListInbound(t *testing.T) {
 }
 
 func TestSubscriptionManager_ListOutbound(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Empty list initially
 	list := sm.ListOutbound()
@@ -242,7 +242,7 @@ func TestSubscriptionManager_ListOutbound(t *testing.T) {
 }
 
 func TestSubscriptionManager_ListDoesNotAffectInternal(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Add subscription
 	id := sm.AddInbound(1, 2, []uint16{100})
@@ -259,7 +259,7 @@ func TestSubscriptionManager_ListDoesNotAffectInternal(t *testing.T) {
 }
 
 func TestSubscriptionManager_EmptyAttributes(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Add subscription with empty attributes (subscribe to all)
 	id := sm.AddInbound(1, 2, nil)
@@ -285,7 +285,7 @@ func TestSubscriptionManager_EmptyAttributes(t *testing.T) {
 }
 
 func TestSubscriptionManager_ConcurrentAccess(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	const numGoroutines = 100
 	const opsPerGoroutine = 100
@@ -333,7 +333,7 @@ func TestSubscriptionManager_ConcurrentAccess(t *testing.T) {
 }
 
 func TestSubscriptionManager_IDsIncrement(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Add multiple subscriptions and verify IDs increment
 	id1 := sm.AddInbound(1, 2, []uint16{100})
@@ -355,7 +355,7 @@ func TestSubscriptionManager_IDsIncrement(t *testing.T) {
 }
 
 func TestSubscriptionManager_ClearInbound(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Add several inbound subscriptions.
 	sm.AddInbound(0, 1, nil)
@@ -382,7 +382,7 @@ func TestSubscriptionManager_ClearInbound(t *testing.T) {
 }
 
 func TestSubscriptionManager_RemoveDoesNotAffectOther(t *testing.T) {
-	sm := NewSubscriptionManager()
+	sm := NewSessionSubscriptionTracker()
 
 	// Add inbound and outbound with potentially same IDs
 	inID := sm.AddInbound(1, 2, []uint16{100})

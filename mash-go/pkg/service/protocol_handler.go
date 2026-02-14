@@ -35,8 +35,8 @@ type ProtocolHandler struct {
 	peerID       string        // The remote peer's identifier (generic, works for both device and controller)
 	peerZoneType cert.ZoneType // The remote peer's zone type (GRID, LOCAL, etc.)
 
-	// Subscription management using SubscriptionManager
-	subscriptions *SubscriptionManager
+	// Subscription management
+	subscriptions *SessionSubscriptionTracker
 
 	// Send function for notifications
 	sendNotification NotificationSender
@@ -57,7 +57,7 @@ type ProtocolHandler struct {
 func NewProtocolHandler(device DeviceModel) *ProtocolHandler {
 	return &ProtocolHandler{
 		device:        device,
-		subscriptions: NewSubscriptionManager(),
+		subscriptions: NewSessionSubscriptionTracker(),
 	}
 }
 
@@ -65,7 +65,7 @@ func NewProtocolHandler(device DeviceModel) *ProtocolHandler {
 func NewProtocolHandlerWithSend(device DeviceModel, send NotificationSender) *ProtocolHandler {
 	return &ProtocolHandler{
 		device:           device,
-		subscriptions:    NewSubscriptionManager(),
+		subscriptions:    NewSessionSubscriptionTracker(),
 		sendNotification: send,
 	}
 }
@@ -75,8 +75,8 @@ func (h *ProtocolHandler) Device() DeviceModel {
 	return h.device
 }
 
-// SubscriptionManager returns the subscription manager for this handler.
-func (h *ProtocolHandler) SubscriptionManager() *SubscriptionManager {
+// SessionSubscriptions returns the session subscription tracker for this handler.
+func (h *ProtocolHandler) SessionSubscriptions() *SessionSubscriptionTracker {
 	return h.subscriptions
 }
 
@@ -480,7 +480,7 @@ func (h *ProtocolHandler) handleSubscribe(req *wire.Request) *wire.Response {
 		attributeIDs = subPayload.AttributeIDs
 	}
 
-	// Add subscription using SubscriptionManager (inbound = from remote peer to our features)
+	// Add subscription (inbound = from remote peer to our features)
 	subID := h.subscriptions.AddInbound(req.EndpointID, req.FeatureID, attributeIDs)
 
 	// Build context with caller zone identity for priming report
@@ -542,7 +542,7 @@ func (h *ProtocolHandler) handleUnsubscribe(req *wire.Request) *wire.Response {
 		}
 	}
 
-	// Remove subscription using SubscriptionManager
+	// Remove subscription
 	exists := h.subscriptions.RemoveInbound(subID)
 
 	if !exists {
