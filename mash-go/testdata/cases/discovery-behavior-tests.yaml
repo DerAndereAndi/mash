@@ -125,7 +125,7 @@ steps:
   - name: Commission device
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
     expect:
       commission_success: true
 
@@ -313,7 +313,7 @@ steps:
   - name: Commission device
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
     expect:
       commission_success: true
 
@@ -693,7 +693,7 @@ steps:
   - name: Commission a device
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
     expect:
       commission_success: true
 
@@ -827,7 +827,7 @@ steps:
       parse_success: true
       version: 1
       discriminator: 1234
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
 
 postconditions:
   - qr_parsed: true
@@ -1061,7 +1061,7 @@ steps:
     action: commission
     params:
       discriminator: 1234
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
     expect:
       commission_success: true
       correct_device_commissioned: true
@@ -1182,7 +1182,7 @@ steps:
   - name: Commission device
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
     expect:
       commission_success: true
 
@@ -1283,7 +1283,7 @@ steps:
   - name: Commission to second zone
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
       zone_type: GRID
     expect:
       commission_success: true

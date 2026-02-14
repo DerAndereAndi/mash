@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
@@ -600,5 +601,129 @@ func TestBrowseMDNS_InterfaceUpThenBrowse(t *testing.T) {
 	// Verify the injected address was merged.
 	if len(ds.services[0].Addresses) != 2 {
 		t.Errorf("expected 2 addresses, got %d: %v", len(ds.services[0].Addresses), ds.services[0].Addresses)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Group G: browseViaObserver fresh-browse semantics
+// ---------------------------------------------------------------------------
+
+// TestBrowseViaObserver_ClearsStaleEntries verifies that browseViaObserver
+// does not return entries accumulated before the browse call. After a state
+// change (e.g., zone removal), stale entries must be cleared so the browse
+// only returns services actively advertising during its timeout window.
+func TestBrowseViaObserver_ClearsStaleEntries(t *testing.T) {
+	r := newTestRunner()
+	tb := newTestBrowser()
+	r.observer = newMDNSObserver(tb, r.debugf)
+	defer r.observer.Stop()
+
+	// Pre-populate observer with a stale commissionable service.
+	tb.commAdded <- &discovery.CommissionableService{
+		InstanceName:  "MASH-STALE",
+		Discriminator: 9999,
+	}
+
+	// Wait for the observer to ingest the service.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := r.observer.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) >= 1
+	})
+	if err != nil {
+		t.Fatalf("setup: observer did not ingest stale service: %v", err)
+	}
+
+	// Now call browseViaObserver with a short timeout. No new services will
+	// be sent during this window, so a fresh browse should return empty.
+	services, err := r.browseViaObserver(context.Background(), "commissionable", 500)
+	if err != nil {
+		t.Fatalf("browseViaObserver error: %v", err)
+	}
+
+	if len(services) != 0 {
+		t.Errorf("browseViaObserver should return empty for stale-only snapshot, got %d services: %v",
+			len(services), services)
+	}
+}
+
+// TestBrowseViaObserver_ReturnsFreshServices verifies that browseViaObserver
+// returns services that arrive AFTER the browse starts (fresh advertisements).
+func TestBrowseViaObserver_ReturnsFreshServices(t *testing.T) {
+	r := newTestRunner()
+	tb := newTestBrowser()
+	r.observer = newMDNSObserver(tb, r.debugf)
+	defer r.observer.Stop()
+
+	// Send a fresh service after a short delay (simulating a device
+	// advertising after the browse starts).
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		tb.commAdded <- &discovery.CommissionableService{
+			InstanceName:  "MASH-FRESH",
+			Discriminator: 1234,
+		}
+	}()
+
+	services, err := r.browseViaObserver(context.Background(), "commissionable", 2000)
+	if err != nil {
+		t.Fatalf("browseViaObserver error: %v", err)
+	}
+
+	if len(services) != 1 {
+		t.Fatalf("expected 1 fresh service, got %d", len(services))
+	}
+	if services[0].InstanceName != "MASH-FRESH" {
+		t.Errorf("expected MASH-FRESH, got %s", services[0].InstanceName)
+	}
+}
+
+// TestBrowseViaObserver_StaleAndFresh verifies that after clearing stale
+// entries, only fresh services that arrive during the browse window appear.
+func TestBrowseViaObserver_StaleAndFresh(t *testing.T) {
+	r := newTestRunner()
+	tb := newTestBrowser()
+	r.observer = newMDNSObserver(tb, r.debugf)
+	defer r.observer.Stop()
+
+	// Pre-populate with stale service.
+	tb.commAdded <- &discovery.CommissionableService{
+		InstanceName:  "MASH-OLD",
+		Discriminator: 1111,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := r.observer.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) >= 1
+	})
+	if err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	// Send a fresh service after browse starts.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		tb.commAdded <- &discovery.CommissionableService{
+			InstanceName:  "MASH-NEW",
+			Discriminator: 2222,
+		}
+	}()
+
+	services, err := r.browseViaObserver(context.Background(), "commissionable", 2000)
+	if err != nil {
+		t.Fatalf("browseViaObserver error: %v", err)
+	}
+
+	// Should see the fresh service. The stale one may or may not reappear
+	// (depends on whether the device re-advertises), but the key assertion
+	// is that at least one service is returned and it includes the fresh one.
+	found := false
+	for _, svc := range services {
+		if svc.InstanceName == "MASH-NEW" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected MASH-NEW in results, got %v", services)
 	}
 }

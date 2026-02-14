@@ -28,7 +28,7 @@ steps:
   - name: Perform PASE with correct setup code
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
     expect:
       session_established: true
       key_length: 32
@@ -104,7 +104,7 @@ steps:
   - name: Send X value but do not complete PASE
     action: send_pase_x
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
       halt_after_x: true
     expect:
       x_sent: true
@@ -183,7 +183,7 @@ steps:
   - name: Send X and capture Y response
     action: send_pase_x
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
       capture_y: true
     expect:
       y_received: true
@@ -195,7 +195,7 @@ steps:
   - name: Send same X value again
     action: send_pase_x
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
       capture_y: true
     expect:
       y_received: true

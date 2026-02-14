@@ -29,7 +29,7 @@ steps:
   - name: Commission device directly
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
       zone_type: LOCAL
     expect:
       commission_success: true
@@ -73,7 +73,7 @@ steps:
   - name: Commission device via admin token
     action: commission_with_admin
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
       admin_token: valid
     expect:
       commission_success: true
@@ -155,7 +155,7 @@ steps:
   - name: Commission correct device (PASE succeeds only with right code)
     action: commission
     params:
-      setup_code: "20202021"       # Code for device 1, not device 2
+      setup_code: "{{ setup_code }}"  # Uses CLI setup code
       discriminator: 1234
     expect:
       commission_success: true
@@ -200,7 +200,7 @@ steps:
   - name: Commission device to GRID zone
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
       zone_type: GRID
     expect:
       commission_success: true

@@ -47,6 +47,10 @@ func (r *Runner) browseViaObserver(ctx context.Context, serviceType string, time
 		return nil, fmt.Errorf("failed to create mDNS observer")
 	}
 
+	// Clear stale entries so this browse only returns services that are
+	// actively advertising during the timeout window (fresh-browse semantics).
+	obs.ClearSnapshot(serviceType)
+
 	browseCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 

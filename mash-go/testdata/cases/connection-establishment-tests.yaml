@@ -175,7 +175,7 @@ steps:
   - name: Commission device (PASE + cert exchange)
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
       transition_to_operational: true
     expect:
       commission_success: true
@@ -228,7 +228,7 @@ steps:
   - name: Commission device
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
     expect:
       commission_success: true
 
@@ -281,7 +281,7 @@ steps:
   - name: Commission device
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
     expect:
       commission_success: true
 
@@ -327,7 +327,7 @@ steps:
   - name: Commission device
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
       transition_to_operational: true
     expect:
       commission_success: true
@@ -386,7 +386,7 @@ steps:
   - name: Commission device
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
       transition_to_operational: true
     expect:
       commission_success: true
@@ -474,7 +474,7 @@ steps:
   - name: Commission to second zone
     action: commission
     params:
-      setup_code: "20202021"
+      setup_code: "{{ setup_code }}"
       zone_type: GRID
     expect:
       commission_success: true
