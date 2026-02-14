@@ -272,7 +272,7 @@ func LoadPICS(path string) (*PICSFile, error) {
 // picsToFile converts a pics.PICS to a PICSFile for backward compatibility.
 func picsToFile(p *pics.PICS) *PICSFile {
 	pf := &PICSFile{
-		Items: make(map[string]interface{}),
+		Items: make(map[string]any),
 	}
 
 	// Copy device metadata
@@ -344,12 +344,12 @@ func CheckPICSRequirements(pf *PICSFile, requirements []string) bool {
 // whether a value was specified. Supports "KEY: VALUE" and "KEY=VALUE" forms.
 func parseRequirement(req string) (key, val string, hasValue bool) {
 	// Try ": " separator first (from YAML map entries).
-	if idx := strings.Index(req, ": "); idx >= 0 {
-		return req[:idx], req[idx+2:], true
+	if k, v, ok := strings.Cut(req, ": "); ok {
+		return k, v, true
 	}
 	// Try "=" separator (inline format).
-	if idx := strings.IndexByte(req, '='); idx >= 0 {
-		return req[:idx], req[idx+1:], true
+	if k, v, ok := strings.Cut(req, "="); ok {
+		return k, v, true
 	}
 	return req, "", false
 }
@@ -453,7 +453,7 @@ func ValidatePICS(pf *PICSFile) []*ValidationError {
 }
 
 // getBool retrieves a boolean value from the items map.
-func getBool(items map[string]interface{}, key string) bool {
+func getBool(items map[string]any, key string) bool {
 	if v, ok := items[key]; ok {
 		if b, ok := v.(bool); ok {
 			return b
@@ -467,14 +467,14 @@ func getBool(items map[string]interface{}, key string) bool {
 }
 
 // hasKey checks if a key exists in the items map.
-func hasKey(items map[string]interface{}, key string) bool {
+func hasKey(items map[string]any, key string) bool {
 	_, ok := items[key]
 	return ok
 }
 
 // getInt retrieves an integer value from the items map.
 // Handles both int and float64 (from YAML parsing).
-func getInt(items map[string]interface{}, key string) (int, bool) {
+func getInt(items map[string]any, key string) (int, bool) {
 	v, ok := items[key]
 	if !ok {
 		return 0, false

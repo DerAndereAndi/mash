@@ -371,11 +371,11 @@ func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 	// hosts this PICS item will be absent and those tests are skipped.
 	if detectHostIPv6Global() {
 		if r.pics == nil {
-			r.pics = &loader.PICSFile{Items: make(map[string]interface{})}
+			r.pics = &loader.PICSFile{Items: make(map[string]any)}
 			r.engineConfig.PICS = r.pics
 		}
 		if r.pics.Items == nil {
-			r.pics.Items = make(map[string]interface{})
+			r.pics.Items = make(map[string]any)
 		}
 		r.pics.Items["MASH.C.NETWORK.HAS_IPV6_GLOBAL"] = 1
 	}

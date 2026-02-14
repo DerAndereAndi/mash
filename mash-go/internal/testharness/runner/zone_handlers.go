@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -94,11 +93,14 @@ func (r *Runner) handleCreateZone(ctx context.Context, step *loader.Step, state 
 	// Generate a real Zone CA and controller operational cert so that
 	// verify_controller_cert and cert fingerprint handlers work with
 	// actual cryptographic material.
-	zt := cert.ZoneTypeLocal
-	if zoneType == ZoneTypeGrid {
+	var zt cert.ZoneType
+	switch zoneType {
+	case ZoneTypeGrid:
 		zt = cert.ZoneTypeGrid
-	} else if zoneType == ZoneTypeTest {
+	case ZoneTypeTest:
 		zt = cert.ZoneTypeTest
+	default:
+		zt = cert.ZoneTypeLocal
 	}
 	if zoneCA, err := cert.GenerateZoneCA(zoneID, zt); err == nil {
 		r.connMgr.SetZoneCA(zoneCA)
@@ -764,14 +766,3 @@ func (r *Runner) checkSaveZoneID(key string, expected interface{}, state *engine
 	}
 }
 
-// sortedZonesByPriority returns zones sorted by priority (highest first).
-func sortedZonesByPriority(zs *zoneState) []*zoneInfo {
-	zones := make([]*zoneInfo, 0, len(zs.zones))
-	for _, z := range zs.zones {
-		zones = append(zones, z)
-	}
-	sort.Slice(zones, func(i, j int) bool {
-		return zones[i].Priority > zones[j].Priority
-	})
-	return zones
-}

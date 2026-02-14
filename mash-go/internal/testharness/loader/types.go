@@ -74,7 +74,7 @@ func (p *PICSRequirementList) UnmarshalYAML(unmarshal func(any) error) error {
 }
 
 // Condition represents a precondition or postcondition.
-type Condition map[string]interface{}
+type Condition map[string]any
 
 // Step represents a single action in a test case.
 type Step struct {
@@ -82,10 +82,10 @@ type Step struct {
 	Action string `yaml:"action"`
 
 	// Params are parameters for the action.
-	Params map[string]interface{} `yaml:"params,omitempty"`
+	Params map[string]any `yaml:"params,omitempty"`
 
 	// Expect defines expected outcomes after the action.
-	Expect map[string]interface{} `yaml:"expect,omitempty"`
+	Expect map[string]any `yaml:"expect,omitempty"`
 
 	// Timeout overrides the test-level timeout for this step.
 	Timeout string `yaml:"timeout,omitempty"`
@@ -132,7 +132,7 @@ type PICSFile struct {
 	// Items maps PICS identifiers to their values.
 	// Boolean items: MASH.S.TRANS.SC=true
 	// Numeric items: MASH.S.ELEC.MAX_CURRENT=32000
-	Items map[string]interface{} `yaml:"items"`
+	Items map[string]any `yaml:"items"`
 }
 
 // ValidationLevel indicates the severity of a validation issue.
