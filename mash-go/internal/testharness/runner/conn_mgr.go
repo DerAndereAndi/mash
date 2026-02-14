@@ -91,14 +91,14 @@ type connMgrImpl struct {
 	deps   connMgrDeps
 
 	// State fields (moved from Runner).
-	paseState            *PASEState
-	zoneCA               *cert.ZoneCA
-	controllerCert       *cert.OperationalCert
-	issuedDeviceCert     *x509.Certificate
-	zoneCAPool           *x509.CertPool
-	lastDeviceConnClose  time.Time
-	commissionZoneType   cert.ZoneType
-	deviceStateModified  bool
+	paseState               *PASEState
+	zoneCA                  *cert.ZoneCA
+	controllerCert          *cert.OperationalCert
+	issuedDeviceCert        *x509.Certificate
+	zoneCAPool              *x509.CertPool
+	lastDeviceConnClose     time.Time
+	commissionZoneType      cert.ZoneType
+	deviceStateModified     bool
 	discoveredDiscriminator uint16
 }
 
@@ -125,7 +125,7 @@ func NewConnectionManager(
 // State accessors
 // ---------------------------------------------------------------------------
 
-func (m *connMgrImpl) PASEState() *PASEState    { return m.paseState }
+func (m *connMgrImpl) PASEState() *PASEState      { return m.paseState }
 func (m *connMgrImpl) SetPASEState(ps *PASEState) { m.paseState = ps }
 
 func (m *connMgrImpl) DeviceStateModified() bool     { return m.deviceStateModified }
@@ -134,10 +134,10 @@ func (m *connMgrImpl) SetDeviceStateModified(b bool) { m.deviceStateModified = b
 func (m *connMgrImpl) CommissionZoneType() cert.ZoneType      { return m.commissionZoneType }
 func (m *connMgrImpl) SetCommissionZoneType(zt cert.ZoneType) { m.commissionZoneType = zt }
 
-func (m *connMgrImpl) LastDeviceConnClose() time.Time    { return m.lastDeviceConnClose }
+func (m *connMgrImpl) LastDeviceConnClose() time.Time     { return m.lastDeviceConnClose }
 func (m *connMgrImpl) SetLastDeviceConnClose(t time.Time) { m.lastDeviceConnClose = t }
 
-func (m *connMgrImpl) DiscoveredDiscriminator() uint16       { return m.discoveredDiscriminator }
+func (m *connMgrImpl) DiscoveredDiscriminator() uint16     { return m.discoveredDiscriminator }
 func (m *connMgrImpl) SetDiscoveredDiscriminator(d uint16) { m.discoveredDiscriminator = d }
 
 func (m *connMgrImpl) IsSuiteZoneCommission() bool {
@@ -174,14 +174,14 @@ func (m *connMgrImpl) OperationalTLSConfig() *tls.Config {
 // Individual crypto field accessors -- used by handlers that read/write
 // a single crypto field rather than the full CryptoState bundle.
 
-func (m *connMgrImpl) ZoneCA() *cert.ZoneCA           { return m.zoneCA }
-func (m *connMgrImpl) SetZoneCA(z *cert.ZoneCA)        { m.zoneCA = z }
-func (m *connMgrImpl) ControllerCert() *cert.OperationalCert { return m.controllerCert }
+func (m *connMgrImpl) ZoneCA() *cert.ZoneCA                      { return m.zoneCA }
+func (m *connMgrImpl) SetZoneCA(z *cert.ZoneCA)                  { m.zoneCA = z }
+func (m *connMgrImpl) ControllerCert() *cert.OperationalCert     { return m.controllerCert }
 func (m *connMgrImpl) SetControllerCert(c *cert.OperationalCert) { m.controllerCert = c }
-func (m *connMgrImpl) IssuedDeviceCert() *x509.Certificate { return m.issuedDeviceCert }
-func (m *connMgrImpl) SetIssuedDeviceCert(c *x509.Certificate) { m.issuedDeviceCert = c }
-func (m *connMgrImpl) ZoneCAPool() *x509.CertPool     { return m.zoneCAPool }
-func (m *connMgrImpl) SetZoneCAPool(p *x509.CertPool) { m.zoneCAPool = p }
+func (m *connMgrImpl) IssuedDeviceCert() *x509.Certificate       { return m.issuedDeviceCert }
+func (m *connMgrImpl) SetIssuedDeviceCert(c *x509.Certificate)   { m.issuedDeviceCert = c }
+func (m *connMgrImpl) ZoneCAPool() *x509.CertPool                { return m.zoneCAPool }
+func (m *connMgrImpl) SetZoneCAPool(p *x509.CertPool)            { m.zoneCAPool = p }
 
 // ---------------------------------------------------------------------------
 // Connection lifecycle
@@ -321,21 +321,17 @@ func (m *connMgrImpl) ReconnectToZone(state *engine.ExecutionState) error {
 // Health checks (moved from readiness.go)
 // ---------------------------------------------------------------------------
 
-// WaitForCommissioningMode polls mDNS until the device advertises the
-// commissionable service, indicating it has re-entered commissioning mode.
+// WaitForCommissioningMode delegates to the Runner's observer-backed browse
+// to wait until the device advertises the commissionable service.
 func (m *connMgrImpl) WaitForCommissioningMode(ctx context.Context, timeout time.Duration) error {
 	start := time.Now()
-	deadline := start.Add(timeout)
-	browseMs := 300
-	for time.Now().Before(deadline) {
-		browseCtx, cancel := context.WithTimeout(ctx, time.Duration(browseMs)*time.Millisecond)
-		count, err := m.deps.browseFn(browseCtx, "commissionable", nil, browseMs)
-		cancel()
-		if err == nil && count > 0 {
-			m.debugf("waitForCommissioningMode: device found after %v", time.Since(start))
-			return nil
-		}
-		browseMs = min(browseMs*2, 1000)
+	timeoutMs := int(timeout.Milliseconds())
+	browseCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	count, err := m.deps.browseFn(browseCtx, "commissionable", nil, timeoutMs)
+	if err == nil && count > 0 {
+		m.debugf("waitForCommissioningMode: device found after %v", time.Since(start))
+		return nil
 	}
 	return fmt.Errorf("timeout waiting for commissioning mode after %v", timeout)
 }

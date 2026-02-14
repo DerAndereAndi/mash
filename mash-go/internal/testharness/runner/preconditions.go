@@ -151,10 +151,10 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceHasGridZone:          precondLevelCommissioned,
 	PrecondDeviceHasLocalZone:         precondLevelCommissioned,
 	PrecondDeviceInLocalZone:          precondLevelCommissioned,
-	PrecondSessionPreviouslyConnected:  precondLevelCommissioned,
-	PrecondFreshCommission:             precondLevelCommissioned,
-	PrecondDeviceHasOneZone:            precondLevelCommissioned,
-	PrecondDeviceHasAvailableZoneSlot:  precondLevelCommissioned,
+	PrecondSessionPreviouslyConnected: precondLevelCommissioned,
+	PrecondFreshCommission:            precondLevelCommissioned,
+	PrecondDeviceHasOneZone:           precondLevelCommissioned,
+	PrecondDeviceHasAvailableZoneSlot: precondLevelCommissioned,
 
 	// State-machine preconditions (require commissioned session).
 	PrecondControlState:          precondLevelCommissioned,
@@ -285,8 +285,10 @@ func (r *Runner) currentLevel() int {
 }
 
 // teardownTest is the callback registered with the engine.
-// It delegates to the coordinator for test cleanup.
+// It delegates to the coordinator for test cleanup and stops the mDNS observer
+// so the next test starts with a fresh observer.
 func (r *Runner) teardownTest(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState) {
+	r.stopObserver()
 	r.coordinator.TeardownTest(ctx, tc, state)
 }
 
@@ -350,7 +352,6 @@ func (r *Runner) ensureConnected(ctx context.Context, state *engine.ExecutionSta
 
 	return nil
 }
-
 
 // closeActiveZoneConns closes runner-tracked zone connections from previous
 // tests. The suite zone lives on suite.Conn() (outside the pool), so it is

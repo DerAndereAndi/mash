@@ -43,6 +43,10 @@ type Runner struct {
 	dialer      Dialer
 	connMgr     ConnectionManager
 
+	// observer is the persistent mDNS observer for the current test.
+	// Created lazily by getOrCreateObserver, stopped in teardownTest.
+	observer *mdnsObserver
+
 	// pairingAdvertiser is a real mDNS advertiser used by announce_pairing_request
 	// to advertise _mashp._udp services. Cleaned up in Close().
 	pairingAdvertiser *discovery.MDNSAdvertiser
@@ -303,8 +307,8 @@ func New(config *Config) *Runner {
 		commissionFn: func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 			return r.handleCommission(ctx, step, state)
 		},
-		browseFn: func(ctx context.Context, serviceType string, params map[string]any, timeoutMs int) (int, error) {
-			services, err := r.browseMDNSOnce(ctx, serviceType, params, timeoutMs)
+		browseFn: func(ctx context.Context, serviceType string, _ map[string]any, timeoutMs int) (int, error) {
+			services, err := r.browseViaObserver(ctx, serviceType, timeoutMs)
 			return len(services), err
 		},
 		nextMsgIDFn: func() uint32 { return r.nextMessageID() },
@@ -556,6 +560,7 @@ func (r *Runner) removeActiveSubscription(subID uint32) {
 // connection before closing so the device can re-enter commissioning
 // mode for the next test run.
 func (r *Runner) Close() error {
+	r.stopObserver()
 	if r.pairingAdvertiser != nil {
 		r.pairingAdvertiser.StopAll()
 		r.pairingAdvertiser = nil

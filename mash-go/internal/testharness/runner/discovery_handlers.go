@@ -7,9 +7,7 @@ import (
 	"net"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -40,121 +38,32 @@ func (r *Runner) registerDiscoveryHandlers() {
 	r.engine.RegisterHandler(ActionVerifyTXTRecords, r.handleVerifyTXTRecordsReal)
 }
 
-// browseMDNSOnce performs a single mDNS browse pass and returns discovered services.
-func (r *Runner) browseMDNSOnce(ctx context.Context, serviceType string, params map[string]any, timeoutMs int) ([]discoveredService, error) {
+// browseViaObserver queries the mDNS observer for services of the given type,
+// waiting up to timeoutMs for at least one service to appear.
+// For commissionable services, it also stores the discovered discriminator.
+func (r *Runner) browseViaObserver(ctx context.Context, serviceType string, timeoutMs int) ([]discoveredService, error) {
+	obs := r.getOrCreateObserver()
+	if obs == nil {
+		return nil, fmt.Errorf("failed to create mDNS observer")
+	}
+
 	browseCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
-	browser, err := discovery.NewMDNSBrowser(discovery.DefaultBrowserConfig())
-	if err != nil {
-		return nil, fmt.Errorf("create browser: %w", err)
-	}
-	defer browser.Stop()
+	// Wait for at least one service, or until timeout.
+	services, _ := obs.WaitFor(browseCtx, serviceType, func(svcs []discoveredService) bool {
+		return len(svcs) > 0
+	})
 
-	var services []discoveredService
-
-	switch serviceType {
-	case discovery.ServiceTypeCommissionable, ServiceAliasCommissionable, "":
-		added, _, err := browser.BrowseCommissionable(browseCtx)
-		if err != nil {
-			return nil, fmt.Errorf("browse commissionable: %w", err)
-		}
-		for svc := range added {
-			// Store discovered discriminator on runner for {{ device_discriminator }}.
+	// Store discovered discriminator for {{ device_discriminator }}.
+	resolved := resolveServiceType(serviceType)
+	if resolved == discovery.ServiceTypeCommissionable || resolved == "" {
+		for _, svc := range services {
 			if r.connMgr.DiscoveredDiscriminator() == 0 && svc.Discriminator > 0 {
 				r.connMgr.SetDiscoveredDiscriminator(svc.Discriminator)
+				break
 			}
-			catParts := make([]string, len(svc.Categories))
-			for i, c := range svc.Categories {
-				catParts[i] = strconv.FormatUint(uint64(c), 10)
-			}
-			services = append(services, discoveredService{
-				InstanceName:  svc.InstanceName,
-				Host:          svc.Host,
-				Port:          svc.Port,
-				Addresses:     svc.Addresses,
-				ServiceType:   discovery.ServiceTypeCommissionable,
-				Discriminator: svc.Discriminator,
-				TXTRecords: map[string]string{
-					"brand":  svc.Brand,
-					"model":  svc.Model,
-					"DN":     svc.DeviceName,
-					"serial": svc.Serial,
-					"cat":    strings.Join(catParts, ","),
-				},
-			})
 		}
-
-	case discovery.ServiceTypeOperational, ServiceAliasOperational:
-		zoneID, _ := params[KeyZoneID].(string)
-		ch, err := browser.BrowseOperational(browseCtx, zoneID)
-		if err != nil {
-			return nil, fmt.Errorf("browse operational: %w", err)
-		}
-		for svc := range ch {
-			services = append(services, discoveredService{
-				InstanceName: svc.InstanceName,
-				Host:         svc.Host,
-				Port:         svc.Port,
-				Addresses:    svc.Addresses,
-				ServiceType:  discovery.ServiceTypeOperational,
-				TXTRecords: map[string]string{
-					"ZI": svc.ZoneID,
-					"DI": svc.DeviceID,
-				},
-			})
-		}
-
-	case discovery.ServiceTypeCommissioner, ServiceAliasCommissioner:
-		ch, err := browser.BrowseCommissioners(browseCtx)
-		if err != nil {
-			return nil, fmt.Errorf("browse commissioners: %w", err)
-		}
-		for svc := range ch {
-			txt := map[string]string{
-				"ZN": svc.ZoneName,
-				"ZI": svc.ZoneID,
-				"DC": strconv.Itoa(int(svc.DeviceCount)),
-			}
-			services = append(services, discoveredService{
-				InstanceName: svc.InstanceName,
-				Host:         svc.Host,
-				Port:         svc.Port,
-				Addresses:    svc.Addresses,
-				ServiceType:  discovery.ServiceTypeCommissioner,
-				TXTRecords:   txt,
-			})
-		}
-
-	case discovery.ServiceTypePairingRequest, ServiceAliasPairingRequest:
-		var mu sync.Mutex
-		err := browser.BrowsePairingRequests(browseCtx, func(svc discovery.PairingRequestService) {
-			mu.Lock()
-			services = append(services, discoveredService{
-				InstanceName:  svc.InstanceName,
-				Host:          svc.Host,
-				Port:          svc.Port,
-				Addresses:     svc.Addresses,
-				ServiceType:   discovery.ServiceTypePairingRequest,
-				Discriminator: svc.Discriminator,
-				TXTRecords: map[string]string{
-					"ZI": svc.ZoneID,
-					"ZN": svc.ZoneName,
-				},
-			})
-			mu.Unlock()
-		})
-		if err != nil {
-			return nil, fmt.Errorf("browse pairing requests: %w", err)
-		}
-		// BrowsePairingRequests is non-blocking; wait for browse timeout.
-		<-browseCtx.Done()
-		// Ensure any in-flight callback has completed.
-		mu.Lock()
-		mu.Unlock()
-
-	default:
-		return nil, fmt.Errorf("unknown service type: %s", serviceType)
 	}
 
 	return services, nil
@@ -174,25 +83,22 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	serviceType, _ := params[KeyServiceType].(string)
 	timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
 
-	// Determine if retry is requested.
+	// Determine if retry is requested. With the persistent observer, retries
+	// are less critical (the observer accumulates services continuously), but
+	// we honour the flag by doubling the browse timeout when retry is set.
 	retryRequested := false
 	if r, ok := params[ParamRetry].(bool); ok {
 		retryRequested = r
 	}
-
-	services, err := r.browseMDNSOnce(ctx, serviceType, params, timeoutMs)
-	if err != nil {
-		return nil, err
+	retries := 0
+	if retryRequested {
+		retries = 1
+		timeoutMs *= 2 // equivalent of two browse windows
 	}
 
-	// Retry once if requested and no services found.
-	retries := 0
-	if retryRequested && len(services) == 0 {
-		retries = 1
-		services, err = r.browseMDNSOnce(ctx, serviceType, params, timeoutMs)
-		if err != nil {
-			return nil, err
-		}
+	services, err := r.browseViaObserver(ctx, serviceType, timeoutMs)
+	if err != nil {
+		return nil, err
 	}
 
 	ds.services = services
@@ -812,10 +718,10 @@ func (r *Runner) handleAnnouncePairingRequest(ctx context.Context, step *loader.
 
 	return map[string]any{
 		KeyPairingRequestAnnounced: true,
-		KeyAnnouncementSent:       true,
-		KeyDiscriminator:          int(discriminator),
-		KeyZoneID:                 zoneID,
-		KeyZoneName:               zoneName,
+		KeyAnnouncementSent:        true,
+		KeyDiscriminator:           int(discriminator),
+		KeyZoneID:                  zoneID,
+		KeyZoneName:                zoneName,
 	}, nil
 }
 
@@ -847,40 +753,43 @@ func (r *Runner) handleWaitForDeviceReal(ctx context.Context, step *loader.Step,
 	discriminator := uint16(paramInt(params, KeyDiscriminator, 0))
 
 	if discriminator > 0 {
+		obs := r.getOrCreateObserver()
+		if obs == nil {
+			return map[string]any{
+				KeyDeviceFound:         false,
+				KeyDeviceHasTXTRecords: false,
+			}, nil
+		}
+
 		browseCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 		defer cancel()
 
-		browser, err := discovery.NewMDNSBrowser(discovery.DefaultBrowserConfig())
-		if err != nil {
-			return map[string]any{
-				KeyDeviceFound:         false,
-				KeyDeviceHasTXTRecords: false,
-			}, nil
-		}
-		defer browser.Stop()
-
-		svc, err := browser.FindByDiscriminator(browseCtx, discriminator)
-		if err != nil || svc == nil {
+		services, err := obs.WaitFor(browseCtx, "commissionable", func(svcs []discoveredService) bool {
+			for _, svc := range svcs {
+				if svc.Discriminator == discriminator {
+					return true
+				}
+			}
+			return false
+		})
+		if err != nil || len(services) == 0 {
 			return map[string]any{
 				KeyDeviceFound:         false,
 				KeyDeviceHasTXTRecords: false,
 			}, nil
 		}
 
+		// Find the matching service
 		ds := getDiscoveryState(state)
-		ds.services = []discoveredService{{
-			InstanceName:  svc.InstanceName,
-			Host:          svc.Host,
-			Port:          svc.Port,
-			Addresses:     svc.Addresses,
-			ServiceType:   discovery.ServiceTypeCommissionable,
-			Discriminator: svc.Discriminator,
-		}}
-
-		return map[string]any{
-			KeyDeviceFound:         true,
-			KeyDeviceHasTXTRecords: true,
-		}, nil
+		for _, svc := range services {
+			if svc.Discriminator == discriminator {
+				ds.services = []discoveredService{svc}
+				return map[string]any{
+					KeyDeviceFound:         true,
+					KeyDeviceHasTXTRecords: true,
+				}, nil
+			}
+		}
 	}
 
 	// No discriminator -- fall back to simulated success for non-mDNS test modes.

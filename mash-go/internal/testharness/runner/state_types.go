@@ -8,13 +8,12 @@ import (
 
 // discoveryState holds state for mDNS discovery handlers.
 type discoveryState struct {
-	services              []discoveredService
-	browser               any // *discovery.Browser when real impl used
-	active                bool
-	qrPayload             string
-	commissioningCompleted bool // set when PASE commissioning succeeded
-	previousAddresses     []string // addresses from last browse, for comparison
-	injectedAddresses     []string // addresses announced by device-local actions (e.g. interface_up)
+	services               []discoveredService
+	active                 bool
+	qrPayload              string
+	commissioningCompleted bool     // set when PASE commissioning succeeded
+	previousAddresses      []string // addresses from last browse, for comparison
+	injectedAddresses      []string // addresses announced by device-local actions (e.g. interface_up)
 }
 
 // discoveredService represents a discovered mDNS service.
@@ -49,24 +48,24 @@ type zoneState struct {
 
 // zoneInfo represents a single zone.
 type zoneInfo struct {
-	ZoneID           string
-	ZoneName         string
-	ZoneType         string
-	Priority         int
-	Metadata         map[string]any
-	CAFingerprint    string
-	Connected        bool
-	DeviceIDs        []string
-	CommissionedAt   time.Time
-	LastSeen         time.Time
-	LastSeenUpdated  bool // tracks whether LastSeen changed on last operation
+	ZoneID          string
+	ZoneName        string
+	ZoneType        string
+	Priority        int
+	Metadata        map[string]any
+	CAFingerprint   string
+	Connected       bool
+	DeviceIDs       []string
+	CommissionedAt  time.Time
+	LastSeen        time.Time
+	LastSeenUpdated bool // tracks whether LastSeen changed on last operation
 }
 
 // zonePriority maps zone types to their priority (higher number = higher priority).
 var zonePriority = map[string]int{
 	ZoneTypeGrid:  2,
 	ZoneTypeLocal: 1,
-	ZoneTypeTest:         0, // Lowest priority -- observer only (DEC-060)
+	ZoneTypeTest:  0, // Lowest priority -- observer only (DEC-060)
 }
 
 // getZoneState retrieves or creates zone state from execution state.

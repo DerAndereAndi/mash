@@ -8,25 +8,27 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
-// waitForCommissioningMode polls mDNS until the device advertises the
-// commissionable service (_mash-comm._tcp), indicating it has re-entered
-// commissioning mode. Uses exponential backoff on browse windows
-// (300ms initial, doubling up to 1s).
+// waitForCommissioningMode uses the persistent mDNS observer to wait until
+// the device advertises the commissionable service (_mash-comm._tcp),
+// indicating it has re-entered commissioning mode.
 func (r *Runner) waitForCommissioningMode(ctx context.Context, timeout time.Duration) error {
 	start := time.Now()
-	deadline := start.Add(timeout)
-	browseMs := 300 // initial browse window in ms
-	for time.Now().Before(deadline) {
-		browseCtx, cancel := context.WithTimeout(ctx, time.Duration(browseMs)*time.Millisecond)
-		services, err := r.browseMDNSOnce(browseCtx, "commissionable", nil, browseMs)
-		cancel()
-		if err == nil && len(services) > 0 {
-			r.debugf("waitForCommissioningMode: device found after %v", time.Since(start))
-			return nil
-		}
-		browseMs = min(browseMs*2, 1000)
+	obs := r.getOrCreateObserver()
+	if obs == nil {
+		return fmt.Errorf("failed to create mDNS observer")
 	}
-	return fmt.Errorf("timeout waiting for commissioning mode after %v", timeout)
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	_, err := obs.WaitFor(waitCtx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) > 0
+	})
+	if err != nil {
+		return fmt.Errorf("timeout waiting for commissioning mode after %v", timeout)
+	}
+	r.debugf("waitForCommissioningMode: device found after %v", time.Since(start))
+	return nil
 }
 
 // probeSessionHealth sends a lightweight Read request to DeviceInfo (endpoint 0,
