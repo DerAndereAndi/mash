@@ -77,6 +77,9 @@ type connMgrDeps struct {
 	// browseFn performs an mDNS browse for commissioning mode detection.
 	browseFn func(ctx context.Context, serviceType string, params map[string]any, timeoutMs int) (int, error)
 
+	// clearSnapshotFn clears stale mDNS entries for a service type before re-waiting.
+	clearSnapshotFn func(serviceType string)
+
 	// nextMsgIDFn returns the next protocol message ID.
 	nextMsgIDFn func() uint32
 }
@@ -325,6 +328,10 @@ func (m *connMgrImpl) ReconnectToZone(state *engine.ExecutionState) error {
 // to wait until the device advertises the commissionable service.
 func (m *connMgrImpl) WaitForCommissioningMode(ctx context.Context, timeout time.Duration) error {
 	start := time.Now()
+	// Clear stale commissionable entries before waiting for fresh advertisements.
+	if m.deps.clearSnapshotFn != nil {
+		m.deps.clearSnapshotFn("commissionable")
+	}
 	timeoutMs := int(timeout.Milliseconds())
 	browseCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

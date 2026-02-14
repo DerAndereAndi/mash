@@ -770,3 +770,181 @@ func TestObserver_HighFrequencyUpdates(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, snap, count)
 }
+
+// ---------------------------------------------------------------------------
+// Group E: ClearSnapshot
+// ---------------------------------------------------------------------------
+
+func TestObserver_ClearSnapshot_RemovesMatchingServices(t *testing.T) {
+	tb := newTestBrowser()
+	obs := newMDNSObserver(tb, noopDebugf)
+	defer obs.Stop()
+
+	// Add commissionable and operational services
+	tb.commAdded <- &discovery.CommissionableService{InstanceName: "MASH-CLR", Discriminator: 1}
+	tb.opAdded <- &discovery.OperationalService{InstanceName: "zone-clr", ZoneID: "AA", DeviceID: "BB"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := obs.WaitFor(ctx, "", func(svcs []discoveredService) bool {
+		return len(svcs) >= 2
+	})
+	require.NoError(t, err)
+
+	// Clear only commissionable
+	obs.ClearSnapshot("commissionable")
+
+	commSnap := obs.Snapshot("commissionable")
+	opSnap := obs.Snapshot("operational")
+	assert.Empty(t, commSnap, "commissionable should be cleared")
+	assert.Len(t, opSnap, 1, "operational should be untouched")
+}
+
+func TestObserver_ClearSnapshot_AllTypes(t *testing.T) {
+	tb := newTestBrowser()
+	obs := newMDNSObserver(tb, noopDebugf)
+	defer obs.Stop()
+
+	tb.commAdded <- &discovery.CommissionableService{InstanceName: "MASH-A", Discriminator: 1}
+	tb.opAdded <- &discovery.OperationalService{InstanceName: "zone-A", ZoneID: "AA", DeviceID: "BB"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := obs.WaitFor(ctx, "", func(svcs []discoveredService) bool {
+		return len(svcs) >= 2
+	})
+	require.NoError(t, err)
+
+	// Clear all
+	obs.ClearSnapshot("")
+
+	assert.Empty(t, obs.Snapshot("commissionable"))
+	assert.Empty(t, obs.Snapshot("operational"))
+}
+
+func TestObserver_ClearSnapshot_WakesWaitForCallers(t *testing.T) {
+	tb := newTestBrowser()
+	obs := newMDNSObserver(tb, noopDebugf)
+	defer obs.Stop()
+
+	// Add a service
+	tb.commAdded <- &discovery.CommissionableService{InstanceName: "MASH-WAKE", Discriminator: 1}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := obs.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) >= 1
+	})
+	require.NoError(t, err)
+
+	// Start WaitFor that expects absence
+	done := make(chan struct{})
+	go func() {
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel2()
+		_, err := obs.WaitFor(ctx2, "commissionable", func(svcs []discoveredService) bool {
+			return len(svcs) == 0
+		})
+		if err == nil {
+			close(done)
+		}
+	}()
+
+	// ClearSnapshot should wake the WaitFor caller and satisfy len==0
+	time.Sleep(50 * time.Millisecond)
+	obs.ClearSnapshot("commissionable")
+
+	select {
+	case <-done:
+		// success
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitFor(len==0) should have been satisfied by ClearSnapshot")
+	}
+}
+
+func TestObserver_ClearSnapshot_ThenFreshServiceAppears(t *testing.T) {
+	tb := newTestBrowser()
+	obs := newMDNSObserver(tb, noopDebugf)
+	defer obs.Stop()
+
+	// Add and verify
+	tb.commAdded <- &discovery.CommissionableService{InstanceName: "MASH-OLD", Discriminator: 1}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := obs.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) >= 1
+	})
+	require.NoError(t, err)
+
+	// Clear, then send a fresh service
+	obs.ClearSnapshot("commissionable")
+	assert.Empty(t, obs.Snapshot("commissionable"))
+
+	tb.commAdded <- &discovery.CommissionableService{InstanceName: "MASH-NEW", Discriminator: 2}
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+	snap, err := obs.WaitFor(ctx2, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) >= 1
+	})
+	require.NoError(t, err)
+	require.Len(t, snap, 1)
+	assert.Equal(t, "MASH-NEW", snap[0].InstanceName, "should see fresh service, not old")
+}
+
+// ---------------------------------------------------------------------------
+// Group F: WaitFor absence patterns
+// ---------------------------------------------------------------------------
+
+func TestObserver_WaitFor_AbsenceAfterClearAndRemoval(t *testing.T) {
+	tb := newTestBrowser()
+	obs := newMDNSObserver(tb, noopDebugf)
+	defer obs.Stop()
+
+	// Populate observer
+	tb.commAdded <- &discovery.CommissionableService{InstanceName: "MASH-ABS", Discriminator: 1}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := obs.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) >= 1
+	})
+	require.NoError(t, err)
+
+	// Simulate device stopping: removal event arrives after 100ms
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		tb.commRemoved <- &discovery.CommissionableService{InstanceName: "MASH-ABS"}
+	}()
+
+	// WaitFor absence -- should succeed within timeout
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+	snap, err := obs.WaitFor(ctx2, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) == 0
+	})
+	require.NoError(t, err)
+	assert.Empty(t, snap)
+}
+
+func TestObserver_WaitFor_AbsenceTimesOutIfStillAdvertising(t *testing.T) {
+	tb := newTestBrowser()
+	obs := newMDNSObserver(tb, noopDebugf)
+	defer obs.Stop()
+
+	// Service present and never removed
+	tb.commAdded <- &discovery.CommissionableService{InstanceName: "MASH-STAY", Discriminator: 1}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := obs.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) >= 1
+	})
+	require.NoError(t, err)
+
+	// WaitFor absence with short timeout -- should fail
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel2()
+	_, err = obs.WaitFor(ctx2, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) == 0
+	})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}

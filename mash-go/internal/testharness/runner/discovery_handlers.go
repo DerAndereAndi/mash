@@ -546,25 +546,9 @@ func (r *Runner) handleVerifyMDNSBrowsing(ctx context.Context, step *loader.Step
 	return result, nil
 }
 
-// confirmNotAdvertising calls browseFunc up to maxAttempts times. If a browse
-// finds services but a subsequent one does not, the stale result is ignored.
-// Returns true if services were found on ALL attempts (genuinely advertising).
-func confirmNotAdvertising(browseFunc func() (int, error), maxAttempts int, retryDelay time.Duration) bool {
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		count, err := browseFunc()
-		if err != nil || count == 0 {
-			return false // not advertising
-		}
-		if attempt < maxAttempts-1 {
-			time.Sleep(retryDelay)
-		}
-	}
-	return true // still advertising after all attempts
-}
-
 // handleVerifyMDNSNotAdvertising verifies device is NOT advertising.
-// Uses retry logic to handle macOS mDNSResponder cache staleness after
-// rapid register/shutdown cycles.
+// Uses the persistent observer to wait for all matching services to disappear
+// within the timeout. Returns not_advertising=true if no services remain.
 func (r *Runner) handleVerifyMDNSNotAdvertising(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 
@@ -573,32 +557,29 @@ func (r *Runner) handleVerifyMDNSNotAdvertising(ctx context.Context, step *loade
 		serviceType = ServiceAliasCommissionable
 	}
 
-	// Default to a short browse timeout to reduce false positives from
-	// test-mode auto-reenter of commissioning mode. Respect step's timeout if set.
-	timeoutMs := float64(1000)
-	if t := paramFloat(params, KeyTimeoutMs, 0); t > 0 {
-		timeoutMs = t
-	}
-	browseStep := &loader.Step{
-		Params: map[string]any{
-			KeyServiceType: serviceType,
-			KeyTimeoutMs:   timeoutMs,
-		},
+	// Default to a short timeout. Respect step's timeout if set.
+	timeoutMs := paramInt(params, KeyTimeoutMs, 1000)
+
+	obs := r.getOrCreateObserver()
+	if obs == nil {
+		return map[string]any{
+			KeyAdvertising:    false,
+			KeyNotAdvertising: true,
+		}, nil
 	}
 
-	browseFunc := func() (int, error) {
-		result, err := r.handleBrowseMDNS(ctx, browseStep, state)
-		if err != nil {
-			return 0, err
-		}
-		return result[KeyServiceCount].(int), nil
-	}
+	waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+	defer cancel()
 
-	found := confirmNotAdvertising(browseFunc, 3, 500*time.Millisecond)
+	// Wait for all services of this type to disappear (removal events).
+	_, err := obs.WaitFor(waitCtx, serviceType, func(svcs []discoveredService) bool {
+		return len(svcs) == 0
+	})
 
+	notAdvertising := err == nil // predicate satisfied = no services found
 	return map[string]any{
-		KeyAdvertising:    found,
-		KeyNotAdvertising: !found,
+		KeyAdvertising:    !notAdvertising,
+		KeyNotAdvertising: notAdvertising,
 	}, nil
 }
 

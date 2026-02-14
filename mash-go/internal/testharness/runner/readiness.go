@@ -18,6 +18,11 @@ func (r *Runner) waitForCommissioningMode(ctx context.Context, timeout time.Dura
 		return fmt.Errorf("failed to create mDNS observer")
 	}
 
+	// Clear stale commissionable entries so we only match fresh advertisements.
+	// Without this, the observer may still hold an entry from a previous session
+	// that would immediately satisfy the predicate.
+	obs.ClearSnapshot("commissionable")
+
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

@@ -80,6 +80,34 @@ func (o *mdnsObserver) WaitFor(ctx context.Context, serviceType string, pred fun
 	}
 }
 
+// ClearSnapshot removes all services matching the given service type from the
+// snapshot and wakes any WaitFor callers. Pass "" to clear all types.
+// Browse sessions continue running, so new events will repopulate the snapshot.
+// This is used before waiting for fresh advertisements (e.g., after zone removal
+// the observer may have stale commissionable entries that need to be forgotten
+// before waiting for the device to re-advertise).
+func (o *mdnsObserver) ClearSnapshot(serviceType string) {
+	resolved := resolveServiceType(serviceType)
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if o.stopped {
+		return
+	}
+
+	if resolved == "" {
+		o.services = make(map[serviceKey]discoveredService)
+	} else {
+		for key := range o.services {
+			if key.serviceType == resolved {
+				delete(o.services, key)
+			}
+		}
+	}
+	o.broadcast()
+}
+
 // Stop tears down all browse sessions and the underlying browser.
 // After Stop, Snapshot returns empty slices and WaitFor returns immediately.
 func (o *mdnsObserver) Stop() {

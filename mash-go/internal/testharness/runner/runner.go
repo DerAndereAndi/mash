@@ -311,6 +311,11 @@ func New(config *Config) *Runner {
 			services, err := r.browseViaObserver(ctx, serviceType, timeoutMs)
 			return len(services), err
 		},
+		clearSnapshotFn: func(serviceType string) {
+			if obs := r.getOrCreateObserver(); obs != nil {
+				obs.ClearSnapshot(serviceType)
+			}
+		},
 		nextMsgIDFn: func() uint32 { return r.nextMessageID() },
 	})
 
