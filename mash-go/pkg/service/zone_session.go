@@ -10,7 +10,6 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
 	"github.com/mash-protocol/mash-go/pkg/log"
-	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -52,7 +51,7 @@ type ZoneSession struct {
 }
 
 // NewZoneSession creates a new zone session.
-func NewZoneSession(zoneID string, conn Sendable, device *model.Device) *ZoneSession {
+func NewZoneSession(zoneID string, conn Sendable, device DeviceModel) *ZoneSession {
 	handler := NewProtocolHandler(device)
 	handler.SetZoneID(zoneID)
 

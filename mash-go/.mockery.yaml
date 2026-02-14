@@ -24,3 +24,9 @@ packages:
       Coordinator: {}
       ConnectionManager: {}
       Dialer: {}
+  github.com/mash-protocol/mash-go/pkg/service:
+    config:
+      dir: '{{.InterfaceDir}}/mocks'
+    interfaces:
+      SubscriptionTracker: {}
+      DeviceModel: {}

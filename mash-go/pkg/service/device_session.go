@@ -10,7 +10,6 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
 	"github.com/mash-protocol/mash-go/pkg/log"
-	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -373,7 +372,7 @@ func (s *DeviceSession) Conn() Sendable {
 // can query the controller's features (e.g., read meter data from an SMGW).
 //
 // If not called, incoming requests from the device will receive StatusUnsupported.
-func (s *DeviceSession) SetExposedDevice(device *model.Device) {
+func (s *DeviceSession) SetExposedDevice(device DeviceModel) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

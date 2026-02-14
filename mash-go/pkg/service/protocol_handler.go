@@ -31,7 +31,7 @@ type InvokeCallback func(endpointID uint8, featureID uint8, commandID uint8, par
 type ProtocolHandler struct {
 	mu sync.RWMutex
 
-	device       *model.Device
+	device       DeviceModel
 	peerID       string        // The remote peer's identifier (generic, works for both device and controller)
 	peerZoneType cert.ZoneType // The remote peer's zone type (GRID, LOCAL, etc.)
 
@@ -54,7 +54,7 @@ type ProtocolHandler struct {
 }
 
 // NewProtocolHandler creates a new protocol handler for a device.
-func NewProtocolHandler(device *model.Device) *ProtocolHandler {
+func NewProtocolHandler(device DeviceModel) *ProtocolHandler {
 	return &ProtocolHandler{
 		device:        device,
 		subscriptions: NewSubscriptionManager(),
@@ -62,7 +62,7 @@ func NewProtocolHandler(device *model.Device) *ProtocolHandler {
 }
 
 // NewProtocolHandlerWithSend creates a new protocol handler with a custom notification sender.
-func NewProtocolHandlerWithSend(device *model.Device, send NotificationSender) *ProtocolHandler {
+func NewProtocolHandlerWithSend(device DeviceModel, send NotificationSender) *ProtocolHandler {
 	return &ProtocolHandler{
 		device:           device,
 		subscriptions:    NewSubscriptionManager(),
@@ -71,7 +71,7 @@ func NewProtocolHandlerWithSend(device *model.Device, send NotificationSender) *
 }
 
 // Device returns the underlying device model.
-func (h *ProtocolHandler) Device() *model.Device {
+func (h *ProtocolHandler) Device() DeviceModel {
 	return h.device
 }
 

@@ -239,77 +239,59 @@ Move from `pkg/service/remove_zone_handler.go:51-87`:
 
 ---
 
-## Phase 3: Add Service-Layer Interfaces
+## Phase 3: Clean Up Dead Code and Add Service-Layer Interfaces
 
-**Why:** `DeviceService` depends on concrete `zone.Manager`, `subscription.Manager`, and `model.Device`. Testing DeviceService requires constructing the full real dependency tree. Adding interfaces at consumption boundaries enables focused unit tests.
+**Why:** `DeviceService` has a dead `zoneManager` field that was never wired in, and depends on concrete `subscription.Manager` and `model.Device`. Removing dead code and adding interfaces at consumption boundaries enables focused unit tests.
 
-**Risk:** Medium -- touches widely-used types, but interfaces are additive.
+**Risk:** Low-Medium -- dead code removal is safe; interfaces are additive but touch constructors.
 
-### Task 3.1: Define ZoneManager interface in pkg/service
+### Task 3.1: Remove dead zoneManager field from DeviceService
 
-**Current:** `pkg/zone/manager.go` exposes 18+ methods on concrete `*zone.Manager`.
-DeviceService uses a subset. Define the interface where it's consumed (in pkg/service), not where it's implemented (in pkg/zone). This follows Go's "accept interfaces, return structs" idiom.
+**Current:** `device_service.go:46` declares `zoneManager *zone.Manager` and `device_service.go:148` initializes it with `zone.NewManager()`, but **zero calls** to `s.zoneManager.` exist anywhere in `pkg/service/`. DeviceService manages zones entirely through its own internal `connectedZones map[string]*ConnectedZone`, `zoneSessions`, `failsafeTimers`, and `zoneIndexMap`.
 
-**Interface (only methods DeviceService actually calls):**
-```go
-// pkg/service/interfaces.go
-type ZoneManager interface {
-    AddZone(zoneID string, zoneType cert.ZoneType) error
-    RemoveZone(zoneID string) error
-    GetZone(zoneID string) (*zone.Zone, error)
-    HasZone(zoneID string) bool
-    ListZones() []string
-    ZoneCount() int
-    SetConnected(zoneID string) error
-    SetDisconnected(zoneID string) error
-    ConnectedZones() []string
-    HighestPriorityConnectedZone() *zone.Zone
-    CanRemoveZone(requesterType cert.ZoneType, targetZoneID string) bool
-    OnZoneAdded(fn func(zone *zone.Zone))
-    OnZoneRemoved(fn func(zoneID string))
-    OnConnect(fn func(zoneID string))
-    OnDisconnect(fn func(zoneID string))
-}
-```
+The original plan proposed wrapping `zone.Manager` with an interface, but creating an interface for something never called is dead code. The `pkg/zone` package itself remains available if needed in the future.
 
 **Files to modify:**
-- `pkg/service/interfaces.go` -- new file with ZoneManager interface
-- `pkg/service/device_service.go` -- change `zoneManager *zone.Manager` to `zoneManager ZoneManager`
+- `pkg/service/device_service.go` -- remove `zoneManager` field (line 46) and `zone.NewManager()` init (line 148)
+- `pkg/service/device_service.go` -- remove `zone` import if no longer used
 
-**TDD steps:**
-1. [ ] Write compile-time check: `var _ ZoneManager = (*zone.Manager)(nil)`
-2. [ ] Create `pkg/service/interfaces.go` with ZoneManager
-3. [ ] Change DeviceService field type from `*zone.Manager` to `ZoneManager`
+**Steps:**
+1. [ ] Remove `zoneManager *zone.Manager` field from DeviceService struct
+2. [ ] Remove `zoneManager: zone.NewManager(),` from constructor
+3. [ ] Remove unused `zone` import if applicable
 4. [ ] Run `go_diagnostics` -- no errors
 5. [ ] Run `go test ./pkg/service/...` -- all green
 
-### Task 3.2: Define SubscriptionManager interface in pkg/service
+### Task 3.2: Define SubscriptionTracker interface in pkg/service
 
-**Current:** `pkg/subscription/manager.go` exposes 11 methods on concrete `*subscription.Manager`.
+**Current:** `pkg/subscription/manager.go` exposes 9 methods on concrete `*subscription.Manager`.
 
-**Interface (only methods DeviceService/ControllerService actually call):**
+**Interface (only methods DeviceService/NotificationDispatcher/ControllerService actually call):**
 ```go
-// pkg/service/interfaces.go (append)
+// pkg/service/interfaces.go
 type SubscriptionTracker interface {
     Subscribe(endpointID, featureID uint16, attributeIDs []uint16,
         minInterval, maxInterval time.Duration, currentValues map[uint16]any) (uint32, error)
     Unsubscribe(subscriptionID uint32) error
     NotifyChange(endpointID, featureID, attrID uint16, value any)
     NotifyChanges(endpointID, featureID uint16, changes map[uint16]any)
+    ProcessNotifications()
     ClearAll()
     Count() int
     OnNotification(fn func(subscription.Notification))
 }
 ```
 
+**Note:** `ProcessNotifications()` is called every 100ms by `NotificationDispatcher.processLoop()` (`notification_dispatcher.go:423`). The `Get()` method on `subscription.Manager` is not called by any service code, so it is excluded.
+
 **Files to modify:**
-- `pkg/service/interfaces.go` -- add SubscriptionTracker
+- `pkg/service/interfaces.go` -- new file with SubscriptionTracker
 - `pkg/service/device_service.go` -- change `subscriptionManager *subscription.Manager` to `subscriptionManager SubscriptionTracker`
 - `pkg/service/controller_service.go` -- same change if applicable
 
 **TDD steps:**
 1. [ ] Write compile-time check: `var _ SubscriptionTracker = (*subscription.Manager)(nil)`
-2. [ ] Add SubscriptionTracker to interfaces.go
+2. [ ] Create `pkg/service/interfaces.go` with SubscriptionTracker
 3. [ ] Change service field types
 4. [ ] Run `go_diagnostics` -- no errors
 5. [ ] Run `go test ./pkg/service/...` -- all green
@@ -330,6 +312,7 @@ type DeviceModel interface {
     AddEndpoint(endpoint *model.Endpoint) error
     GetEndpoint(id uint8) (*model.Endpoint, error)
     Endpoints() []*model.Endpoint
+    EndpointCount() int
     GetFeature(endpointID uint8, featureType model.FeatureType) (*model.Feature, error)
     ReadAttribute(endpointID uint8, featureType model.FeatureType, attrID uint16) (any, error)
     WriteAttribute(endpointID uint8, featureType model.FeatureType, attrID uint16, value any) error
@@ -340,23 +323,27 @@ type DeviceModel interface {
 }
 ```
 
+**Note:** `EndpointCount()` is called 3 times in production code (`device_service.go:1705,2410`). Additionally, `NewZoneSession()` and `NewProtocolHandler()`/`NewProtocolHandlerWithSend()` accept `*model.Device` as a concrete parameter type -- their signatures must be updated to accept `DeviceModel` when changing the field type.
+
 **Files to modify:**
 - `pkg/service/interfaces.go` -- add DeviceModel
 - `pkg/service/device_service.go` -- change `device *model.Device` to `device DeviceModel`
-- `pkg/service/protocol_handler.go` -- change `device *model.Device` to `device DeviceModel`
+- `pkg/service/protocol_handler.go` -- change `device *model.Device` to `device DeviceModel`; update `NewProtocolHandler()` and `NewProtocolHandlerWithSend()` parameter types
+- `pkg/service/zone_session.go` -- update `NewZoneSession()` parameter type
 
 **TDD steps:**
 1. [ ] Write compile-time check: `var _ DeviceModel = (*model.Device)(nil)`
 2. [ ] Add DeviceModel to interfaces.go
-3. [ ] Change service and protocol_handler field types
-4. [ ] Run `go_diagnostics` -- no errors
-5. [ ] Run `go test ./pkg/service/...` -- all green
-6. [ ] Run `go test ./...` -- all green (catches any downstream breakage)
+3. [ ] Update constructor signatures: `NewZoneSession`, `NewProtocolHandler`, `NewProtocolHandlerWithSend`
+4. [ ] Change service and protocol_handler field types
+5. [ ] Run `go_diagnostics` -- no errors
+6. [ ] Run `go test ./pkg/service/...` -- all green
+7. [ ] Run `go test ./...` -- all green (catches any downstream breakage)
 
 ### Task 3.4: Generate mocks for new service interfaces
 
 **TDD steps:**
-1. [ ] Add ZoneManager, SubscriptionTracker, DeviceModel to `.mockery.yaml`
+1. [ ] Add SubscriptionTracker, DeviceModel to `.mockery.yaml`
 2. [ ] Run `make generate`
 3. [ ] Write one test per mock to verify they compile and work with testify
 4. [ ] Run `go test ./pkg/service/...` -- all green
@@ -495,10 +482,10 @@ type DeviceModel interface {
 | 1 | 1.2 Split ConnPool | [x] Done | ConnReader, ConnWriter, ConnLifecycle, RequestSender, NotificationBuffer |
 | 1 | 1.3 Add ConnectionManager to mockery | [x] Done | MockConnectionManager generated |
 | 2 | 2.1 Create pkg/zonecontext | [x] Done | Context keys extracted, LimitResolver uses direct import, injection wiring removed |
-| 3 | 3.1 ZoneManager interface | [ ] Not started | |
-| 3 | 3.2 SubscriptionTracker interface | [ ] Not started | |
-| 3 | 3.3 DeviceModel interface | [ ] Not started | |
-| 3 | 3.4 Generate mocks | [ ] Not started | |
+| 3 | 3.1 Remove dead zoneManager field | [x] Done | Removed field, init, and zone import |
+| 3 | 3.2 SubscriptionTracker interface | [x] Done | 8-method interface incl. ProcessNotifications; field type changed in DeviceService, ControllerService, NotificationDispatcher |
+| 3 | 3.3 DeviceModel interface | [x] Done | 16-method interface at ProtocolHandler/ZoneSession level; DeviceService.Device() keeps *model.Device for external callers |
+| 3 | 3.4 Generate mocks | [x] Done | MockSubscriptionTracker + MockDeviceModel; fixed mockery v3 tooling (removed stale v2 dep from go.mod) |
 | 4 | 4.1 Consolidate Runner state | [ ] Not started | |
 | 4 | 4.2 Integrate Coordinator | [ ] Not started | |
 | 5 | 5.1 Generate names.go from YAML | [ ] Not started | |

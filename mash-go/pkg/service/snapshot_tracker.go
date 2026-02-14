@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/log"
-	"github.com/mash-protocol/mash-go/pkg/model"
 )
 
 // snapshotTracker monitors message flow and triggers capability snapshot
@@ -17,7 +16,7 @@ type snapshotTracker struct {
 	connID       string
 	localRole    log.Role
 
-	localDevice *model.Device
+	localDevice DeviceModel
 	remoteCache *log.DeviceSnapshot
 
 	// timeNow returns the current time. Defaults to time.Now.
@@ -26,7 +25,7 @@ type snapshotTracker struct {
 }
 
 // newSnapshotTracker creates a tracker with the given policy and data sources.
-func newSnapshotTracker(policy SnapshotPolicy, device *model.Device, logger log.Logger, connID string, role log.Role) *snapshotTracker {
+func newSnapshotTracker(policy SnapshotPolicy, device DeviceModel, logger log.Logger, connID string, role log.Role) *snapshotTracker {
 	return &snapshotTracker{
 		policy:      policy,
 		localDevice: device,

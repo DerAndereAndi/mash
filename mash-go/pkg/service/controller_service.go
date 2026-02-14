@@ -51,7 +51,7 @@ type ControllerService struct {
 	deviceSessions map[string]*DeviceSession
 
 	// Subscription management
-	subscriptionManager *subscription.Manager
+	subscriptionManager SubscriptionTracker
 
 	// Event handlers
 	eventHandlers []EventHandler

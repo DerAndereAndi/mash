@@ -28,7 +28,6 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/subscription"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
-	"github.com/mash-protocol/mash-go/pkg/zone"
 )
 
 // DeviceService orchestrates a MASH device.
@@ -41,9 +40,6 @@ type DeviceService struct {
 
 	// Device identity (derived from certificate fingerprint)
 	deviceID string
-
-	// Zone management
-	zoneManager *zone.Manager
 
 	// Discovery management
 	discoveryManager *discovery.DiscoveryManager
@@ -72,7 +68,7 @@ type DeviceService struct {
 	durationManager *duration.Manager
 
 	// Subscription management
-	subscriptionManager *subscription.Manager
+	subscriptionManager SubscriptionTracker
 
 	// Connected zones
 	connectedZones map[string]*ConnectedZone
@@ -145,7 +141,6 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 		config:         config,
 		device:         device,
 		state:          StateIdle,
-		zoneManager:    zone.NewManager(),
 		connectedZones: make(map[string]*ConnectedZone),
 		zoneSessions:   make(map[string]*ZoneSession),
 		failsafeTimers: make(map[string]*failsafe.Timer),

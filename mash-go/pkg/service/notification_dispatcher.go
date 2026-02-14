@@ -21,7 +21,7 @@ type NotificationDispatcher struct {
 	mu sync.RWMutex
 
 	handler *ProtocolHandler
-	manager *subscription.Manager
+	manager SubscriptionTracker
 
 	// Connection tracking
 	connections     map[uint64]*connectionInfo

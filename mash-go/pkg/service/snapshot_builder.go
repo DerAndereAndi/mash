@@ -11,7 +11,7 @@ import (
 // buildDeviceSnapshot creates a DeviceSnapshot from a model.Device.
 // It captures the complete capability state: endpoints, features,
 // featureMaps, attributeLists, commandLists, specVersion, and use cases.
-func buildDeviceSnapshot(device *model.Device) *log.DeviceSnapshot {
+func buildDeviceSnapshot(device DeviceModel) *log.DeviceSnapshot {
 	if device == nil {
 		return nil
 	}
