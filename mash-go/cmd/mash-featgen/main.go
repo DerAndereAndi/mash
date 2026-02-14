@@ -18,6 +18,7 @@ func main() {
 	version := flag.String("version", "1.0", "Protocol version to generate")
 	outputDir := flag.String("output", "", "Output directory for generated Go files")
 	modelOutput := flag.String("model-output", "", "Output directory for generated model type files")
+	inspectOutput := flag.String("inspect-output", "", "Output directory for generated inspect name tables")
 	specOutput := flag.String("spec-output", "", "Output path for derived spec manifest")
 	flag.Parse()
 
@@ -27,13 +28,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := run(*featuresDir, *sharedPath, *protocolPath, *version, *outputDir, *modelOutput, *specOutput); err != nil {
+	if err := run(*featuresDir, *sharedPath, *protocolPath, *version, *outputDir, *modelOutput, *inspectOutput, *specOutput); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(featuresDir, sharedPath, protocolPath, version, outputDir, modelOutput, specOutput string) error {
+func run(featuresDir, sharedPath, protocolPath, version, outputDir, modelOutput, inspectOutput, specOutput string) error {
 	// Load shared types
 	shared, err := specparse.LoadSharedTypes(sharedPath)
 	if err != nil {
@@ -138,6 +139,22 @@ func run(featuresDir, sharedPath, protocolPath, version, outputDir, modelOutput,
 		if err := ValidateFeatureIDs(ver.FeatureTypes, allDefs); err != nil {
 			return err
 		}
+	}
+
+	// Generate inspect name tables if output directory is specified
+	if inspectOutput != "" && len(allDefs) > 0 {
+		if err := os.MkdirAll(inspectOutput, 0o755); err != nil {
+			return fmt.Errorf("creating inspect output dir: %w", err)
+		}
+		namesCode, err := GenerateNameTables(ver.EndpointTypes, ver.FeatureTypes, allDefs)
+		if err != nil {
+			return fmt.Errorf("generating name tables: %w", err)
+		}
+		outPath := filepath.Join(inspectOutput, "names_gen.go")
+		if err := writeFormatted(outPath, namesCode); err != nil {
+			return fmt.Errorf("writing names_gen.go: %w", err)
+		}
+		fmt.Printf("  generated %s\n", outPath)
 	}
 
 	// Derive spec manifest if output path is specified

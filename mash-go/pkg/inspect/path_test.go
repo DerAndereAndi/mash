@@ -175,9 +175,6 @@ func TestPathString(t *testing.T) {
 }
 
 func TestParsePathWithNames(t *testing.T) {
-	// Initialize name tables before running these tests
-	initNameTables()
-
 	tests := []struct {
 		name    string
 		input   string

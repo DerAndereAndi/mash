@@ -61,7 +61,7 @@ func TestGeneratorEndToEnd(t *testing.T) {
 	tmpDir := t.TempDir()
 	specOutput := filepath.Join(tmpDir, "spec.yaml")
 
-	err := run(featDir, sharedPath, protocolPath, "1.0", tmpDir, "", specOutput)
+	err := run(featDir, sharedPath, protocolPath, "1.0", tmpDir, "", "", specOutput)
 	if err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestGenerateStatus_ContentCheck(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	err := run(featDir, sharedPath, protocolPath, "1.0", tmpDir, "", "")
+	err := run(featDir, sharedPath, protocolPath, "1.0", tmpDir, "", "", "")
 	if err != nil {
 		t.Fatalf("run failed: %v", err)
 	}

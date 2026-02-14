@@ -35,6 +35,7 @@ features:
 		-version 1.0 \
 		-output pkg/features/ \
 		-model-output pkg/model/ \
+		-inspect-output pkg/inspect/ \
 		-spec-output pkg/version/specs/1.0.yaml
 
 # Generate documentation site (Markdown + MkDocs config)
