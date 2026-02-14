@@ -405,6 +405,50 @@ func TestHandleRemoveDevice_ZoneOnlyParam_TwoZones(t *testing.T) {
 	}
 }
 
+func TestHandleRemoveDevice_RealDevice_ClearsSuiteZone(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "localhost:9999" // real-device mode
+	state := newTestState()
+
+	// Record a suite zone without a connection (no wire ops needed for this test).
+	r.suite.Record("test-zone-1234", CryptoState{})
+	state.Set(PrecondDeviceInZone, true)
+
+	step := &loader.Step{Params: map[string]any{"zone": "all"}}
+	out, err := r.handleRemoveDevice(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyDeviceRemoved] != true {
+		t.Error("expected device_removed=true")
+	}
+
+	// Key assertion: suite zone should be cleared so the device is truly decommissioned.
+	if r.suite.ZoneID() != "" {
+		t.Errorf("expected suite zone cleared after remove_device zone=all on real device, got %q", r.suite.ZoneID())
+	}
+}
+
+func TestHandleRemoveDevice_SimOnly_PreservesSuite(t *testing.T) {
+	r := newTestRunner()
+	// config.Target is empty (simulation mode)
+	state := newTestState()
+
+	r.suite.Record("test-zone-1234", CryptoState{})
+	state.Set(PrecondDeviceInZone, true)
+
+	step := &loader.Step{Params: map[string]any{"zone": "all"}}
+	_, err := r.handleRemoveDevice(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// In simulation mode, suite zone should NOT be cleared by handleRemoveDevice.
+	if r.suite.ZoneID() != "test-zone-1234" {
+		t.Errorf("expected suite zone preserved in simulation mode, got %q", r.suite.ZoneID())
+	}
+}
+
 func TestHandleCheckRenewal(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()

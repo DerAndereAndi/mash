@@ -393,6 +393,21 @@ func (r *Runner) handleRemoveDevice(ctx context.Context, step *loader.Step, stat
 		}
 	}
 
+	// For real devices, send RemoveZone on the wire so the device actually
+	// decommissions and deregisters its operational mDNS service.
+	if r.config.Target != "" && zone == "all" {
+		if r.suite.ZoneID() != "" {
+			suiteConn := r.suite.Conn()
+			if suiteConn != nil && suiteConn.isConnected() && suiteConn.framer != nil {
+				r.debugf("handleRemoveDevice: sending RemoveZone on suite conn (zone=%s)", r.suite.ZoneID())
+				r.sendRemoveZoneOnConn(suiteConn, r.suite.ZoneID())
+			}
+			r.suite.Clear()
+		} else {
+			r.sendRemoveZone()
+		}
+	}
+
 	return map[string]any{
 		KeyDeviceRemoved: existed,
 	}, nil
