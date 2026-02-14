@@ -108,7 +108,7 @@ curl -X POST http://localhost:8080/api/v1/runs \
   -d '{
     "target": "192.168.1.100:8443",
     "pattern": "TC-READ-*",
-    "setup_code": "12345678"
+    "setup_code": "20202021"
   }'
 ```
 

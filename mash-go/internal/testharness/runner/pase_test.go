@@ -54,7 +54,7 @@ func TestIsNumeric(t *testing.T) {
 		input    string
 		expected bool
 	}{
-		{"12345678", true},
+		{"20202021", true},
 		{"00000000", true},
 		{"", true}, // empty string has no non-digits
 		{"1234567a", false},
@@ -152,13 +152,13 @@ func TestGetSetupCode(t *testing.T) {
 	}
 
 	// From params
-	params := map[string]any{"setup_code": "12345678"}
+	params := map[string]any{"setup_code": "20202021"}
 	code, err := r.getSetupCode(params)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if code != 12345678 {
-		t.Errorf("expected 12345678, got %d", code)
+	if code != 20202021 {
+		t.Errorf("expected 20202021, got %d", code)
 	}
 
 	// From config
@@ -193,13 +193,13 @@ func TestGetSetupCodeFromLegacyParams(t *testing.T) {
 	r := &Runner{config: &Config{}}
 
 	// Numeric password (8 digits) - treated as setup code
-	params := map[string]any{"password": "12345678"}
+	params := map[string]any{"password": "20202021"}
 	code, err := r.getSetupCodeFromLegacyParams(params)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-	if code != 12345678 {
-		t.Errorf("expected 12345678, got %d", code)
+	if code != 20202021 {
+		t.Errorf("expected 20202021, got %d", code)
 	}
 
 	// Non-numeric password - derived to setup code

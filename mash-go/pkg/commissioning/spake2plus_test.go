@@ -6,7 +6,7 @@ import (
 )
 
 func TestSPAKE2PlusBasicExchange(t *testing.T) {
-	setupCode := SetupCode(12345678)
+	setupCode := SetupCode(20202021)
 	clientIdentity := []byte("controller")
 	serverIdentity := []byte("device")
 
@@ -61,7 +61,7 @@ func TestSPAKE2PlusBasicExchange(t *testing.T) {
 }
 
 func TestSPAKE2PlusWrongPassword(t *testing.T) {
-	correctCode := SetupCode(12345678)
+	correctCode := SetupCode(20202021)
 	wrongCode := SetupCode(87654321)
 	clientIdentity := []byte("controller")
 	serverIdentity := []byte("device")
@@ -117,7 +117,7 @@ func TestSPAKE2PlusWrongPassword(t *testing.T) {
 }
 
 func TestSPAKE2PlusReplay(t *testing.T) {
-	setupCode := SetupCode(12345678)
+	setupCode := SetupCode(20202021)
 	clientIdentity := []byte("controller")
 	serverIdentity := []byte("device")
 
@@ -158,7 +158,7 @@ func TestSPAKE2PlusReplay(t *testing.T) {
 }
 
 func TestSPAKE2PlusInvalidPublicKey(t *testing.T) {
-	setupCode := SetupCode(12345678)
+	setupCode := SetupCode(20202021)
 	clientIdentity := []byte("controller")
 	serverIdentity := []byte("device")
 
@@ -190,7 +190,7 @@ func TestSPAKE2PlusNilVerifier(t *testing.T) {
 }
 
 func TestGenerateVerifier(t *testing.T) {
-	setupCode := SetupCode(12345678)
+	setupCode := SetupCode(20202021)
 	clientIdentity := []byte("controller")
 	serverIdentity := []byte("device")
 
@@ -232,7 +232,7 @@ func TestGenerateVerifier(t *testing.T) {
 }
 
 func TestSPAKE2PlusPublicValueIdempotent(t *testing.T) {
-	setupCode := SetupCode(12345678)
+	setupCode := SetupCode(20202021)
 	client, _ := NewSPAKE2PlusClient(setupCode, []byte("c"), []byte("s"))
 
 	// PublicValue should return the same value on multiple calls
@@ -245,7 +245,7 @@ func TestSPAKE2PlusPublicValueIdempotent(t *testing.T) {
 }
 
 func TestSPAKE2PlusSharedSecretSize(t *testing.T) {
-	setupCode := SetupCode(12345678)
+	setupCode := SetupCode(20202021)
 	clientIdentity := []byte("controller")
 	serverIdentity := []byte("device")
 
@@ -268,7 +268,7 @@ func TestSPAKE2PlusSharedSecretSize(t *testing.T) {
 }
 
 func TestSPAKE2PlusConfirmationSize(t *testing.T) {
-	setupCode := SetupCode(12345678)
+	setupCode := SetupCode(20202021)
 	clientIdentity := []byte("controller")
 	serverIdentity := []byte("device")
 
@@ -291,7 +291,7 @@ func TestSPAKE2PlusConfirmationSize(t *testing.T) {
 }
 
 func BenchmarkSPAKE2PlusExchange(b *testing.B) {
-	setupCode := SetupCode(12345678)
+	setupCode := SetupCode(20202021)
 	clientIdentity := []byte("controller")
 	serverIdentity := []byte("device")
 

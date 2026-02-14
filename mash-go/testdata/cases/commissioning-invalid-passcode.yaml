@@ -1,0 +1,86 @@
+# Test Cases: Invalid Passcode Rejection (DEC-068)
+# Verifies that devices reject prohibited low-entropy setup codes
+# per Matter specification 5.1.7.1.
+
+---
+id: TC-PASE-006
+name: Repeated-digit setup code rejected
+description: |
+  Verifies that a device rejects commissioning with a repeated-digit
+  setup code (11111111). All single repeated-digit codes are on the
+  prohibited list due to low entropy.
+
+pics_requirements:
+  - D.COMM.SC
+  - D.COMM.PASE
+  - MASH.S.COMM.INVALID_PASSCODES
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - tls_connection_established: true
+
+steps:
+  - name: Attempt PASE with repeated-digit code
+    action: commission
+    params:
+      setup_code: "11111111"
+      endpoint: 0
+    expect:
+      session_established: false
+      error: invalid_setup_code
+
+postconditions:
+  - session_active: false
+
+timeout: "10s"
+tags:
+  - commissioning
+  - PASE
+  - security
+  - invalid-passcode
+
+---
+id: TC-PASE-007
+name: Sequential setup codes rejected
+description: |
+  Verifies that a device rejects commissioning with sequential
+  setup codes (12345678 and 87654321). These are on the prohibited
+  list due to low entropy (Matter 5.1.7.1).
+
+pics_requirements:
+  - D.COMM.SC
+  - D.COMM.PASE
+  - MASH.S.COMM.INVALID_PASSCODES
+
+preconditions:
+  - device_in_commissioning_mode: true
+  - tls_connection_established: true
+
+steps:
+  - name: Attempt PASE with ascending sequential code
+    action: commission
+    params:
+      setup_code: "12345678"
+      endpoint: 0
+    expect:
+      session_established: false
+      error: invalid_setup_code
+
+  - name: Attempt PASE with descending sequential code
+    action: commission
+    params:
+      setup_code: "87654321"
+      endpoint: 0
+    expect:
+      session_established: false
+      error: invalid_setup_code
+
+postconditions:
+  - session_active: false
+
+timeout: "10s"
+tags:
+  - commissioning
+  - PASE
+  - security
+  - invalid-passcode

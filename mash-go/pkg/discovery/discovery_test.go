@@ -14,11 +14,11 @@ func TestParseQRCodeValid(t *testing.T) {
 		wantDiscrim   uint16
 		wantSetupCode string
 	}{
-		{"Basic", "MASH:1:1234:12345678", 1, 1234, "12345678"},
+		{"Basic", "MASH:1:1234:20202021", 1, 1234, "20202021"},
 		{"LeadingZerosSetup", "MASH:1:0:00001234", 1, 0, "00001234"},
 		{"MaxDiscriminator", "MASH:1:4095:99999999", 1, 4095, "99999999"},
 		{"Version255", "MASH:255:100:00000000", 255, 100, "00000000"},
-		{"ZeroDiscriminator", "MASH:1:0:12345678", 1, 0, "12345678"},
+		{"ZeroDiscriminator", "MASH:1:0:20202021", 1, 0, "20202021"},
 	}
 
 	for _, tt := range tests {
@@ -46,14 +46,14 @@ func TestParseQRCodeInvalid(t *testing.T) {
 		input   string
 		wantErr error
 	}{
-		{"InvalidPrefix", "EEBUS:1:1234:12345678", ErrInvalidPrefix},
+		{"InvalidPrefix", "EEBUS:1:1234:20202021", ErrInvalidPrefix},
 		{"WrongFieldCount3", "MASH:1:1234", ErrInvalidFieldCount},
-		{"WrongFieldCount5", "MASH:1:1234:12345678:extra", ErrInvalidFieldCount},
-		{"VersionZero", "MASH:0:1234:12345678", ErrInvalidVersion},
-		{"VersionTooHigh", "MASH:256:1234:12345678", ErrInvalidVersion},
-		{"VersionNonNumeric", "MASH:a:1234:12345678", ErrInvalidVersion},
-		{"DiscriminatorTooHigh", "MASH:1:9999:12345678", ErrInvalidDiscriminator},
-		{"DiscriminatorNonNumeric", "MASH:1:abc:12345678", ErrInvalidDiscriminator},
+		{"WrongFieldCount5", "MASH:1:1234:20202021:extra", ErrInvalidFieldCount},
+		{"VersionZero", "MASH:0:1234:20202021", ErrInvalidVersion},
+		{"VersionTooHigh", "MASH:256:1234:20202021", ErrInvalidVersion},
+		{"VersionNonNumeric", "MASH:a:1234:20202021", ErrInvalidVersion},
+		{"DiscriminatorTooHigh", "MASH:1:9999:20202021", ErrInvalidDiscriminator},
+		{"DiscriminatorNonNumeric", "MASH:1:abc:20202021", ErrInvalidDiscriminator},
 		{"SetupCodeTooShort", "MASH:1:1234:1234", ErrInvalidSetupCode},
 		{"SetupCodeTooLong", "MASH:1:1234:123456789", ErrInvalidSetupCode},
 		{"SetupCodeNonNumeric", "MASH:1:1234:1234abcd", ErrInvalidSetupCode},
@@ -84,7 +84,7 @@ func TestQRCodeString(t *testing.T) {
 }
 
 func TestNewQRCode(t *testing.T) {
-	qr, err := NewQRCode(1234, "12345678")
+	qr, err := NewQRCode(1234, "20202021")
 	if err != nil {
 		t.Fatalf("NewQRCode() error = %v", err)
 	}
@@ -95,14 +95,14 @@ func TestNewQRCode(t *testing.T) {
 	if qr.Discriminator != 1234 {
 		t.Errorf("Discriminator = %d, want 1234", qr.Discriminator)
 	}
-	if qr.SetupCode != "12345678" {
-		t.Errorf("SetupCode = %q, want \"12345678\"", qr.SetupCode)
+	if qr.SetupCode != "20202021" {
+		t.Errorf("SetupCode = %q, want \"20202021\"", qr.SetupCode)
 	}
 }
 
 func TestNewQRCodeInvalid(t *testing.T) {
 	// Discriminator too high
-	_, err := NewQRCode(5000, "12345678")
+	_, err := NewQRCode(5000, "20202021")
 	if err != ErrInvalidDiscriminator {
 		t.Errorf("NewQRCode with discriminator 5000 error = %v, want ErrInvalidDiscriminator", err)
 	}
@@ -146,7 +146,7 @@ func TestFormatSetupCode(t *testing.T) {
 	}{
 		{1234, "00001234"},
 		{0, "00000000"},
-		{12345678, "12345678"},
+		{20202021, "20202021"},
 		{99999999, "99999999"},
 	}
 

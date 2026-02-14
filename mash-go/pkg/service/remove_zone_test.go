@@ -235,7 +235,7 @@ func TestDeviceInfo_HasRemoveZoneCommand(t *testing.T) {
 
 	// Create device service (this should register the RemoveZone command)
 	config := DeviceConfig{
-		SetupCode:     "12345678",
+		SetupCode:     "20202021",
 		Discriminator: 100,
 		ListenAddress: "127.0.0.1:0",
 		SerialNumber:  "TEST-001",

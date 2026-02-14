@@ -35,7 +35,7 @@ func createTestDeviceService(t *testing.T) *DeviceService {
 	cfg := DefaultDeviceConfig()
 	cfg.ListenAddress = ":0" // Use dynamic port
 	cfg.Discriminator = 1234
-	cfg.SetupCode = "12345678"
+	cfg.SetupCode = "20202021"
 	cfg.SerialNumber = "SN-12345"
 	cfg.Brand = "Test Vendor"
 	cfg.Model = "Test EVSE"
@@ -489,7 +489,7 @@ func createTestDeviceServiceWithTestMode(t *testing.T) *DeviceService {
 	cfg := DefaultDeviceConfig()
 	cfg.ListenAddress = ":0"
 	cfg.Discriminator = 1234
-	cfg.SetupCode = "12345678"
+	cfg.SetupCode = "20202021"
 	cfg.SerialNumber = "SN-TM-001"
 	cfg.Brand = "Test Vendor"
 	cfg.Model = "Test EVSE"

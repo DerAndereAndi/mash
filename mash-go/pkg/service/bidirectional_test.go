@@ -32,7 +32,7 @@ func TestBidirectional_ControllerExposesFeatures(t *testing.T) {
 	device := model.NewDevice("evse-bidir-001", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 1111
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
@@ -104,7 +104,7 @@ func TestBidirectional_ControllerExposesFeatures(t *testing.T) {
 		Discriminator: 1111,
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestBidirectional_ControllerWithoutExposedFeatures(t *testing.T) {
 	device := model.NewDevice("evse-bidir-002", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 2222
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
@@ -217,7 +217,7 @@ func TestBidirectional_ControllerWithoutExposedFeatures(t *testing.T) {
 		Discriminator: 2222,
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestBidirectional_Subscriptions(t *testing.T) {
 
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 3333
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
@@ -339,7 +339,7 @@ func TestBidirectional_Subscriptions(t *testing.T) {
 		Discriminator: 3333,
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestBidirectional_NormalOperationsStillWork(t *testing.T) {
 
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 4040 // Max is 4095
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
@@ -510,7 +510,7 @@ func TestBidirectional_NormalOperationsStillWork(t *testing.T) {
 		Discriminator: 4040,
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}

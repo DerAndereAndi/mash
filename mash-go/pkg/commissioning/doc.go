@@ -26,7 +26,7 @@
 //
 //	MASH:<version>:<discriminator>:<setupcode>:<vendorid>:<productid>
 //
-// Example: MASH:1:1234:12345678:0x1234:0x5678
+// Example: MASH:1:1234:20202021:0x1234:0x5678
 //
 // # Commissioning Flow
 //

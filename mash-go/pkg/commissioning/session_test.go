@@ -43,7 +43,7 @@ func (c *mockConn) SetWriteDeadline(t time.Time) error { return nil }
 // TestPASESessionSuccess verifies successful PASE handshake between client and server.
 func TestPASESessionSuccess(t *testing.T) {
 	// Setup
-	setupCode := commissioning.MustParseSetupCode("12345678")
+	setupCode := commissioning.MustParseSetupCode("20202021")
 	clientIdentity := []byte("controller-001")
 	serverIdentity := []byte("device-001")
 
@@ -114,7 +114,7 @@ func TestPASESessionSuccess(t *testing.T) {
 // TestPASESessionWrongPassword verifies PASE fails with wrong setup code.
 func TestPASESessionWrongPassword(t *testing.T) {
 	// Setup with correct code
-	correctCode := commissioning.MustParseSetupCode("12345678")
+	correctCode := commissioning.MustParseSetupCode("20202021")
 	wrongCode := commissioning.MustParseSetupCode("87654321")
 	clientIdentity := []byte("controller-001")
 	serverIdentity := []byte("device-001")
@@ -162,7 +162,7 @@ func TestPASESessionWrongPassword(t *testing.T) {
 
 // TestPASESessionTimeout verifies PASE times out properly.
 func TestPASESessionTimeout(t *testing.T) {
-	setupCode := commissioning.MustParseSetupCode("12345678")
+	setupCode := commissioning.MustParseSetupCode("20202021")
 	clientIdentity := []byte("controller-001")
 	serverIdentity := []byte("device-001")
 
@@ -199,7 +199,7 @@ func TestPASESessionTimeout(t *testing.T) {
 
 // TestPASEClientIdentity verifies client identity is properly included.
 func TestPASEClientIdentity(t *testing.T) {
-	setupCode := commissioning.MustParseSetupCode("12345678")
+	setupCode := commissioning.MustParseSetupCode("20202021")
 	clientIdentity := []byte("controller-test-identity")
 	serverIdentity := []byte("device-test-identity")
 
@@ -217,7 +217,7 @@ func TestPASEClientIdentity(t *testing.T) {
 // server uses WaitForPASERequest + CompleteHandshake, client uses Handshake.
 // Both sides should derive the same shared secret.
 func TestPASEServerSplitHandshake(t *testing.T) {
-	setupCode := commissioning.MustParseSetupCode("12345678")
+	setupCode := commissioning.MustParseSetupCode("20202021")
 	clientIdentity := []byte("controller-001")
 	serverIdentity := []byte("device-001")
 
@@ -287,7 +287,7 @@ func TestPASEServerSplitHandshake(t *testing.T) {
 // TestWaitForPASERequest_Timeout verifies WaitForPASERequest returns
 // context.DeadlineExceeded when no message arrives within the timeout.
 func TestWaitForPASERequest_Timeout(t *testing.T) {
-	setupCode := commissioning.MustParseSetupCode("12345678")
+	setupCode := commissioning.MustParseSetupCode("20202021")
 	clientIdentity := []byte("controller-001")
 	serverIdentity := []byte("device-001")
 
@@ -320,7 +320,7 @@ func TestWaitForPASERequest_Timeout(t *testing.T) {
 // TestWaitForPASERequest_ConnectionClosed verifies WaitForPASERequest returns
 // an error when the client closes the connection immediately.
 func TestWaitForPASERequest_ConnectionClosed(t *testing.T) {
-	setupCode := commissioning.MustParseSetupCode("12345678")
+	setupCode := commissioning.MustParseSetupCode("20202021")
 	clientIdentity := []byte("controller-001")
 	serverIdentity := []byte("device-001")
 
@@ -474,7 +474,7 @@ func readLengthPrefixedMessage(conn net.Conn) (interface{}, error) {
 
 // TestVerifierPersistence verifies verifier can be serialized and restored.
 func TestVerifierPersistence(t *testing.T) {
-	setupCode := commissioning.MustParseSetupCode("12345678")
+	setupCode := commissioning.MustParseSetupCode("20202021")
 	clientIdentity := []byte("controller-001")
 	serverIdentity := []byte("device-001")
 

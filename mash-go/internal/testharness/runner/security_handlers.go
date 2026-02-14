@@ -1344,7 +1344,7 @@ func (r *Runner) handleBusyPASEExchange(step *loader.Step) (map[string]any, erro
 // commissioning lock held.
 func sendPASERequestRaw(conn net.Conn) error {
 	spakeClient, err := commissioning.NewSPAKE2PlusClient(
-		commissioning.SetupCode(12345678),
+		commissioning.SetupCode(20202021),
 		[]byte("test-harness"),
 		[]byte("mash-device"),
 	)

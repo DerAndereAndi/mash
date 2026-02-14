@@ -428,7 +428,7 @@ func TestInterpolateParamsWithPICS_TypePreservation(t *testing.T) {
 // uppercase PICS item names. State variables must use {{ setup_code }} syntax.
 func TestInterpolate_DollarBraceLowercaseNotResolved(t *testing.T) {
 	state := NewExecutionState(context.Background())
-	state.Set("setup_code", "12345678")
+	state.Set("setup_code", "20202021")
 
 	pics := &loader.PICSFile{
 		Items: map[string]interface{}{},
@@ -442,8 +442,8 @@ func TestInterpolate_DollarBraceLowercaseNotResolved(t *testing.T) {
 
 	// {{ setup_code }} SHOULD be resolved from state.
 	braceResult := InterpolateWithPICS("{{ setup_code }}", state, pics)
-	if braceResult != "12345678" {
-		t.Errorf("{{ setup_code }} should resolve to %q, got %q", "12345678", braceResult)
+	if braceResult != "20202021" {
+		t.Errorf("{{ setup_code }} should resolve to %q, got %q", "20202021", braceResult)
 	}
 }
 

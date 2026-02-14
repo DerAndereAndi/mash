@@ -28,7 +28,7 @@ steps:
   - name: Perform PASE with admin token
     action: commission_with_admin
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
       admin_token: valid
     expect:
       commission_success: true
@@ -63,7 +63,7 @@ steps:
   - name: Attempt commissioning with expired token
     action: commission_with_admin
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
       admin_token: expired
     expect:
       commission_success: false
@@ -98,7 +98,7 @@ steps:
   - name: Attempt commissioning with tampered token
     action: commission_with_admin
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
       admin_token: invalid_signature
     expect:
       commission_success: false
@@ -134,7 +134,7 @@ steps:
   - name: Attempt commissioning with read-only token
     action: commission_with_admin
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
       admin_token: wrong_permissions
     expect:
       commission_success: false

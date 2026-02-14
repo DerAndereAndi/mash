@@ -153,13 +153,13 @@ func TestHandleVerifyTXTRecordsReal(t *testing.T) {
 
 func TestHandleGetQRPayload(t *testing.T) {
 	r := newTestRunner()
-	r.config.SetupCode = "12345678"
+	r.config.SetupCode = "20202021"
 	state := newTestState()
 
 	// From explicit payload.
 	step := &loader.Step{
 		Params: map[string]any{
-			"payload": "MASH:1:1234:12345678:0x0000:0x0000",
+			"payload": "MASH:1:1234:20202021:0x0000:0x0000",
 		},
 	}
 	out, err := r.handleGetQRPayload(context.Background(), step, state)
@@ -169,7 +169,7 @@ func TestHandleGetQRPayload(t *testing.T) {
 	if out["valid"] != true {
 		t.Error("expected valid=true")
 	}
-	if out["qr_payload"] != "MASH:1:1234:12345678:0x0000:0x0000" {
+	if out["qr_payload"] != "MASH:1:1234:20202021:0x0000:0x0000" {
 		t.Errorf("unexpected payload: %v", out["qr_payload"])
 	}
 

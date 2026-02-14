@@ -30,7 +30,7 @@ steps:
   - name: Perform PASE commissioning
     action: commission
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
     expect:
       session_established: true
 
@@ -152,7 +152,7 @@ steps:
   - name: Commission to first zone (LOCAL)
     action: commission
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
       zone_type: "LOCAL"
     store_result: zone1_result
 
@@ -165,7 +165,7 @@ steps:
   - name: Commission to second zone (GRID)
     action: commission
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
       zone_type: "GRID"
     store_result: zone2_result
 

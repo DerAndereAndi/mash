@@ -27,7 +27,7 @@ steps:
   - name: Perform PASE commissioning
     action: commission
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
       endpoint: 0
     expect:
       session_established: true

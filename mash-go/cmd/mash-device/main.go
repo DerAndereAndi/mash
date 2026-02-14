@@ -29,7 +29,7 @@
 // Examples:
 //
 //	# Start EVSE device with default settings
-//	mash-device -type evse -discriminator 1234 -setup-code 12345678
+//	mash-device -type evse -discriminator 1234 -setup-code 20202021
 //
 //	# Start inverter with config file
 //	mash-device -type inverter -config /etc/mash/inverter.yaml
@@ -136,7 +136,7 @@ func init() {
 	flag.StringVar((*string)(&config.Type), "type", "evse", "Device type: evse, inverter, battery, heatpump")
 	flag.StringVar(&config.ConfigFile, "config", "", "Configuration file path")
 	flag.UintVar(&discriminator, "discriminator", 1234, "Discriminator for commissioning (0-4095)")
-	flag.StringVar(&config.SetupCode, "setup-code", "12345678", "8-digit setup code for commissioning")
+	flag.StringVar(&config.SetupCode, "setup-code", "20202021", "8-digit setup code for commissioning")
 	flag.IntVar(&config.Port, "port", 8443, "Listen port")
 	flag.StringVar(&config.LogLevel, "log-level", "info", "Log level: debug, info, warn, error")
 	flag.BoolVar(&config.Simulate, "simulate", false, "Enable simulation mode with synthetic data")

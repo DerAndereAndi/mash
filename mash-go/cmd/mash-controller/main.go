@@ -326,7 +326,7 @@ func handleEvent(event service.Event) {
 			if config.AutoCommission {
 				log.Printf("Auto-commissioning device %d...", d.Discriminator)
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				_, err := svc.Commission(ctx, d, "12345678") // Default setup code
+				_, err := svc.Commission(ctx, d, "20202021") // Default setup code
 				cancel()
 				if err != nil {
 					log.Printf("Failed to commission: %v", err)

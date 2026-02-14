@@ -17,7 +17,7 @@
 //
 //	device := model.NewDevice(...)
 //	config := service.DefaultDeviceConfig()
-//	config.SetupCode = "12345678"
+//	config.SetupCode = "20202021"
 //
 //	svc, err := service.NewDeviceService(device, config)
 //	svc.Start(ctx)
@@ -42,7 +42,7 @@
 //
 //	// Discover and commission a device
 //	devices, _ := ctrl.Discover(ctx, discovery.FilterByCategory(discovery.CategoryEMobility))
-//	device, _ := ctrl.Commission(ctx, devices[0], "12345678")
+//	device, _ := ctrl.Commission(ctx, devices[0], "20202021")
 //
 //	// Interact with device
 //	values, _ := device.Read(ctx, 1, features.EnergyControlID, nil)

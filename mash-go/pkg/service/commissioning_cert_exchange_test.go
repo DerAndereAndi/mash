@@ -67,7 +67,7 @@ func TestCommissioning_CertExchangeAfterPASE(t *testing.T) {
 	device := model.NewDevice("test-device-certex", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
 	if err != nil {
@@ -131,7 +131,7 @@ func TestCommissioning_CertExchangeAfterPASE(t *testing.T) {
 		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestCommissioning_DeviceIDFromOperationalCert(t *testing.T) {
 	device := model.NewDevice("test-device-devid", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
 	if err != nil {
@@ -240,7 +240,7 @@ func TestCommissioning_DeviceIDFromOperationalCert(t *testing.T) {
 		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestCommissioning_EventCommissionedEmitted(t *testing.T) {
 	device := model.NewDevice("test-device-event", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
 	if err != nil {
@@ -388,7 +388,7 @@ func TestCommissioning_EventCommissionedEmitted(t *testing.T) {
 		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
 	}
 
-	_, err = controllerSvc.Commission(ctx, discoveryService, "12345678")
+	_, err = controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestDEC066_OperationalReconnection(t *testing.T) {
 	device := model.NewDevice("test-device-dec066", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
 	if err != nil {
@@ -495,7 +495,7 @@ func TestDEC066_OperationalReconnection(t *testing.T) {
 		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}

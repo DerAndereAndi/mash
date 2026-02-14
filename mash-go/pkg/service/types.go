@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/log"
 )
@@ -387,6 +388,13 @@ func (c *DeviceConfig) Validate() error {
 	}
 	if len(c.SetupCode) != discovery.SetupCodeLength {
 		return ErrInvalidConfig
+	}
+	sc, err := commissioning.ParseSetupCode(c.SetupCode)
+	if err != nil {
+		return ErrInvalidConfig
+	}
+	if err := sc.Validate(); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
 	if c.SerialNumber == "" || c.Brand == "" || c.Model == "" {
 		return ErrInvalidConfig

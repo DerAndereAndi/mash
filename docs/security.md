@@ -134,17 +134,37 @@ No CRL or OCSP. Revocation is immediate:
 
 ## 4. Commissioning (PASE-like)
 
-### 4.1 Setup Code
+### 4.1 Setup Code (DEC-068)
 
-- **Format:** 8 decimal digits (00000000-99999999)
+- **Format:** 8 decimal digits
+- **Valid range:** 00000001-99999998
 - **Entropy:** ~27 bits
 - **Delivery:** QR code, printed label, or manual entry
+
+**Prohibited codes (low entropy):** Devices MUST reject the following setup codes during provisioning. These are derived from Matter specification 5.1.7.1.
+
+| Code | Reason |
+|------|--------|
+| 00000000 | Below minimum (boundary) |
+| 99999999 | Above maximum (boundary) |
+| 11111111 | Repeated digit |
+| 22222222 | Repeated digit |
+| 33333333 | Repeated digit |
+| 44444444 | Repeated digit |
+| 55555555 | Repeated digit |
+| 66666666 | Repeated digit |
+| 77777777 | Repeated digit |
+| 88888888 | Repeated digit |
+| 12345678 | Ascending sequential |
+| 87654321 | Descending sequential |
+
+`GenerateSetupCode()` retries up to 10 times if a prohibited code is generated. `ParseSetupCode()` remains permissive (accepts any 8-digit value) so test harnesses can parse invalid codes for negative testing.
 
 ### 4.2 QR Code Content
 
 ```
 MASH:<version>:<discriminator>:<setupcode>:<vendorid>:<productid>
-Example: MASH:1:1234:12345678:0x1234:0x5678
+Example: MASH:1:1234:20202021:0x1234:0x5678
 ```
 
 | Field | Description |

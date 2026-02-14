@@ -71,7 +71,7 @@ func TestDeviceServicePASEHandshake(t *testing.T) {
 	device := model.NewDevice("test-device-002", 0x1234, 0x5678)
 	config := validDeviceConfig()
 	config.ListenAddress = "localhost:0"
-	config.SetupCode = "12345678"
+	config.SetupCode = "20202021"
 
 	svc, err := NewDeviceService(device, config)
 	if err != nil {
@@ -115,7 +115,7 @@ func TestDeviceServicePASEHandshake(t *testing.T) {
 	serverIdentity := []byte("mash-device")
 
 	session, err := commissioning.NewPASEClientSession(
-		commissioning.SetupCode(12345678),
+		commissioning.SetupCode(20202021),
 		clientIdentity,
 		serverIdentity,
 	)
@@ -142,7 +142,7 @@ func TestDeviceServicePASEWrongSetupCode(t *testing.T) {
 	device := model.NewDevice("test-device-003", 0x1234, 0x5678)
 	config := validDeviceConfig()
 	config.ListenAddress = "localhost:0"
-	config.SetupCode = "12345678"
+	config.SetupCode = "20202021"
 
 	svc, err := NewDeviceService(device, config)
 	if err != nil {
@@ -225,7 +225,7 @@ func TestControllerServiceCommission(t *testing.T) {
 	device := model.NewDevice("test-device-004", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
 	if err != nil {
@@ -302,7 +302,7 @@ func TestControllerServiceCommission(t *testing.T) {
 	}
 
 	// Commission with correct setup code (includes cert exchange)
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestControllerServiceCommissionWrongCode(t *testing.T) {
 	device := model.NewDevice("test-device-005", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
 	if err != nil {
@@ -518,7 +518,7 @@ func TestCommissioningWithNotRunningDevice(t *testing.T) {
 		Discriminator: 9999,
 	}
 
-	_, err = controllerSvc.Commission(ctx, discoveryService, "12345678")
+	_, err = controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err == nil {
 		t.Error("Expected error when commissioning unreachable device")
 	}
@@ -552,7 +552,7 @@ func TestMessageGatedLocking_IdleConnectionDoesNotBlock(t *testing.T) {
 	device := model.NewDevice("test-device-gated-001", 0x1234, 0x5678)
 	config := validDeviceConfig()
 	config.ListenAddress = "localhost:0"
-	config.SetupCode = "12345678"
+	config.SetupCode = "20202021"
 	config.PASEFirstMessageTimeout = 500 * time.Millisecond
 	config.ConnectionCooldown = 0 // Disable cooldown for test
 
@@ -605,7 +605,7 @@ func TestMessageGatedLocking_IdleConnectionDoesNotBlock(t *testing.T) {
 	clientIdentity := []byte("mash-controller")
 	serverIdentity := []byte("mash-device")
 	session, err := commissioning.NewPASEClientSession(
-		commissioning.SetupCode(12345678),
+		commissioning.SetupCode(20202021),
 		clientIdentity,
 		serverIdentity,
 	)
@@ -629,7 +629,7 @@ func TestMessageGatedLocking_FirstMessageTimeout(t *testing.T) {
 	device := model.NewDevice("test-device-gated-002", 0x1234, 0x5678)
 	config := validDeviceConfig()
 	config.ListenAddress = "localhost:0"
-	config.SetupCode = "12345678"
+	config.SetupCode = "20202021"
 	config.PASEFirstMessageTimeout = 200 * time.Millisecond
 	config.ConnectionCooldown = 0
 
@@ -685,7 +685,7 @@ func TestMessageGatedLocking_BackwardCompat(t *testing.T) {
 	device := model.NewDevice("test-device-gated-003", 0x1234, 0x5678)
 	config := validDeviceConfig()
 	config.ListenAddress = "localhost:0"
-	config.SetupCode = "12345678"
+	config.SetupCode = "20202021"
 
 	svc, err := NewDeviceService(device, config)
 	if err != nil {
@@ -724,7 +724,7 @@ func TestMessageGatedLocking_BackwardCompat(t *testing.T) {
 	clientIdentity := []byte("mash-controller")
 	serverIdentity := []byte("mash-device")
 	session, err := commissioning.NewPASEClientSession(
-		commissioning.SetupCode(12345678),
+		commissioning.SetupCode(20202021),
 		clientIdentity,
 		serverIdentity,
 	)
@@ -754,7 +754,7 @@ func TestCommission_ZonesFullAfterCertExchange(t *testing.T) {
 	device := model.NewDevice("test-device-zfull", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.MaxZones = 1
 	deviceConfig.TestEnableKey = "00112233445566778899aabbccddeeff"
 
@@ -833,7 +833,7 @@ func TestCommission_ZonesFullAfterCertExchange(t *testing.T) {
 	// but the device MUST NOT register the new zone.
 	commCtx, commCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer commCancel()
-	_, commErr := controllerSvc.Commission(commCtx, discoveryService, "12345678")
+	_, commErr := controllerSvc.Commission(commCtx, discoveryService, "20202021")
 
 	// Wait for the device to finish processing the rejection
 	time.Sleep(200 * time.Millisecond)

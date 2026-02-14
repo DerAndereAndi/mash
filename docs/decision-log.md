@@ -3795,6 +3795,39 @@ The device SHOULD generate its self-signed commissioning certificate once and re
 
 ---
 
+### DEC-068: Invalid Passcode Validation
+
+**Date:** 2026-02-14
+**Status:** Accepted
+
+**Context:**
+Matter specification 5.1.7.1 defines 12 prohibited setup codes that devices MUST reject due to low entropy. MASH previously accepted all values 0-99999999 with no weak-value checking. Additionally, many tests and defaults used "12345678" as the standard test setup code, which is on the prohibited list.
+
+**Decision:**
+1. Valid setup code range narrowed to **1-99999998** (excludes 0 and 99999999 as boundary values).
+2. **10 explicit codes** rejected: all repeated-digit codes (11111111 through 88888888), plus 12345678 and 87654321.
+3. `Validate()` rejects invalid codes -- device-side provisioning gatekeeper.
+4. `ParseSetupCode()` stays permissive -- test harness needs to parse any code for negative testing.
+5. `GenerateSetupCode()` retries up to 10 times if the generated code is invalid.
+6. Standard test passcode changed from "12345678" to "20202021" (Matter's standard test code).
+7. `DeviceConfig.Validate()` strengthened to call `commissioning.ParseSetupCode().Validate()`.
+
+**Rationale:**
+- Aligns with Matter specification for prohibited codes
+- Separating parse (permissive) from validate (strict) lets the test harness send intentionally invalid codes for conformance testing
+- 20202021 is Matter's standard test passcode, providing consistency with the broader ecosystem
+- Retry-based generation (max 10 attempts) matches Matter's approach
+
+**Implementation notes:**
+- `pkg/commissioning/setupcode.go`: `SetupCodeMin`, `SetupCodeMax`, `InvalidSetupCodes`, updated `Validate()` and `GenerateSetupCode()`
+- `pkg/service/types.go`: `DeviceConfig.Validate()` now calls `commissioning.ParseSetupCode().Validate()`
+- PICS item: `MASH.S.COMM.INVALID_PASSCODES`
+- Conformance tests: TC-PASE-006 (repeated-digit), TC-PASE-007 (sequential codes)
+
+**Related:** DEC-047 (commissioning security), Matter specification 5.1.7.1
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
@@ -3932,3 +3965,4 @@ Key learnings:
 | 2026-02-04 | Added DEC-061: Message-gated commissioning locking. Moves commissioning lock from TLS accept to first PASERequest receipt. Splits PASEServerSession.Handshake into WaitForPASERequest (5s timeout, no lock) + CompleteHandshake (85s, with lock). Idle TLS connections no longer block commissioning. |
 | 2026-02-04 | Added DEC-065: Connection cooldown starts at release. Moves lastCommissioningAttempt timestamp from acceptCommissioningConnection to releaseCommissioningConnection so cooldown prevents rapid re-attempts after completion, not during in-progress connections. |
 | 2026-02-11 | Added DEC-067: Single-port ALPN-based commissioning routing and stable commissioning certificate. Uses `GetConfigForClient` with ALPN `mash-comm/1` (commissioning) and `mash/1` (operational) on a single port. Commissioning cert generated once (at first startup or factory provisioning) instead of per-window. |
+| 2026-02-14 | Added DEC-068: Invalid passcode validation. Devices reject 12 prohibited low-entropy setup codes (Matter 5.1.7.1). Valid range narrowed to 1-99999998. Standard test passcode changed from 12345678 to 20202021. |

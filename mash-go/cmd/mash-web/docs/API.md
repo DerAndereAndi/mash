@@ -241,7 +241,7 @@ Starts a new test run.
 {
   "target": "192.168.1.100:8443",
   "pattern": "TC-READ-*",
-  "setup_code": "12345678",
+  "setup_code": "20202021",
   "mode": "device",
   "timeout": "30s"
 }

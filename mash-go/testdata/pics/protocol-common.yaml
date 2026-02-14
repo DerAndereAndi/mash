@@ -207,6 +207,7 @@ items:
   MASH.S.CONN.STALE_REAPER: true          # Stale connection reaper (DEC-064)
   MASH.S.CONN.STALE_TIMEOUT: 90           # Stale timeout (seconds)
   MASH.S.CONN.STALE_TIMEOUT_MS: 90000     # Stale timeout (milliseconds)
+  MASH.S.COMM.INVALID_PASSCODES: true    # Device rejects prohibited setup codes (DEC-068)
 
   # ==========================================================================
   # Zone Management

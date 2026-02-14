@@ -95,7 +95,7 @@ steps:
 
   - action: controller_pase
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
     expect:
       pase_success: true
       session_key_derived: true

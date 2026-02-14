@@ -39,7 +39,7 @@
 //	mash-test -target localhost:8443 -mode device
 //
 //	# Test with PASE commissioning (auto-discovers PICS)
-//	mash-test -target localhost:8443 -setup-code 12345678
+//	mash-test -target localhost:8443 -setup-code 20202021
 //
 //	# Test specific patterns with static PICS file
 //	mash-test -target 192.168.1.100:8443 -pics device.pics -tests ./testdata/cases

@@ -204,14 +204,14 @@ func TestHandleUserOverride(t *testing.T) {
 
 func TestHandleDeviceLocalAction_CheckDisplay(t *testing.T) {
 	r := newTestRunner()
-	r.config.SetupCode = "12345678"
+	r.config.SetupCode = "20202021"
 	state := newTestState()
 
 	step := &loader.Step{
 		Params: map[string]any{
 			"sub_action":    "check_display",
 			"discriminator": float64(1234),
-			"setup_code":    "12345678",
+			"setup_code":    "20202021",
 		},
 	}
 	out, err := r.handleDeviceLocalAction(context.Background(), step, state)

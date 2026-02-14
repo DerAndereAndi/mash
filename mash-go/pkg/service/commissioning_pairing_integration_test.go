@@ -31,7 +31,7 @@ func TestE2E_StandardCommissioning(t *testing.T) {
 	device := model.NewDevice("evse-standard-001", 0x1234, 0x5678)
 	deviceConfig := testDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 1001
 	deviceConfig.CommissioningWindowDuration = 5 * time.Second
 
@@ -104,7 +104,7 @@ func TestE2E_StandardCommissioning(t *testing.T) {
 		Discriminator: 1001,
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestE2E_DeferredCommissioning_PairingRequest(t *testing.T) {
 	device := model.NewDevice("evse-deferred-001", 0x1234, 0x5678)
 	deviceConfig := testDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 2001
 	deviceConfig.CommissioningWindowDuration = 5 * time.Second
 	deviceConfig.ListenForPairingRequests = true // Enable pairing request listening
@@ -518,7 +518,7 @@ func TestE2E_DeferredCommissioning_PairingRequest(t *testing.T) {
 			}
 		}()
 
-		connectedDevice, err := controllerSvc.CommissionDevice(ctx, 2001, "12345678")
+		connectedDevice, err := controllerSvc.CommissionDevice(ctx, 2001, "20202021")
 		commissionResultCh <- struct {
 			device *ConnectedDevice
 			err    error
@@ -582,7 +582,7 @@ func TestE2E_ZoneTypeConstraint(t *testing.T) {
 	device := model.NewDevice("evse-zonetype-001", 0x1234, 0x5678)
 	deviceConfig := testDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 3001
 	deviceConfig.MaxZones = zone.MaxZones
 
@@ -631,7 +631,7 @@ func TestE2E_ZoneTypeConstraint(t *testing.T) {
 	defer func() { _ = controller1.Stop() }()
 
 	// Commission with GRID controller
-	device1, err := controller1.Commission(ctx, discoveryService, "12345678")
+	device1, err := controller1.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("First GRID commission failed: %v", err)
 	}
@@ -713,7 +713,7 @@ func TestE2E_ZoneTypeConstraint(t *testing.T) {
 	defer func() { _ = controller3.Stop() }()
 
 	// Commission with LOCAL controller (should succeed)
-	device3, err := controller3.Commission(ctx, discoveryService, "12345678")
+	device3, err := controller3.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("LOCAL commission failed: %v", err)
 	}
@@ -759,7 +759,7 @@ func TestE2E_MaxZonesStopsPairingRequestListening(t *testing.T) {
 	device := model.NewDevice("evse-maxzones-001", 0x1234, 0x5678)
 	deviceConfig := testDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 401
 	deviceConfig.MaxZones = zone.MaxZones
 	deviceConfig.ListenForPairingRequests = true
@@ -866,7 +866,7 @@ func TestE2E_PairingRequestResumesAfterZoneRemoval(t *testing.T) {
 	device := model.NewDevice("evse-resume-001", 0x1234, 0x5678)
 	deviceConfig := testDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 501
 	deviceConfig.MaxZones = zone.MaxZones
 	deviceConfig.ListenForPairingRequests = true
@@ -970,7 +970,7 @@ func TestE2E_ConcurrentPairingRequests(t *testing.T) {
 	for i := 0; i < numDevices; i++ {
 		discriminator := uint16(601 + i)
 		go func(d uint16) {
-			_, err := controllerSvc.CommissionDevice(ctx, d, "12345678")
+			_, err := controllerSvc.CommissionDevice(ctx, d, "20202021")
 			results <- err
 		}(discriminator)
 	}
@@ -1015,7 +1015,7 @@ func TestE2E_ConcurrentPairingRequests(t *testing.T) {
 // testDeviceConfig returns a valid device config for testing.
 func testDeviceConfig() DeviceConfig {
 	config := DefaultDeviceConfig()
-	config.SetupCode = "12345678"
+	config.SetupCode = "20202021"
 	config.Discriminator = 1234
 	config.SerialNumber = "SN12345"
 	config.Brand = "TestBrand"

@@ -12,7 +12,7 @@ import (
 //
 // Format: MASH:<version>:<discriminator>:<setupcode>
 //
-// Example: MASH:1:1234:12345678
+// Example: MASH:1:1234:20202021
 func ParseQRCode(content string) (*QRCode, error) {
 	// Check prefix
 	if !strings.HasPrefix(content, QRPrefix) {

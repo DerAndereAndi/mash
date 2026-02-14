@@ -65,7 +65,7 @@ func TestSetupCodeString(t *testing.T) {
 	}{
 		{0, "00000000"},
 		{1, "00000001"},
-		{12345678, "12345678"},
+		{20202021, "20202021"},
 		{99999999, "99999999"},
 	}
 
@@ -78,8 +78,8 @@ func TestSetupCodeString(t *testing.T) {
 }
 
 func TestSetupCodeBytes(t *testing.T) {
-	code := SetupCode(12345678)
-	want := []byte("12345678")
+	code := SetupCode(20202021)
+	want := []byte("20202021")
 	got := code.Bytes()
 
 	if string(got) != string(want) {
@@ -92,16 +92,63 @@ func TestSetupCodeValidate(t *testing.T) {
 		code    SetupCode
 		wantErr bool
 	}{
-		{0, false},
-		{12345678, false},
-		{99999999, false},
+		// Valid codes
+		{1, false},
+		{20202021, false},
+		{99999998, false},
+		{50000000, false},
+
+		// Out of range
+		{0, true},         // below minimum
+		{99999999, true},  // above maximum
 		{100000000, true}, // exceeds max
+
+		// Prohibited codes (Matter 5.1.7.1)
+		{11111111, true},
+		{22222222, true},
+		{33333333, true},
+		{44444444, true},
+		{55555555, true},
+		{66666666, true},
+		{77777777, true},
+		{88888888, true},
+		{12345678, true},
+		{87654321, true},
 	}
 
 	for _, tt := range tests {
-		err := tt.code.Validate()
-		if (err != nil) != tt.wantErr {
-			t.Errorf("SetupCode(%d).Validate() error = %v, wantErr %v", tt.code, err, tt.wantErr)
+		t.Run(tt.code.String(), func(t *testing.T) {
+			err := tt.code.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("SetupCode(%d).Validate() error = %v, wantErr %v", tt.code, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestInvalidSetupCodes(t *testing.T) {
+	if len(InvalidSetupCodes) != 10 {
+		t.Fatalf("expected 10 invalid setup codes, got %d", len(InvalidSetupCodes))
+	}
+
+	for _, code := range InvalidSetupCodes {
+		if err := code.Validate(); err == nil {
+			t.Errorf("InvalidSetupCodes entry %d should fail Validate()", code)
+		}
+	}
+}
+
+func TestGenerateSetupCodeNeverInvalid(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		code, err := GenerateSetupCode()
+		if err != nil {
+			t.Fatalf("GenerateSetupCode failed: %v", err)
+		}
+		if err := code.Validate(); err != nil {
+			t.Errorf("GenerateSetupCode returned invalid code %d: %v", code, err)
+		}
+		if code < SetupCodeMin || code > SetupCodeMax {
+			t.Errorf("GenerateSetupCode returned out-of-range code %d", code)
 		}
 	}
 }
@@ -115,11 +162,11 @@ func TestParseQRCode(t *testing.T) {
 	}{
 		{
 			name:  "valid with hex IDs",
-			input: "MASH:1:1234:12345678:0x1234:0x5678",
+			input: "MASH:1:1234:20202021:0x1234:0x5678",
 			want: &QRCodeData{
 				Version:       1,
 				Discriminator: 1234,
-				SetupCode:     12345678,
+				SetupCode:     20202021,
 				VendorID:      0x1234,
 				ProductID:     0x5678,
 			},
@@ -148,23 +195,23 @@ func TestParseQRCode(t *testing.T) {
 		},
 		{
 			name:  "with whitespace",
-			input: "  MASH:1:1234:12345678:0x1234:0x5678  ",
+			input: "  MASH:1:1234:20202021:0x1234:0x5678  ",
 			want: &QRCodeData{
 				Version:       1,
 				Discriminator: 1234,
-				SetupCode:     12345678,
+				SetupCode:     20202021,
 				VendorID:      0x1234,
 				ProductID:     0x5678,
 			},
 		},
 
 		// Invalid cases
-		{name: "wrong prefix", input: "FOO:1:1234:12345678:0x1234:0x5678", wantErr: true},
-		{name: "unsupported version", input: "MASH:2:1234:12345678:0x1234:0x5678", wantErr: true},
-		{name: "discriminator too large", input: "MASH:1:4096:12345678:0x1234:0x5678", wantErr: true},
+		{name: "wrong prefix", input: "FOO:1:1234:20202021:0x1234:0x5678", wantErr: true},
+		{name: "unsupported version", input: "MASH:2:1234:20202021:0x1234:0x5678", wantErr: true},
+		{name: "discriminator too large", input: "MASH:1:4096:20202021:0x1234:0x5678", wantErr: true},
 		{name: "setup code too short", input: "MASH:1:1234:1234567:0x1234:0x5678", wantErr: true},
 		{name: "setup code too long", input: "MASH:1:1234:123456789:0x1234:0x5678", wantErr: true},
-		{name: "missing field", input: "MASH:1:1234:12345678:0x1234", wantErr: true},
+		{name: "missing field", input: "MASH:1:1234:20202021:0x1234", wantErr: true},
 		{name: "empty", input: "", wantErr: true},
 	}
 
@@ -201,13 +248,13 @@ func TestQRCodeDataString(t *testing.T) {
 	qr := &QRCodeData{
 		Version:       1,
 		Discriminator: 1234,
-		SetupCode:     12345678,
+		SetupCode:     20202021,
 		VendorID:      0x1234,
 		ProductID:     0x5678,
 	}
 
 	got := qr.String()
-	want := "MASH:1:1234:12345678:0x1234:0x5678"
+	want := "MASH:1:1234:20202021:0x1234:0x5678"
 
 	if got != want {
 		t.Errorf("QRCodeData.String() = %q, want %q", got, want)

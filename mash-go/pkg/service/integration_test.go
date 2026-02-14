@@ -39,7 +39,7 @@ func TestE2E_CommissioningFlow(t *testing.T) {
 	device := model.NewDevice("evse-001", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 1234
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
@@ -127,7 +127,7 @@ func TestE2E_CommissioningFlow(t *testing.T) {
 	t.Logf("Commissioning device at %s:%d", discoveryService.Host, discoveryService.Port)
 
 	// Commission with correct setup code
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestE2E_CommissioningFlowWrongCode(t *testing.T) {
 	device := model.NewDevice("evse-002", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
 	if err != nil {
@@ -297,7 +297,7 @@ func TestE2E_MultipleCommissioning(t *testing.T) {
 	device := model.NewDevice("evse-003", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	// Per DEC-043: MaxZones is 2 (one GRID + one LOCAL)
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
@@ -341,7 +341,7 @@ func TestE2E_MultipleCommissioning(t *testing.T) {
 	_ = controller1.Start(ctx)
 	defer func() { _ = controller1.Stop() }()
 
-	device1, err := controller1.Commission(ctx, discoveryService, "12345678")
+	device1, err := controller1.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("First commission failed: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestE2E_MultipleCommissioning(t *testing.T) {
 	_ = controller2.Start(ctx)
 	defer func() { _ = controller2.Stop() }()
 
-	device2, err := controller2.Commission(ctx, discoveryService, "12345678")
+	device2, err := controller2.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Second commission failed: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestE2E_OperationalRead(t *testing.T) {
 
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
 	if err != nil {
@@ -439,7 +439,7 @@ func TestE2E_OperationalRead(t *testing.T) {
 		Addresses: []string{"127.0.0.1"},
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -482,7 +482,7 @@ func TestE2E_OperationalSubscribe(t *testing.T) {
 
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
 	if err != nil {
@@ -527,7 +527,7 @@ func TestE2E_OperationalSubscribe(t *testing.T) {
 		Addresses: []string{"127.0.0.1"},
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -570,7 +570,7 @@ func TestE2E_SubscriptionNotification(t *testing.T) {
 
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
 	if err != nil {
@@ -615,7 +615,7 @@ func TestE2E_SubscriptionNotification(t *testing.T) {
 		Addresses: []string{"127.0.0.1"},
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -693,7 +693,7 @@ func TestE2E_NotificationDelivery(t *testing.T) {
 	// Create device service
 	deviceConfig := validDeviceConfig()
 	deviceConfig.Discriminator = 2345 // Max is 4095
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.ListenAddress = "127.0.0.1:0"
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
@@ -737,7 +737,7 @@ func TestE2E_NotificationDelivery(t *testing.T) {
 		Addresses: []string{"127.0.0.1"},
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -817,7 +817,7 @@ func TestE2E_DeviceIDConsistencyForReconnection(t *testing.T) {
 	device := model.NewDevice("evse-reconnect", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 3333 // Must be <= 4095
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
@@ -880,7 +880,7 @@ func TestE2E_DeviceIDConsistencyForReconnection(t *testing.T) {
 		Discriminator: 3333,
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, commissionSvc, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, commissionSvc, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -947,7 +947,7 @@ func TestE2E_ReconnectionAfterDisconnect(t *testing.T) {
 	device := model.NewDevice("evse-reconnect-full", 0x1234, 0x5678)
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 2222 // Must be <= 4095
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
@@ -1007,7 +1007,7 @@ func TestE2E_ReconnectionAfterDisconnect(t *testing.T) {
 		Discriminator: 2222,
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, commissionSvc, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, commissionSvc, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -1088,7 +1088,7 @@ func TestE2E_RenewalOverTLS(t *testing.T) {
 	// Create device config with a setup code
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 3456 // Max is 4095
 
 	// Create device service
@@ -1150,7 +1150,7 @@ func TestE2E_RenewalOverTLS(t *testing.T) {
 	}
 
 	// Commission the device
-	connectedDevice, err := controllerSvc.Commission(ctx, commService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, commService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}
@@ -1239,7 +1239,7 @@ func TestE2E_RemoveDevice(t *testing.T) {
 
 	deviceConfig := validDeviceConfig()
 	deviceConfig.ListenAddress = "localhost:0"
-	deviceConfig.SetupCode = "12345678"
+	deviceConfig.SetupCode = "20202021"
 	deviceConfig.Discriminator = 3210 // Max is 4095
 
 	deviceSvc, err := NewDeviceService(device, deviceConfig)
@@ -1309,7 +1309,7 @@ func TestE2E_RemoveDevice(t *testing.T) {
 		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
 	}
 
-	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "12345678")
+	connectedDevice, err := controllerSvc.Commission(ctx, discoveryService, "20202021")
 	if err != nil {
 		t.Fatalf("Commission failed: %v", err)
 	}

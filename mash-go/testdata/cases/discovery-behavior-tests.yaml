@@ -125,7 +125,7 @@ steps:
   - name: Commission device
     action: commission
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
     expect:
       commission_success: true
 
@@ -313,7 +313,7 @@ steps:
   - name: Commission device
     action: commission
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
     expect:
       commission_success: true
 
@@ -693,7 +693,7 @@ steps:
   - name: Commission a device
     action: commission
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
     expect:
       commission_success: true
 
@@ -809,7 +809,7 @@ tags:
 id: TC-QR-001
 name: Valid QR Code Parses Successfully
 description: |
-  Verifies that a valid QR code string "MASH:1:1234:12345678"
+  Verifies that a valid QR code string "MASH:1:1234:20202021"
   is parsed correctly into version, discriminator, and setup code.
 
 pics_requirements:
@@ -822,12 +822,12 @@ steps:
   - name: Parse valid QR code
     action: parse_qr
     params:
-      content: "MASH:1:1234:12345678"
+      content: "MASH:1:1234:20202021"
     expect:
       parse_success: true
       version: 1
       discriminator: 1234
-      setup_code: "12345678"
+      setup_code: "20202021"
 
 postconditions:
   - qr_parsed: true
@@ -892,7 +892,7 @@ steps:
   - name: Parse QR with wrong prefix
     action: parse_qr
     params:
-      content: "EEBUS:1:1234:12345678"
+      content: "EEBUS:1:1234:20202021"
     expect:
       parse_success: false
       error: invalid_prefix
@@ -991,7 +991,7 @@ steps:
   - name: Parse QR with overflow discriminator
     action: parse_qr
     params:
-      content: "MASH:1:9999:12345678"
+      content: "MASH:1:9999:20202021"
     expect:
       parse_success: false
       error: discriminator_out_of_range
@@ -1061,7 +1061,7 @@ steps:
     action: commission
     params:
       discriminator: 1234
-      setup_code: "12345678"
+      setup_code: "20202021"
     expect:
       commission_success: true
       correct_device_commissioned: true
@@ -1182,7 +1182,7 @@ steps:
   - name: Commission device
     action: commission
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
     expect:
       commission_success: true
 
@@ -1283,7 +1283,7 @@ steps:
   - name: Commission to second zone
     action: commission
     params:
-      setup_code: "12345678"
+      setup_code: "20202021"
       zone_type: GRID
     expect:
       commission_success: true

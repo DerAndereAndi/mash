@@ -322,7 +322,7 @@ func TestHandleParseQR(t *testing.T) {
 	// Valid QR payload (4-field discovery format).
 	step := &loader.Step{
 		Params: map[string]any{
-			"payload": "MASH:1:1234:12345678",
+			"payload": "MASH:1:1234:20202021",
 		},
 	}
 	out, err := r.handleParseQR(context.Background(), step, state)
@@ -338,8 +338,8 @@ func TestHandleParseQR(t *testing.T) {
 	if out["discriminator"] != 1234 {
 		t.Errorf("expected discriminator=1234, got %v", out["discriminator"])
 	}
-	if out["setup_code"] != "12345678" {
-		t.Errorf("expected setup_code=12345678, got %v", out["setup_code"])
+	if out["setup_code"] != "20202021" {
+		t.Errorf("expected setup_code=20202021, got %v", out["setup_code"])
 	}
 
 	// Invalid QR payload.
@@ -378,7 +378,7 @@ func TestHandleParseQR_ErrorCodes(t *testing.T) {
 	}{
 		{
 			name:     "InvalidPrefix",
-			payload:  "EEBUS:1:1234:12345678",
+			payload:  "EEBUS:1:1234:20202021",
 			wantCode: "invalid_prefix",
 		},
 		{
@@ -388,12 +388,12 @@ func TestHandleParseQR_ErrorCodes(t *testing.T) {
 		},
 		{
 			name:     "InvalidVersion",
-			payload:  "MASH:0:1234:12345678",
+			payload:  "MASH:0:1234:20202021",
 			wantCode: "invalid_version",
 		},
 		{
 			name:     "DiscriminatorOutOfRange",
-			payload:  "MASH:1:9999:12345678",
+			payload:  "MASH:1:9999:20202021",
 			wantCode: "discriminator_out_of_range",
 		},
 		{

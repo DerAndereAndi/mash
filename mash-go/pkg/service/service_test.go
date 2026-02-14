@@ -140,7 +140,7 @@ func validDeviceConfig() DeviceConfig {
 	config := DefaultDeviceConfig()
 	config.ListenAddress = "127.0.0.1:0" // Use dynamic port to avoid conflicts
 	config.Discriminator = 1234
-	config.SetupCode = "12345678"
+	config.SetupCode = "20202021"
 	config.SerialNumber = "SN001"
 	config.Brand = "TestBrand"
 	config.Model = "TestModel"
@@ -730,6 +730,13 @@ func TestDeviceConfigValidate(t *testing.T) {
 			name: "no categories",
 			modify: func(c *DeviceConfig) {
 				c.Categories = nil
+			},
+			wantErr: true,
+		},
+		{
+			name: "prohibited setup code",
+			modify: func(c *DeviceConfig) {
+				c.SetupCode = "12345678"
 			},
 			wantErr: true,
 		},

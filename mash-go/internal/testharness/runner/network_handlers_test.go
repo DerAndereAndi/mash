@@ -105,7 +105,7 @@ func TestHandleCheckDisplay(t *testing.T) {
 
 	// Set QR payload.
 	ds := getDiscoveryState(state)
-	ds.qrPayload = "MASH:1:1234:12345678:0x0000:0x0000"
+	ds.qrPayload = "MASH:1:1234:20202021:0x0000:0x0000"
 
 	out, _ = r.handleCheckDisplay(context.Background(), &loader.Step{}, state)
 	if out["qr_displayed"] != true {

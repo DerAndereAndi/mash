@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -15,12 +16,30 @@ const (
 	// SetupCodeLength is the number of digits in a setup code.
 	SetupCodeLength = 8
 
-	// SetupCodeMax is the maximum setup code value (99999999).
-	SetupCodeMax = 99999999
+	// SetupCodeMin is the minimum valid setup code value.
+	SetupCodeMin = 1
+
+	// SetupCodeMax is the maximum valid setup code value.
+	SetupCodeMax = 99999998
 
 	// DiscriminatorMax is the maximum discriminator value (12 bits).
 	DiscriminatorMax = 0xFFF
 )
+
+// InvalidSetupCodes lists setup codes that MUST be rejected due to low entropy.
+// These are derived from Matter specification 5.1.7.1.
+var InvalidSetupCodes = []SetupCode{
+	11111111,
+	22222222,
+	33333333,
+	44444444,
+	55555555,
+	66666666,
+	77777777,
+	88888888,
+	12345678,
+	87654321,
+}
 
 // Setup code errors.
 var (
@@ -32,14 +51,22 @@ var (
 // SetupCode represents an 8-digit setup code.
 type SetupCode uint32
 
-// GenerateSetupCode generates a cryptographically random setup code.
+// GenerateSetupCode generates a cryptographically random valid setup code.
+// It retries up to 10 times if the generated code is invalid (prohibited).
 func GenerateSetupCode() (SetupCode, error) {
-	max := big.NewInt(SetupCodeMax + 1)
-	n, err := rand.Int(rand.Reader, max)
-	if err != nil {
-		return 0, fmt.Errorf("failed to generate random setup code: %w", err)
+	// Range is [SetupCodeMin, SetupCodeMax] inclusive.
+	codeRange := big.NewInt(SetupCodeMax - SetupCodeMin + 1)
+	for range 10 {
+		n, err := rand.Int(rand.Reader, codeRange)
+		if err != nil {
+			return 0, fmt.Errorf("failed to generate random setup code: %w", err)
+		}
+		sc := SetupCode(n.Int64() + SetupCodeMin)
+		if sc.Validate() == nil {
+			return sc, nil
+		}
 	}
-	return SetupCode(n.Uint64()), nil
+	return 0, errors.New("failed to generate valid setup code after 10 attempts")
 }
 
 // ParseSetupCode parses an 8-digit string into a SetupCode.
@@ -54,7 +81,7 @@ func ParseSetupCode(s string) (SetupCode, error) {
 		return 0, fmt.Errorf("%w: %v", ErrInvalidSetupCode, err)
 	}
 
-	if n > SetupCodeMax {
+	if n > 99999999 {
 		return 0, fmt.Errorf("%w: exceeds maximum value", ErrInvalidSetupCode)
 	}
 
@@ -73,9 +100,14 @@ func (sc SetupCode) Bytes() []byte {
 }
 
 // Validate checks if the setup code is valid.
+// It rejects codes outside the range [SetupCodeMin, SetupCodeMax] and
+// codes on the prohibited list (low-entropy patterns from Matter 5.1.7.1).
 func (sc SetupCode) Validate() error {
-	if sc > SetupCodeMax {
-		return fmt.Errorf("%w: exceeds maximum value", ErrInvalidSetupCode)
+	if sc < SetupCodeMin || sc > SetupCodeMax {
+		return fmt.Errorf("%w: must be between %d and %d", ErrInvalidSetupCode, SetupCodeMin, SetupCodeMax)
+	}
+	if slices.Contains(InvalidSetupCodes, sc) {
+		return fmt.Errorf("%w: prohibited low-entropy code", ErrInvalidSetupCode)
 	}
 	return nil
 }

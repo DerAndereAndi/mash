@@ -67,7 +67,7 @@ func TestCommissionCandidates_FirstSucceeds(t *testing.T) {
 		return nil, ErrPASEFailed
 	}
 
-	result, err := commissionCandidates(ctx, candidates, "12345678", fn)
+	result, err := commissionCandidates(ctx, candidates, "20202021", fn)
 	assert.NoError(t, err)
 	assert.Equal(t, device, result)
 }
@@ -87,7 +87,7 @@ func TestCommissionCandidates_FirstFailsPASE_SecondSucceeds(t *testing.T) {
 		return device, nil
 	}
 
-	result, err := commissionCandidates(ctx, candidates, "12345678", fn)
+	result, err := commissionCandidates(ctx, candidates, "20202021", fn)
 	assert.NoError(t, err)
 	assert.Equal(t, device, result)
 }
@@ -103,7 +103,7 @@ func TestCommissionCandidates_AllFailPASE(t *testing.T) {
 		return nil, ErrPASEFailed
 	}
 
-	result, err := commissionCandidates(ctx, candidates, "12345678", fn)
+	result, err := commissionCandidates(ctx, candidates, "20202021", fn)
 	assert.Nil(t, result)
 	assert.True(t, isPASEFailure(err))
 }
@@ -122,7 +122,7 @@ func TestCommissionCandidates_NonRetryableError_StopsImmediately(t *testing.T) {
 		return nil, connErr
 	}
 
-	result, err := commissionCandidates(ctx, candidates, "12345678", fn)
+	result, err := commissionCandidates(ctx, candidates, "20202021", fn)
 	assert.Nil(t, result)
 	assert.Equal(t, 1, callCount, "should not try second candidate on non-PASE error")
 	assert.ErrorIs(t, err, ErrCommissionFailed)
@@ -136,7 +136,7 @@ func TestCommissionCandidates_EmptyCandidates(t *testing.T) {
 		return nil, nil
 	}
 
-	result, err := commissionCandidates(ctx, nil, "12345678", fn)
+	result, err := commissionCandidates(ctx, nil, "20202021", fn)
 	assert.Nil(t, result)
 	assert.Nil(t, err, "empty candidates should return nil error")
 }
@@ -188,7 +188,7 @@ func TestCommissionDevice_CollisionRetry_DirectDiscovery(t *testing.T) {
 	// Both will fail because there's no real device listening, but the retry
 	// logic should attempt both. The connection error is non-retryable, so
 	// it will return after the first connection failure.
-	result, err := svc.CommissionDevice(ctx, 1234, "12345678")
+	result, err := svc.CommissionDevice(ctx, 1234, "20202021")
 	assert.Nil(t, result)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrCommissionFailed)
@@ -255,7 +255,7 @@ func TestCommissionDevice_CollisionAllFailPASE_FallsThrough(t *testing.T) {
 	svc.mu.Unlock()
 
 	// Should fall through to pairing request and eventually timeout
-	_, err = svc.CommissionDevice(ctx, 1234, "12345678")
+	_, err = svc.CommissionDevice(ctx, 1234, "20202021")
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrPairingRequestTimeout), "expected timeout, got: %v", err)
 }
@@ -299,7 +299,7 @@ func TestCommissionDevice_DeviceAlreadyAdvertising_UsesNewPath(t *testing.T) {
 
 	// Device found immediately -- connection will fail since no real device,
 	// but pairing request should NOT be announced.
-	result, err := svc.CommissionDevice(ctx, 1234, "12345678")
+	result, err := svc.CommissionDevice(ctx, 1234, "20202021")
 	assert.Nil(t, result)
 	assert.Error(t, err)
 	// Mock expectations verify AnnouncePairingRequest was NOT called

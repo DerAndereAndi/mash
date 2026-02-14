@@ -185,7 +185,7 @@ func TestE2E_CommissioningHandshake(t *testing.T) {
 	defer cancel()
 
 	// Setup code and identities
-	setupCode := commissioning.MustParseSetupCode("12345678")
+	setupCode := commissioning.MustParseSetupCode("20202021")
 	clientIdentity := []byte("controller-test")
 	serverIdentity := []byte("device-test")
 
@@ -312,7 +312,7 @@ func TestE2E_Failsafe(t *testing.T) {
 	config := service.DeviceConfig{
 		ListenAddress: "127.0.0.1:0",
 		Discriminator: 1234,
-		SetupCode:     "12345678",
+		SetupCode:     "20202021",
 		SerialNumber:  "SN-FAILSAFE-001",
 		Brand:         "TestBrand",
 		Model:         "TestModel",
@@ -450,7 +450,7 @@ func TestE2E_MultiZone(t *testing.T) {
 	config := service.DeviceConfig{
 		ListenAddress:   "127.0.0.1:0",
 		Discriminator:   1234,
-		SetupCode:       "12345678",
+		SetupCode:       "20202021",
 		SerialNumber:    "SN-MULTIZONE-001",
 		Brand:           "TestBrand",
 		Model:           "TestModel",

@@ -57,7 +57,7 @@ func TestCommissionDevice_DeviceAlreadyAdvertising(t *testing.T) {
 	svc.mu.Unlock()
 
 	// CommissionDevice should find the device directly, no pairing request needed
-	result, err := svc.CommissionDevice(ctx, 1234, "12345678")
+	result, err := svc.CommissionDevice(ctx, 1234, "20202021")
 
 	// We expect it to find the device (but fail on actual connection since there's no real device)
 	// The key assertion is that no pairing request was announced
@@ -107,7 +107,7 @@ func TestCommissionDevice_DeviceNotAdvertising_PairingRequestAnnounced(t *testin
 	svc.mu.Unlock()
 
 	// CommissionDevice - device not found, should announce pairing request and timeout
-	_, err = svc.CommissionDevice(ctx, 1234, "12345678")
+	_, err = svc.CommissionDevice(ctx, 1234, "20202021")
 
 	// Should timeout since device never appears
 	assert.Error(t, err)
@@ -183,7 +183,7 @@ func TestCommissionDevice_PairingRequest_DeviceAppears(t *testing.T) {
 	svc.mu.Unlock()
 
 	// CommissionDevice - device not found initially, then appears
-	_, err = svc.CommissionDevice(ctx, 1234, "12345678")
+	_, err = svc.CommissionDevice(ctx, 1234, "20202021")
 
 	// Connection will fail since no actual device, but we verify the flow
 	assert.Error(t, err) // Expected - no real device to connect to
@@ -231,7 +231,7 @@ func TestCommissionDevice_PairingRequest_Timeout(t *testing.T) {
 
 	// CommissionDevice should timeout
 	start := time.Now()
-	_, err = svc.CommissionDevice(ctx, 1234, "12345678")
+	_, err = svc.CommissionDevice(ctx, 1234, "20202021")
 	elapsed := time.Since(start)
 
 	assert.Error(t, err)
@@ -280,7 +280,7 @@ func TestCancelCommissioning_StopsPairingRequest(t *testing.T) {
 	// Start commissioning in background
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := svc.CommissionDevice(ctx, 1234, "12345678")
+		_, err := svc.CommissionDevice(ctx, 1234, "20202021")
 		errCh <- err
 	}()
 
@@ -386,7 +386,7 @@ func TestCommissionDevice_PairingRequest_CleanupOnSuccess(t *testing.T) {
 	svc.mu.Unlock()
 
 	// CommissionDevice - device appears (connection will fail but that's OK for this test)
-	_, _ = svc.CommissionDevice(ctx, 1234, "12345678")
+	_, _ = svc.CommissionDevice(ctx, 1234, "20202021")
 
 	// Verify pairing request was stopped (cleanup)
 	mu.Lock()
@@ -439,7 +439,7 @@ func TestCommissionDevice_ContextCancellation(t *testing.T) {
 	// Start commissioning
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := svc.CommissionDevice(commissionCtx, 1234, "12345678")
+		_, err := svc.CommissionDevice(commissionCtx, 1234, "20202021")
 		errCh <- err
 	}()
 
@@ -495,7 +495,7 @@ func TestCommissionDevice_RequiresZoneID(t *testing.T) {
 	// Don't set zone ID
 
 	// CommissionDevice should fail because zoneID is required for pairing request
-	_, err = svc.CommissionDevice(ctx, 1234, "12345678")
+	_, err = svc.CommissionDevice(ctx, 1234, "20202021")
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrZoneIDRequired), "expected zone ID required error, got: %v", err)
 }

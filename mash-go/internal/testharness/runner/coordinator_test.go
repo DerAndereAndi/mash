@@ -948,13 +948,13 @@ func TestCoordPrevConn_SetsPASEToNil(t *testing.T) {
 // ===========================================================================
 
 func TestCoordSetup_StoresSetupCode(t *testing.T) {
-	c, s, p, o := newCoord(t, &Config{SetupCode: "12345678"})
+	c, s, p, o := newCoord(t, &Config{SetupCode: "20202021"})
 	allMaybe(s, p, o)
 	state := st()
 	assert.NoError(t, c.SetupPreconditions(context.Background(), tcWith("TC"), state))
 	val, ok := state.Get(StateSetupCode)
 	assert.True(t, ok)
-	assert.Equal(t, "12345678", val)
+	assert.Equal(t, "20202021", val)
 }
 
 func TestCoordSetup_StoresDiscriminator(t *testing.T) {
