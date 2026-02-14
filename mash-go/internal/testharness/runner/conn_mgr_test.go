@@ -8,17 +8,16 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 // Compile-time check: connMgrImpl satisfies ConnectionManager.
 var _ ConnectionManager = (*connMgrImpl)(nil)
 
 // newTestConnMgr creates a connMgrImpl with stubbed dependencies for testing.
-func newTestConnMgr(t *testing.T) (*connMgrImpl, *stubConnPool, *stubSuiteSession) {
+func newTestConnMgr(t *testing.T) (*connMgrImpl, *MockConnPool, *MockSuiteSession) {
 	t.Helper()
-	p := &stubConnPool{}
-	s := &stubSuiteSession{}
+	p := NewMockConnPool(t)
+	s := NewMockSuiteSession(t)
 	m := &connMgrImpl{
 		pool:   p,
 		suite:  s,
@@ -37,7 +36,7 @@ func newTestConnMgr(t *testing.T) (*connMgrImpl, *stubConnPool, *stubSuiteSessio
 
 func TestConnMgr_EnsureConnected_NoopWhenAlreadyConnected(t *testing.T) {
 	m, p, _ := newTestConnMgr(t)
-	p.On("Main").Return(&Connection{state: ConnTLSConnected})
+	p.EXPECT().Main().Return(&Connection{state: ConnTLSConnected})
 
 	err := m.EnsureConnected(context.Background(), st())
 	assert.NoError(t, err)
@@ -45,7 +44,7 @@ func TestConnMgr_EnsureConnected_NoopWhenAlreadyConnected(t *testing.T) {
 
 func TestConnMgr_EnsureConnected_DialsWhenDisconnected(t *testing.T) {
 	m, p, _ := newTestConnMgr(t)
-	p.On("Main").Return((*Connection)(nil))
+	p.EXPECT().Main().Return((*Connection)(nil))
 
 	called := false
 	m.deps.connectFn = func(ctx context.Context, state *engine.ExecutionState) error {
@@ -60,7 +59,7 @@ func TestConnMgr_EnsureConnected_DialsWhenDisconnected(t *testing.T) {
 
 func TestConnMgr_EnsureConnected_ReturnsDialError(t *testing.T) {
 	m, p, _ := newTestConnMgr(t)
-	p.On("Main").Return((*Connection)(nil))
+	p.EXPECT().Main().Return((*Connection)(nil))
 
 	m.deps.connectFn = func(ctx context.Context, state *engine.ExecutionState) error {
 		return errors.New("connection refused")
@@ -77,7 +76,7 @@ func TestConnMgr_EnsureConnected_ReturnsDialError(t *testing.T) {
 func TestConnMgr_DisconnectConnection_ClosesSocket(t *testing.T) {
 	m, p, _ := newTestConnMgr(t)
 	conn := &Connection{state: ConnTLSConnected}
-	p.On("Main").Return(conn)
+	p.EXPECT().Main().Return(conn)
 
 	m.paseState = completedPASE()
 	m.DisconnectConnection()
@@ -88,7 +87,7 @@ func TestConnMgr_DisconnectConnection_ClosesSocket(t *testing.T) {
 
 func TestConnMgr_DisconnectConnection_NoopWhenNotConnected(t *testing.T) {
 	m, p, _ := newTestConnMgr(t)
-	p.On("Main").Return((*Connection)(nil))
+	p.EXPECT().Main().Return((*Connection)(nil))
 
 	m.paseState = completedPASE()
 	m.DisconnectConnection()
@@ -99,7 +98,7 @@ func TestConnMgr_DisconnectConnection_NoopWhenNotConnected(t *testing.T) {
 func TestConnMgr_DisconnectConnection_PreservesCrypto(t *testing.T) {
 	m, p, _ := newTestConnMgr(t)
 	conn := &Connection{state: ConnOperational}
-	p.On("Main").Return(conn)
+	p.EXPECT().Main().Return(conn)
 
 	m.zoneCA = &cert.ZoneCA{}
 	m.DisconnectConnection()
@@ -113,8 +112,8 @@ func TestConnMgr_DisconnectConnection_PreservesCrypto(t *testing.T) {
 
 func TestConnMgr_EnsureDisconnected_ClearsCrypto(t *testing.T) {
 	m, p, s := newTestConnMgr(t)
-	p.On("Main").Return((*Connection)(nil))
-	s.On("Clear").Return()
+	p.EXPECT().Main().Return((*Connection)(nil))
+	s.EXPECT().Clear().Return()
 
 	m.zoneCA = &cert.ZoneCA{}
 	m.controllerCert = &cert.OperationalCert{}
@@ -128,10 +127,10 @@ func TestConnMgr_EnsureDisconnected_ClearsCrypto(t *testing.T) {
 func TestConnMgr_EnsureDisconnected_ClearsSuiteState(t *testing.T) {
 	m, p, s := newTestConnMgr(t)
 	conn := &Connection{state: ConnOperational}
-	p.On("Main").Return(conn)
+	p.EXPECT().Main().Return(conn)
 
 	cleared := false
-	s.On("Clear").Run(func(args mock.Arguments) { cleared = true }).Return()
+	s.EXPECT().Clear().Run(func() { cleared = true }).Return()
 
 	m.EnsureDisconnected()
 
@@ -183,12 +182,12 @@ func TestConnMgr_IsSuiteZoneCommission(t *testing.T) {
 	m, _, s := newTestConnMgr(t)
 	m.commissionZoneType = cert.ZoneTypeTest
 
-	s.On("ZoneID").Return("")
+	s.EXPECT().ZoneID().Return("")
 	assert.True(t, m.IsSuiteZoneCommission(), "true when test zone and no suite zone ID")
 
 	m2, _, s2 := newTestConnMgr(t)
 	m2.commissionZoneType = cert.ZoneTypeTest
-	s2.On("ZoneID").Return("existing-zone")
+	s2.EXPECT().ZoneID().Return("existing-zone")
 	assert.False(t, m2.IsSuiteZoneCommission(), "false when suite zone already exists")
 }
 
@@ -198,7 +197,7 @@ func TestConnMgr_IsSuiteZoneCommission(t *testing.T) {
 
 func TestConnMgr_ProbeSessionHealth_NoConnection(t *testing.T) {
 	m, p, _ := newTestConnMgr(t)
-	p.On("Main").Return((*Connection)(nil))
+	p.EXPECT().Main().Return((*Connection)(nil))
 
 	err := m.ProbeSessionHealth()
 	assert.ErrorContains(t, err, "no active connection")
@@ -210,7 +209,7 @@ func TestConnMgr_ProbeSessionHealth_NoConnection(t *testing.T) {
 
 func TestConnMgr_ReconnectToZone_FailsWithoutSuiteZone(t *testing.T) {
 	m, _, s := newTestConnMgr(t)
-	s.On("ZoneID").Return("")
+	s.EXPECT().ZoneID().Return("")
 
 	err := m.ReconnectToZone(st())
 	assert.ErrorContains(t, err, "no suite zone")

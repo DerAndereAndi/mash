@@ -6,7 +6,10 @@ template-data:
 packages:
   github.com/mash-protocol/mash-go/internal/testharness/runner:
     config:
-      dir: '{{.InterfaceDir}}/mocks'
+      dir: '{{.InterfaceDir}}'
+      inpackage: true
+      pkgname: runner
+      filename: "mock_{{.InterfaceName | snakecase}}_test.go"
     interfaces:
       SuiteSession: {}
       ConnPool: {}
