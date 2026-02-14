@@ -494,7 +494,16 @@ var operatingStateTriggers = map[string]uint64{
 // sendTriggerViaZone sends a triggerTestEvent invoke to the device using the
 // main connection or the suite zone connection (the control channel).
 func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *engine.ExecutionState) error {
-	// Try main connection first (L3 tests where Main is operational).
+	// Always prefer the suite zone connection (the dedicated control channel).
+	// pool.Main() may be a stale connection from a previous test's commission
+	// step that the device already closed (DEC-066), causing broken-pipe errors
+	// that shadow the working suite zone.
+	conn := r.suite.Conn()
+	if conn != nil && conn.isConnected() && conn.framer != nil {
+		return r.sendTriggerOnConn(ctx, trigger, conn)
+	}
+
+	// Fall back to pool.Main() (L3 tests where Main is the operational connection).
 	if r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().framer != nil {
 		_, err := r.sendTrigger(ctx, trigger, state)
 		if err == nil {
@@ -503,12 +512,11 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 		return err
 	}
 
-	// Use suite zone connection (the control channel).
-	conn := r.suite.Conn()
-	if conn == nil || !conn.isConnected() || conn.framer == nil {
-		return fmt.Errorf("no suite zone connection available for trigger")
-	}
+	return fmt.Errorf("no suite zone connection available for trigger")
+}
 
+// sendTriggerOnConn sends a TriggerTestEvent invoke on a specific connection.
+func (r *Runner) sendTriggerOnConn(ctx context.Context, trigger uint64, conn *Connection) error {
 	enableKey := r.config.EnableKey
 	if enableKey == "" {
 		return fmt.Errorf("no enable key configured")

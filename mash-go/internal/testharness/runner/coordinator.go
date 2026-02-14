@@ -339,10 +339,13 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		}
 	}
 
-	// Reset untracked commission sessions.
+	// Reset untracked commission sessions. Skip when a suite zone exists --
+	// the suite zone is the persistent control channel and must not be destroyed
+	// by stale PASE state from a previous test's commission step.
 	if needed >= precondLevelCommissioned &&
 		c.ops.PASEState().Completed() &&
 		c.pool.ZoneCount() == 0 &&
+		c.suite.ZoneID() == "" &&
 		c.config.Target != "" {
 		c.debugf("resetting untracked commission session (no activeZoneConns)")
 		c.ops.EnsureDisconnected()
@@ -360,6 +363,10 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 			c.debugf("ensureCommissioned FAILED for %s: %v", tc.ID, setupErr)
 			return setupErr
 		}
+		// After commissioning, the device IS in a zone. Auto-set so
+		// browse_mdns simulation returns operational records without
+		// requiring an explicit device_in_zone precondition in YAML.
+		state.Set(PrecondDeviceInZone, true)
 		// Store zone IDs for test interpolation.
 		if !needsZoneConns && c.ops.PASEState().Completed() && c.ops.PASEState().SessionKey() != nil {
 			zID := deriveZoneIDFromSecret(c.ops.PASEState().SessionKey())

@@ -489,6 +489,28 @@ func TestCoordUntracked_NoResetWhenZonesExist(t *testing.T) {
 		tcWith("TC", cond(PrecondDeviceCommissioned, true)), st()))
 }
 
+// TestCoordUntracked_NoResetWhenSuiteZoneExists verifies that the "untracked
+// commission session" safety net does NOT destroy the suite zone. This was
+// Bug 2: when pool.ZoneCount()==0 but a suite zone existed, the coordinator
+// called EnsureDisconnected() which called suite.Clear(), destroying the
+// persistent control channel mid-run.
+func TestCoordUntracked_NoResetWhenSuiteZoneExists(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{Target: "localhost:8443"})
+	// Completed PASE + empty pool + existing suite zone.
+	o.EXPECT().PASEState().Return(completedPASE())
+	p.EXPECT().Main().Return((*Connection)(nil)).Maybe()
+	p.EXPECT().ZoneCount().Return(0)
+	s.EXPECT().ZoneID().Return("sz1")
+
+	disconnected := false
+	o.EXPECT().EnsureDisconnected().Run(func() { disconnected = true }).Return().Maybe()
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(),
+		tcWith("TC", cond(PrecondDeviceCommissioned, true)), st()))
+	assert.False(t, disconnected, "EnsureDisconnected must NOT be called when suite zone exists (Bug 2 guard)")
+}
+
 // ===========================================================================
 // 9. TeardownTest
 // ===========================================================================
@@ -1046,6 +1068,34 @@ var (
 	_ DiagnosticsOps      = (*MockCommissioningOps)(nil)
 	_ PreconditionHandler = (*MockCommissioningOps)(nil)
 )
+
+// TestCoordSetup_AutoSetsDeviceInZoneAfterCommission verifies that after
+// EnsureCommissioned succeeds, PrecondDeviceInZone is automatically set in
+// state. This is needed so that browse_mdns simulation returns operational
+// records without requiring an explicit device_in_zone precondition in YAML.
+func TestCoordSetup_AutoSetsDeviceInZoneAfterCommission(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	o.EXPECT().PASEState().Return(completedPASE())
+	p.EXPECT().Main().Return(&Connection{state: ConnOperational}).Maybe()
+	p.EXPECT().ZoneCount().Return(1)
+	s.EXPECT().ZoneID().Return("sz1")
+	s.EXPECT().ConnKey().Return("main-sz1").Maybe()
+
+	commissioned := false
+	o.EXPECT().EnsureCommissioned(mock.Anything, mock.Anything).Run(
+		func(_ context.Context, _ *engine.ExecutionState) { commissioned = true },
+	).Return(nil)
+
+	allMaybe(s, p, o)
+	state := st()
+	assert.NoError(t, c.SetupPreconditions(context.Background(),
+		tcWith("TC-COMM-003", cond(PrecondDeviceCommissioned, true)), state))
+	assert.True(t, commissioned, "EnsureCommissioned was called")
+
+	val, ok := state.Get(PrecondDeviceInZone)
+	assert.True(t, ok, "PrecondDeviceInZone should be set in state after commissioning")
+	assert.Equal(t, true, val)
+}
 
 // TestNarrowInterface_StateAccessor verifies that a function accepting only
 // StateAccessor can read/write state without requiring the full CommissioningOps.

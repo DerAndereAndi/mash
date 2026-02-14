@@ -85,6 +85,10 @@ var simulationPreconditionKeys = map[string]bool{
 	PrecondDeviceSupportsProduction: true,
 	PrecondDeviceIsBidirectional:    true,
 	PrecondDeviceSupportsAsymmetric: true,
+	// IPv6 / multi-interface simulation.
+	PrecondDeviceHasGlobalAndLinkLocal: true,
+	PrecondDeviceHasLinkLocal:          true,
+	PrecondDeviceHasMultipleInterfaces: true,
 }
 
 var preconditionKeyLevels = map[string]int{
@@ -120,6 +124,10 @@ var preconditionKeyLevels = map[string]int{
 	PrecondMultipleDevicesCommissioning: precondLevelNone,
 	PrecondMultipleDevicesCommissioned:  precondLevelNone,
 	PrecondMultipleControllersRunning:   precondLevelNone,
+	// IPv6 / multi-interface simulation (no real connection needed).
+	PrecondDeviceHasGlobalAndLinkLocal: precondLevelNone,
+	PrecondDeviceHasLinkLocal:          precondLevelNone,
+	PrecondDeviceHasMultipleInterfaces: precondLevelNone,
 
 	// Zone management test preconditions (runner-side state, no connection needed).
 	PrecondNoZonesConfigured:   precondLevelNone,

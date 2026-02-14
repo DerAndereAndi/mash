@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"sync"
 
 	"github.com/enbility/zeroconf/v3"
@@ -94,11 +96,16 @@ func (a *MDNSAdvertiser) AdvertiseCommissionable(ctx context.Context, info *Comm
 	ifaces := a.getInterfaces()
 	opts := a.serverOptions()
 
-	server, err := zeroconf.Register(
+	host := resolvedHost(info.Host)
+	ips := interfaceIPs(ifaces)
+
+	server, err := zeroconf.RegisterProxy(
 		instanceName,
 		ServiceTypeCommissionable,
 		Domain,
 		port,
+		host,
+		ips,
 		txtStrings,
 		ifaces,
 		opts...,
@@ -162,11 +169,16 @@ func (a *MDNSAdvertiser) AdvertiseOperational(ctx context.Context, info *Operati
 	ifaces := a.getInterfaces()
 	opts := a.serverOptions()
 
-	server, err := zeroconf.Register(
+	host := resolvedHost(info.Host)
+	ips := interfaceIPs(ifaces)
+
+	server, err := zeroconf.RegisterProxy(
 		instanceName,
 		ServiceTypeOperational,
 		Domain,
 		port,
+		host,
+		ips,
 		txtStrings,
 		ifaces,
 		opts...,
@@ -255,11 +267,16 @@ func (a *MDNSAdvertiser) AdvertiseCommissioner(ctx context.Context, info *Commis
 	ifaces := a.getInterfaces()
 	opts := a.serverOptions()
 
-	server, err := zeroconf.Register(
+	host := resolvedHost(info.Host)
+	ips := interfaceIPs(ifaces)
+
+	server, err := zeroconf.RegisterProxy(
 		instanceName,
 		ServiceTypeCommissioner,
 		Domain,
 		port,
+		host,
+		ips,
 		txtStrings,
 		ifaces,
 		opts...,
@@ -313,6 +330,63 @@ func (a *MDNSAdvertiser) StopCommissioner(zoneID string) error {
 	return nil
 }
 
+// normalizeHostname strips the ".local" suffix and trailing dot from a
+// hostname so that zeroconf.RegisterProxy can correctly produce a fully
+// qualified domain name (FQDN) with trailing dot. Without this, macOS
+// hostnames like "MacBookPro16.local" cause zeroconf to skip its own
+// ".local." suffix logic, resulting in "MacBookPro16.local" (no trailing
+// dot) which DNS message packing rejects.
+func normalizeHostname(name string) string {
+	name = strings.TrimSuffix(name, ".")
+	name = strings.TrimSuffix(name, ".local")
+	return name
+}
+
+// resolvedHost returns a normalized hostname for use with RegisterProxy.
+// It uses the provided hint first, falling back to os.Hostname(), and
+// finally to "mash-device" as a last resort.
+func resolvedHost(hint string) string {
+	host := normalizeHostname(hint)
+	if host == "" {
+		h, _ := os.Hostname()
+		host = normalizeHostname(h)
+	}
+	if host == "" {
+		host = "mash-device"
+	}
+	return host
+}
+
+// interfaceIPs collects non-loopback IP addresses from the given interfaces.
+// If ifaces is empty/nil, it queries all system interfaces. Falls back to
+// 127.0.0.1 if no non-loopback addresses are found.
+func interfaceIPs(ifaces []net.Interface) []string {
+	var sources []net.Addr
+	if len(ifaces) > 0 {
+		for _, iface := range ifaces {
+			addrs, err := iface.Addrs()
+			if err == nil {
+				sources = append(sources, addrs...)
+			}
+		}
+	} else {
+		addrs, err := net.InterfaceAddrs()
+		if err == nil {
+			sources = addrs
+		}
+	}
+	var ips []string
+	for _, addr := range sources {
+		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {
+			ips = append(ips, ipNet.IP.String())
+		}
+	}
+	if len(ips) == 0 {
+		return []string{"127.0.0.1"}
+	}
+	return ips
+}
+
 // AnnouncePairingRequest starts advertising a pairing request.
 // Controllers use this to signal devices that they want to commission them.
 func (a *MDNSAdvertiser) AnnouncePairingRequest(ctx context.Context, info *PairingRequestInfo) error {
@@ -349,11 +423,16 @@ func (a *MDNSAdvertiser) AnnouncePairingRequest(ctx context.Context, info *Pairi
 	ifaces := a.getInterfaces()
 	opts := a.serverOptions()
 
-	server, err := zeroconf.Register(
+	host := resolvedHost(info.Host)
+	ips := interfaceIPs(ifaces)
+
+	server, err := zeroconf.RegisterProxy(
 		instanceName,
 		ServiceTypePairingRequest,
 		Domain,
 		port,
+		host,
+		ips,
 		txtStrings,
 		ifaces,
 		opts...,

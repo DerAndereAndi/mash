@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
@@ -198,5 +199,73 @@ func TestExitCommissioningMode_UsesSuiteConn(t *testing.T) {
 	}
 	if r.connMgr.ZoneCAPool() != origZoneCAPool {
 		t.Error("expected zoneCAPool to be preserved")
+	}
+}
+
+// TestSendTriggerViaZone_PrefersSuiteOverConnectedMain verifies that
+// sendTriggerViaZone uses suite.Conn() even when pool.Main() is also connected.
+// This is the core Bug 1 scenario: a stale-but-connected Main shadowed the
+// working suite zone, causing broken-pipe cascades across 151 tests.
+func TestSendTriggerViaZone_PrefersSuiteOverConnectedMain(t *testing.T) {
+	r := newTestRunner()
+	r.config.EnableKey = "00112233445566778899aabbccddeeff"
+
+	// Both Main and suite are live, operational connections with valid framers.
+	mainConn, mainServer := newPipeConnection()
+	r.pool.SetMain(mainConn)
+
+	suiteConn, suiteServer := newPipeConnection()
+	r.suite.SetConn(suiteConn)
+
+	state := engine.NewExecutionState(context.Background())
+
+	// Only feed a success response on the suite server.
+	// If sendTriggerViaZone incorrectly prefers Main, the write to Main's pipe
+	// will block (net.Pipe is synchronous) and the context deadline will fire.
+	go echoSuccessResponse(suiteServer)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := r.sendTriggerViaZone(ctx, features.TriggerEnterCommissioningMode, state)
+	suiteServer.Close()
+	mainServer.Close()
+
+	if err != nil {
+		t.Fatalf("sendTriggerViaZone should use suite.Conn() but got error: %v", err)
+	}
+
+	if !r.connMgr.DeviceStateModified() {
+		t.Error("expected deviceStateModified=true (proves suite conn was used)")
+	}
+}
+
+// TestSendTriggerViaZone_FallsBackToMainWhenNoSuite verifies that
+// sendTriggerViaZone falls back to pool.Main() when suite.Conn() is nil.
+func TestSendTriggerViaZone_FallsBackToMainWhenNoSuite(t *testing.T) {
+	r := newTestRunner()
+	r.config.EnableKey = "00112233445566778899aabbccddeeff"
+
+	// Suite has no connection.
+	// Main is a live connection.
+	mainConn, mainServer := newPipeConnection()
+	r.pool.SetMain(mainConn)
+
+	state := engine.NewExecutionState(context.Background())
+
+	go echoSuccessResponse(mainServer)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := r.sendTriggerViaZone(ctx, features.TriggerEnterCommissioningMode, state)
+	mainServer.Close()
+
+	if err != nil {
+		t.Fatalf("sendTriggerViaZone should fall back to Main but got error: %v", err)
+	}
+
+	if !r.connMgr.DeviceStateModified() {
+		t.Error("expected deviceStateModified=true (proves Main was used as fallback)")
 	}
 }

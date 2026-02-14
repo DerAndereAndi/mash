@@ -56,6 +56,7 @@ type DeviceService struct {
 	listener           net.Listener
 	operationalTLSConfig *tls.Config
 	commissioningOpen  atomic.Bool         // true when commissioning window is open
+	commissioningEpoch atomic.Uint64      // incremented on each EnterCommissioningMode
 	commissioningCert  tls.Certificate     // Stable, generated once at startup
 	tlsCert            tls.Certificate     // Operational cert (from zone CA)
 
@@ -1005,6 +1006,13 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 		return
 	}
 
+	// Capture the commissioning epoch BEFORE registering the zone.
+	// RegisterZoneAwaitingConnection enables the concurrent auto-reentry
+	// path (HandleZoneDisconnect → EnterCommissioningMode), which would
+	// increment the epoch. The epoch guard ensures the exit below is
+	// skipped if a newer commissioning window opened in the meantime.
+	exitEpoch := s.commissioningEpoch.Load()
+
 	// DEC-066: Register the zone as awaiting operational connection.
 	// The zone is marked as disconnected; the controller will reconnect
 	// with operational certificates via handleOperationalConnection.
@@ -1014,18 +1022,18 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	_ = s.SaveState()
 
 	// Signal handleOperationalConnection to re-enter commissioning mode
-	// after the operational TLS reconnect succeeds. Set BEFORE ExitCommissioningMode
-	// to avoid a race: the operational handler goroutine can start and check
-	// this flag before the commissioning handler goroutine reaches this point.
+	// after the operational TLS reconnect succeeds. Set BEFORE the exit
+	// so the operational handler can consume it even if the exit runs first.
 	if s.isEnableKeyValid() {
 		s.mu.Lock()
 		s.autoReentryPending = true
 		s.mu.Unlock()
 	}
 
-	// Exit commissioning mode after successful commission
-	// The device should no longer advertise as commissionable
-	if err := s.ExitCommissioningMode(); err != nil {
+	// Exit commissioning mode. The epoch guard prevents this from
+	// overriding a concurrent EnterCommissioningMode that may have
+	// been triggered by HandleZoneDisconnect auto-reentry.
+	if err := s.exitCommissioningForEpoch(exitEpoch); err != nil {
 		s.debugLog("handleCommissioningConnection: failed to exit commissioning mode", "error", err)
 	}
 
@@ -1520,10 +1528,14 @@ func (s *DeviceService) EnterCommissioningMode() error {
 	// Capture context before releasing lock.
 	ctx := s.ctx
 	dm := s.discoveryManager
-	s.mu.Unlock()
 
-	// Open the commissioning ALPN gate and ensure the listener is running.
+	// Open the commissioning ALPN gate and bump the epoch under the lock.
+	// The epoch lets exitCommissioningForEpoch detect that a new window
+	// opened between decision time and execution time, preventing a stale
+	// exit from overriding a newer enter.
 	s.commissioningOpen.Store(true)
+	s.commissioningEpoch.Add(1)
+	s.mu.Unlock()
 	if err := s.ensureListenerStarted(); err != nil {
 		s.commissioningOpen.Store(false)
 		return fmt.Errorf("start listener: %w", err)
@@ -1572,6 +1584,52 @@ func (s *DeviceService) ExitCommissioningMode() error {
 
 	// Stop mDNS commissioning advertising outside the lock because mDNS
 	// operations can take >1s on macOS and would block new connections.
+	if dm != nil {
+		if err := dm.ExitCommissioningMode(); err != nil {
+			s.debugLog("ExitCommissioningMode: failed", "error", err)
+			return err
+		}
+	}
+
+	s.debugLog("ExitCommissioningMode: success")
+	s.emitEvent(Event{Type: EventCommissioningClosed, Reason: "commissioned"})
+	return nil
+}
+
+// exitCommissioningForEpoch exits commissioning only if the commissioning
+// epoch hasn't changed since the caller captured it. This prevents a stale
+// exit from overriding a concurrent EnterCommissioningMode (e.g., triggered
+// by HandleZoneDisconnect auto-reentry while ExitCommissioningMode was
+// still running slow mDNS operations).
+func (s *DeviceService) exitCommissioningForEpoch(epoch uint64) error {
+	s.mu.Lock()
+	if s.commissioningEpoch.Load() != epoch {
+		s.debugLog("exitCommissioningForEpoch: skipped (commissioning re-entered)",
+			"capturedEpoch", epoch, "currentEpoch", s.commissioningEpoch.Load())
+		s.mu.Unlock()
+		return nil
+	}
+
+	var discoveryState string
+	if s.discoveryManager != nil {
+		discoveryState = s.discoveryManager.State().String()
+	}
+	s.debugLog("ExitCommissioningMode: called", "discoveryState", discoveryState)
+
+	s.ResetPASETracker()
+
+	// Close the gate under the same lock that verified the epoch,
+	// so no concurrent EnterCommissioningMode can slip in between.
+	s.commissioningOpen.Store(false)
+
+	zoneCount := len(s.connectedZones)
+	dm := s.discoveryManager
+	s.mu.Unlock()
+
+	if zoneCount == 0 {
+		s.stopListener()
+	}
+
 	if dm != nil {
 		if err := dm.ExitCommissioningMode(); err != nil {
 			s.debugLog("ExitCommissioningMode: failed", "error", err)

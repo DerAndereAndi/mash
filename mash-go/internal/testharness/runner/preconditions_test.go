@@ -1396,6 +1396,38 @@ func TestDeviceHasLocalZone_PreservesCryptoOnSessionReuse(t *testing.T) {
 	}
 }
 
+// TestIPv6PreconditionKeysAreSimulation verifies that the 3 IPv6/multi-interface
+// precondition keys are registered in simulationPreconditionKeys so handlers can
+// adapt their behavior based on the simulated scenario.
+func TestIPv6PreconditionKeysAreSimulation(t *testing.T) {
+	for _, key := range []string{
+		PrecondDeviceHasGlobalAndLinkLocal,
+		PrecondDeviceHasLinkLocal,
+		PrecondDeviceHasMultipleInterfaces,
+	} {
+		if !simulationPreconditionKeys[key] {
+			t.Errorf("expected %q to be in simulationPreconditionKeys", key)
+		}
+	}
+}
+
+// TestIPv6PreconditionKeysHaveLevels verifies that the 3 IPv6/multi-interface
+// keys are registered in preconditionKeyLevels at level 0 (no connection needed).
+func TestIPv6PreconditionKeysHaveLevels(t *testing.T) {
+	r := newTestRunner()
+	for _, key := range []string{
+		PrecondDeviceHasGlobalAndLinkLocal,
+		PrecondDeviceHasLinkLocal,
+		PrecondDeviceHasMultipleInterfaces,
+	} {
+		conditions := []loader.Condition{{key: true}}
+		got := r.preconditionLevel(conditions)
+		if got != precondLevelNone {
+			t.Errorf("preconditionLevel(%s) = %d, want %d (level 0)", key, got, precondLevelNone)
+		}
+	}
+}
+
 func TestDeviceHasGridZone_KeepsNewCryptoOnFreshCommission(t *testing.T) {
 	// When there's NO existing PASE session, ensureCommissioned does a fresh
 	// commission. In this case the new GRID crypto IS correct (it matches
