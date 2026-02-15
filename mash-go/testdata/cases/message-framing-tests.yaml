@@ -711,7 +711,7 @@ steps:
     params:
       endpoint: 1
       feature: EnergyControl
-      attribute: effectiveConsumptionLimit
+      attribute: myConsumptionLimit
     expect:
       read_success: true
       value: 5000000
@@ -758,7 +758,7 @@ steps:
     params:
       endpoint: 1
       feature: EnergyControl
-      attribute: effectiveConsumptionLimit
+      attribute: myConsumptionLimit
     expect:
       read_success: true
       value: 0                     # Zero, not null

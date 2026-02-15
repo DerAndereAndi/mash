@@ -146,6 +146,65 @@ func TestSuiteSession_Record_OverwritesPreviousState(t *testing.T) {
 	}
 }
 
+func TestSuiteSession_CloseConn_ClosesConnectionButPreservesState(t *testing.T) {
+	s := NewSuiteSession()
+	crypto := makeCryptoState()
+	s.Record("zone-abc", crypto)
+
+	conn := &Connection{state: ConnOperational}
+	s.SetConn(conn)
+
+	s.CloseConn()
+
+	// Connection should be closed.
+	if conn.isConnected() {
+		t.Error("expected connection to be closed after CloseConn")
+	}
+
+	// Conn() should return nil after CloseConn.
+	if s.Conn() != nil {
+		t.Error("expected Conn() to return nil after CloseConn")
+	}
+
+	// Zone ID, crypto, and commissioned state should be preserved.
+	if !s.IsCommissioned() {
+		t.Error("expected IsCommissioned() to remain true after CloseConn")
+	}
+	if got := s.ZoneID(); got != "zone-abc" {
+		t.Errorf("ZoneID() = %q, want %q after CloseConn", got, "zone-abc")
+	}
+	if got := s.ConnKey(); got != "main-zone-abc" {
+		t.Errorf("ConnKey() = %q, want %q after CloseConn", got, "main-zone-abc")
+	}
+	cs := s.Crypto()
+	if cs.ZoneCA != crypto.ZoneCA {
+		t.Error("expected Crypto().ZoneCA to be preserved after CloseConn")
+	}
+}
+
+func TestSuiteSession_CloseConn_NoopWhenNoConnection(t *testing.T) {
+	s := NewSuiteSession()
+	s.Record("zone-abc", makeCryptoState())
+
+	// Should not panic when conn is nil.
+	s.CloseConn()
+
+	if !s.IsCommissioned() {
+		t.Error("expected IsCommissioned() to remain true")
+	}
+}
+
+func TestSuiteSession_CloseConn_NoopWhenNotCommissioned(t *testing.T) {
+	s := NewSuiteSession()
+
+	// Should not panic when nothing is set.
+	s.CloseConn()
+
+	if s.IsCommissioned() {
+		t.Error("expected IsCommissioned() to remain false")
+	}
+}
+
 // makeCryptoState creates a non-zero CryptoState for testing.
 func makeCryptoState() CryptoState {
 	return CryptoState{

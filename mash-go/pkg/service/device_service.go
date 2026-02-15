@@ -376,6 +376,9 @@ func (s *DeviceService) resolveListenAddresses() {
 }
 
 // buildOperationalTLSConfig creates the operational TLS config with RequireAndVerifyClientCert.
+// The config includes operational certificates from ALL zones so the device
+// can present the correct cert during TLS handshake regardless of which zone
+// the controller is reconnecting to.
 func (s *DeviceService) buildOperationalTLSConfig() {
 	// Build CA pool from known zone CAs for client cert verification.
 	caPool := x509.NewCertPool()
@@ -385,14 +388,43 @@ func (s *DeviceService) buildOperationalTLSConfig() {
 		}
 	}
 
+	// Put the most recently set cert (s.tlsCert) first, then add
+	// remaining zone certs. In TLS 1.3 the server cert is sent before
+	// the client cert, so Go picks the first cert matching the negotiated
+	// signature algorithm. Putting the newest cert first ensures fresh
+	// commissions present the correct cert to the reconnecting controller.
+	var certs []tls.Certificate
+	hasTLSCert := len(s.tlsCert.Certificate) > 0
+	if hasTLSCert {
+		certs = append(certs, s.tlsCert) // newest cert first
+	}
+	if s.certStore != nil {
+		for _, zoneID := range s.certStore.ListZones() {
+			if opCert, err := s.certStore.GetOperationalCert(zoneID); err == nil {
+				tc := opCert.TLSCertificate()
+				if !hasTLSCert || !sameTLSCert(tc, s.tlsCert) {
+					certs = append(certs, tc)
+				}
+			}
+		}
+	}
+
 	s.operationalTLSConfig = &tls.Config{
 		MinVersion:   tls.VersionTLS13,
 		MaxVersion:   tls.VersionTLS13,
-		Certificates: []tls.Certificate{s.tlsCert},
+		Certificates: certs,
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		ClientCAs:    caPool,
 		NextProtos:   []string{transport.ALPNProtocol},
 	}
+}
+
+// sameTLSCert returns true if two tls.Certificate values wrap the same leaf.
+func sameTLSCert(a, b tls.Certificate) bool {
+	if len(a.Certificate) == 0 || len(b.Certificate) == 0 {
+		return false
+	}
+	return bytes.Equal(a.Certificate[0], b.Certificate[0])
 }
 
 // refreshTLSCert updates s.tlsCert to a remaining zone's operational cert.
@@ -670,12 +702,40 @@ func (s *DeviceService) matchZoneByPeerCert(peerCert *x509.Certificate) string {
 	return ""
 }
 
+// matchConnectedZoneByPeerCert identifies a connected zone matching the peer
+// certificate. This handles ungraceful disconnects where the device did not
+// detect the client going away: the zone stays Connected=true but the old TCP
+// socket is dead. When the controller reconnects with a fresh TLS connection,
+// we match by AuthorityKeyId to find the stale session and replace it.
+//
+// Caller must hold s.mu.RLock or s.mu.Lock.
+func (s *DeviceService) matchConnectedZoneByPeerCert(peerCert *x509.Certificate) string {
+	if peerCert == nil || len(peerCert.AuthorityKeyId) == 0 {
+		return ""
+	}
+
+	for zoneID, cz := range s.connectedZones {
+		if !cz.Connected {
+			continue
+		}
+		zoneCACert, err := s.certStore.GetZoneCACert(zoneID)
+		if err != nil {
+			continue
+		}
+		if bytes.Equal(peerCert.AuthorityKeyId, zoneCACert.SubjectKeyId) {
+			return zoneID
+		}
+	}
+	return ""
+}
+
 // handleOperationalConnection handles a reconnection from a known zone.
 // rawConn is the underlying net.Conn from Accept, used for connTracker removal.
 func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.Conn, releaseActiveConn func()) {
 	// Identify which zone this connection belongs to using the peer certificate's
 	// AuthorityKeyId (matches the Zone CA's SubjectKeyId).
 	var targetZoneID string
+	var needsSessionReplace bool
 	peerCerts := conn.ConnectionState().PeerCertificates
 	s.mu.RLock()
 	if len(peerCerts) > 0 {
@@ -691,10 +751,17 @@ func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.
 			}
 		}
 	}
+	// Second chance: if no disconnected zone found, check if a connected zone
+	// matches the peer cert. This handles ungraceful disconnects where the
+	// device didn't detect the client going away.
+	if targetZoneID == "" && len(peerCerts) > 0 {
+		targetZoneID = s.matchConnectedZoneByPeerCert(peerCerts[0])
+		needsSessionReplace = targetZoneID != ""
+	}
 	s.mu.RUnlock()
 
 	if targetZoneID == "" {
-		// No known disconnected zones - reject connection.
+		// No known zones match - reject connection.
 		// Log the full zone state map for diagnostics.
 		s.mu.RLock()
 		zoneStates := make([]string, 0, len(s.connectedZones))
@@ -702,11 +769,18 @@ func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.
 			zoneStates = append(zoneStates, fmt.Sprintf("%s(connected=%v)", zid, cz.Connected))
 		}
 		s.mu.RUnlock()
-		s.debugLog("handleOperationalConnection: no disconnected zones to reconnect",
+		s.debugLog("handleOperationalConnection: no matching zones to reconnect",
 			"zoneCount", len(zoneStates),
 			"zones", zoneStates)
 		conn.Close()
 		return
+	}
+
+	// If replacing an existing connected session (ungraceful disconnect recovery),
+	// close the old session first so the zone transitions to disconnected state.
+	if needsSessionReplace {
+		s.debugLog("handleOperationalConnection: replacing stale session for connected zone", "zoneID", targetZoneID)
+		s.handleZoneSessionClose(targetZoneID)
 	}
 
 	// Mark zone as connected
@@ -962,12 +1036,6 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	if s.deviceID == "" {
 		s.deviceID = deviceID
 	}
-	// Always update TLS cert to use the latest operational cert.
-	// On re-commission (e.g., second zone), the device gets a new cert
-	// from the new zone's CA -- we must present that cert on future TLS
-	// connections, otherwise the controller sees a stale certificate.
-	s.tlsCert = operationalCert.TLSCertificate()
-	s.buildOperationalTLSConfig()
 	s.mu.Unlock()
 
 	// Ensure listener is running for the controller's operational reconnection.
@@ -995,6 +1063,15 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 		return
 	}
 
+	// Reject zones when a zone of the same type already exists (DEC-043).
+	// Each device supports max 1 zone per type.
+	if s.hasZoneOfType(zoneType) {
+		s.debugLog("handleCommissioningConnection: zone type already exists", "zoneID", zoneID, "zoneType", zoneType)
+		_ = commissioning.WriteCommissioningError(conn, commissioning.ErrCodeZoneTypeExists, "zone type already exists", 0)
+		conn.Close()
+		return
+	}
+
 	// Reject GRID/LOCAL zones when slots are full.
 	// We accepted the connection earlier because enable-key was valid (potential TEST zone),
 	// but now we know it's not a TEST zone, so check slots again.
@@ -1005,6 +1082,14 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 		conn.Close()
 		return
 	}
+
+	// All validation passed -- now update TLS cert to use the latest operational cert.
+	// This is intentionally placed AFTER zone validation so that rejected zones
+	// (e.g., duplicate zone type) do not pollute the device's TLS configuration.
+	s.mu.Lock()
+	s.tlsCert = operationalCert.TLSCertificate()
+	s.buildOperationalTLSConfig()
+	s.mu.Unlock()
 
 	// Capture the commissioning epoch BEFORE registering the zone.
 	// RegisterZoneAwaitingConnection enables the concurrent auto-reentry
@@ -2751,6 +2836,19 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, commissioningReje
 	return true, 0, ""
 }
 
+// hasZoneOfType returns true if a zone of the given type already exists.
+// Used to enforce DEC-043: max 1 zone per type.
+func (s *DeviceService) hasZoneOfType(zt cert.ZoneType) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, cz := range s.connectedZones {
+		if cz.Type == zt {
+			return true
+		}
+	}
+	return false
+}
+
 // isZonesFull returns true when all zone slots are occupied.
 // TEST zones don't count against MaxZones (they're an extra observer slot).
 func (s *DeviceService) isZonesFull() bool {
@@ -2771,15 +2869,16 @@ func (s *DeviceService) nonTestZoneCountLocked() int {
 	return count
 }
 
-// evictDisconnectedZone removes ALL disconnected zones to free slots for
+// evictDisconnectedZone removes disconnected non-TEST zones to free slots for
 // new commissioning. Returns the first evicted zone ID, or "" if none found.
-// Used in test mode only to recover from orphaned zones left by dead
-// runner connections that couldn't send explicit RemoveZone.
+// TEST zones are skipped because they may be deliberately disconnected during
+// tier transitions. Used in test mode only to recover from orphaned zones left
+// by dead runner connections that couldn't send explicit RemoveZone.
 func (s *DeviceService) evictDisconnectedZone() string {
 	s.mu.Lock()
 	var toEvict []string
 	for zoneID, cz := range s.connectedZones {
-		if !cz.Connected {
+		if !cz.Connected && cz.Type != cert.ZoneTypeTest {
 			toEvict = append(toEvict, zoneID)
 		}
 	}

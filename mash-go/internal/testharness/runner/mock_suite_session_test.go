@@ -68,6 +68,39 @@ func (_c *MockSuiteSession_Clear_Call) RunAndReturn(run func()) *MockSuiteSessio
 	return _c
 }
 
+// CloseConn provides a mock function for the type MockSuiteSession
+func (_mock *MockSuiteSession) CloseConn() {
+	_mock.Called()
+	return
+}
+
+// MockSuiteSession_CloseConn_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CloseConn'
+type MockSuiteSession_CloseConn_Call struct {
+	*mock.Call
+}
+
+// CloseConn is a helper method to define mock.On call
+func (_e *MockSuiteSession_Expecter) CloseConn() *MockSuiteSession_CloseConn_Call {
+	return &MockSuiteSession_CloseConn_Call{Call: _e.mock.On("CloseConn")}
+}
+
+func (_c *MockSuiteSession_CloseConn_Call) Run(run func()) *MockSuiteSession_CloseConn_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSuiteSession_CloseConn_Call) Return() *MockSuiteSession_CloseConn_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSuiteSession_CloseConn_Call) RunAndReturn(run func()) *MockSuiteSession_CloseConn_Call {
+	_c.Run(run)
+	return _c
+}
+
 // Conn provides a mock function for the type MockSuiteSession
 func (_mock *MockSuiteSession) Conn() *Connection {
 	ret := _mock.Called()

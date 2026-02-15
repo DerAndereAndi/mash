@@ -837,6 +837,165 @@ func TestTriggerResetTestState_NoRestartWhenListeningDisabled(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Zone type enforcement: TestControl commands must only be accepted on TEST zones
+// ---------------------------------------------------------------------------
+
+// newDeviceServiceWithTestControl creates a DeviceService with a registered
+// TestControl feature on endpoint 0. Returns the service and the feature so
+// callers can invoke commands directly via feature.InvokeCommand.
+func newDeviceServiceWithTestControl(t *testing.T) (*DeviceService, *model.Feature) {
+	t.Helper()
+
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+
+	// Add a functional endpoint so feature resets have something to operate on.
+	charger := model.NewEndpoint(1, model.EndpointEVCharger, "Test Charger")
+	charger.AddFeature(features.NewStatus().Feature)
+	if err := device.AddEndpoint(charger); err != nil {
+		t.Fatalf("AddEndpoint: %v", err)
+	}
+
+	config := validDeviceConfig()
+	config.TestEnableKey = "test-key-abc"
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService: %v", err)
+	}
+
+	tc := features.NewTestControl()
+	svc.RegisterTestEventHandler(tc)
+	svc.RegisterSetCommissioningWindowDurationHandler(tc)
+	svc.RegisterGetTestStateHandler(tc)
+
+	// Get endpoint 0 and add the feature.
+	ep0, err := device.GetEndpoint(0)
+	if err != nil {
+		t.Fatalf("GetEndpoint(0): %v", err)
+	}
+	ep0.AddFeature(tc.Feature)
+
+	return svc, tc.Feature
+}
+
+func TestTestControl_TriggerTestEvent_RejectedOnGridZone(t *testing.T) {
+	_, feat := newDeviceServiceWithTestControl(t)
+
+	ctx := ContextWithCallerZoneID(context.Background(), "grid-zone-1")
+	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeGrid)
+
+	params := map[string]any{
+		"enableKey":    "test-key-abc",
+		"eventTrigger": features.TriggerResetTestState,
+	}
+	_, err := feat.InvokeCommand(ctx, features.TestControlCmdTriggerTestEvent, params)
+	if err == nil {
+		t.Fatal("expected error: TriggerTestEvent should be rejected on GRID zone")
+	}
+}
+
+func TestTestControl_TriggerTestEvent_RejectedOnLocalZone(t *testing.T) {
+	_, feat := newDeviceServiceWithTestControl(t)
+
+	ctx := ContextWithCallerZoneID(context.Background(), "local-zone-1")
+	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeLocal)
+
+	params := map[string]any{
+		"enableKey":    "test-key-abc",
+		"eventTrigger": features.TriggerResetTestState,
+	}
+	_, err := feat.InvokeCommand(ctx, features.TestControlCmdTriggerTestEvent, params)
+	if err == nil {
+		t.Fatal("expected error: TriggerTestEvent should be rejected on LOCAL zone")
+	}
+}
+
+func TestTestControl_TriggerTestEvent_AcceptedOnTestZone(t *testing.T) {
+	_, feat := newDeviceServiceWithTestControl(t)
+
+	ctx := ContextWithCallerZoneID(context.Background(), "test-zone-1")
+	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeTest)
+
+	params := map[string]any{
+		"enableKey":    "test-key-abc",
+		"eventTrigger": features.TriggerResetTestState,
+	}
+	_, err := feat.InvokeCommand(ctx, features.TestControlCmdTriggerTestEvent, params)
+	if err != nil {
+		t.Fatalf("TriggerTestEvent should succeed on TEST zone: %v", err)
+	}
+}
+
+func TestTestControl_SetCommWindowDuration_RejectedOnGridZone(t *testing.T) {
+	_, feat := newDeviceServiceWithTestControl(t)
+
+	ctx := ContextWithCallerZoneID(context.Background(), "grid-zone-1")
+	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeGrid)
+
+	params := map[string]any{
+		"enableKey":       "test-key-abc",
+		"durationSeconds": uint32(60),
+	}
+	_, err := feat.InvokeCommand(ctx, features.TestControlCmdSetCommissioningWindowDuration, params)
+	if err == nil {
+		t.Fatal("expected error: SetCommissioningWindowDuration should be rejected on GRID zone")
+	}
+}
+
+func TestTestControl_SetCommWindowDuration_AcceptedOnTestZone(t *testing.T) {
+	svc, feat := newDeviceServiceWithTestControl(t)
+
+	// SetCommissioningWindowDuration needs a DiscoveryManager.
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	ctx := ContextWithCallerZoneID(context.Background(), "test-zone-1")
+	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeTest)
+
+	params := map[string]any{
+		"enableKey":       "test-key-abc",
+		"durationSeconds": uint32(60),
+	}
+	_, err := feat.InvokeCommand(ctx, features.TestControlCmdSetCommissioningWindowDuration, params)
+	if err != nil {
+		t.Fatalf("SetCommissioningWindowDuration should succeed on TEST zone: %v", err)
+	}
+}
+
+func TestTestControl_GetTestState_RejectedOnLocalZone(t *testing.T) {
+	_, feat := newDeviceServiceWithTestControl(t)
+
+	ctx := ContextWithCallerZoneID(context.Background(), "local-zone-1")
+	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeLocal)
+
+	params := map[string]any{
+		"enableKey": "test-key-abc",
+	}
+	_, err := feat.InvokeCommand(ctx, TestControlCmdGetTestState, params)
+	if err == nil {
+		t.Fatal("expected error: GetTestState should be rejected on LOCAL zone")
+	}
+}
+
+func TestTestControl_GetTestState_AcceptedOnTestZone(t *testing.T) {
+	_, feat := newDeviceServiceWithTestControl(t)
+
+	ctx := ContextWithCallerZoneID(context.Background(), "test-zone-1")
+	ctx = ContextWithCallerZoneType(ctx, cert.ZoneTypeTest)
+
+	params := map[string]any{
+		"enableKey": "test-key-abc",
+	}
+	result, err := feat.InvokeCommand(ctx, TestControlCmdGetTestState, params)
+	if err != nil {
+		t.Fatalf("GetTestState should succeed on TEST zone: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result from GetTestState")
+	}
+}
+
 func TestTriggerResetTestState_RemovesLeakedZones(t *testing.T) {
 	svc := newDeviceServiceWithAllFeatures(t)
 	ctx := context.Background()

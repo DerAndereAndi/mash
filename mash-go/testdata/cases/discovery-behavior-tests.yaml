@@ -236,6 +236,7 @@ tags:
   - discovery
   - commissionable
   - conflict
+  - env:multi-device
 
 ---
 # TC-MASHC-006: Already Operational Device Adds Commissionable
@@ -803,6 +804,7 @@ tags:
   - discovery
   - commissioner
   - device-initiated
+  - env:multi-device
 
 ---
 # TC-QR-001: Valid QR Code Parsed
@@ -1038,6 +1040,7 @@ tags:
   - discovery
   - discriminator
   - collision
+  - env:multi-device
 
 ---
 # TC-DISC-004: Discriminator Collision Resolved via PASE
@@ -1075,6 +1078,7 @@ tags:
   - discovery
   - discriminator
   - collision
+  - env:multi-device
   - pase
 
 ---
@@ -1386,6 +1390,7 @@ tags:
   - discovery
   - browse
   - commissionable
+  - env:multi-device
 
 ---
 # TC-BROWSE-002: Browse Operational Devices
@@ -1418,6 +1423,7 @@ tags:
   - discovery
   - browse
   - operational
+  - env:multi-device
 
 ---
 # TC-BROWSE-003: Browse Commissioner Devices
@@ -1450,6 +1456,7 @@ tags:
   - discovery
   - browse
   - commissioner
+  - env:multi-device
 
 ---
 # TC-BROWSE-004: Filter by Discriminator
@@ -1552,3 +1559,4 @@ tags:
   - browse
   - timeout
   - negative
+  - env:multi-device

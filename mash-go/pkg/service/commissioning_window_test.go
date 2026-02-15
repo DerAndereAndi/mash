@@ -8,11 +8,20 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/zonecontext"
 )
+
+// testZoneCtx returns a context with TEST zone type set, required for
+// TestControl command authorization.
+func testZoneCtx() context.Context {
+	ctx := zonecontext.ContextWithCallerZoneID(context.Background(), "test-zone")
+	return zonecontext.ContextWithCallerZoneType(ctx, cert.ZoneTypeTest)
+}
 
 // =============================================================================
 // Commissioning Window Timing Constants (DEC-048)
@@ -403,7 +412,7 @@ func TestSetCommissioningWindowDurationHandler(t *testing.T) {
 		tc := newTestControlFeature(t)
 		svc.RegisterSetCommissioningWindowDurationHandler(tc)
 
-		_, err := tc.InvokeCommand(context.Background(), 2, map[string]any{
+		_, err := tc.InvokeCommand(testZoneCtx(), 2, map[string]any{
 			"enableKey":       "00112233445566778899aabbccddeeff",
 			"durationSeconds": uint32(20),
 		})
@@ -421,7 +430,7 @@ func TestSetCommissioningWindowDurationHandler(t *testing.T) {
 		tc := newTestControlFeature(t)
 		svc.RegisterSetCommissioningWindowDurationHandler(tc)
 
-		_, err := tc.InvokeCommand(context.Background(), 2, map[string]any{
+		_, err := tc.InvokeCommand(testZoneCtx(), 2, map[string]any{
 			"enableKey":       "wrong-key",
 			"durationSeconds": uint32(20),
 		})
@@ -436,7 +445,7 @@ func TestSetCommissioningWindowDurationHandler(t *testing.T) {
 		tc := newTestControlFeature(t)
 		svc.RegisterSetCommissioningWindowDurationHandler(tc)
 
-		_, _ = tc.InvokeCommand(context.Background(), 2, map[string]any{
+		_, _ = tc.InvokeCommand(testZoneCtx(), 2, map[string]any{
 			"enableKey":       "00112233445566778899aabbccddeeff",
 			"durationSeconds": uint32(1),
 		})
@@ -453,7 +462,7 @@ func TestSetCommissioningWindowDurationHandler(t *testing.T) {
 		tc := newTestControlFeature(t)
 		svc.RegisterSetCommissioningWindowDurationHandler(tc)
 
-		_, _ = tc.InvokeCommand(context.Background(), 2, map[string]any{
+		_, _ = tc.InvokeCommand(testZoneCtx(), 2, map[string]any{
 			"enableKey":       "00112233445566778899aabbccddeeff",
 			"durationSeconds": uint32(20000),
 		})

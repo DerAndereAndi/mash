@@ -292,6 +292,10 @@ func New(config *Config) *Runner {
 				_ = conn.framer.WriteFrame(closeData)
 			}
 		}
+		// Drop per-zone crypto when a zone is removed from the pool.
+		if r.connMgr != nil {
+			r.connMgr.RemoveZoneCrypto(zoneID)
+		}
 	})
 	r.pool.SetMain(&Connection{})
 
@@ -482,10 +486,10 @@ func (r *Runner) runAutoPICS(ctx context.Context) error {
 	// count against MaxZones and is transparent to device logic.
 	r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 	if err := r.ensureCommissioned(ctx, state); err != nil {
-		r.connMgr.SetCommissionZoneType(0)
+		r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 		return fmt.Errorf("commissioning for auto-PICS: %w", err)
 	}
-	r.connMgr.SetCommissionZoneType(0)
+	r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 
 	pf, err := r.buildAutoPICS(ctx)
 	if err != nil {
@@ -1055,6 +1059,9 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	// Close the previous TLS connection before replacing it. Without
 	// this, the device still sees the old TCP connection as an active
 	// zone, preventing it from re-entering commissioning mode.
+	if r.pool.Main() == nil {
+		r.pool.SetMain(&Connection{})
+	}
 	if r.pool.Main().tlsConn != nil && r.pool.Main().tlsConn != conn {
 		_ = r.pool.Main().tlsConn.Close()
 	}

@@ -312,11 +312,18 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// Perform certificate exchange after PASE (MsgType 30-33).
 	// This is required: the device blocks waiting for the cert exchange
 	// before it will accept operational messages (Read/Write/Invoke).
+	r.debugf("handleCommission: starting cert exchange (framer=%p, conn=%p)", r.pool.Main().framer, r.pool.Main().tlsConn)
 	deviceID, certErr := r.performCertExchange(ctx)
+	if certErr != nil {
+		r.debugf("handleCommission: cert exchange FAILED: %v", certErr)
+	} else {
+		r.debugf("handleCommission: cert exchange succeeded, deviceID=%s, zoneCAPool=%p", deviceID, r.connMgr.ZoneCAPool())
+	}
 
 	// Even if cert exchange fails, fall back to commissioning TLS trust
 	// so basic tests that don't need operational connections still work.
 	if certErr != nil {
+		r.debugf("handleCommission: falling back to commissioning TLS peer certs")
 		// Fall back: use peer cert from commissioning TLS.
 		if r.pool.Main().tlsConn != nil {
 			cs := r.pool.Main().tlsConn.ConnectionState()
@@ -526,9 +533,11 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 	syncConn := &framerSyncConn{framer: r.pool.Main().framer}
 
 	// Create the renewal handler and perform the 4-message cert exchange.
+	r.debugf("performCertExchange: issuing cert for zone %s (type=%d)", zoneID, zt)
 	renewalHandler := service.NewControllerRenewalHandler(zoneCA, syncConn)
 	deviceCert, err := renewalHandler.IssueInitialCertSync(ctx, syncConn)
 	if err != nil {
+		r.debugf("performCertExchange: IssueInitialCertSync failed: %v", err)
 		return "", fmt.Errorf("cert exchange: %w", err)
 	}
 
@@ -551,6 +560,10 @@ func (r *Runner) performCertExchange(ctx context.Context) (string, error) {
 
 	// Store the issued device cert for verify_device_cert.
 	r.connMgr.SetIssuedDeviceCert(deviceCert)
+
+	// Persist per-zone crypto so it can be restored after a second zone
+	// overwrites the working fields (multi-zone scenario).
+	r.connMgr.StoreZoneCrypto(zoneID)
 
 	// Extract device ID from the signed certificate.
 	deviceID, _ := cert.ExtractDeviceID(deviceCert)

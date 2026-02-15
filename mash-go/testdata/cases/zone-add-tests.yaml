@@ -171,6 +171,7 @@ tags:
   - add
   - discriminator
   - collision
+  - env:multi-device
 
 ---
 # TC-ZONE-ADD-005: Second Zone Both Active

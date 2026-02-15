@@ -41,6 +41,39 @@ func (_m *MockCommissioningOps) EXPECT() *MockCommissioningOps_Expecter {
 	return &MockCommissioningOps_Expecter{mock: &_m.Mock}
 }
 
+// ClearAllCrypto provides a mock function for the type MockCommissioningOps
+func (_mock *MockCommissioningOps) ClearAllCrypto() {
+	_mock.Called()
+	return
+}
+
+// MockCommissioningOps_ClearAllCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClearAllCrypto'
+type MockCommissioningOps_ClearAllCrypto_Call struct {
+	*mock.Call
+}
+
+// ClearAllCrypto is a helper method to define mock.On call
+func (_e *MockCommissioningOps_Expecter) ClearAllCrypto() *MockCommissioningOps_ClearAllCrypto_Call {
+	return &MockCommissioningOps_ClearAllCrypto_Call{Call: _e.mock.On("ClearAllCrypto")}
+}
+
+func (_c *MockCommissioningOps_ClearAllCrypto_Call) Run(run func()) *MockCommissioningOps_ClearAllCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCommissioningOps_ClearAllCrypto_Call) Return() *MockCommissioningOps_ClearAllCrypto_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCommissioningOps_ClearAllCrypto_Call) RunAndReturn(run func()) *MockCommissioningOps_ClearAllCrypto_Call {
+	_c.Run(run)
+	return _c
+}
+
 // ClearWorkingCrypto provides a mock function for the type MockCommissioningOps
 func (_mock *MockCommissioningOps) ClearWorkingCrypto() {
 	_mock.Called()
@@ -501,6 +534,57 @@ func (_c *MockCommissioningOps_HandlePreconditionCases_Call) RunAndReturn(run fu
 	return _c
 }
 
+// HasZoneCrypto provides a mock function for the type MockCommissioningOps
+func (_mock *MockCommissioningOps) HasZoneCrypto(zoneID string) bool {
+	ret := _mock.Called(zoneID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasZoneCrypto")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = returnFunc(zoneID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// MockCommissioningOps_HasZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasZoneCrypto'
+type MockCommissioningOps_HasZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// HasZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockCommissioningOps_Expecter) HasZoneCrypto(zoneID interface{}) *MockCommissioningOps_HasZoneCrypto_Call {
+	return &MockCommissioningOps_HasZoneCrypto_Call{Call: _e.mock.On("HasZoneCrypto", zoneID)}
+}
+
+func (_c *MockCommissioningOps_HasZoneCrypto_Call) Run(run func(zoneID string)) *MockCommissioningOps_HasZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCommissioningOps_HasZoneCrypto_Call) Return(b bool) *MockCommissioningOps_HasZoneCrypto_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *MockCommissioningOps_HasZoneCrypto_Call) RunAndReturn(run func(zoneID string) bool) *MockCommissioningOps_HasZoneCrypto_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsSuiteZoneCommission provides a mock function for the type MockCommissioningOps
 func (_mock *MockCommissioningOps) IsSuiteZoneCommission() bool {
 	ret := _mock.Called()
@@ -585,6 +669,57 @@ func (_c *MockCommissioningOps_LastDeviceConnClose_Call) Return(time1 time.Time)
 }
 
 func (_c *MockCommissioningOps_LastDeviceConnClose_Call) RunAndReturn(run func() time.Time) *MockCommissioningOps_LastDeviceConnClose_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LoadZoneCrypto provides a mock function for the type MockCommissioningOps
+func (_mock *MockCommissioningOps) LoadZoneCrypto(zoneID string) bool {
+	ret := _mock.Called(zoneID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadZoneCrypto")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = returnFunc(zoneID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// MockCommissioningOps_LoadZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadZoneCrypto'
+type MockCommissioningOps_LoadZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// LoadZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockCommissioningOps_Expecter) LoadZoneCrypto(zoneID interface{}) *MockCommissioningOps_LoadZoneCrypto_Call {
+	return &MockCommissioningOps_LoadZoneCrypto_Call{Call: _e.mock.On("LoadZoneCrypto", zoneID)}
+}
+
+func (_c *MockCommissioningOps_LoadZoneCrypto_Call) Run(run func(zoneID string)) *MockCommissioningOps_LoadZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCommissioningOps_LoadZoneCrypto_Call) Return(b bool) *MockCommissioningOps_LoadZoneCrypto_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *MockCommissioningOps_LoadZoneCrypto_Call) RunAndReturn(run func(zoneID string) bool) *MockCommissioningOps_LoadZoneCrypto_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -727,6 +862,46 @@ func (_c *MockCommissioningOps_ReconnectToZone_Call) Return(err error) *MockComm
 
 func (_c *MockCommissioningOps_ReconnectToZone_Call) RunAndReturn(run func(state *engine.ExecutionState) error) *MockCommissioningOps_ReconnectToZone_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveZoneCrypto provides a mock function for the type MockCommissioningOps
+func (_mock *MockCommissioningOps) RemoveZoneCrypto(zoneID string) {
+	_mock.Called(zoneID)
+	return
+}
+
+// MockCommissioningOps_RemoveZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveZoneCrypto'
+type MockCommissioningOps_RemoveZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// RemoveZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockCommissioningOps_Expecter) RemoveZoneCrypto(zoneID interface{}) *MockCommissioningOps_RemoveZoneCrypto_Call {
+	return &MockCommissioningOps_RemoveZoneCrypto_Call{Call: _e.mock.On("RemoveZoneCrypto", zoneID)}
+}
+
+func (_c *MockCommissioningOps_RemoveZoneCrypto_Call) Run(run func(zoneID string)) *MockCommissioningOps_RemoveZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCommissioningOps_RemoveZoneCrypto_Call) Return() *MockCommissioningOps_RemoveZoneCrypto_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCommissioningOps_RemoveZoneCrypto_Call) RunAndReturn(run func(zoneID string)) *MockCommissioningOps_RemoveZoneCrypto_Call {
+	_c.Run(run)
 	return _c
 }
 
@@ -1178,6 +1353,46 @@ func (_c *MockCommissioningOps_SetWorkingCrypto_Call) Return() *MockCommissionin
 }
 
 func (_c *MockCommissioningOps_SetWorkingCrypto_Call) RunAndReturn(run func(crypto CryptoState)) *MockCommissioningOps_SetWorkingCrypto_Call {
+	_c.Run(run)
+	return _c
+}
+
+// StoreZoneCrypto provides a mock function for the type MockCommissioningOps
+func (_mock *MockCommissioningOps) StoreZoneCrypto(zoneID string) {
+	_mock.Called(zoneID)
+	return
+}
+
+// MockCommissioningOps_StoreZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StoreZoneCrypto'
+type MockCommissioningOps_StoreZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// StoreZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockCommissioningOps_Expecter) StoreZoneCrypto(zoneID interface{}) *MockCommissioningOps_StoreZoneCrypto_Call {
+	return &MockCommissioningOps_StoreZoneCrypto_Call{Call: _e.mock.On("StoreZoneCrypto", zoneID)}
+}
+
+func (_c *MockCommissioningOps_StoreZoneCrypto_Call) Run(run func(zoneID string)) *MockCommissioningOps_StoreZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCommissioningOps_StoreZoneCrypto_Call) Return() *MockCommissioningOps_StoreZoneCrypto_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCommissioningOps_StoreZoneCrypto_Call) RunAndReturn(run func(zoneID string)) *MockCommissioningOps_StoreZoneCrypto_Call {
 	_c.Run(run)
 	return _c
 }

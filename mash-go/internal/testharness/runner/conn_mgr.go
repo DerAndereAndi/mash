@@ -37,6 +37,13 @@ type ConnectionManager interface {
 	ClearWorkingCrypto()
 	OperationalTLSConfig() *tls.Config
 
+	// Per-zone crypto storage
+	StoreZoneCrypto(zoneID string)
+	LoadZoneCrypto(zoneID string) bool
+	HasZoneCrypto(zoneID string) bool
+	RemoveZoneCrypto(zoneID string)
+	ClearAllCrypto()
+
 	// Crypto state (individual field access)
 	ZoneCA() *cert.ZoneCA
 	SetZoneCA(z *cert.ZoneCA)
@@ -103,6 +110,11 @@ type connMgrImpl struct {
 	commissionZoneType      cert.ZoneType
 	deviceStateModified     bool
 	discoveredDiscriminator uint16
+
+	// Per-zone crypto storage. Maps zone ID -> snapshot of the 4 crypto
+	// fields at commission time. The accumulated zoneCAPool is rebuilt
+	// from all entries so it always trusts all known zone CAs.
+	zoneCrypto map[string]CryptoState
 }
 
 // NewConnectionManager creates a ConnectionManager backed by the given components.
@@ -115,12 +127,13 @@ func NewConnectionManager(
 	deps connMgrDeps,
 ) ConnectionManager {
 	return &connMgrImpl{
-		pool:   pool,
-		suite:  suite,
-		dialer: dialer,
-		config: config,
-		debugf: debugf,
-		deps:   deps,
+		pool:       pool,
+		suite:      suite,
+		dialer:     dialer,
+		config:     config,
+		debugf:     debugf,
+		deps:       deps,
+		zoneCrypto: make(map[string]CryptoState),
 	}
 }
 
@@ -187,6 +200,76 @@ func (m *connMgrImpl) ZoneCAPool() *x509.CertPool                { return m.zone
 func (m *connMgrImpl) SetZoneCAPool(p *x509.CertPool)            { m.zoneCAPool = p }
 
 // ---------------------------------------------------------------------------
+// Per-zone crypto storage
+// ---------------------------------------------------------------------------
+
+// StoreZoneCrypto snapshots the current 4 working crypto fields into the
+// per-zone map and rebuilds the accumulated CA pool.
+func (m *connMgrImpl) StoreZoneCrypto(zoneID string) {
+	m.zoneCrypto[zoneID] = CryptoState{
+		ZoneCA:           m.zoneCA,
+		ControllerCert:   m.controllerCert,
+		ZoneCAPool:       m.zoneCAPool,
+		IssuedDeviceCert: m.issuedDeviceCert,
+	}
+	m.rebuildAccumulatedPool()
+}
+
+// LoadZoneCrypto restores the working crypto fields from the per-zone map
+// and rebuilds the accumulated CA pool. Returns false if the zone is unknown.
+func (m *connMgrImpl) LoadZoneCrypto(zoneID string) bool {
+	cs, ok := m.zoneCrypto[zoneID]
+	if !ok {
+		return false
+	}
+	m.zoneCA = cs.ZoneCA
+	m.controllerCert = cs.ControllerCert
+	m.issuedDeviceCert = cs.IssuedDeviceCert
+	// zoneCAPool is always rebuilt from all zones, not restored per-zone.
+	m.rebuildAccumulatedPool()
+	return true
+}
+
+// HasZoneCrypto returns true if per-zone crypto exists for the given zone.
+func (m *connMgrImpl) HasZoneCrypto(zoneID string) bool {
+	_, ok := m.zoneCrypto[zoneID]
+	return ok
+}
+
+// RemoveZoneCrypto deletes the per-zone crypto entry and rebuilds the pool.
+func (m *connMgrImpl) RemoveZoneCrypto(zoneID string) {
+	delete(m.zoneCrypto, zoneID)
+	m.rebuildAccumulatedPool()
+}
+
+// ClearAllCrypto nils the individual crypto fields, the accumulated pool,
+// AND the entire zoneCrypto map. Used for full teardown (ensureDisconnected).
+func (m *connMgrImpl) ClearAllCrypto() {
+	m.zoneCA = nil
+	m.controllerCert = nil
+	m.zoneCAPool = nil
+	m.issuedDeviceCert = nil
+	m.zoneCrypto = make(map[string]CryptoState)
+}
+
+// rebuildAccumulatedPool creates a fresh x509.CertPool containing the zone
+// CA certificates from ALL entries in zoneCrypto. This ensures that the pool
+// always trusts every known zone's CA, regardless of which zone is "active".
+func (m *connMgrImpl) rebuildAccumulatedPool() {
+	if len(m.zoneCrypto) == 0 {
+		m.zoneCAPool = nil
+		return
+	}
+	pool := x509.NewCertPool()
+	for _, cs := range m.zoneCrypto {
+		if cs.ZoneCA != nil && cs.ZoneCA.Certificate != nil {
+			pool.AddCert(cs.ZoneCA.Certificate)
+		}
+	}
+	m.zoneCAPool = pool
+}
+
+// ---------------------------------------------------------------------------
 // Connection lifecycle
 // ---------------------------------------------------------------------------
 
@@ -219,7 +302,10 @@ func (m *connMgrImpl) DisconnectConnection() {
 	m.paseState = nil
 }
 
-// EnsureDisconnected fully disconnects and clears all crypto + suite state.
+// EnsureDisconnected fully disconnects and clears active crypto + suite state.
+// The per-zone crypto map is preserved so that reconnectToZone can restore
+// suite zone crypto after backward tier transitions (L3 -> L2 -> L3).
+// Use ClearAllCrypto() explicitly for full teardown (fresh_commission).
 func (m *connMgrImpl) EnsureDisconnected() {
 	m.DisconnectConnection()
 	m.ClearWorkingCrypto()
@@ -240,8 +326,8 @@ func (m *connMgrImpl) TransitionToOperational(state *engine.ExecutionState) erro
 	if m.pool.Main() != nil && m.pool.Main().isConnected() {
 		_ = m.pool.Main().Close()
 		m.pool.Main().clearConnectionRefs()
-		m.pool.SetMain(nil)
 	}
+	m.pool.SetMain(&Connection{})
 
 	// Establish new operational TLS connection.
 	m.debugf("transitionToOperational: reconnecting with operational TLS")
@@ -281,13 +367,15 @@ func (m *connMgrImpl) ReconnectToZone(state *engine.ExecutionState) error {
 		return fmt.Errorf("no suite zone to reconnect to")
 	}
 
-	// Restore crypto from suite if local state is empty.
-	if m.zoneCAPool == nil || m.controllerCert == nil {
+	// Restore suite zone crypto from the per-zone map (preferred). Falls
+	// back to suite snapshot for backward compatibility.
+	suiteZoneID := m.suite.ZoneID()
+	if !m.LoadZoneCrypto(suiteZoneID) {
 		saved := m.suite.Crypto()
-		m.zoneCA = saved.ZoneCA
-		m.controllerCert = saved.ControllerCert
-		m.zoneCAPool = saved.ZoneCAPool
-		m.issuedDeviceCert = saved.IssuedDeviceCert
+		if saved.ZoneCAPool == nil || saved.ControllerCert == nil {
+			return fmt.Errorf("no crypto material for reconnection")
+		}
+		m.SetWorkingCrypto(saved)
 	}
 
 	m.debugf("reconnectToZone: reconnecting to zone %s", m.suite.ZoneID())

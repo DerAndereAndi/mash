@@ -119,7 +119,7 @@ var preconditionKeyLevels = map[string]int{
 	PrecondDeviceWillAppearAfterDelay:   precondLevelNone,
 	PrecondFiveZonesConnected:           precondLevelNone,
 	PrecondTwoZonesConnected:            precondLevelNone,
-	PrecondDeviceInZone:                 precondLevelNone,
+	PrecondDeviceInZone:                 precondLevelCommissioned,
 	PrecondDeviceInTwoZones:             precondLevelNone,
 	PrecondMultipleDevicesCommissioning: precondLevelNone,
 	PrecondMultipleDevicesCommissioned:  precondLevelNone,
@@ -289,7 +289,30 @@ func (r *Runner) currentLevel() int {
 // so the next test starts with a fresh observer.
 func (r *Runner) teardownTest(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState) {
 	r.stopObserver()
+	if r.pairingAdvertiser != nil {
+		r.pairingAdvertiser.StopAll()
+		r.pairingAdvertiser = nil
+	}
 	r.coordinator.TeardownTest(ctx, tc, state)
+
+	// Re-commission the suite zone if a test destroyed it (e.g. remove_device
+	// with zone=all calls suite.Clear()). Without this, all subsequent tests
+	// lose the control channel for reset triggers, causing cascading failures.
+	if r.config.Target != "" && r.config.EnableKey != "" && r.suite.ZoneID() == "" {
+		r.debugf("teardown: suite zone destroyed, re-commissioning")
+		// Wait for the device to enter commissioning mode after zone removal.
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := r.waitForCommissioningMode(waitCtx, 3*time.Second); err != nil {
+			r.debugf("teardown: wait for commissioning mode: %v (continuing)", err)
+		}
+		waitCancel()
+
+		reCtx, reCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if err := r.commissionSuiteZone(reCtx); err != nil {
+			r.debugf("teardown: suite zone re-commission failed: %v", err)
+		}
+		reCancel()
+	}
 }
 
 // setupPreconditions is the callback registered with the engine.
@@ -447,10 +470,7 @@ func (r *Runner) disconnectConnection() {
 // session-reuse path restores the stale suite crypto.
 func (r *Runner) ensureDisconnected() {
 	r.disconnectConnection()
-	r.connMgr.SetZoneCA(nil)
-	r.connMgr.SetControllerCert(nil)
-	r.connMgr.SetZoneCAPool(nil)
-	r.connMgr.SetIssuedDeviceCert(nil)
+	r.connMgr.ClearAllCrypto()
 	// suite.Clear() closes the suite zone connection and nils all suite state.
 	r.suite.Clear()
 }
@@ -676,6 +696,21 @@ func (r *Runner) IsSuiteZoneCommission() bool {
 	return r.isSuiteZoneCommission()
 }
 
+// StoreZoneCrypto delegates to connMgr.
+func (r *Runner) StoreZoneCrypto(zoneID string) { r.connMgr.StoreZoneCrypto(zoneID) }
+
+// LoadZoneCrypto delegates to connMgr.
+func (r *Runner) LoadZoneCrypto(zoneID string) bool { return r.connMgr.LoadZoneCrypto(zoneID) }
+
+// HasZoneCrypto delegates to connMgr.
+func (r *Runner) HasZoneCrypto(zoneID string) bool { return r.connMgr.HasZoneCrypto(zoneID) }
+
+// RemoveZoneCrypto delegates to connMgr.
+func (r *Runner) RemoveZoneCrypto(zoneID string) { r.connMgr.RemoveZoneCrypto(zoneID) }
+
+// ClearAllCrypto delegates to connMgr.
+func (r *Runner) ClearAllCrypto() { r.connMgr.ClearAllCrypto() }
+
 // RequestDeviceState wraps requestDeviceState.
 func (r *Runner) RequestDeviceState(ctx context.Context, state *engine.ExecutionState) DeviceStateSnapshot {
 	return r.requestDeviceState(ctx, state)
@@ -718,6 +753,23 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 					_, _ = r.handleCreateZone(ctx, step, state)
 				}
 				r.connMgr.SetCommissionZoneType(cert.ZoneTypeLocal)
+
+				// For real devices: commission a real LOCAL zone alongside the suite zone.
+				// Detach pool.Main from suite, clear PASE + crypto so ensureCommissioned
+				// creates a fresh LOCAL zone tracked in the pool.
+				// StoreZoneCrypto (called in performCertExchange) automatically adds
+				// the new zone's CA to the accumulated pool, so no savedPool needed.
+				if r.config.Target != "" {
+					r.debugf("device_has_local_zone: commissioning real LOCAL zone on device")
+					r.pool.SetMain(&Connection{})
+					r.connMgr.SetPASEState(nil)
+					r.connMgr.SetZoneCA(nil)
+					r.connMgr.SetControllerCert(nil)
+					r.connMgr.SetIssuedDeviceCert(nil)
+					if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+						r.debugf("device_has_local_zone: %v (continuing)", err)
+					}
+				}
 			case PrecondDeviceInLocalZone:
 				zs := getZoneState(state)
 				if !hasZoneOfType(zs, ZoneTypeLocal) {
@@ -838,12 +890,12 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 							r.sendRemoveZone()
 						}
 
-						savedPool := r.connMgr.ZoneCAPool()
 						r.disconnectConnection()
 						r.connMgr.SetZoneCA(nil)
 						r.connMgr.SetControllerCert(nil)
-						r.connMgr.SetZoneCAPool(savedPool)
 						r.connMgr.SetIssuedDeviceCert(nil)
+						// zoneCAPool is rebuilt by StoreZoneCrypto after each cert exchange,
+						// so no manual savedPool save/restore needed.
 
 						r.connMgr.SetCommissionZoneType(z.zt)
 
@@ -903,7 +955,7 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 					if localID, ok := state.Get(StateLocalZoneID); ok {
 						state.Set(StateOtherZoneID, localID)
 					}
-					r.connMgr.SetCommissionZoneType(0)
+					r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 				} else {
 					for _, z := range zones {
 						if _, exists := ct.zoneConnections[z.name]; exists {
@@ -946,12 +998,11 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 							r.sendRemoveZone()
 						}
 
-						savedPool := r.connMgr.ZoneCAPool()
 						r.disconnectConnection()
 						r.connMgr.SetZoneCA(nil)
 						r.connMgr.SetControllerCert(nil)
-						r.connMgr.SetZoneCAPool(savedPool)
 						r.connMgr.SetIssuedDeviceCert(nil)
+						// zoneCAPool is rebuilt by StoreZoneCrypto after each cert exchange.
 
 						r.connMgr.SetCommissionZoneType(z.zt)
 						if err := r.ensureCommissioned(ctx, state); err != nil {
@@ -1004,7 +1055,7 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 						r.debugf("device_zones_full: post-fill %v (continuing)", err)
 					}
 
-					r.connMgr.SetCommissionZoneType(0)
+					r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 					r.connMgr.SetPASEState(nil)
 				}
 			}

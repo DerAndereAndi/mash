@@ -42,6 +42,39 @@ func (_m *MockConnectionManager) EXPECT() *MockConnectionManager_Expecter {
 	return &MockConnectionManager_Expecter{mock: &_m.Mock}
 }
 
+// ClearAllCrypto provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) ClearAllCrypto() {
+	_mock.Called()
+	return
+}
+
+// MockConnectionManager_ClearAllCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClearAllCrypto'
+type MockConnectionManager_ClearAllCrypto_Call struct {
+	*mock.Call
+}
+
+// ClearAllCrypto is a helper method to define mock.On call
+func (_e *MockConnectionManager_Expecter) ClearAllCrypto() *MockConnectionManager_ClearAllCrypto_Call {
+	return &MockConnectionManager_ClearAllCrypto_Call{Call: _e.mock.On("ClearAllCrypto")}
+}
+
+func (_c *MockConnectionManager_ClearAllCrypto_Call) Run(run func()) *MockConnectionManager_ClearAllCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_ClearAllCrypto_Call) Return() *MockConnectionManager_ClearAllCrypto_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockConnectionManager_ClearAllCrypto_Call) RunAndReturn(run func()) *MockConnectionManager_ClearAllCrypto_Call {
+	_c.Run(run)
+	return _c
+}
+
 // ClearWorkingCrypto provides a mock function for the type MockConnectionManager
 func (_mock *MockConnectionManager) ClearWorkingCrypto() {
 	_mock.Called()
@@ -433,6 +466,57 @@ func (_c *MockConnectionManager_EnsureDisconnected_Call) RunAndReturn(run func()
 	return _c
 }
 
+// HasZoneCrypto provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) HasZoneCrypto(zoneID string) bool {
+	ret := _mock.Called(zoneID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasZoneCrypto")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = returnFunc(zoneID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// MockConnectionManager_HasZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasZoneCrypto'
+type MockConnectionManager_HasZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// HasZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockConnectionManager_Expecter) HasZoneCrypto(zoneID interface{}) *MockConnectionManager_HasZoneCrypto_Call {
+	return &MockConnectionManager_HasZoneCrypto_Call{Call: _e.mock.On("HasZoneCrypto", zoneID)}
+}
+
+func (_c *MockConnectionManager_HasZoneCrypto_Call) Run(run func(zoneID string)) *MockConnectionManager_HasZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_HasZoneCrypto_Call) Return(b bool) *MockConnectionManager_HasZoneCrypto_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *MockConnectionManager_HasZoneCrypto_Call) RunAndReturn(run func(zoneID string) bool) *MockConnectionManager_HasZoneCrypto_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsSuiteZoneCommission provides a mock function for the type MockConnectionManager
 func (_mock *MockConnectionManager) IsSuiteZoneCommission() bool {
 	ret := _mock.Called()
@@ -563,6 +647,57 @@ func (_c *MockConnectionManager_LastDeviceConnClose_Call) Return(time1 time.Time
 }
 
 func (_c *MockConnectionManager_LastDeviceConnClose_Call) RunAndReturn(run func() time.Time) *MockConnectionManager_LastDeviceConnClose_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LoadZoneCrypto provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) LoadZoneCrypto(zoneID string) bool {
+	ret := _mock.Called(zoneID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadZoneCrypto")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = returnFunc(zoneID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// MockConnectionManager_LoadZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadZoneCrypto'
+type MockConnectionManager_LoadZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// LoadZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockConnectionManager_Expecter) LoadZoneCrypto(zoneID interface{}) *MockConnectionManager_LoadZoneCrypto_Call {
+	return &MockConnectionManager_LoadZoneCrypto_Call{Call: _e.mock.On("LoadZoneCrypto", zoneID)}
+}
+
+func (_c *MockConnectionManager_LoadZoneCrypto_Call) Run(run func(zoneID string)) *MockConnectionManager_LoadZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_LoadZoneCrypto_Call) Return(b bool) *MockConnectionManager_LoadZoneCrypto_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *MockConnectionManager_LoadZoneCrypto_Call) RunAndReturn(run func(zoneID string) bool) *MockConnectionManager_LoadZoneCrypto_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -751,6 +886,46 @@ func (_c *MockConnectionManager_ReconnectToZone_Call) Return(err error) *MockCon
 
 func (_c *MockConnectionManager_ReconnectToZone_Call) RunAndReturn(run func(state *engine.ExecutionState) error) *MockConnectionManager_ReconnectToZone_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveZoneCrypto provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) RemoveZoneCrypto(zoneID string) {
+	_mock.Called(zoneID)
+	return
+}
+
+// MockConnectionManager_RemoveZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveZoneCrypto'
+type MockConnectionManager_RemoveZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// RemoveZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockConnectionManager_Expecter) RemoveZoneCrypto(zoneID interface{}) *MockConnectionManager_RemoveZoneCrypto_Call {
+	return &MockConnectionManager_RemoveZoneCrypto_Call{Call: _e.mock.On("RemoveZoneCrypto", zoneID)}
+}
+
+func (_c *MockConnectionManager_RemoveZoneCrypto_Call) Run(run func(zoneID string)) *MockConnectionManager_RemoveZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_RemoveZoneCrypto_Call) Return() *MockConnectionManager_RemoveZoneCrypto_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockConnectionManager_RemoveZoneCrypto_Call) RunAndReturn(run func(zoneID string)) *MockConnectionManager_RemoveZoneCrypto_Call {
+	_c.Run(run)
 	return _c
 }
 
@@ -1150,6 +1325,46 @@ func (_c *MockConnectionManager_SetZoneCAPool_Call) Return() *MockConnectionMana
 }
 
 func (_c *MockConnectionManager_SetZoneCAPool_Call) RunAndReturn(run func(p *x509.CertPool)) *MockConnectionManager_SetZoneCAPool_Call {
+	_c.Run(run)
+	return _c
+}
+
+// StoreZoneCrypto provides a mock function for the type MockConnectionManager
+func (_mock *MockConnectionManager) StoreZoneCrypto(zoneID string) {
+	_mock.Called(zoneID)
+	return
+}
+
+// MockConnectionManager_StoreZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StoreZoneCrypto'
+type MockConnectionManager_StoreZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// StoreZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockConnectionManager_Expecter) StoreZoneCrypto(zoneID interface{}) *MockConnectionManager_StoreZoneCrypto_Call {
+	return &MockConnectionManager_StoreZoneCrypto_Call{Call: _e.mock.On("StoreZoneCrypto", zoneID)}
+}
+
+func (_c *MockConnectionManager_StoreZoneCrypto_Call) Run(run func(zoneID string)) *MockConnectionManager_StoreZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockConnectionManager_StoreZoneCrypto_Call) Return() *MockConnectionManager_StoreZoneCrypto_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockConnectionManager_StoreZoneCrypto_Call) RunAndReturn(run func(zoneID string)) *MockConnectionManager_StoreZoneCrypto_Call {
 	_c.Run(run)
 	return _c
 }

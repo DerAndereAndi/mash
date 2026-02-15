@@ -608,19 +608,19 @@ func TestBrowseMDNS_InterfaceUpThenBrowse(t *testing.T) {
 // Group G: browseViaObserver fresh-browse semantics
 // ---------------------------------------------------------------------------
 
-// TestBrowseViaObserver_ClearsStaleEntries verifies that browseViaObserver
-// does not return entries accumulated before the browse call. After a state
-// change (e.g., zone removal), stale entries must be cleared so the browse
-// only returns services actively advertising during its timeout window.
-func TestBrowseViaObserver_ClearsStaleEntries(t *testing.T) {
+// TestBrowseViaObserver_ReturnsExistingEntries verifies that browseViaObserver
+// returns services already in the observer's live snapshot. The persistent
+// observer tracks additions and removals, so previously discovered services
+// are returned immediately without clearing.
+func TestBrowseViaObserver_ReturnsExistingEntries(t *testing.T) {
 	r := newTestRunner()
 	tb := newTestBrowser()
 	r.observer = newMDNSObserver(tb, r.debugf)
 	defer r.observer.Stop()
 
-	// Pre-populate observer with a stale commissionable service.
+	// Pre-populate observer with a commissionable service.
 	tb.commAdded <- &discovery.CommissionableService{
-		InstanceName:  "MASH-STALE",
+		InstanceName:  "MASH-EXISTING",
 		Discriminator: 9999,
 	}
 
@@ -631,19 +631,20 @@ func TestBrowseViaObserver_ClearsStaleEntries(t *testing.T) {
 		return len(svcs) >= 1
 	})
 	if err != nil {
-		t.Fatalf("setup: observer did not ingest stale service: %v", err)
+		t.Fatalf("setup: observer did not ingest service: %v", err)
 	}
 
-	// Now call browseViaObserver with a short timeout. No new services will
-	// be sent during this window, so a fresh browse should return empty.
+	// browseViaObserver should return the existing service immediately.
 	services, err := r.browseViaObserver(context.Background(), "commissionable", 500)
 	if err != nil {
 		t.Fatalf("browseViaObserver error: %v", err)
 	}
 
-	if len(services) != 0 {
-		t.Errorf("browseViaObserver should return empty for stale-only snapshot, got %d services: %v",
-			len(services), services)
+	if len(services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(services))
+	}
+	if services[0].InstanceName != "MASH-EXISTING" {
+		t.Errorf("expected MASH-EXISTING, got %s", services[0].InstanceName)
 	}
 }
 
@@ -678,15 +679,16 @@ func TestBrowseViaObserver_ReturnsFreshServices(t *testing.T) {
 	}
 }
 
-// TestBrowseViaObserver_StaleAndFresh verifies that after clearing stale
-// entries, only fresh services that arrive during the browse window appear.
-func TestBrowseViaObserver_StaleAndFresh(t *testing.T) {
+// TestBrowseViaObserver_ExistingAndNew verifies that browseViaObserver returns
+// all services in the observer's live snapshot, including both previously
+// discovered and newly arriving ones.
+func TestBrowseViaObserver_ExistingAndNew(t *testing.T) {
 	r := newTestRunner()
 	tb := newTestBrowser()
 	r.observer = newMDNSObserver(tb, r.debugf)
 	defer r.observer.Stop()
 
-	// Pre-populate with stale service.
+	// Pre-populate with an existing service.
 	tb.commAdded <- &discovery.CommissionableService{
 		InstanceName:  "MASH-OLD",
 		Discriminator: 1111,
@@ -700,30 +702,17 @@ func TestBrowseViaObserver_StaleAndFresh(t *testing.T) {
 		t.Fatalf("setup failed: %v", err)
 	}
 
-	// Send a fresh service after browse starts.
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		tb.commAdded <- &discovery.CommissionableService{
-			InstanceName:  "MASH-NEW",
-			Discriminator: 2222,
-		}
-	}()
-
+	// browseViaObserver returns immediately since there's already a service.
 	services, err := r.browseViaObserver(context.Background(), "commissionable", 2000)
 	if err != nil {
 		t.Fatalf("browseViaObserver error: %v", err)
 	}
 
-	// Should see the fresh service. The stale one may or may not reappear
-	// (depends on whether the device re-advertises), but the key assertion
-	// is that at least one service is returned and it includes the fresh one.
-	found := false
-	for _, svc := range services {
-		if svc.InstanceName == "MASH-NEW" {
-			found = true
-		}
+	// Should see the existing service.
+	if len(services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(services))
 	}
-	if !found {
-		t.Errorf("expected MASH-NEW in results, got %v", services)
+	if services[0].InstanceName != "MASH-OLD" {
+		t.Errorf("expected MASH-OLD, got %s", services[0].InstanceName)
 	}
 }

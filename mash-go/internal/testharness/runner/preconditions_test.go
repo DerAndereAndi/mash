@@ -582,11 +582,21 @@ func TestSetupPreconditions_BackwardsFromCommissioned_SendsRemoveZone(t *testing
 func TestPreconditionLevel_DeviceInZoneKeys(t *testing.T) {
 	r := newTestRunner()
 
-	for _, key := range []string{PrecondDeviceInZone, PrecondDeviceInTwoZones} {
-		conditions := []loader.Condition{{key: true}}
+	// device_in_zone requires commissioned level (the device must be in a zone).
+	{
+		conditions := []loader.Condition{{PrecondDeviceInZone: true}}
+		got := r.preconditionLevel(conditions)
+		if got != precondLevelCommissioned {
+			t.Errorf("preconditionLevel(%s) = %d, want %d (commissioned)", PrecondDeviceInZone, got, precondLevelCommissioned)
+		}
+	}
+
+	// device_in_two_zones is simulation-only (level 0).
+	{
+		conditions := []loader.Condition{{PrecondDeviceInTwoZones: true}}
 		got := r.preconditionLevel(conditions)
 		if got != precondLevelNone {
-			t.Errorf("preconditionLevel(%s) = %d, want %d (level 0)", key, got, precondLevelNone)
+			t.Errorf("preconditionLevel(%s) = %d, want %d (level 0)", PrecondDeviceInTwoZones, got, precondLevelNone)
 		}
 	}
 
@@ -1410,6 +1420,83 @@ func TestIPv6PreconditionKeysHaveLevels(t *testing.T) {
 		if got != precondLevelNone {
 			t.Errorf("preconditionLevel(%s) = %d, want %d (level 0)", key, got, precondLevelNone)
 		}
+	}
+}
+
+// TestRemoveSuiteZone_ReconnectsWhenMainDead verifies that removeSuiteZone
+// attempts to reconnect the suite zone connection before sending RemoveZone
+// when the main pool connection is dead. Without this, the device is left
+// with stale zones because sendRemoveZone silently returns when there is
+// no live connection.
+func TestRemoveSuiteZone_ReconnectsWhenMainDead(t *testing.T) {
+	r := newTestRunner()
+
+	// Set up suite zone with zone ID but NO live connection.
+	r.suite.Record("suite-zone-id", makeCryptoState())
+	// Main connection is dead (default stub has ConnDisconnected).
+
+	// removeSuiteZone should still complete without panic.
+	// It will attempt reconnect (which fails since no target), then
+	// proceed to cleanup.
+	r.removeSuiteZone()
+
+	// After removeSuiteZone, suite should be cleared.
+	if r.suite.ZoneID() != "" {
+		t.Error("expected suite zone ID to be cleared after removeSuiteZone")
+	}
+	if r.suite.IsCommissioned() {
+		t.Error("expected suite to not be commissioned after removeSuiteZone")
+	}
+}
+
+// TestRemoveSuiteZone_PromotesSuiteConnToMain verifies that removeSuiteZone
+// promotes the suite connection to main when the main pool connection is dead,
+// allowing sendRemoveZone to use it for sending the RemoveZone message.
+func TestRemoveSuiteZone_PromotesSuiteConnToMain(t *testing.T) {
+	r := newTestRunner()
+
+	// Create a suite zone with a "live" connection (ConnOperational).
+	suiteConn := &Connection{state: ConnOperational}
+	r.suite.Record("suite-zone-id", makeCryptoState())
+	r.suite.SetConn(suiteConn)
+
+	// Set PASE state so sendRemoveZone has a session key for zone ID derivation.
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{0xDE, 0xAD}})
+
+	// Main connection is dead (default stub has ConnDisconnected).
+	if r.pool.Main().isConnected() {
+		t.Fatal("precondition: main should be disconnected")
+	}
+
+	// removeSuiteZone should promote suite conn to main so RemoveZone can be sent.
+	r.removeSuiteZone()
+
+	// After removeSuiteZone, suite should be cleared.
+	if r.suite.ZoneID() != "" {
+		t.Error("expected suite zone ID to be cleared after removeSuiteZone")
+	}
+}
+
+// TestRemoveSuiteZone_CleansUpEvenWhenReconnectFails verifies that
+// removeSuiteZone still cleans up all state even when reconnection fails.
+func TestRemoveSuiteZone_CleansUpEvenWhenReconnectFails(t *testing.T) {
+	r := newTestRunner()
+
+	// Set up suite zone with no connection and no target (reconnect will fail).
+	r.suite.Record("suite-zone-id", makeCryptoState())
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{0xAB}})
+
+	r.removeSuiteZone()
+
+	// All state should be cleared regardless.
+	if r.suite.ZoneID() != "" {
+		t.Error("expected suite zone cleared")
+	}
+	if r.connMgr.PASEState() != nil {
+		t.Error("expected PASE state cleared")
+	}
+	if r.connMgr.ZoneCA() != nil {
+		t.Error("expected zone CA cleared")
 	}
 }
 

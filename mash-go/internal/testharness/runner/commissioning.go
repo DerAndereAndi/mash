@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -41,28 +40,18 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 	if r.connMgr.PASEState() != nil && r.connMgr.PASEState().completed {
 		if wasConnected {
 			r.debugf("ensureCommissioned: reusing existing PASE session")
-			// Always restore suite zone crypto when reusing a session.
-			// Precondition handlers may have replaced it (device_has_grid_zone
-			// generates a new Zone CA), and lower-level tests may have cleared
-			// it (non-commissioned tests nil out zoneCA/zoneCAPool). The suite
-			// zone crypto is the only crypto that matches the device's actual
-			// TLS config for the reused session.
-			crypto := r.suite.Crypto()
-			if crypto.ZoneCAPool != nil {
-				r.connMgr.SetZoneCA(crypto.ZoneCA)
-				r.connMgr.SetControllerCert(crypto.ControllerCert)
-				r.connMgr.SetIssuedDeviceCert(crypto.IssuedDeviceCert)
-				// Ensure suite zone CA is in the pool without replacing it.
-				// The accumulated pool may contain CAs from other zones the
-				// device still knows about. Replacing it with the suite pool
-				// loses those CAs (the device may present a cert from any zone).
-				if r.connMgr.ZoneCAPool() == nil {
-					r.connMgr.SetZoneCAPool(x509.NewCertPool())
+			// Restore suite zone crypto from per-zone map (preferred) or
+			// suite snapshot (fallback). The per-zone map automatically
+			// rebuilds an accumulated pool containing ALL zone CAs.
+			suiteZoneID := r.suite.ZoneID()
+			if suiteZoneID != "" && r.connMgr.LoadZoneCrypto(suiteZoneID) {
+				r.debugf("ensureCommissioned: restored suite zone crypto from zone map")
+			} else {
+				crypto := r.suite.Crypto()
+				if crypto.ZoneCAPool != nil {
+					r.connMgr.SetWorkingCrypto(crypto)
+					r.debugf("ensureCommissioned: restored suite zone crypto from suite snapshot")
 				}
-				if crypto.ZoneCA != nil && crypto.ZoneCA.Certificate != nil {
-					r.connMgr.ZoneCAPool().AddCert(crypto.ZoneCA.Certificate)
-				}
-				r.debugf("ensureCommissioned: restored suite zone crypto")
 			}
 			state.Set(KeySessionEstablished, true)
 			state.Set(KeyConnectionEstablished, true)
@@ -238,8 +227,8 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 	if r.pool.Main() != nil {
 		r.debugf("transitionToOperational: closing commissioning connection")
 		_ = r.pool.Main().Close()
-		r.pool.SetMain(nil)
 	}
+	r.pool.SetMain(&Connection{})
 
 	// DEC-066: Establish new operational TLS connection.
 	// Retry the dial briefly in case the device hasn't finished registering
@@ -287,27 +276,28 @@ func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
 	if r.suite.ZoneID() == "" {
 		return fmt.Errorf("no suite zone to reconnect to")
 	}
-	if r.connMgr.ZoneCAPool() == nil || r.connMgr.ControllerCert() == nil {
-		// Try restoring from saved suite zone crypto.
+	// Restore suite zone crypto from the per-zone map first (preferred --
+	// contains the accumulated pool). Fall back to suite snapshot for
+	// backward compatibility.
+	suiteZoneID := r.suite.ZoneID()
+	if !r.connMgr.LoadZoneCrypto(suiteZoneID) {
 		crypto := r.suite.Crypto()
-		if crypto.ZoneCAPool != nil && crypto.ControllerCert != nil {
-			r.connMgr.SetZoneCA(crypto.ZoneCA)
-			r.connMgr.SetControllerCert(crypto.ControllerCert)
-			r.connMgr.SetZoneCAPool(crypto.ZoneCAPool)
-			r.connMgr.SetIssuedDeviceCert(crypto.IssuedDeviceCert)
-			r.debugf("reconnectToZone: restored suite zone crypto")
-		} else {
+		if crypto.ZoneCAPool == nil || crypto.ControllerCert == nil {
 			return fmt.Errorf("no crypto material for reconnection")
 		}
+		r.connMgr.SetWorkingCrypto(crypto)
+		r.debugf("reconnectToZone: restored suite zone crypto from suite snapshot (fallback)")
+	} else {
+		r.debugf("reconnectToZone: restored suite zone crypto from zone map")
 	}
 
 	r.debugf("reconnectToZone: reconnecting to zone %s", r.suite.ZoneID())
 
 	target := r.getTarget(nil)
 	ctx := context.Background()
-	crypto := r.WorkingCrypto()
+	wc := r.WorkingCrypto()
 	tlsConn, dialErr := dialWithRetry(ctx, 3, func() (*tls.Conn, error) {
-		return r.dialer.DialOperational(ctx, target, crypto)
+		return r.dialer.DialOperational(ctx, target, wc)
 	})
 	if dialErr != nil {
 		return fmt.Errorf("reconnectToZone failed: %w", dialErr)
@@ -393,10 +383,10 @@ func (r *Runner) commissionSuiteZone(ctx context.Context) error {
 
 	r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 	if err := r.ensureCommissioned(ctx, state); err != nil {
-		r.connMgr.SetCommissionZoneType(0)
+		r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 		return fmt.Errorf("suite commissioning: %w", err)
 	}
-	r.connMgr.SetCommissionZoneType(0)
+	r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 
 	r.recordSuiteZone()
 	r.debugf("commissionSuiteZone: suite zone established (id=%s key=%s)", r.suite.ZoneID(), r.suite.ConnKey())
@@ -425,11 +415,37 @@ func (r *Runner) recordSuiteZone() {
 	} else if r.pool.Main() != nil && r.pool.Main().isConnected() {
 		r.suite.SetConn(r.pool.Main())
 	}
+
+	// Detach main so the suite zone connection lives independently.
+	// Tier transitions only affect pool.Main(), never suite.Conn().
+	r.pool.SetMain(&Connection{})
 }
 
 // removeSuiteZone sends RemoveZone for the suite zone and clears all state.
+// pool.Main() is typically empty (detached) after recordSuiteZone, so this
+// promotes suite.Conn() to main for sending RemoveZone. If the suite
+// connection is dead, we attempt reconnection. Cleanup always proceeds.
 func (r *Runner) removeSuiteZone() {
 	r.debugf("removeSuiteZone: tearing down suite zone %s", r.suite.ZoneID())
+
+	// Ensure we have a live connection to send RemoveZone.
+	// The main pool connection may be dead from tier transitions.
+	mainAlive := r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().framer != nil
+	if !mainAlive {
+		// Try to promote the suite connection to main if it is still alive.
+		if sc := r.suite.Conn(); sc != nil && sc.isConnected() {
+			r.debugf("removeSuiteZone: promoting suite conn to main (main is dead)")
+			r.pool.SetMain(sc)
+		} else if r.config.Target != "" {
+			// Suite conn is also dead; attempt reconnection.
+			r.debugf("removeSuiteZone: main and suite conns dead, attempting reconnect")
+			state := engine.NewExecutionState(context.Background())
+			if err := r.reconnectToZone(state); err != nil {
+				r.debugf("removeSuiteZone: reconnect failed: %v (proceeding with cleanup)", err)
+			}
+		}
+	}
+
 	r.sendRemoveZone()
 	r.closeAllZoneConns()
 	r.ensureDisconnected()

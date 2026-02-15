@@ -34,6 +34,12 @@ type SuiteSession interface {
 	// Called after successful PASE + cert exchange + operational transition.
 	Record(zoneID string, crypto CryptoState)
 
+	// CloseConn closes the suite zone's TCP connection but preserves the
+	// zone ID, crypto material, and commissioned state. Used during backward
+	// transitions so the device detects the disconnect while the harness
+	// retains enough state to reconnect later.
+	CloseConn()
+
 	// Clear removes all suite zone state, closing the connection if alive.
 	// Called during suite teardown or fresh_commission.
 	Clear()
@@ -74,6 +80,13 @@ func (s *suiteSessionImpl) Record(zoneID string, crypto CryptoState) {
 	s.zoneID = zoneID
 	s.connKey = "main-" + zoneID
 	s.crypto = crypto
+}
+
+func (s *suiteSessionImpl) CloseConn() {
+	if s.conn != nil {
+		_ = s.conn.Close()
+		s.conn = nil
+	}
 }
 
 func (s *suiteSessionImpl) Clear() {

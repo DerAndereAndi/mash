@@ -46,6 +46,13 @@ type StateAccessor interface {
 	LastDeviceConnClose() time.Time
 	SetLastDeviceConnClose(t time.Time)
 	IsSuiteZoneCommission() bool
+
+	// Per-zone crypto storage
+	StoreZoneCrypto(zoneID string)
+	LoadZoneCrypto(zoneID string) bool
+	HasZoneCrypto(zoneID string) bool
+	RemoveZoneCrypto(zoneID string)
+	ClearAllCrypto()
 }
 
 // LifecycleOps manages connection and commissioning transitions.
@@ -138,8 +145,9 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 	// Clear stale notification buffer from previous tests.
 	c.pool.ClearNotifications()
 
-	// Reset commission zone type to default (LOCAL) between tests.
-	c.ops.SetCommissionZoneType(0)
+	// Reset commission zone type to TEST between tests. TestControl commands
+	// require a TEST zone, so the default must be TEST (not 0/unspecified).
+	c.ops.SetCommissionZoneType(cert.ZoneTypeTest)
 
 	// Always reset device test state between tests.
 	if c.config.Target != "" && c.config.EnableKey != "" {
@@ -224,10 +232,23 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		}
 		if needsFreshCommission(tc.Preconditions) && c.suite.ZoneID() != "" {
 			c.debugf("fresh_commission: removing suite zone %s", c.suite.ZoneID())
+			// Send RemoveZone on the suite connection (not pool.Main() which
+			// is detached/empty after recordSuiteZone). The suite connection
+			// is the only live link to the device at this point.
+			if sc := c.suite.Conn(); sc != nil && sc.isConnected() {
+				c.ops.SendRemoveZoneOnConn(sc, c.suite.ZoneID())
+			}
 			c.ops.EnsureDisconnected()
+			// EnsureDisconnected clears the suite, so close all zones
+			// (the suite zone should be torn down for fresh_commission).
+			c.pool.CloseAllZones()
+		} else if c.suite.ZoneID() != "" {
+			// Preserve the suite zone's pool entry so that the device keeps
+			// it registered (onZoneClose sends RemoveZone which would kill it).
+			c.pool.CloseZonesExcept(c.suite.ConnKey())
+		} else {
+			c.pool.CloseAllZones()
 		}
-		// Suite zone lives on suite.Conn(), not in the pool. Close all pool zones.
-		c.pool.CloseAllZones()
 	} else {
 		// Clean up extra zones from previous multi-zone tests.
 		if !needsZoneConns {
@@ -255,7 +276,7 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 	// DEC-059: backward transition from commissioned.
 	if current >= precondLevelCommissioned && needed <= precondLevelCommissioning {
 		if c.suite.ZoneID() != "" {
-			c.debugf("backward transition: detaching main conn (suite zone %s stays connected)", c.suite.ZoneID())
+			c.debugf("backward transition: detaching main (suite zone %s stays alive)", c.suite.ZoneID())
 			c.pool.SetMain(&Connection{})
 			c.ops.SetPASEState(nil)
 		} else {
@@ -357,11 +378,46 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 	var setupErr error
 	switch needed {
 	case precondLevelCommissioned:
-		c.debugf("ensuring commissioned for %s", tc.ID)
-		setupErr = c.ops.EnsureCommissioned(ctx, state)
-		if setupErr != nil {
-			c.debugf("ensureCommissioned FAILED for %s: %v", tc.ID, setupErr)
-			return setupErr
+		// Determine whether we can reconnect to the existing suite zone
+		// instead of creating a new zone on the device.
+		// Reconnect when: (1) suite zone exists, (2) zone type is still TEST
+		// (not overridden by a precondition like device_has_grid_zone), and
+		// (3) the current session is NOT already good (PASE completed + conn alive).
+		suiteCanReconnect := c.suite.ZoneID() != "" &&
+			c.ops.CommissionZoneType() == cert.ZoneTypeTest &&
+			!(c.ops.PASEState().Completed() && c.pool.Main() != nil && c.pool.Main().isConnected())
+
+		if suiteCanReconnect {
+			// Close stale main if it's not the suite conn.
+			if m := c.pool.Main(); m != nil && m != c.suite.Conn() && m.isConnected() {
+				_ = m.Close()
+			}
+
+			// Borrow suite connection if it's alive; fall back to reconnect.
+			sc := c.suite.Conn()
+			if sc != nil && sc.isConnected() {
+				c.pool.SetMain(sc)
+				c.debugf("borrowing suite zone %s for %s", c.suite.ZoneID(), tc.ID)
+			} else {
+				c.pool.SetMain(&Connection{})
+				c.debugf("reconnecting to suite zone %s for %s (suite conn dead)", c.suite.ZoneID(), tc.ID)
+				setupErr = c.ops.ReconnectToZone(state)
+				if setupErr != nil {
+					c.debugf("reconnect to suite zone FAILED for %s: %v", tc.ID, setupErr)
+					return setupErr
+				}
+			}
+			state.Set(KeySessionEstablished, true)
+			state.Set(KeyConnectionEstablished, true)
+			state.Set(StateCurrentZoneID, c.suite.ZoneID())
+			state.Set(StateTestZoneID, c.suite.ZoneID())
+		} else {
+			c.debugf("ensuring commissioned for %s", tc.ID)
+			setupErr = c.ops.EnsureCommissioned(ctx, state)
+			if setupErr != nil {
+				c.debugf("ensureCommissioned FAILED for %s: %v", tc.ID, setupErr)
+				return setupErr
+			}
 		}
 		// Store zone IDs for test interpolation.
 		if !needsZoneConns && c.ops.PASEState().Completed() && c.ops.PASEState().SessionKey() != nil {
@@ -559,6 +615,10 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, _ *loader.TestCase, st
 			zc.pendingNotifications = nil
 		}
 	}
+	// Suite zone conn lives outside the pool -- clear its buffer too.
+	if sc := c.suite.Conn(); sc != nil {
+		sc.pendingNotifications = nil
+	}
 
 	// Close connections with incomplete PASE state.
 	if c.pool.Main() != nil && c.pool.Main().isConnected() && !c.ops.PASEState().Completed() {
@@ -588,6 +648,30 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, _ *loader.TestCase, st
 		}
 		secState.pool.connections = nil
 		secState.pool.mu.Unlock()
+	}
+
+	// Probe suite zone connection health. Tests like TC-FRAME-005 send raw
+	// bytes that corrupt the framing layer without transitioning the
+	// Connection state to ConnDisconnected. The connection looks alive
+	// (isConnected()=true) but is unusable. Detecting this here -- in
+	// teardown, which has independent timeouts -- avoids burning the next
+	// test's tight timeout on failed reconnect attempts.
+	if c.config.Target != "" && c.suite.ZoneID() != "" {
+		// After non-L3 tests, pool.Main() may be dead/empty while
+		// suite.Conn() is alive. Restore main to suite conn so
+		// ProbeSessionHealth can use it.
+		if sc := c.suite.Conn(); sc != nil && sc.isConnected() {
+			if m := c.pool.Main(); m == nil || !m.isConnected() {
+				c.pool.SetMain(sc)
+			}
+		}
+
+		if err := c.ops.ProbeSessionHealth(); err != nil {
+			c.debugf("teardown: suite zone health probe failed: %v, reconnecting", err)
+			if reconErr := c.ops.ReconnectToZone(state); reconErr != nil {
+				c.debugf("teardown: suite zone reconnect failed: %v (continuing)", reconErr)
+			}
+		}
 	}
 }
 

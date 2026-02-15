@@ -24,6 +24,8 @@ func init() {
 	// Aliases not present in YAML -- used by test specs and legacy references.
 	attributeNames[uint8(model.FeatureDeviceInfo)]["endpointList"] = features.DeviceInfoAttrEndpoints
 	attributeNames[uint8(model.FeatureSignals)]["schedule"] = features.SignalsAttrPriceSlots
+	// getTestState is added manually in DeviceService (not generated).
+	commandNames[uint8(model.FeatureTestControl)]["getTestState"] = 3
 }
 
 // ResolveEndpointName resolves an endpoint name to its ID (case-insensitive).

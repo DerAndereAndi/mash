@@ -892,6 +892,80 @@ func TestObserver_ClearSnapshot_ThenFreshServiceAppears(t *testing.T) {
 	assert.Equal(t, "MASH-NEW", snap[0].InstanceName, "should see fresh service, not old")
 }
 
+// TestObserver_ClearSnapshot_TimesOutWhenNoNewEvent demonstrates the problem
+// with ClearSnapshot in waitForCommissioningMode: if the device is already
+// advertising (service was already discovered by the persistent browse session)
+// but no NEW mDNS event arrives after clearing, WaitFor times out.
+//
+// In real mDNS, zeroconf's persistent browse session fires events only for
+// changes (new/removed services). If the device hasn't changed its advertisement,
+// no new event arrives and ClearSnapshot causes a false timeout.
+func TestObserver_ClearSnapshot_TimesOutWhenNoNewEvent(t *testing.T) {
+	tb := newTestBrowser()
+	obs := newMDNSObserver(tb, noopDebugf)
+	defer obs.Stop()
+
+	// Device is already advertising -- observer discovers it
+	tb.commAdded <- &discovery.CommissionableService{InstanceName: "MASH-STEADY", Discriminator: 1}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	snap, err := obs.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) >= 1
+	})
+	require.NoError(t, err)
+	require.Len(t, snap, 1)
+
+	// Simulate what waitForCommissioningMode does: clear + wait.
+	// No new mDNS event is sent (device hasn't changed its advertisement).
+	obs.ClearSnapshot("commissionable")
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer waitCancel()
+	_, err = obs.WaitFor(waitCtx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) > 0
+	})
+
+	// BUG: This times out because ClearSnapshot removed the service from the
+	// observer's internal map, and no new event arrives to repopulate it.
+	assert.ErrorIs(t, err, context.DeadlineExceeded,
+		"ClearSnapshot + no new event should cause WaitFor to time out (demonstrating the bug)")
+}
+
+// TestObserver_WaitForPresence_WithoutClear shows that without ClearSnapshot,
+// WaitFor returns immediately when the service is already in the snapshot.
+// This is the desired behavior for waitForCommissioningMode when the device
+// is continuously advertising.
+func TestObserver_WaitForPresence_WithoutClear(t *testing.T) {
+	tb := newTestBrowser()
+	obs := newMDNSObserver(tb, noopDebugf)
+	defer obs.Stop()
+
+	// Device is already advertising
+	tb.commAdded <- &discovery.CommissionableService{InstanceName: "MASH-STEADY", Discriminator: 1}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	snap, err := obs.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) >= 1
+	})
+	require.NoError(t, err)
+	require.Len(t, snap, 1)
+
+	// Without ClearSnapshot, WaitFor returns immediately from existing snapshot
+	start := time.Now()
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer waitCancel()
+	snap, err = obs.WaitFor(waitCtx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) > 0
+	})
+
+	assert.NoError(t, err, "WaitFor should succeed immediately from existing snapshot")
+	assert.Len(t, snap, 1)
+	assert.Less(t, time.Since(start), 50*time.Millisecond,
+		"should return near-instantly from cached snapshot")
+}
+
 // ---------------------------------------------------------------------------
 // Group F: WaitFor absence patterns
 // ---------------------------------------------------------------------------
@@ -924,6 +998,116 @@ func TestObserver_WaitFor_AbsenceAfterClearAndRemoval(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Empty(t, snap)
+}
+
+// ---------------------------------------------------------------------------
+// TC-COMM-003 root cause verification: stale operational entries
+// ---------------------------------------------------------------------------
+
+// TestObserver_TwoOperationalEntries_BothInSnapshot demonstrates that when a
+// device is commissioned twice (creating two different zones), the observer
+// holds BOTH operational entries in its snapshot. This is the root cause of
+// TC-COMM-003's intermittent "all_equal = false" failure: the browse handler
+// picks services[0], which could be the stale zone's entry with an old device ID.
+func TestObserver_TwoOperationalEntries_BothInSnapshot(t *testing.T) {
+	tb := newTestBrowser()
+	obs := newMDNSObserver(tb, noopDebugf)
+	defer obs.Stop()
+
+	// Zone A commissioned first -- device ID "aaaa".
+	tb.opAdded <- &discovery.OperationalService{
+		InstanceName: "zoneA-aaaa",
+		ZoneID:       "zoneA",
+		DeviceID:     "aaaa",
+		Port:         8443,
+	}
+	// Zone B commissioned after fallback -- device ID "bbbb".
+	tb.opAdded <- &discovery.OperationalService{
+		InstanceName: "zoneB-bbbb",
+		ZoneID:       "zoneB",
+		DeviceID:     "bbbb",
+		Port:         8443,
+	}
+
+	// Wait for both to appear.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	svcs, err := obs.WaitFor(ctx, "operational", func(s []discoveredService) bool {
+		return len(s) >= 2
+	})
+	require.NoError(t, err)
+	require.Len(t, svcs, 2, "observer must hold both operational entries")
+
+	// Both device IDs are present.
+	ids := map[string]bool{}
+	for _, svc := range svcs {
+		ids[svc.TXTRecords["DI"]] = true
+	}
+	assert.True(t, ids["aaaa"], "zone A device ID should be in snapshot")
+	assert.True(t, ids["bbbb"], "zone B device ID should be in snapshot")
+
+	// The critical issue: services[0] could be either entry.
+	// Whatever device_id services[0] has, if it's the stale zone, comparing
+	// it against cert_device_id and state_device_id (both from zone B)
+	// produces all_equal = false.
+	firstDI := svcs[0].TXTRecords["DI"]
+	t.Logf("services[0] has DI=%q (non-deterministic)", firstDI)
+}
+
+// TestObserver_StaleOperationalEntry_WrongDeviceID demonstrates the exact
+// TC-COMM-003 failure: three device IDs from different sources don't match
+// because the mDNS browse picks a stale operational entry.
+func TestObserver_StaleOperationalEntry_WrongDeviceID(t *testing.T) {
+	tb := newTestBrowser()
+	obs := newMDNSObserver(tb, noopDebugf)
+	defer obs.Stop()
+
+	const (
+		staleDeviceID = "aaaa1111"
+		freshDeviceID = "bbbb2222"
+	)
+
+	// Stale zone from auto-PICS commissioning.
+	tb.opAdded <- &discovery.OperationalService{
+		InstanceName: "staleZone-" + staleDeviceID,
+		ZoneID:       "staleZone",
+		DeviceID:     staleDeviceID,
+		Port:         8443,
+	}
+	// Fresh zone from fallback re-commissioning.
+	tb.opAdded <- &discovery.OperationalService{
+		InstanceName: "freshZone-" + freshDeviceID,
+		ZoneID:       "freshZone",
+		DeviceID:     freshDeviceID,
+		Port:         8443,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	svcs, err := obs.WaitFor(ctx, "operational", func(s []discoveredService) bool {
+		return len(s) >= 2
+	})
+	require.NoError(t, err)
+
+	// Simulate what TC-COMM-003 does: pick services[0] device_id as mdns_device_id.
+	mdnsDeviceID := svcs[0].TXTRecords["DI"]
+
+	// The cert and state always have the fresh device ID (from the latest commission).
+	certDeviceID := freshDeviceID
+	stateDeviceID := freshDeviceID
+
+	// The all_equal check.
+	allEqual := certDeviceID == stateDeviceID && stateDeviceID == mdnsDeviceID
+
+	if mdnsDeviceID == staleDeviceID {
+		// Observer returned the stale entry first -- this is the TC-COMM-003 failure.
+		assert.False(t, allEqual, "stale DI must cause all_equal=false")
+		t.Logf("REPRODUCED: services[0] has stale DI=%q, cert/state have %q", mdnsDeviceID, freshDeviceID)
+	} else {
+		// Observer returned the fresh entry first -- test would pass.
+		assert.True(t, allEqual, "fresh DI should make all_equal=true")
+		t.Logf("NOT REPRODUCED this run: services[0] has fresh DI=%q (map iteration order)", mdnsDeviceID)
+	}
 }
 
 func TestObserver_WaitFor_AbsenceTimesOutIfStillAdvertising(t *testing.T) {

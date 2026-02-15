@@ -38,6 +38,39 @@ func (_m *MockStateAccessor) EXPECT() *MockStateAccessor_Expecter {
 	return &MockStateAccessor_Expecter{mock: &_m.Mock}
 }
 
+// ClearAllCrypto provides a mock function for the type MockStateAccessor
+func (_mock *MockStateAccessor) ClearAllCrypto() {
+	_mock.Called()
+	return
+}
+
+// MockStateAccessor_ClearAllCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClearAllCrypto'
+type MockStateAccessor_ClearAllCrypto_Call struct {
+	*mock.Call
+}
+
+// ClearAllCrypto is a helper method to define mock.On call
+func (_e *MockStateAccessor_Expecter) ClearAllCrypto() *MockStateAccessor_ClearAllCrypto_Call {
+	return &MockStateAccessor_ClearAllCrypto_Call{Call: _e.mock.On("ClearAllCrypto")}
+}
+
+func (_c *MockStateAccessor_ClearAllCrypto_Call) Run(run func()) *MockStateAccessor_ClearAllCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockStateAccessor_ClearAllCrypto_Call) Return() *MockStateAccessor_ClearAllCrypto_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockStateAccessor_ClearAllCrypto_Call) RunAndReturn(run func()) *MockStateAccessor_ClearAllCrypto_Call {
+	_c.Run(run)
+	return _c
+}
+
 // ClearWorkingCrypto provides a mock function for the type MockStateAccessor
 func (_mock *MockStateAccessor) ClearWorkingCrypto() {
 	_mock.Called()
@@ -203,6 +236,57 @@ func (_c *MockStateAccessor_DiscoveredDiscriminator_Call) RunAndReturn(run func(
 	return _c
 }
 
+// HasZoneCrypto provides a mock function for the type MockStateAccessor
+func (_mock *MockStateAccessor) HasZoneCrypto(zoneID string) bool {
+	ret := _mock.Called(zoneID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for HasZoneCrypto")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = returnFunc(zoneID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// MockStateAccessor_HasZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasZoneCrypto'
+type MockStateAccessor_HasZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// HasZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockStateAccessor_Expecter) HasZoneCrypto(zoneID interface{}) *MockStateAccessor_HasZoneCrypto_Call {
+	return &MockStateAccessor_HasZoneCrypto_Call{Call: _e.mock.On("HasZoneCrypto", zoneID)}
+}
+
+func (_c *MockStateAccessor_HasZoneCrypto_Call) Run(run func(zoneID string)) *MockStateAccessor_HasZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStateAccessor_HasZoneCrypto_Call) Return(b bool) *MockStateAccessor_HasZoneCrypto_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *MockStateAccessor_HasZoneCrypto_Call) RunAndReturn(run func(zoneID string) bool) *MockStateAccessor_HasZoneCrypto_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsSuiteZoneCommission provides a mock function for the type MockStateAccessor
 func (_mock *MockStateAccessor) IsSuiteZoneCommission() bool {
 	ret := _mock.Called()
@@ -291,6 +375,57 @@ func (_c *MockStateAccessor_LastDeviceConnClose_Call) RunAndReturn(run func() ti
 	return _c
 }
 
+// LoadZoneCrypto provides a mock function for the type MockStateAccessor
+func (_mock *MockStateAccessor) LoadZoneCrypto(zoneID string) bool {
+	ret := _mock.Called(zoneID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadZoneCrypto")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func(string) bool); ok {
+		r0 = returnFunc(zoneID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// MockStateAccessor_LoadZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadZoneCrypto'
+type MockStateAccessor_LoadZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// LoadZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockStateAccessor_Expecter) LoadZoneCrypto(zoneID interface{}) *MockStateAccessor_LoadZoneCrypto_Call {
+	return &MockStateAccessor_LoadZoneCrypto_Call{Call: _e.mock.On("LoadZoneCrypto", zoneID)}
+}
+
+func (_c *MockStateAccessor_LoadZoneCrypto_Call) Run(run func(zoneID string)) *MockStateAccessor_LoadZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStateAccessor_LoadZoneCrypto_Call) Return(b bool) *MockStateAccessor_LoadZoneCrypto_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *MockStateAccessor_LoadZoneCrypto_Call) RunAndReturn(run func(zoneID string) bool) *MockStateAccessor_LoadZoneCrypto_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PASEState provides a mock function for the type MockStateAccessor
 func (_mock *MockStateAccessor) PASEState() *PASEState {
 	ret := _mock.Called()
@@ -334,6 +469,46 @@ func (_c *MockStateAccessor_PASEState_Call) Return(pASEState *PASEState) *MockSt
 
 func (_c *MockStateAccessor_PASEState_Call) RunAndReturn(run func() *PASEState) *MockStateAccessor_PASEState_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// RemoveZoneCrypto provides a mock function for the type MockStateAccessor
+func (_mock *MockStateAccessor) RemoveZoneCrypto(zoneID string) {
+	_mock.Called(zoneID)
+	return
+}
+
+// MockStateAccessor_RemoveZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveZoneCrypto'
+type MockStateAccessor_RemoveZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// RemoveZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockStateAccessor_Expecter) RemoveZoneCrypto(zoneID interface{}) *MockStateAccessor_RemoveZoneCrypto_Call {
+	return &MockStateAccessor_RemoveZoneCrypto_Call{Call: _e.mock.On("RemoveZoneCrypto", zoneID)}
+}
+
+func (_c *MockStateAccessor_RemoveZoneCrypto_Call) Run(run func(zoneID string)) *MockStateAccessor_RemoveZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStateAccessor_RemoveZoneCrypto_Call) Return() *MockStateAccessor_RemoveZoneCrypto_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockStateAccessor_RemoveZoneCrypto_Call) RunAndReturn(run func(zoneID string)) *MockStateAccessor_RemoveZoneCrypto_Call {
+	_c.Run(run)
 	return _c
 }
 
@@ -533,6 +708,46 @@ func (_c *MockStateAccessor_SetWorkingCrypto_Call) Return() *MockStateAccessor_S
 }
 
 func (_c *MockStateAccessor_SetWorkingCrypto_Call) RunAndReturn(run func(crypto CryptoState)) *MockStateAccessor_SetWorkingCrypto_Call {
+	_c.Run(run)
+	return _c
+}
+
+// StoreZoneCrypto provides a mock function for the type MockStateAccessor
+func (_mock *MockStateAccessor) StoreZoneCrypto(zoneID string) {
+	_mock.Called(zoneID)
+	return
+}
+
+// MockStateAccessor_StoreZoneCrypto_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StoreZoneCrypto'
+type MockStateAccessor_StoreZoneCrypto_Call struct {
+	*mock.Call
+}
+
+// StoreZoneCrypto is a helper method to define mock.On call
+//   - zoneID string
+func (_e *MockStateAccessor_Expecter) StoreZoneCrypto(zoneID interface{}) *MockStateAccessor_StoreZoneCrypto_Call {
+	return &MockStateAccessor_StoreZoneCrypto_Call{Call: _e.mock.On("StoreZoneCrypto", zoneID)}
+}
+
+func (_c *MockStateAccessor_StoreZoneCrypto_Call) Run(run func(zoneID string)) *MockStateAccessor_StoreZoneCrypto_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStateAccessor_StoreZoneCrypto_Call) Return() *MockStateAccessor_StoreZoneCrypto_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockStateAccessor_StoreZoneCrypto_Call) RunAndReturn(run func(zoneID string)) *MockStateAccessor_StoreZoneCrypto_Call {
 	_c.Run(run)
 	return _c
 }

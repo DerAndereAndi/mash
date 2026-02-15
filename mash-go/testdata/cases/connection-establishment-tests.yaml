@@ -371,7 +371,7 @@ steps:
   - name: Parse QR code
     action: parse_qr
     params:
-      content: "MASH:1:1234:20202021"
+      content: "MASH:1:{{ device_discriminator }}:{{ setup_code }}"
     expect:
       parse_success: true
 
@@ -379,7 +379,7 @@ steps:
     action: browse_mdns
     params:
       service_type: "_mash-comm._tcp"
-      discriminator: 1234
+      discriminator: "{{ device_discriminator }}"
     expect:
       device_found: true
 
@@ -424,6 +424,7 @@ pics_requirements:
 preconditions:
   - device_commissioned: true
   - connection_established: true
+  - device_has_local_zone: true
 
 steps:
   - name: Force disconnect
@@ -510,6 +511,7 @@ pics_requirements:
 preconditions:
   - device_commissioned: true
   - connection_established: true
+  - device_has_local_zone: true
 
 steps:
   - name: Reboot device
@@ -634,6 +636,7 @@ pics_requirements:
 preconditions:
   - device_commissioned: true
   - connection_established: true
+  - device_has_local_zone: true
 
 steps:
   - name: Change device address
@@ -1311,6 +1314,7 @@ tags:
   - connection
   - not-found
   - negative
+  - env:multi-device
 
 ---
 # TC-NOTFOUND-002: Wrong Discriminator
@@ -1381,6 +1385,7 @@ tags:
   - not-found
   - address
   - negative
+  - env:multi-device
 
 ---
 # TC-NOTFOUND-004: Connection Refused

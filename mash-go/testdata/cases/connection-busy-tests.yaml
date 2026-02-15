@@ -141,6 +141,11 @@ steps:
     expect:
       commission_success: true
 
+  - name: Wait for device to release connection slots
+    action: wait
+    params:
+      duration_ms: 2000
+
 postconditions:
   - device_commissioned: true
 

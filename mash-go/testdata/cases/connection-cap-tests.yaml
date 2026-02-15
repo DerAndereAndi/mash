@@ -48,6 +48,11 @@ steps:
     expect:
       connection_established: true
 
+  - name: Wait for device to release connection slots
+    action: wait
+    params:
+      duration_ms: 2000
+
 postconditions:
   - max_concurrent_connections: "${MASH.S.ZONE.MAX + 1}"
   - connection_cap_enforced: true
@@ -89,6 +94,11 @@ steps:
     action: open_commissioning_connection
     expect:
       connection_established: true
+
+  - name: Wait for device to release connection slots
+    action: wait
+    params:
+      duration_ms: 2000
 
 postconditions:
   - device_responsive_after_flood: true

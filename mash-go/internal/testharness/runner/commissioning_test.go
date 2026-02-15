@@ -209,6 +209,46 @@ func TestIsSuiteZoneCommission_SuiteConnNil(t *testing.T) {
 	}
 }
 
+// TestRecordSuiteZone_DetachesMainFromSuite verifies that after
+// recordSuiteZone(), pool.Main() is a fresh empty connection that is NOT
+// the same object as suite.Conn(). The suite zone connection lives
+// independently so tier transitions on pool.Main() never kill it.
+func TestRecordSuiteZone_DetachesMainFromSuite(t *testing.T) {
+	r := newTestRunner()
+	// Simulate a successful commission: pool.Main() is operational.
+	origConn := &Connection{state: ConnOperational}
+	r.pool.SetMain(origConn)
+	r.connMgr.SetPASEState(&PASEState{
+		completed:  true,
+		sessionKey: []byte("test-session-key"),
+	})
+
+	// Track the zone in the pool (transitionToOperational does this).
+	zoneID := deriveZoneIDFromSecret([]byte("test-session-key"))
+	connKey := "main-" + zoneID
+	r.pool.TrackZone(connKey, origConn, zoneID)
+
+	r.recordSuiteZone()
+
+	// Suite should hold the original connection.
+	if r.suite.Conn() != origConn {
+		t.Error("expected suite.Conn() to be the original connection")
+	}
+	if !r.suite.Conn().isConnected() {
+		t.Error("expected suite.Conn() to still be connected")
+	}
+
+	// pool.Main() must NOT be the same object as suite.Conn().
+	if r.pool.Main() == r.suite.Conn() {
+		t.Error("pool.Main() must be detached from suite.Conn() -- they should be different objects")
+	}
+
+	// pool.Main() should be a fresh, disconnected connection.
+	if r.pool.Main().isConnected() {
+		t.Error("pool.Main() should not be connected after detach")
+	}
+}
+
 func TestEnsureDisconnected_ClearsSuiteCrypto(t *testing.T) {
 	// When ensureDisconnected is called (fresh_commission, suite teardown),
 	// it must clear both current AND suite crypto. Without this, a subsequent

@@ -5,9 +5,26 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/wire"
+	"github.com/mash-protocol/mash-go/pkg/zonecontext"
 )
+
+// requireTestZone returns a StatusNotAuthorized error if the caller's zone
+// type (from context) is not TEST. TestControl commands must never be accepted
+// on production (GRID/LOCAL) zones.
+func requireTestZone(ctx context.Context) error {
+	zt := zonecontext.CallerZoneTypeFromContext(ctx)
+	if zt != cert.ZoneTypeTest {
+		return &wire.CommandError{
+			Status:  wire.StatusNotAuthorized,
+			Message: "TestControl commands require a TEST zone",
+		}
+	}
+	return nil
+}
 
 // RegisterTestEventHandler wires the triggerTestEvent command on the given
 // TestControl feature to the device service's trigger dispatch. This must be
@@ -15,6 +32,9 @@ import (
 // Feature is added to the endpoint) and only when TestMode is enabled.
 func (s *DeviceService) RegisterTestEventHandler(tc *features.TestControl) {
 	tc.OnTriggerTestEvent(func(ctx context.Context, req features.TriggerTestEventRequest) error {
+		if err := requireTestZone(ctx); err != nil {
+			return err
+		}
 		// Validate enable key.
 		if req.EnableKey != s.config.TestEnableKey {
 			s.debugLog("triggerTestEvent: enable key mismatch")
@@ -29,7 +49,10 @@ func (s *DeviceService) RegisterTestEventHandler(tc *features.TestControl) {
 // command on the given TestControl feature. This allows the test harness to dynamically
 // set the commissioning window duration on a running device.
 func (s *DeviceService) RegisterSetCommissioningWindowDurationHandler(tc *features.TestControl) {
-	tc.OnSetCommissioningWindowDuration(func(_ context.Context, req features.SetCommissioningWindowDurationRequest) error {
+	tc.OnSetCommissioningWindowDuration(func(ctx context.Context, req features.SetCommissioningWindowDurationRequest) error {
+		if err := requireTestZone(ctx); err != nil {
+			return err
+		}
 		// Validate enable key.
 		if req.EnableKey != s.config.TestEnableKey {
 			s.debugLog("setCommissioningWindowDuration: enable key mismatch")
@@ -74,7 +97,10 @@ func (s *DeviceService) RegisterGetTestStateHandler(tc *features.TestControl) {
 		Parameters: []model.ParameterMetadata{
 			{Name: "enableKey", Type: model.DataTypeString, Required: true},
 		},
-	}, func(_ context.Context, params map[string]any) (map[string]any, error) {
+	}, func(ctx context.Context, params map[string]any) (map[string]any, error) {
+		if err := requireTestZone(ctx); err != nil {
+			return nil, err
+		}
 		enableKey, _ := params["enableKey"].(string)
 		if enableKey != s.config.TestEnableKey {
 			return nil, fmt.Errorf("invalid enable key")
@@ -237,13 +263,18 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 		// Remove leaked/partial zones that have no active session. These
 		// arise when a PASE handshake creates a zone record but the
 		// connection dies before operational TLS completes (e.g. EOF).
-		// Zones WITH an active session (like the suite zone) are kept.
+		// TEST zones are preserved: the suite zone is the persistent control
+		// channel and may be temporarily disconnected between tests. It gets
+		// removed only by explicit RemoveZone during suite teardown.
 		// Collect IDs under RLock, then remove outside the lock because
 		// RemoveZone takes s.mu.Lock internally and calls slow operations.
 		s.mu.RLock()
 		var staleZoneIDs []string
 		for id := range s.connectedZones {
 			if _, hasSession := s.zoneSessions[id]; !hasSession {
+				if cz := s.connectedZones[id]; cz != nil && cz.Type == cert.ZoneTypeTest {
+					continue
+				}
 				staleZoneIDs = append(staleZoneIDs, id)
 			}
 		}
