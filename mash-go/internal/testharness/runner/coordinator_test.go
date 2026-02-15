@@ -339,6 +339,28 @@ func TestCoordBackward_SecondBlock_SuiteConnNeverClosed(t *testing.T) {
 	assert.False(t, closeConnCalled, "CloseConn must NOT be called in second backward transition block")
 }
 
+// TestCoordBackward_ClosesSuiteConnTCP verifies that the backward transition
+// to L1 (commissioning mode) closes the suite zone TCP connection to free
+// the device's cap slot. The zone itself stays registered -- only the TCP is
+// closed. This is the fix for TC-CONN-CAP-001 and TC-CONN-BUSY-003.
+func TestCoordBackward_ClosesSuiteConnTCP(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	suiteConn := &Connection{state: ConnOperational}
+
+	// current=3 (commissioned), needed=1 (commissioning).
+	o.EXPECT().PASEState().Return(completedPASE())
+	p.EXPECT().Main().Return(&Connection{state: ConnOperational}).Maybe()
+	s.EXPECT().ZoneID().Return("sz1")
+	s.EXPECT().ConnKey().Return("main-sz1").Maybe()
+	s.EXPECT().Conn().Return(suiteConn)
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(),
+		tcWith("TC", cond(PrecondDeviceInCommissioningMode, true)), st()))
+	assert.Equal(t, ConnDisconnected, suiteConn.state,
+		"suite zone TCP must be closed in backward transition to free cap slot")
+}
+
 // ===========================================================================
 // 4. Device reset trigger
 // ===========================================================================

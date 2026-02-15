@@ -165,6 +165,11 @@ type DeviceConfig struct {
 	// Default: 85s. This is an absolute limit across all phases (starting from PASERequest).
 	HandshakeTimeout time.Duration
 
+	// PASEPhaseTimeout is the per-phase timeout for individual PASE read operations.
+	// For example, after sending PASEResponse, the device waits at most this long
+	// for PASEConfirm before closing the connection. Default: 30s (PASE_WAIT_V).
+	PASEPhaseTimeout time.Duration
+
 	// PASEBackoffEnabled enables exponential backoff on failed PASE attempts.
 	// Default: true.
 	PASEBackoffEnabled bool
@@ -343,6 +348,7 @@ func DefaultDeviceConfig() DeviceConfig {
 		ConnectionCooldown:      500 * time.Millisecond,
 		PASEFirstMessageTimeout: 5 * time.Second,
 		HandshakeTimeout:        85 * time.Second,
+		PASEPhaseTimeout:        30 * time.Second,
 		PASEBackoffEnabled: true,
 		PASEBackoffTiers: [4]time.Duration{
 			0,                        // Tier 1: attempts 1-3, no delay

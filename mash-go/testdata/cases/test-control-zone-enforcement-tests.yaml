@@ -1,0 +1,119 @@
+# test-control-zone-enforcement-tests.yaml
+#
+# Validates that TestControl commands (triggerTestEvent,
+# setCommissioningWindowDuration, getTestState) are rejected with
+# NOT_AUTHORIZED when received on non-TEST zones.
+#
+# TestControl is a test-only feature. Accepting its commands on production
+# zones (GRID, LOCAL) would allow external controllers to reset device state,
+# open commissioning windows, or exfiltrate diagnostic data.
+
+---
+id: TC-TESTCTRL-ZONE-001
+name: TestControl Commands Rejected on Non-TEST Zones
+description: |
+  Verifies that all three TestControl commands are rejected with
+  NOT_AUTHORIZED when invoked via GRID and LOCAL zone connections.
+  The zone type is derived from the TLS certificate, so the device
+  must inspect the caller's certificate to enforce this.
+
+pictures_requirements:
+  - D.COMM.PASE
+  - MASH.S.TESTCTRL
+
+preconditions:
+  - session_established: true
+  - two_zones_connected: true
+
+steps:
+  # --- GRID zone: all 3 commands must be rejected ---
+
+  - name: triggerTestEvent rejected on GRID zone
+    action: invoke_as_zone
+    params:
+      zone: GRID
+      endpoint: 0
+      feature: TestControl
+      command: triggerTestEvent
+      args:
+        enableKey: "0000000000000000"
+        eventTrigger: 1
+    expect:
+      invoke_success: false
+      error_code: NOT_AUTHORIZED
+
+  - name: setCommissioningWindowDuration rejected on GRID zone
+    action: invoke_as_zone
+    params:
+      zone: GRID
+      endpoint: 0
+      feature: TestControl
+      command: setCommissioningWindowDuration
+      args:
+        enableKey: "0000000000000000"
+        durationSeconds: 300
+    expect:
+      invoke_success: false
+      error_code: NOT_AUTHORIZED
+
+  - name: getTestState rejected on GRID zone
+    action: invoke_as_zone
+    params:
+      zone: GRID
+      endpoint: 0
+      feature: TestControl
+      command: getTestState
+      args:
+        enableKey: "0000000000000000"
+    expect:
+      invoke_success: false
+      error_code: NOT_AUTHORIZED
+
+  # --- LOCAL zone: all 3 commands must be rejected ---
+
+  - name: triggerTestEvent rejected on LOCAL zone
+    action: invoke_as_zone
+    params:
+      zone: LOCAL
+      endpoint: 0
+      feature: TestControl
+      command: triggerTestEvent
+      args:
+        enableKey: "0000000000000000"
+        eventTrigger: 1
+    expect:
+      invoke_success: false
+      error_code: NOT_AUTHORIZED
+
+  - name: setCommissioningWindowDuration rejected on LOCAL zone
+    action: invoke_as_zone
+    params:
+      zone: LOCAL
+      endpoint: 0
+      feature: TestControl
+      command: setCommissioningWindowDuration
+      args:
+        enableKey: "0000000000000000"
+        durationSeconds: 300
+    expect:
+      invoke_success: false
+      error_code: NOT_AUTHORIZED
+
+  - name: getTestState rejected on LOCAL zone
+    action: invoke_as_zone
+    params:
+      zone: LOCAL
+      endpoint: 0
+      feature: TestControl
+      command: getTestState
+      args:
+        enableKey: "0000000000000000"
+    expect:
+      invoke_success: false
+      error_code: NOT_AUTHORIZED
+
+timeout: "60s"
+tags:
+  - base-protocol
+  - test-control
+  - zone-enforcement

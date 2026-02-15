@@ -973,8 +973,10 @@ func (r *Runner) handleSendRaw(ctx context.Context, step *loader.Step, state *en
 		KeyParseSuccess: true,
 	}
 
-	// Try to read a response with a short timeout.
-	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Try to read a response with an independent timeout. We use
+	// context.Background() instead of ctx because the parent context may
+	// already be expired after precondition setup consumed the test budget.
+	readCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	type readResult struct {

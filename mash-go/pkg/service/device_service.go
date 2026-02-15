@@ -416,6 +416,19 @@ func (s *DeviceService) buildOperationalTLSConfig() {
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		ClientCAs:    caPool,
 		NextProtos:   []string{transport.ALPNProtocol},
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			if len(rawCerts) == 0 {
+				return fmt.Errorf("no peer certificate")
+			}
+			cert, err := x509.ParseCertificate(rawCerts[0])
+			if err != nil {
+				return fmt.Errorf("parse peer certificate: %w", err)
+			}
+			if cert.IsCA {
+				return fmt.Errorf("controller certificate has CA:TRUE (must be end-entity)")
+			}
+			return nil
+		},
 	}
 }
 
@@ -968,6 +981,7 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	}
 
 	// Phase 3: Complete PASE handshake (lock held)
+	paseSession.PhaseTimeout = s.config.PASEPhaseTimeout
 	sharedSecret, err := paseSession.CompleteHandshake(handshakeCtx, conn, req)
 	if err != nil {
 		// PASE failed - wrong setup code or protocol error

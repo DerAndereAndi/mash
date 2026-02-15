@@ -112,6 +112,12 @@ type PASEServerSession struct {
 	verifier       *Verifier
 	spake          *SPAKE2PlusServer
 	serverIdentity []byte
+
+	// PhaseTimeout, if non-zero, overrides the parent context deadline for
+	// individual read phases (e.g. waiting for PASEConfirm after sending
+	// PASEResponse). This implements per-phase timeouts as required by the
+	// spec (PASE_WAIT_V = 30s). When zero, the parent context governs.
+	PhaseTimeout time.Duration
 }
 
 // NewPASEServerSession creates a new PASE server session.
@@ -186,8 +192,14 @@ func (s *PASEServerSession) CompleteHandshake(ctx context.Context, conn net.Conn
 		return nil, fmt.Errorf("failed to send PASE response: %w", err)
 	}
 
-	// Step 4: Read PASEConfirm
-	msg, err := readMessageWithContext(ctx, conn)
+	// Step 4: Read PASEConfirm with per-phase timeout if configured.
+	readCtx := ctx
+	if s.PhaseTimeout > 0 {
+		var phaseCancel context.CancelFunc
+		readCtx, phaseCancel = context.WithTimeout(ctx, s.PhaseTimeout)
+		defer phaseCancel()
+	}
+	msg, err := readMessageWithContext(readCtx, conn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read PASE confirm: %w", err)
 	}

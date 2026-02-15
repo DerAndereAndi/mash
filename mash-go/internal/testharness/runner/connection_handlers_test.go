@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
@@ -1570,6 +1571,63 @@ func TestHandleSendRaw_MessageTypeResponse(t *testing.T) {
 	}
 	if out[KeyRawSent] != true {
 		t.Error("expected raw_sent=true")
+	}
+}
+
+// ============================================================================
+// TC-CBOR-002 root cause: context exhaustion in handleSendRaw
+// ============================================================================
+
+// TestHandleSendRaw_ExpiredContext demonstrates that handleSendRaw returns
+// response_received=false when called with an already-expired context, even
+// though the write succeeds and a response is available.
+//
+// Root cause of TC-CBOR-002: The test-level context (5s from YAML timeout) is
+// shared between precondition setup and step execution. If preconditions
+// consume the budget (e.g., reconnecting after a health check failure), the
+// handler's ctx is expired before it runs. The handler creates
+// context.WithTimeout(ctx, 5s) which inherits the expired parent, so the
+// select immediately takes readCtx.Done().
+//
+// RED: The handler should use its own independent timeout for I/O rather than
+// inheriting the parent context's expired deadline. Currently it inherits,
+// causing false-negative response_received.
+func TestHandleSendRaw_ExpiredContext(t *testing.T) {
+	r, server := newPipedRunner()
+	defer server.Close()
+
+	// Server will echo a valid response immediately.
+	go serverEchoResponse(server)
+
+	// Create an already-expired context — simulates the test budget being
+	// consumed by precondition setup.
+	expiredCtx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	defer cancel()
+	time.Sleep(1 * time.Millisecond) // ensure context is expired
+
+	state := engine.NewExecutionState(expiredCtx)
+	step := &loader.Step{Params: map[string]any{
+		"message_type": "request",
+		"operation":    1,
+		"endpoint_id":  0,
+		"feature_id":   1,
+	}}
+
+	out, err := r.handleSendRaw(expiredCtx, step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Currently: response_received=false because the expired context causes
+	// the read to immediately return. The write succeeded (9 bytes sent),
+	// and the server responded, but we never read it.
+	//
+	// After fix: handleSendRaw should use its own timeout for I/O, not
+	// inherit the parent's expired deadline, so response_received=true.
+	if out[KeyResponseReceived] != true {
+		t.Errorf("response_received=%v; want true — "+
+			"handler should use independent timeout, not inherit expired parent context",
+			out[KeyResponseReceived])
 	}
 }
 

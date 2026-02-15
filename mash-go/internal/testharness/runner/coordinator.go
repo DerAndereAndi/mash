@@ -286,9 +286,17 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 	}
 
 	// Backwards transition: disconnect to give the device a clean state.
+	// When a suite zone exists, close its TCP connection so the device's
+	// cap slots are fully available for L1 tests (e.g. TC-CONN-CAP-001).
+	// The zone stays registered; suiteCanReconnect will re-establish TCP
+	// when a L3 test needs it again.
 	if needed < current && needed <= precondLevelCommissioning {
 		c.debugf("backward transition: disconnecting (current=%d -> needed=%d)", current, needed)
 		if c.suite.ZoneID() != "" {
+			if sc := c.suite.Conn(); sc != nil && sc.isConnected() {
+				c.debugf("backward transition: closing suite zone TCP to free cap slot")
+				sc.transitionTo(ConnDisconnected)
+			}
 			c.pool.SetMain(&Connection{})
 			c.ops.SetPASEState(nil)
 		} else {
