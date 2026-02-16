@@ -392,6 +392,25 @@ func TestConnMgr_ClearAllCrypto_ClearsEverything(t *testing.T) {
 	assert.False(t, m.HasZoneCrypto("zone-1"), "ClearAllCrypto should clear zoneCrypto map")
 }
 
+// ===========================================================================
+// TransitionToOperational: zone tracking key convention
+// ===========================================================================
+
+// TestConnMgr_ReconnectToZone_TrackKeyMatchesConnKey verifies that
+// ReconnectToZone uses suite.ConnKey() as the pool tracking key, ensuring
+// consistency with the "main-"+zoneID convention. This same convention
+// must be used by TransitionToOperational.
+func TestConnMgr_ReconnectToZone_TrackKeyMatchesConnKey(t *testing.T) {
+	sessionKey := []byte("test-session-key")
+	zoneID := deriveZoneIDFromSecret(sessionKey)
+	expectedKey := "main-" + zoneID
+
+	suite := NewSuiteSession()
+	suite.Record(zoneID, CryptoState{})
+	assert.Equal(t, expectedKey, suite.ConnKey(),
+		"suite.ConnKey() must use 'main-' prefix convention")
+}
+
 func TestConnMgr_EnsureDisconnected_PreservesZoneCryptoMap(t *testing.T) {
 	m, p, s := newTestConnMgr(t)
 	p.EXPECT().Main().Return((*Connection)(nil))

@@ -356,7 +356,7 @@ func (m *connMgrImpl) TransitionToOperational(state *engine.ExecutionState) erro
 	}
 
 	state.Set(StateOperationalConnEstablished, time.Now())
-	m.pool.TrackZone(zoneID, m.pool.Main(), zoneID)
+	m.pool.TrackZone("main-"+zoneID, m.pool.Main(), zoneID)
 	m.debugf("transitionToOperational: operational connection established for zone %s", zoneID)
 	return nil
 }

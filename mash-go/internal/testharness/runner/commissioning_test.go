@@ -249,6 +249,93 @@ func TestRecordSuiteZone_DetachesMainFromSuite(t *testing.T) {
 	}
 }
 
+// TestRecordSuiteZone_UntracksFromPool_UsingTransitionKey verifies that
+// recordSuiteZone properly untracks the suite zone from the pool when the
+// zone was registered by transitionToOperational. The pool tracking key must
+// match suite.ConnKey() ("main-"+zoneID) for the lookup to succeed.
+//
+// This is the core regression test for the x509 cascade bug: if the tracking
+// key doesn't match, the zone stays in the pool and gets its crypto deleted
+// by CloseZonesExcept during tier transitions.
+func TestRecordSuiteZone_UntracksFromPool_UsingTransitionKey(t *testing.T) {
+	r := newTestRunner()
+	origConn := &Connection{state: ConnOperational}
+	r.pool.SetMain(origConn)
+
+	sessionKey := []byte("test-session-key")
+	r.connMgr.SetPASEState(&PASEState{
+		completed:  true,
+		sessionKey: sessionKey,
+	})
+
+	zoneID := deriveZoneIDFromSecret(sessionKey)
+	connKey := "main-" + zoneID
+
+	// Simulate what transitionToOperational does after the fix:
+	// TrackZone with key="main-"+zoneID to match suite.ConnKey().
+	r.pool.TrackZone(connKey, origConn, zoneID)
+
+	r.recordSuiteZone()
+
+	// The zone MUST be untracked from the pool after recordSuiteZone
+	// moves it to the suite session.
+	if r.pool.Zone(connKey) != nil {
+		t.Error("zone still tracked under main-prefixed key -- recordSuiteZone should have untracked it")
+	}
+	if r.pool.ZoneCount() != 0 {
+		t.Errorf("expected 0 zones in pool after recordSuiteZone, got %d", r.pool.ZoneCount())
+	}
+
+	// Suite session should hold the connection.
+	if r.suite.Conn() != origConn {
+		t.Error("expected suite.Conn() to be the original connection")
+	}
+}
+
+// TestRecordSuiteZone_CloseZonesExcept_PreservesAfterRecord verifies the
+// full flow: transitionToOperational tracks → recordSuiteZone untracks →
+// CloseZonesExcept does NOT fire onZoneClose for the suite zone.
+func TestRecordSuiteZone_CloseZonesExcept_PreservesAfterRecord(t *testing.T) {
+	var closedZoneIDs []string
+	r := &Runner{
+		config: &Config{},
+		suite:  NewSuiteSession(),
+	}
+	r.pool = NewConnPool(func(string, ...any) {}, func(conn *Connection, zoneID string) {
+		closedZoneIDs = append(closedZoneIDs, zoneID)
+	})
+	origConn := &Connection{state: ConnOperational}
+	r.pool.SetMain(origConn)
+	r.dialer = NewDialer(false, r.debugf)
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{})
+
+	sessionKey := []byte("test-session-key-2")
+	r.connMgr.SetPASEState(&PASEState{
+		completed:  true,
+		sessionKey: sessionKey,
+	})
+
+	zoneID := deriveZoneIDFromSecret(sessionKey)
+	connKey := "main-" + zoneID
+
+	// Simulate transitionToOperational (fixed): track with "main-"+zoneID.
+	r.pool.TrackZone(connKey, origConn, zoneID)
+
+	r.recordSuiteZone()
+
+	// Now add another zone and close all except suite.
+	otherConn := &Connection{state: ConnOperational}
+	r.pool.TrackZone("other-zone", otherConn, "other-id")
+	r.pool.CloseZonesExcept(r.suite.ConnKey())
+
+	// Only the "other" zone should have been closed.
+	// The suite zone was properly untracked by recordSuiteZone,
+	// so CloseZonesExcept won't touch it.
+	if len(closedZoneIDs) != 1 || closedZoneIDs[0] != "other-id" {
+		t.Errorf("expected only other-id to be closed, got %v", closedZoneIDs)
+	}
+}
+
 func TestEnsureDisconnected_ClearsSuiteCrypto(t *testing.T) {
 	// When ensureDisconnected is called (fresh_commission, suite teardown),
 	// it must clear both current AND suite crypto. Without this, a subsequent

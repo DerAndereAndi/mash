@@ -513,6 +513,62 @@ func TestConnPool_ClearNotifications(t *testing.T) {
 	}
 }
 
+// --- Key mismatch regression guard ---
+//
+// These tests document what happens when pool zone tracking keys don't
+// match the key used by CloseZonesExcept/UntrackZone. This was the root
+// cause of the x509 cascade: transitionToOperational tracked with raw
+// zoneID while recordSuiteZone and CloseZonesExcept used "main-"+zoneID.
+// Fixed by aligning transitionToOperational to use "main-"+zoneID.
+
+// TestConnPool_KeyMismatch_UntrackWithWrongKey verifies that UntrackZone
+// silently does nothing when the key doesn't match any tracked zone.
+func TestConnPool_KeyMismatch_UntrackWithWrongKey(t *testing.T) {
+	pool := NewConnPool(nil, nil)
+	conn := &Connection{state: ConnOperational}
+
+	pool.TrackZone("abc123", conn, "abc123")
+	pool.UntrackZone("main-abc123") // wrong key
+
+	if pool.ZoneCount() != 1 {
+		t.Fatalf("expected zone to still be tracked (key mismatch), got count=%d", pool.ZoneCount())
+	}
+}
+
+// TestConnPool_KeyMismatch_CloseZonesExceptFailsToProtect verifies that
+// CloseZonesExcept with a mismatched except key does NOT protect the zone.
+func TestConnPool_KeyMismatch_CloseZonesExceptFailsToProtect(t *testing.T) {
+	var closedZoneIDs []string
+	pool := NewConnPool(nil, func(conn *Connection, zoneID string) {
+		closedZoneIDs = append(closedZoneIDs, zoneID)
+	})
+	conn := &Connection{state: ConnOperational}
+
+	pool.TrackZone("suite-zone", conn, "suite-zone")
+	pool.CloseZonesExcept("main-suite-zone") // wrong except key
+
+	if len(closedZoneIDs) != 1 || closedZoneIDs[0] != "suite-zone" {
+		t.Fatalf("expected onZoneClose for suite-zone (not protected), got %v", closedZoneIDs)
+	}
+}
+
+// TestConnPool_KeyMismatch_SuiteConnDestroyedByClosure verifies that a
+// shared *Connection pointer is destroyed by pool closure when the
+// except key doesn't match.
+func TestConnPool_KeyMismatch_SuiteConnDestroyedByClosure(t *testing.T) {
+	pool := NewConnPool(nil, nil)
+	conn := &Connection{state: ConnOperational}
+
+	pool.TrackZone("xyz", conn, "xyz")
+	suiteConn := conn // shared pointer
+
+	pool.CloseZonesExcept("main-xyz") // wrong except key
+
+	if suiteConn.isConnected() {
+		t.Fatal("expected suite connection to be destroyed by pool closure")
+	}
+}
+
 // --- Narrow sub-interface compile-time checks ---
 
 // Verify connPoolImpl satisfies each narrow sub-interface.

@@ -418,6 +418,49 @@ func TestCoordReset_SkipsWhenNoTarget(t *testing.T) {
 }
 
 // ===========================================================================
+// 4b. Zone cleanup key mismatch (x509 cascade root cause)
+// ===========================================================================
+
+// TestCoordCleanup_CloseZonesExceptUsesConnKey verifies that when the
+// coordinator cleans up stale zones (not reusing session), it calls
+// CloseZonesExcept with the suite's ConnKey. Since transitionToOperational
+// tracks the zone under key=zoneID but ConnKey returns "main-"+zoneID,
+// the except key won't match and the suite zone gets closed+crypto deleted.
+//
+// This test documents the bug: the coordinator correctly passes ConnKey
+// to CloseZonesExcept, but the pool entry was registered under a different
+// key. The fix must align the tracking key with ConnKey.
+func TestCoordCleanup_CloseZonesExceptUsesConnKey(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+
+	// Not reusing session: current=0 (no PASE), needed=2 (connected).
+	o.EXPECT().PASEState().Return((*PASEState)(nil))
+	p.EXPECT().Main().Return((*Connection)(nil)).Maybe()
+
+	// Suite zone exists.
+	s.EXPECT().ZoneID().Return("abc123")
+	s.EXPECT().ConnKey().Return("main-abc123")
+
+	// Pool has 1 zone entry (the orphaned suite zone under key="abc123").
+	p.EXPECT().ZoneCount().Return(1)
+
+	// Capture the except key passed to CloseZonesExcept.
+	var exceptKey string
+	p.EXPECT().CloseZonesExcept(mock.Anything).Run(func(key string) {
+		exceptKey = key
+	}).Return(time.Time{})
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(),
+		tcWith("TC", cond(PrecondDeviceConnected, true)), st()))
+
+	// The coordinator passes suite.ConnKey() = "main-abc123" as the except key.
+	// But the zone is tracked under "abc123", so the except key doesn't match.
+	assert.Equal(t, "main-abc123", exceptKey,
+		"coordinator passes suite.ConnKey() to CloseZonesExcept")
+}
+
+// ===========================================================================
 // 5. Zone CA clearing
 // ===========================================================================
 
