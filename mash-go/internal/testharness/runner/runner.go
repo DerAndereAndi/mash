@@ -1883,14 +1883,15 @@ func (r *Runner) handleWait(ctx context.Context, step *loader.Step, state *engin
 		}
 	}
 
-	// Parse simulated duration from "duration" string param (e.g. "31s").
-	// This is used for keepalive tracking but NOT for actual sleep.
-	simulatedMs := durationMs
+	// Parse "duration" string param (e.g. "35s") and use it for actual sleep
+	// when no duration_ms or duration_seconds was provided.
 	if durStr, ok := params[ParamDuration].(string); ok && durStr != "" {
-		if d, err := time.ParseDuration(durStr); err == nil {
-			simulatedMs = float64(d.Milliseconds())
+		if d, err := time.ParseDuration(durStr); err == nil && durationMs <= 1000 {
+			// Override the default 1000ms with the parsed duration.
+			durationMs = float64(d.Milliseconds())
 		}
 	}
+	simulatedMs := durationMs
 
 	select {
 	case <-ctx.Done():

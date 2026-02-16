@@ -293,16 +293,23 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 		// Real TLS connection: probe with a short read to detect EOF/reset.
 		_ = r.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 		buf := make([]byte, 1)
-		_, err := r.pool.Main().tlsConn.Read(buf)
+		n, err := r.pool.Main().tlsConn.Read(buf)
 		_ = r.pool.Main().tlsConn.SetReadDeadline(time.Time{})
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// read timed out -- connection still alive
+				// read timed out -- connection still alive, no data pending
 			} else {
 				// EOF, reset, or other error -- remote closed.
 				r.pool.Main().transitionTo(ConnDisconnected)
 				connected = false
 			}
+		} else if n > 0 && !paseCompleted {
+			// Data arrived on a commissioning connection where PASE is not
+			// complete. This means the device sent a response (PASEResponse
+			// or CommissioningError) -- it is closing the connection. Treat
+			// as disconnected so we report ADVERTISING, not CONNECTED.
+			r.pool.Main().transitionTo(ConnDisconnected)
+			connected = false
 		}
 	}
 

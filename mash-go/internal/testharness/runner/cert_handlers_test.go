@@ -2,8 +2,14 @@ package runner
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"math/big"
 	"testing"
+	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
@@ -83,6 +89,94 @@ func TestHandleVerifyCommissioningState(t *testing.T) {
 	out, _ = r.handleVerifyCommissioningState(context.Background(), step, state)
 	if out[KeyStateMatches] != false {
 		t.Error("expected state_matches=false for mismatch")
+	}
+}
+
+// TestHandleVerifyCommissioningState_BufferedDataDetection verifies that when
+// the device sends data on a commissioning connection (e.g., PASEResponse after
+// invalid PASE X bytes), the probe correctly detects this as a closing connection
+// and reports ADVERTISING, not CONNECTED. This was the root cause of TC-PASE-003.
+func TestHandleVerifyCommissioningState_BufferedDataDetection(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	// Create a real TCP+TLS pair so SetReadDeadline works (net.Pipe doesn't
+	// support deadlines). The server writes data to simulate buffered PASEResponse.
+	serverTLS := &tls.Config{
+		Certificates: []tls.Certificate{selfSignedCert(t)},
+		MinVersion:   tls.VersionTLS13,
+	}
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", serverTLS)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	// Server: accept, write data (simulating PASEResponse), then close.
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		// Write some bytes to simulate a PASEResponse sitting in buffer.
+		conn.Write([]byte{0xA1, 0x01, 0x02, 0x03})
+		time.Sleep(500 * time.Millisecond)
+		conn.Close()
+	}()
+
+	clientConn, err := tls.Dial("tcp", listener.Addr().String(), &tls.Config{
+		InsecureSkipVerify: true,
+		MinVersion:         tls.VersionTLS13,
+	})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer clientConn.Close()
+
+	// Small delay to let server write data into the TLS stream.
+	time.Sleep(50 * time.Millisecond)
+
+	// Set up connection as TLS-connected (commissioning, PASE not complete).
+	r.pool.Main().tlsConn = clientConn
+	r.pool.Main().state = ConnTLSConnected
+	r.pool.Main().hadConnection = true
+	r.connMgr.SetPASEState(nil) // PASE not completed
+
+	step := &loader.Step{Params: map[string]any{ParamExpectedState: CommissioningStateAdvertising}}
+	out, err := r.handleVerifyCommissioningState(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// With buffered data on an incomplete PASE connection, the probe should
+	// detect the data and transition to disconnected -> ADVERTISING.
+	if got := out[KeyCommissioningState]; got != CommissioningStateAdvertising {
+		t.Errorf("expected ADVERTISING (device sending response = closing), got %v", got)
+	}
+	if out[KeyStateMatches] != true {
+		t.Error("expected state_matches=true")
+	}
+}
+
+// selfSignedCert generates a self-signed TLS certificate for testing.
+func selfSignedCert(t *testing.T) tls.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	return tls.Certificate{
+		Certificate: [][]byte{certDER},
+		PrivateKey:  key,
 	}
 }
 

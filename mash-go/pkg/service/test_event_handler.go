@@ -300,9 +300,12 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 		// Reset PASE backoff counter so timing-sensitive tests start clean.
 		s.ResetPASETracker()
 		// Clear connection cooldown timer so cooldown tests are hermetic.
+		// Bump the generation to invalidate any stale goroutines from the
+		// previous test that hold a defer releaseCommissioningConnection.
 		s.connectionMu.Lock()
 		s.lastCommissioningAttempt = time.Time{}
 		s.commissioningConnActive = false
+		s.commissioningGeneration++
 		s.connectionMu.Unlock()
 		// Reset failsafe timers to prevent active failsafes from prior
 		// tests from firing during subsequent tests.
@@ -314,7 +317,12 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 		// Close pre-operational connections tracked by connTracker to
 		// prevent stale entries from prior tests from being reaped mid-test.
 		if s.connTracker != nil {
-			s.connTracker.CloseAll()
+			closed := s.connTracker.CloseAll()
+			// If connections were closed, give goroutines a brief moment
+			// to decrement activeConns via their defers.
+			if closed > 0 {
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
 		// Reset auto-reentry flag so commissioning re-entry is clean.
 		s.autoReentryPending = false

@@ -492,6 +492,14 @@ func stepDurationFromParams(params map[string]interface{}) time.Duration {
 			d = md
 		}
 	}
+	// Also handle the "duration" string param (e.g. "31s", "100ms").
+	// handleWait uses this for actual sleep when no duration_ms/duration_seconds
+	// is provided, so the step timeout must account for it.
+	if durStr, ok := params["duration"].(string); ok && durStr != "" {
+		if pd, err := time.ParseDuration(durStr); err == nil && pd > d {
+			d = pd
+		}
+	}
 	return d
 }
 

@@ -503,14 +503,19 @@ steps:
     params:
       block_pong: true
     expect:
+      ping_sent: true
       pong_received: false
 
-  - name: Verify pong timeout after 5s
-    action: verify_timing
+  - name: Wait for pong timeout period
+    action: wait
     params:
-      max_duration: "6s"
+      duration: "6s"
+
+  - name: Verify keepalive shows pong was not received
+    action: verify_keepalive
     expect:
-      timeout_detected: true
+      keepalive_active: true
+      pong_received: false
 
 postconditions:
   - pong_timeout_5s: true

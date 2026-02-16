@@ -665,3 +665,35 @@ func TestParamFloat(t *testing.T) {
 		})
 	}
 }
+
+// TestHandleWait_DurationStringParam verifies that handleWait uses the
+// "duration" string parameter (e.g. "35s") for actual sleep, not just
+// for keepalive simulation.
+//
+// Root cause of TC-PASE-003 in-suite failure: The YAML specifies
+// duration: "35s" but handleWait only uses it for simulatedMs (keepalive
+// tracking). The actual sleep uses durationMs which defaults to 1000ms
+// when neither duration_ms nor duration_seconds is provided.
+func TestHandleWait_DurationStringParam(t *testing.T) {
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+	step := &loader.Step{Params: map[string]any{
+		"duration": "100ms",
+	}}
+
+	start := time.Now()
+	_, err := r.handleWait(context.Background(), step, state)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("handleWait error: %v", err)
+	}
+
+	// With duration: "100ms", the handler should sleep ~100ms.
+	// Currently it sleeps 1000ms (the default) because the duration
+	// string is only used for keepalive simulation.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("handleWait slept %v; want ~100ms — "+
+			"duration string param should be used for actual sleep, not just keepalive", elapsed)
+	}
+}

@@ -112,6 +112,7 @@ type DeviceService struct {
 	// Security Hardening (DEC-047)
 	// Connection tracking
 	commissioningConnActive  bool       // Only one commissioning connection allowed
+	commissioningGeneration  uint64     // Monotonic counter to prevent stale release
 	lastCommissioningAttempt time.Time  // For connection cooldown
 	connectionMu             sync.Mutex // Protects connection tracking fields
 
@@ -949,7 +950,8 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	}
 
 	// Phase 2: PASERequest received -- now acquire the commissioning lock
-	if ok, rejectReason, reason := s.acceptCommissioningConnection(); !ok {
+	ok, rejectReason, reason, commGen := s.acceptCommissioningConnection()
+	if !ok {
 		// DEC-047: Count cooldown rejections as failed attempts so the
 		// backoff tracker escalates. Skip "already in progress" since
 		// the concurrent PASE will be counted when it completes -- counting
@@ -970,7 +972,7 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 		conn.Close()
 		return
 	}
-	defer s.releaseCommissioningConnection()
+	defer s.releaseCommissioningConnection(commGen)
 
 	// DEC-047: Overall handshake timeout (starts at PASERequest, not TLS accept)
 	handshakeCtx := s.ctx
@@ -1142,7 +1144,7 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	s.debugLog("handleCommissioningConnection: closing commissioning connection (DEC-066)", "zoneID", zoneID)
 
 	// Release resources before closing
-	s.releaseCommissioningConnection()
+	s.releaseCommissioningConnection(commGen)
 	s.connTracker.Remove(rawConn)
 	releaseActiveConn()
 
@@ -2786,13 +2788,13 @@ const (
 	rejectZonesFull
 )
 
-func (s *DeviceService) acceptCommissioningConnection() (bool, commissioningRejectReason, string) {
+func (s *DeviceService) acceptCommissioningConnection() (bool, commissioningRejectReason, string, uint64) {
 	s.connectionMu.Lock()
 	defer s.connectionMu.Unlock()
 
 	// Check 1: Is commissioning already in progress?
 	if s.commissioningConnActive {
-		return false, rejectAlreadyInProgress, "commissioning already in progress"
+		return false, rejectAlreadyInProgress, "commissioning already in progress", 0
 	}
 
 	// Check 2: Connection cooldown (starts at release, not acceptance).
@@ -2803,7 +2805,7 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, commissioningReje
 	if s.config.ConnectionCooldown > 0 {
 		elapsed := time.Since(s.lastCommissioningAttempt)
 		if elapsed < s.config.ConnectionCooldown {
-			return false, rejectCooldown, fmt.Sprintf("cooldown active (%s remaining)", s.config.ConnectionCooldown-elapsed)
+			return false, rejectCooldown, fmt.Sprintf("cooldown active (%s remaining)", s.config.ConnectionCooldown-elapsed), 0
 		}
 	}
 
@@ -2835,19 +2837,22 @@ func (s *DeviceService) acceptCommissioningConnection() (bool, commissioningReje
 	s.mu.RUnlock()
 
 	if nonTestCount >= maxZones && !enableKeyValid {
-		return false, rejectZonesFull, fmt.Sprintf("zone slots full (%d/%d)", nonTestCount, maxZones)
+		return false, rejectZonesFull, fmt.Sprintf("zone slots full (%d/%d)", nonTestCount, maxZones), 0
 	}
 
 	// Even with enable-key, reject when all slots (including the TEST slot)
 	// are occupied. The enable-key bypass allows a TEST zone, but if one
 	// already exists alongside full non-test slots, there's truly no room.
 	if totalZoneCount > maxZones {
-		return false, rejectZonesFull, fmt.Sprintf("all zone slots full (%d non-test + %d test)", nonTestCount, totalZoneCount-nonTestCount)
+		return false, rejectZonesFull, fmt.Sprintf("all zone slots full (%d non-test + %d test)", nonTestCount, totalZoneCount-nonTestCount), 0
 	}
 
-	// Accept the connection (cooldown timestamp is set on release, not here)
+	// Accept the connection (cooldown timestamp is set on release, not here).
+	// Bump the generation counter so stale goroutines from previous tests
+	// cannot release this lock (they hold the old generation).
 	s.commissioningConnActive = true
-	return true, 0, ""
+	s.commissioningGeneration++
+	return true, 0, "", s.commissioningGeneration
 }
 
 // hasZoneOfType returns true if a zone of the given type already exists.
@@ -2911,11 +2916,17 @@ func (s *DeviceService) evictDisconnectedZone() string {
 
 
 // releaseCommissioningConnection marks the commissioning connection as complete
-// and starts the cooldown timer. Call this when commissioning finishes (success
-// or failure). The cooldown prevents rapid reconnection after a completed attempt.
-func (s *DeviceService) releaseCommissioningConnection() {
+// and starts the cooldown timer. The generation parameter must match the value
+// returned by acceptCommissioningConnection; stale goroutines from previous
+// tests that hold an old generation are silently ignored, preventing them from
+// releasing a lock they no longer own.
+func (s *DeviceService) releaseCommissioningConnection(gen uint64) {
 	s.connectionMu.Lock()
 	defer s.connectionMu.Unlock()
+	if s.commissioningGeneration != gen {
+		// Stale release from a previous test's goroutine -- ignore.
+		return
+	}
 	s.commissioningConnActive = false
 	s.lastCommissioningAttempt = time.Now()
 }

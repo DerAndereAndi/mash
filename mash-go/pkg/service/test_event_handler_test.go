@@ -725,6 +725,46 @@ func TestTriggerResetTestState_ClearsConnTracker(t *testing.T) {
 	}
 }
 
+func TestTriggerResetTestState_DrainsActiveConns(t *testing.T) {
+	svc := newDeviceServiceWithAllFeatures(t)
+	ctx := context.Background()
+
+	// Simulate 2 pre-operational connections that hold activeConns slots
+	// (as happens when connTracker.CloseAll runs but goroutine defers
+	// haven't decremented activeConns yet).
+	server1, client1 := net.Pipe()
+	server2, client2 := net.Pipe()
+	t.Cleanup(func() {
+		server1.Close()
+		client1.Close()
+		server2.Close()
+		client2.Close()
+	})
+
+	svc.connTracker.Add(server1)
+	svc.connTracker.Add(server2)
+	svc.activeConns.Store(2)
+
+	// Simulate goroutines that decrement activeConns when their conn is closed.
+	for _, conn := range []net.Conn{server1, server2} {
+		go func(c net.Conn) {
+			buf := make([]byte, 1)
+			c.Read(buf) // blocks until conn is closed
+			svc.activeConns.Add(-1)
+		}(conn)
+	}
+
+	// Reset test state -- should close connections and wait for drain.
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+
+	// After reset, activeConns should be 0.
+	if got := svc.activeConns.Load(); got != 0 {
+		t.Errorf("activeConns = %d after reset, want 0", got)
+	}
+}
+
 func TestTriggerResetTestState_ResetsAutoReentryPending(t *testing.T) {
 	svc := newDeviceServiceWithAllFeatures(t)
 	ctx := context.Background()

@@ -534,6 +534,137 @@ func TestStoreResult_FlattenedKeysUsedInInterpolation(t *testing.T) {
 	}
 }
 
+// TestStepTimeout_DurationStringExtendsTimeout verifies that when a step has
+// a "duration" string param (e.g., "500ms"), the step timeout is extended to
+// accommodate the actual sleep. Without this, keepalive tests that use
+// params: { duration: "31s" } would hit the 10s default step timeout.
+func TestStepTimeout_DurationStringExtendsTimeout(t *testing.T) {
+	config := engine.DefaultConfig()
+	config.StepTimeout = 100 * time.Millisecond // Very short default
+
+	e := engine.NewWithConfig(config)
+
+	// Handler that sleeps for the requested duration, respecting context.
+	e.RegisterHandler("wait", func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]interface{}, error) {
+		durStr, _ := step.Params["duration"].(string)
+		d, err := time.ParseDuration(durStr)
+		if err != nil {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(d):
+			return map[string]interface{}{"waited": true}, nil
+		}
+	})
+
+	tc := &loader.TestCase{
+		ID:      "TC-WAIT-DUR",
+		Name:    "Wait with duration string",
+		Timeout: "5s",
+		Steps: []loader.Step{
+			{
+				Action: "wait",
+				Params: map[string]interface{}{"duration": "500ms"},
+				Expect: map[string]interface{}{"waited": true},
+			},
+		},
+	}
+
+	result := e.Run(context.Background(), tc)
+
+	if !result.Passed {
+		t.Errorf("test should pass: the 'duration' string param should extend the "+
+			"step timeout beyond the 100ms default; got error: %v", result.Error)
+	}
+}
+
+// TestStepTimeout_DurationMsExtendsTimeout verifies the existing behavior
+// where "duration_ms" extends the step timeout.
+func TestStepTimeout_DurationMsExtendsTimeout(t *testing.T) {
+	config := engine.DefaultConfig()
+	config.StepTimeout = 100 * time.Millisecond
+
+	e := engine.NewWithConfig(config)
+
+	e.RegisterHandler("wait", func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]interface{}, error) {
+		ms, _ := step.Params["duration_ms"].(float64)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(ms) * time.Millisecond):
+			return map[string]interface{}{"waited": true}, nil
+		}
+	})
+
+	tc := &loader.TestCase{
+		ID:      "TC-WAIT-MS",
+		Name:    "Wait with duration_ms",
+		Timeout: "5s",
+		Steps: []loader.Step{
+			{
+				Action: "wait",
+				Params: map[string]interface{}{"duration_ms": float64(500)},
+				Expect: map[string]interface{}{"waited": true},
+			},
+		},
+	}
+
+	result := e.Run(context.Background(), tc)
+	if !result.Passed {
+		t.Errorf("test should pass: duration_ms extends step timeout; got error: %v", result.Error)
+	}
+}
+
+// TestStepTimeout_DurationStringWithoutFix_WouldFail demonstrates the failure
+// mode: without the fix, a 500ms duration string with 100ms step timeout
+// would cause context deadline exceeded.
+func TestStepTimeout_DurationStringWithoutFix_WouldFail(t *testing.T) {
+	config := engine.DefaultConfig()
+	config.StepTimeout = 100 * time.Millisecond
+
+	e := engine.NewWithConfig(config)
+
+	e.RegisterHandler("wait", func(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]interface{}, error) {
+		durStr, _ := step.Params["duration"].(string)
+		d, _ := time.ParseDuration(durStr)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(d):
+			return map[string]interface{}{"waited": true}, nil
+		}
+	})
+
+	// This test verifies the fix works. Without stepDurationFromParams handling
+	// the "duration" string param, the step would timeout at 100ms instead of
+	// sleeping for 2s. The test timeout is 5s, so the step should complete.
+	tc := &loader.TestCase{
+		ID:      "TC-DUR-2S",
+		Name:    "Two second wait via duration string",
+		Timeout: "5s",
+		Steps: []loader.Step{
+			{
+				Action: "wait",
+				Params: map[string]interface{}{"duration": "2s"},
+				Expect: map[string]interface{}{"waited": true},
+			},
+		},
+	}
+
+	start := time.Now()
+	result := e.Run(context.Background(), tc)
+	elapsed := time.Since(start)
+
+	if !result.Passed {
+		t.Errorf("test should pass with the fix; error: %v", result.Error)
+	}
+	if elapsed < 1500*time.Millisecond {
+		t.Errorf("expected ~2s sleep, got %v", elapsed)
+	}
+}
+
 func TestRunSuiteExplicitTimeout(t *testing.T) {
 	config := engine.DefaultConfig()
 	config.SuiteTimeout = 50 * time.Millisecond
