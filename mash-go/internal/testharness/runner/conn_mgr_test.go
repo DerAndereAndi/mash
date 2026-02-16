@@ -44,6 +44,21 @@ func TestConnMgr_EnsureConnected_NoopWhenAlreadyConnected(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestConnMgr_EnsureConnected_SetsHadConnectionOnShortcut(t *testing.T) {
+	// When a connection already exists, EnsureConnected takes the shortcut
+	// path (no dial). It must still set hadConnection=true so that
+	// verify_commissioning_state reports ADVERTISING after device-side
+	// disconnection (not IDLE). This is critical for TC-PASE-003.
+	m, p, _ := newTestConnMgr(t)
+	conn := &Connection{state: ConnTLSConnected, hadConnection: false}
+	p.EXPECT().Main().Return(conn)
+
+	err := m.EnsureConnected(context.Background(), st())
+	assert.NoError(t, err)
+	assert.True(t, conn.hadConnection,
+		"EnsureConnected shortcut must set hadConnection=true")
+}
+
 func TestConnMgr_EnsureConnected_DialsWhenDisconnected(t *testing.T) {
 	m, p, _ := newTestConnMgr(t)
 	p.EXPECT().Main().Return((*Connection)(nil))

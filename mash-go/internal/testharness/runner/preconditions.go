@@ -351,6 +351,7 @@ func (r *Runner) sendClearLimitInvoke(_ context.Context) error {
 // ensureConnected checks if already connected; if not, establishes a commissioning TLS connection.
 func (r *Runner) ensureConnected(ctx context.Context, state *engine.ExecutionState) error {
 	if r.pool.Main() != nil && r.pool.Main().isConnected() {
+		r.pool.Main().hadConnection = true
 		return nil
 	}
 

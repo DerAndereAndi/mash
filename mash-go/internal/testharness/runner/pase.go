@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"time"
 
@@ -109,6 +110,20 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	setupCode, err := r.getSetupCode(params)
 	if err != nil {
 		return nil, fmt.Errorf("invalid setup code: %w", err)
+	}
+
+	// DEC-068: Reject prohibited low-entropy setup codes before attempting
+	// the PASE handshake. SPAKE2+ cannot distinguish "wrong code" from
+	// "prohibited code" (both fail at confirmation), so we validate early.
+	// Only check the prohibited list -- out-of-range codes (like 0) are
+	// legitimate "wrong code" test inputs that should reach PASE.
+	if slices.Contains(commissioning.InvalidSetupCodes, setupCode) {
+		return map[string]any{
+			KeySessionEstablished: false,
+			KeyCommissionSuccess:  false,
+			KeySuccess:            false,
+			KeyError:              "invalid_setup_code",
+		}, nil
 	}
 
 	// Get identities from params or use defaults

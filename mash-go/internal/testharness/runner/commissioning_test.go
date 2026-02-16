@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
+	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 )
 
@@ -334,6 +335,64 @@ func TestRecordSuiteZone_CloseZonesExcept_PreservesAfterRecord(t *testing.T) {
 	if len(closedZoneIDs) != 1 || closedZoneIDs[0] != "other-id" {
 		t.Errorf("expected only other-id to be closed, got %v", closedZoneIDs)
 	}
+}
+
+// TestHandleCommission_ProhibitedSetupCode verifies that handleCommission
+// returns a structured output (not a Go error) when given a prohibited
+// low-entropy setup code. This is the fix for TC-PASE-006 / TC-PASE-007.
+func TestHandleCommission_ProhibitedSetupCode(t *testing.T) {
+	codes := []string{"11111111", "12345678", "87654321"}
+	for _, code := range codes {
+		t.Run(code, func(t *testing.T) {
+			r := newTestRunner()
+			step := &loader.Step{
+				Action: "commission",
+				Params: map[string]any{"setup_code": code},
+			}
+			state := engine.NewExecutionState(context.Background())
+
+			out, err := r.handleCommission(context.Background(), step, state)
+			// Must NOT return a Go error — the engine would treat that as
+			// a harness failure, not a structured check result.
+			if err != nil {
+				t.Fatalf("expected structured output, got Go error: %v", err)
+			}
+			if out == nil {
+				t.Fatal("expected non-nil output map")
+			}
+			errVal, ok := out[KeyError].(string)
+			if !ok || errVal != "invalid_setup_code" {
+				t.Errorf("expected error=invalid_setup_code, got %v", out[KeyError])
+			}
+			if out[KeySessionEstablished] != false {
+				t.Errorf("expected session_established=false, got %v", out[KeySessionEstablished])
+			}
+		})
+	}
+}
+
+// TestHandleCommission_OutOfRangeCodeNotProhibited verifies that out-of-range
+// setup codes (like "00000000") are NOT caught by the prohibited code check.
+// These should proceed to the PASE handshake and fail with VERIFICATION_FAILED
+// (TC-PASE-002). Only codes on the DEC-068 prohibited list are rejected early.
+func TestHandleCommission_OutOfRangeCodeNotProhibited(t *testing.T) {
+	r := newTestRunner()
+	step := &loader.Step{
+		Action: "commission",
+		Params: map[string]any{"setup_code": "00000000"},
+	}
+	state := engine.NewExecutionState(context.Background())
+
+	out, err := r.handleCommission(context.Background(), step, state)
+	// Should NOT return invalid_setup_code -- "00000000" is wrong but not prohibited.
+	// It will proceed to connection and fail there (no real device in unit test).
+	if out != nil {
+		if errVal, ok := out[KeyError].(string); ok && errVal == "invalid_setup_code" {
+			t.Error("out-of-range code 00000000 must NOT be treated as prohibited")
+		}
+	}
+	// err is expected (connection failure in unit test), that's fine.
+	_ = err
 }
 
 func TestEnsureDisconnected_ClearsSuiteCrypto(t *testing.T) {

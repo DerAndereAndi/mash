@@ -274,8 +274,13 @@ func (m *connMgrImpl) rebuildAccumulatedPool() {
 // ---------------------------------------------------------------------------
 
 // EnsureConnected checks if already connected; if not, delegates to connectFn.
+// When a connection already exists, sets hadConnection=true so that
+// verify_commissioning_state correctly reports ADVERTISING after device-side
+// disconnection. Without this, teardown's hadConnection=false reset leaves
+// the flag stale when ensureConnected takes the shortcut path (TC-PASE-003).
 func (m *connMgrImpl) EnsureConnected(ctx context.Context, state *engine.ExecutionState) error {
 	if m.pool.Main() != nil && m.pool.Main().isConnected() {
+		m.pool.Main().hadConnection = true
 		return nil
 	}
 	return m.deps.connectFn(ctx, state)
