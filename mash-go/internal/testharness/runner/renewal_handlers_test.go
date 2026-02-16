@@ -173,3 +173,26 @@ func TestUsePreviousCSR(t *testing.T) {
 		t.Errorf("expected CSR A (0xAA), got 0x%02X", selectedCSR[0])
 	}
 }
+
+// TestGetTargetUsesStateDeviceAddress verifies that getTarget checks
+// StateDeviceAddress from execution state before falling back to config.Target.
+// Root cause of TC-IPV6-003: reconnectOperational calls getTarget(nil) which
+// always returns config.Target, ignoring the updated device address stored in state.
+func TestGetTargetUsesStateDeviceAddress(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "192.168.1.100:9999"
+	state := newTestState()
+
+	// Without state address: should use config.Target.
+	got := r.getTargetFromState(state)
+	if got != "192.168.1.100:9999" {
+		t.Errorf("expected config target, got %q", got)
+	}
+
+	// With state address: should use the dynamic address.
+	state.Set(StateDeviceAddress, "[fe80::1%en0]:9999")
+	got = r.getTargetFromState(state)
+	if got != "[fe80::1%en0]:9999" {
+		t.Errorf("expected state address, got %q", got)
+	}
+}

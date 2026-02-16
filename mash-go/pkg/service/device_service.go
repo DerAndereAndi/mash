@@ -428,6 +428,20 @@ func (s *DeviceService) buildOperationalTLSConfig() {
 			if cert.IsCA {
 				return fmt.Errorf("controller certificate has CA:TRUE (must be end-entity)")
 			}
+			// Check certificate time validity using the device's clock offset
+			// (set via TriggerAdjustClockBase). The 300s tolerance matches the
+			// spec's clock-skew allowance.
+			s.mu.RLock()
+			offset := s.clockOffset
+			s.mu.RUnlock()
+			now := time.Now().Add(offset)
+			const clockSkewTolerance = 300 * time.Second
+			if now.Before(cert.NotBefore) && cert.NotBefore.Sub(now) > clockSkewTolerance {
+				return fmt.Errorf("certificate not yet valid (notBefore=%s, now=%s)", cert.NotBefore.UTC(), now.UTC())
+			}
+			if now.After(cert.NotAfter) && now.Sub(cert.NotAfter) > clockSkewTolerance {
+				return fmt.Errorf("certificate has expired (notAfter=%s, now=%s)", cert.NotAfter.UTC(), now.UTC())
+			}
 			return nil
 		},
 	}

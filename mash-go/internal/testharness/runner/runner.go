@@ -369,6 +369,19 @@ func (r *Runner) getTarget(params map[string]any) string {
 	return r.config.Target
 }
 
+// getTargetFromState returns the host:port for connections, checking
+// StateDeviceAddress in execution state before falling back to config.Target.
+// Used by reconnectOperational where the device may have changed its address
+// (e.g. TC-IPV6-003 after an IPv6 address change).
+func (r *Runner) getTargetFromState(state *engine.ExecutionState) string {
+	if addr, ok := state.Get(StateDeviceAddress); ok {
+		if s, ok := addr.(string); ok && s != "" {
+			return s
+		}
+	}
+	return r.config.Target
+}
+
 // Run executes all matching test cases and returns the suite result.
 func (r *Runner) Run(ctx context.Context) (*engine.SuiteResult, error) {
 	// Auto-PICS: discover device capabilities before loading tests.
@@ -814,7 +827,19 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 	} else if clientCertType, ok := step.Params["client_cert"].(string); ok && clientCertType != "" {
 		switch clientCertType {
 		case CertTypeControllerOperational:
-			// Use default r.controllerCert -- already set by operationalTLSConfig.
+			// When a clock offset is active, generate a fresh controller cert
+			// with NotBefore=now so the device's adjusted clock can properly
+			// reject it when the skew exceeds the 300s tolerance.
+			// Without this, the commissioning-time cert (issued minutes ago)
+			// appears valid even with -400s offset because the gap between
+			// device time and NotBefore is within tolerance.
+			co, _ := state.Get(StateClockOffsetMs)
+			if co != nil && co != int64(0) && co != 0 && r.connMgr.ZoneCA() != nil {
+				freshCert, certErr := generateTestClientCert(CertTypeControllerFreshOperational, r.connMgr.ZoneCA())
+				if certErr == nil {
+					tlsConfig.Certificates = []tls.Certificate{freshCert}
+				}
+			}
 		case "none":
 			tlsConfig.Certificates = nil
 		default:
@@ -2240,7 +2265,15 @@ func extractTLSAlert(err error) string {
 // reason. In TLS 1.3 with RequestClientCert, the server can't send a specific
 // alert reason for client cert rejection, so we infer from the cert type.
 func classifyTestCertRejection(certType string, err error) string {
-	// First check if the error itself contains useful info.
+	// For operational certs, any post-handshake rejection is due to clock
+	// skew making the cert appear expired or not-yet-valid. Classify before
+	// checking error text because TLS 1.3 sends a generic "bad_certificate"
+	// alert that would mask the real reason.
+	if certType == CertTypeControllerOperational {
+		return "certificate_expired"
+	}
+
+	// Check if the error itself contains useful info.
 	if err != nil {
 		msg := strings.ToLower(err.Error())
 		if strings.Contains(msg, "expired") || strings.Contains(msg, "not yet valid") {
@@ -2269,10 +2302,6 @@ func classifyTestCertRejection(certType string, err error) string {
 		return "bad_certificate"
 	case CertTypeControllerSelfSigned:
 		return "unknown_ca"
-	case CertTypeControllerOperational:
-		// A valid operational cert rejected post-handshake is typically
-		// due to clock skew making the cert appear expired or not-yet-valid.
-		return "certificate_expired"
 	case CertTypeDeepChain:
 		return "chain_too_deep"
 	case CertTypeNoALPN:

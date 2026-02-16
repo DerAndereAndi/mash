@@ -383,7 +383,7 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 	// Skip when the connection was gracefully closed (TC-CLOSE tests).
 	if (r.pool.Main() == nil || !r.pool.Main().isConnected()) && r.connMgr.ControllerCert() != nil && r.connMgr.ZoneCAPool() != nil && !gracefullyClosed {
 		r.debugf("verify_connection_state: connection lost, attempting operational reconnection")
-		if err := r.reconnectOperational(); err != nil {
+		if err := r.reconnectOperational(state); err != nil {
 			r.debugf("verify_connection_state: reconnection failed: %v", err)
 		}
 	}
@@ -465,7 +465,7 @@ func (r *Runner) handleVerifyConnectionState(ctx context.Context, step *loader.S
 // reconnectOperational dials the device using operational TLS (mutual auth)
 // without performing PASE. Used when the connection was lost but the device
 // is still commissioned (certs are valid).
-func (r *Runner) reconnectOperational() error {
+func (r *Runner) reconnectOperational(state *engine.ExecutionState) error {
 	// Find the zone ID from a previous commissioning.
 	var zoneID, connKey string
 	for _, k := range r.pool.ZoneKeys() {
@@ -474,11 +474,29 @@ func (r *Runner) reconnectOperational() error {
 		break
 	}
 	if zoneID == "" {
-		return fmt.Errorf("no zone ID available for reconnection")
+		// Fall back to suite zone if pool has no zone keys.
+		if r.suite.ZoneID() != "" {
+			zoneID = r.suite.ZoneID()
+		} else {
+			return fmt.Errorf("no zone ID available for reconnection")
+		}
+	}
+
+	// Restore crypto from the zone map (same as reconnectToZone does).
+	// Without this, WorkingCrypto() may be stale/nil after teardown,
+	// causing "x509: certificate signed by unknown authority".
+	if !r.connMgr.LoadZoneCrypto(zoneID) {
+		// Fall back to suite crypto snapshot.
+		if sc := r.suite.Crypto(); sc.ZoneCA != nil {
+			r.connMgr.SetWorkingCrypto(sc)
+			r.debugf("reconnectOperational: restored crypto from suite snapshot")
+		}
+	} else {
+		r.debugf("reconnectOperational: restored crypto from zone map for %s", zoneID)
 	}
 
 	tlsConfig := r.operationalTLSConfig()
-	target := r.getTarget(nil)
+	target := r.getTargetFromState(state)
 	tlsConn, dialErr := dialWithRetry(context.Background(), 3, func() (*tls.Conn, error) {
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
 		return tls.DialWithDialer(dialer, "tcp", target, tlsConfig)

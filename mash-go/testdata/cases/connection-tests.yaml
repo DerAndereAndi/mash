@@ -27,8 +27,6 @@ steps:
   - name: Initiate TLS connection
     action: connect
     params:
-      host: localhost
-      port: 8443
       tls_version: "1.3"
     expect:
       connection_established: true

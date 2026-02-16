@@ -22,7 +22,8 @@ const (
 	CertTypeControllerNoClientAuth = "controller_no_client_auth"
 	CertTypeControllerCaTrue      = "controller_ca_true"
 	CertTypeControllerSelfSigned  = "controller_self_signed"
-	CertTypeControllerOperational = "controller_operational"
+	CertTypeControllerOperational      = "controller_operational"
+	CertTypeControllerFreshOperational = "controller_fresh_operational"
 
 	// cert_chain single-cert types (from buildCertChain).
 	CertTypeInvalidSignature = "invalid_signature_cert"
@@ -106,6 +107,12 @@ func generateTestClientCert(certType string, zoneCA *cert.ZoneCA) (tls.Certifica
 		// Self-signed: use the cert's own key as signer (not the zone CA).
 		signerCert = template
 		signerKey = privKey
+
+	case CertTypeControllerFreshOperational:
+		// Fresh operational cert with NotBefore=now. Used when clock offset
+		// is active so the device's adjusted time sees it as exactly
+		// offset-seconds in the future (not offset - commissioning_age).
+		template.NotBefore = now
 
 	default:
 		return tls.Certificate{}, fmt.Errorf("unknown test cert type: %q", certType)

@@ -335,7 +335,16 @@ func (r *Runner) sendSetCommWindowDuration(durationSeconds uint32, state *engine
 			conn.pendingNotifications = append(conn.pendingNotifications, respData)
 			continue
 		}
-		// Got the invoke response -- done.
+		// Got the invoke response -- decode and verify success.
+		resp, decErr := wire.DecodeResponse(respData)
+		if decErr != nil {
+			r.debugf("sendSetCommWindowDuration: decode response error: %v", decErr)
+			return false
+		}
+		if !resp.IsSuccess() {
+			r.debugf("sendSetCommWindowDuration: device rejected with status %d", resp.Status)
+			return false
+		}
 		r.debugf("sendSetCommWindowDuration: success (durationSeconds=%d)", durationSeconds)
 		return true
 	}
