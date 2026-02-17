@@ -146,6 +146,7 @@ func isIOError(err error) bool {
 	return strings.Contains(msg, "EOF") ||
 		strings.Contains(msg, "connection reset") ||
 		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "closed pipe") ||
 		strings.Contains(msg, "connection refused") ||
 		strings.Contains(msg, "deadline exceeded")
 }

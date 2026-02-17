@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 )
@@ -252,6 +253,25 @@ func TestControllerRenewalHandler_PreservesSession(t *testing.T) {
 	err = conn.Send([]byte{0x01, 0x02, 0x03})
 	if err != nil {
 		t.Error("Connection should still be usable after renewal")
+	}
+}
+
+func TestDecodeRenewalOrCommissioningError_CommissioningError(t *testing.T) {
+	data, err := cbor.Marshal(&commissioning.CommissioningError{
+		MsgType:   commissioning.MsgCommissioningError,
+		ErrorCode: commissioning.ErrCodeZoneTypeExists,
+		Message:   "zone type already exists",
+	})
+	if err != nil {
+		t.Fatalf("marshal commissioning error: %v", err)
+	}
+
+	_, err = decodeRenewalOrCommissioningError(data, "CSR")
+	if err == nil {
+		t.Fatal("expected commissioning error to be surfaced")
+	}
+	if got := err.Error(); got == "" || got == "decode CSR: invalid commissioning message" {
+		t.Fatalf("expected detailed commissioning error, got %q", got)
 	}
 }
 

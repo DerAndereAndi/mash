@@ -303,9 +303,10 @@ func (r *Runner) teardownTest(ctx context.Context, tc *loader.TestCase, state *e
 		r.pairingAdvertiser = nil
 	}
 	r.coordinator.TeardownTest(ctx, tc, state)
+	r.recoverDeadSuiteControlChannel(state)
 
-	// Re-commission the suite zone if a test destroyed it (e.g. remove_device
-	// with zone=all calls suite.Clear()). Without this, all subsequent tests
+	// Re-commission the suite zone if it still doesn't exist (e.g. remove_device
+	// with zone=all truly removed all zones). Without this, all subsequent tests
 	// lose the control channel for reset triggers, causing cascading failures.
 	if r.config.Target != "" && r.config.EnableKey != "" && r.suite.ZoneID() == "" {
 		r.debugf("teardown: suite zone destroyed, re-commissioning")
@@ -351,6 +352,47 @@ func (r *Runner) teardownTest(ctx context.Context, tc *loader.TestCase, state *e
 			})
 		}
 	}
+}
+
+// recoverDeadSuiteControlChannel ensures that teardown does not carry a
+// poisoned suite state into the next test. If a suite zone exists but its
+// control connection is dead and reconnect fails, clear suite state so the
+// normal re-commission path can rebuild a fresh control channel.
+func (r *Runner) recoverDeadSuiteControlChannel(state *engine.ExecutionState) {
+	if r.config == nil || r.config.Target == "" || r.config.EnableKey == "" {
+		return
+	}
+	if r.suite.ZoneID() == "" {
+		return
+	}
+	if sc := r.suite.Conn(); sc != nil && sc.isConnected() && sc.framer != nil {
+		return
+	}
+	if err := r.reconnectToZone(state); err != nil {
+		r.debugf("teardown: suite control channel unrecoverable (%v), clearing suite state", err)
+		r.ensureDisconnected()
+	}
+}
+
+// adoptMainAsSuiteIfPossible promotes an existing commissioned TEST session on
+// pool.Main() into suite session state. Returns true when adoption succeeds.
+func (r *Runner) adoptMainAsSuiteIfPossible() bool {
+	if r.suite.ZoneID() != "" {
+		return false
+	}
+	if r.connMgr.CommissionZoneType() != cert.ZoneTypeTest {
+		return false
+	}
+	ps := r.connMgr.PASEState()
+	if ps == nil || !ps.completed || len(ps.sessionKey) == 0 {
+		return false
+	}
+	main := r.pool.Main()
+	if main == nil || !main.isConnected() {
+		return false
+	}
+	r.recordSuiteZone()
+	return r.suite.ZoneID() != ""
 }
 
 func appendTeardownError(state *engine.ExecutionState, err error) {
@@ -774,6 +816,11 @@ func (r *Runner) EnsureDisconnected() {
 	r.ensureDisconnected()
 }
 
+// AdoptMainAsSuiteIfPossible wraps adoptMainAsSuiteIfPossible.
+func (r *Runner) AdoptMainAsSuiteIfPossible() bool {
+	return r.adoptMainAsSuiteIfPossible()
+}
+
 // ReconnectToZone wraps reconnectToZone.
 func (r *Runner) ReconnectToZone(state *engine.ExecutionState) error {
 	return r.reconnectToZone(state)
@@ -819,10 +866,7 @@ func isBestEffortRemoveZoneOnConnError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, errRemoveZoneNoConnection) {
-		return true
-	}
-	return strings.Contains(err.Error(), "remove zone ack read")
+	return errors.Is(err, errRemoveZoneNoConnection)
 }
 
 // SendTriggerViaZone wraps sendTriggerViaZone.

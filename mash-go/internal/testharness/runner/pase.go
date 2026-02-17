@@ -331,26 +331,16 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	deviceID, certErr := r.performCertExchange(ctx)
 	if certErr != nil {
 		r.debugf("handleCommission: cert exchange FAILED: %v", certErr)
-	} else {
-		r.debugf("handleCommission: cert exchange succeeded, deviceID=%s, zoneCAPool=%p", deviceID, r.connMgr.ZoneCAPool())
+		r.pool.Main().transitionTo(ConnDisconnected)
+		return map[string]any{
+			KeySessionEstablished: false,
+			KeyCommissionSuccess:  false,
+			KeySuccess:            false,
+			KeyError:              certErr.Error(),
+			PrecondDeviceInZone:   false,
+		}, fmt.Errorf("cert exchange failed: %w", certErr)
 	}
-
-	// Even if cert exchange fails, fall back to commissioning TLS trust
-	// so basic tests that don't need operational connections still work.
-	if certErr != nil {
-		r.debugf("handleCommission: falling back to commissioning TLS peer certs")
-		// Fall back: use peer cert from commissioning TLS.
-		if r.pool.Main().tlsConn != nil {
-			cs := r.pool.Main().tlsConn.ConnectionState()
-			if len(cs.PeerCertificates) > 0 {
-				pool := x509.NewCertPool()
-				for _, c := range cs.PeerCertificates {
-					pool.AddCert(c)
-				}
-				r.connMgr.SetZoneCAPool(pool)
-			}
-		}
-	}
+	r.debugf("handleCommission: cert exchange succeeded, deviceID=%s, zoneCAPool=%p", deviceID, r.connMgr.ZoneCAPool())
 
 	// DEC-066: the device closes the commissioning connection after cert
 	// exchange, so we must reconnect operationally for cleanup to work.

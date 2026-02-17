@@ -2,14 +2,20 @@ package runner
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/transport"
+	"github.com/mash-protocol/mash-go/pkg/wire"
+	"github.com/stretchr/testify/mock"
 )
 
 func TestEnsureCommissioned_AlreadyDone(t *testing.T) {
@@ -427,6 +433,281 @@ func TestHandleCommission_OutOfRangeCodeNotProhibited(t *testing.T) {
 	_ = err
 }
 
+func TestTransitionToOperational_FailsWhenReadinessProbeFails(t *testing.T) {
+	r := newTestRunner()
+	r.connMgr.SetPASEState(&PASEState{
+		completed:  true,
+		sessionKey: []byte("readiness-fail-session"),
+	})
+	r.connMgr.SetZoneCA(&cert.ZoneCA{})
+	r.connMgr.SetControllerCert(&cert.OperationalCert{})
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
+	r.suite.Record("suite-zone", CryptoState{
+		ZoneCA:         &cert.ZoneCA{},
+		ControllerCert: &cert.OperationalCert{},
+		ZoneCAPool:     x509.NewCertPool(),
+	})
+
+	mockDialer := NewMockDialer(t)
+	r.dialer = mockDialer
+
+	clientRaw, serverRaw := net.Pipe()
+	serverTLS := tls.Server(serverRaw, &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{selfSignedCert(t)},
+		NextProtos:   []string{transport.ALPNProtocol},
+	})
+	clientTLS := tls.Client(clientRaw, &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true,
+		NextProtos:         []string{transport.ALPNProtocol},
+	})
+	t.Cleanup(func() {
+		_ = clientTLS.Close()
+		_ = serverTLS.Close()
+	})
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		if err := serverTLS.Handshake(); err != nil {
+			return
+		}
+		_ = serverTLS.Close()
+	}()
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("client handshake failed: %v", err)
+	}
+
+	mockDialer.EXPECT().
+		DialOperational(mock.Anything, mock.Anything, mock.Anything).
+		Return(clientTLS, nil).
+		Once()
+
+	state := engine.NewExecutionState(context.Background())
+	err := r.transitionToOperational(state)
+	<-serverDone
+	if err == nil {
+		t.Fatal("expected transitionToOperational to fail when readiness probe fails")
+	}
+	if r.pool.ZoneCount() != 0 {
+		t.Fatalf("expected no tracked operational zones on readiness failure, got %d", r.pool.ZoneCount())
+	}
+	if r.connMgr.PASEState() != nil {
+		t.Fatal("expected PASE state to be invalidated after operational transition failure")
+	}
+	if r.connMgr.ZoneCA() != nil || r.connMgr.ControllerCert() != nil || r.connMgr.ZoneCAPool() != nil {
+		t.Fatal("expected working crypto to be cleared after operational transition failure")
+	}
+	if r.suite.ZoneID() != "" {
+		t.Fatal("expected suite session to be cleared after operational transition failure")
+	}
+}
+
+func TestEnsureCommissioned_DeadMainWithSuite_ReconnectsMainWithoutFreshCommission(t *testing.T) {
+	r := newTestRunner()
+	r.pool.SetMain(&Connection{state: ConnDisconnected})
+	r.connMgr.SetPASEState(&PASEState{
+		completed:  true,
+		sessionKey: []byte("suite-reconnect-session"),
+	})
+
+	// Seed suite zone and keep a dedicated suite control connection.
+	suiteConn := &Connection{state: ConnOperational}
+	r.suite.Record("suite-zone-123", CryptoState{
+		ZoneCA:         &cert.ZoneCA{},
+		ControllerCert: &cert.OperationalCert{},
+		ZoneCAPool:     x509.NewCertPool(),
+	})
+	r.suite.SetConn(suiteConn)
+
+	mockDialer := NewMockDialer(t)
+	r.dialer = mockDialer
+
+	clientRaw, serverRaw := net.Pipe()
+	serverTLS := tls.Server(serverRaw, &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{selfSignedCert(t)},
+		NextProtos:   []string{transport.ALPNProtocol},
+	})
+	clientTLS := tls.Client(clientRaw, &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true,
+		NextProtos:         []string{transport.ALPNProtocol},
+	})
+	t.Cleanup(func() {
+		_ = clientTLS.Close()
+		_ = serverTLS.Close()
+	})
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		if err := serverTLS.Handshake(); err != nil {
+			return
+		}
+		srvFramer := transport.NewFramer(serverTLS)
+		reqFrame, err := srvFramer.ReadFrame()
+		if err != nil {
+			return
+		}
+		req, err := wire.DecodeRequest(reqFrame)
+		if err != nil {
+			return
+		}
+		okFrame, _ := wire.EncodeResponse(&wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+		})
+		_ = srvFramer.WriteFrame(okFrame)
+	}()
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("client handshake failed: %v", err)
+	}
+
+	mockDialer.EXPECT().
+		DialCommissioning(mock.Anything, mock.Anything).
+		Return((*tls.Conn)(nil), fmt.Errorf("must not commission")).
+		Maybe()
+	mockDialer.EXPECT().
+		DialOperational(mock.Anything, mock.Anything, mock.Anything).
+		Return(clientTLS, nil).
+		Once()
+
+	state := engine.NewExecutionState(context.Background())
+	err := r.ensureCommissioned(context.Background(), state)
+	select {
+	case <-serverDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server readiness goroutine did not complete")
+	}
+	if err != nil {
+		t.Fatalf("ensureCommissioned failed: %v", err)
+	}
+
+	mockDialer.AssertNotCalled(t, "DialCommissioning", mock.Anything, mock.Anything)
+	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
+		t.Fatal("expected main connection to be re-established operationally")
+	}
+	if r.pool.Main() == r.suite.Conn() {
+		t.Fatal("main connection must not alias suite control connection")
+	}
+	if r.suite.Conn() != suiteConn {
+		t.Fatal("suite control connection should remain unchanged")
+	}
+}
+
+func TestReconnectToZone_RetriesAfterReadinessEOF(t *testing.T) {
+	r := newTestRunner()
+	r.suite.Record("suite-zone-123", CryptoState{
+		ZoneCA:         &cert.ZoneCA{},
+		ControllerCert: &cert.OperationalCert{},
+		ZoneCAPool:     x509.NewCertPool(),
+	})
+
+	mockDialer := NewMockDialer(t)
+	r.dialer = mockDialer
+
+	// Attempt 1: handshake succeeds, readiness read gets EOF.
+	c1raw, s1raw := net.Pipe()
+	s1tls := tls.Server(s1raw, &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{selfSignedCert(t)},
+		NextProtos:   []string{transport.ALPNProtocol},
+	})
+	c1tls := tls.Client(c1raw, &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true,
+		NextProtos:         []string{transport.ALPNProtocol},
+	})
+	t.Cleanup(func() {
+		_ = c1tls.Close()
+		_ = s1tls.Close()
+	})
+	done1 := make(chan struct{})
+	go func() {
+		defer close(done1)
+		if err := s1tls.Handshake(); err != nil {
+			return
+		}
+		f := transport.NewFramer(s1tls)
+		_, _ = f.ReadFrame()
+		_ = s1tls.Close()
+	}()
+	if err := c1tls.Handshake(); err != nil {
+		t.Fatalf("client handshake #1 failed: %v", err)
+	}
+
+	// Attempt 2: readiness succeeds.
+	c2raw, s2raw := net.Pipe()
+	s2tls := tls.Server(s2raw, &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{selfSignedCert(t)},
+		NextProtos:   []string{transport.ALPNProtocol},
+	})
+	c2tls := tls.Client(c2raw, &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true,
+		NextProtos:         []string{transport.ALPNProtocol},
+	})
+	t.Cleanup(func() {
+		_ = c2tls.Close()
+		_ = s2tls.Close()
+	})
+	done2 := make(chan struct{})
+	go func() {
+		defer close(done2)
+		if err := s2tls.Handshake(); err != nil {
+			return
+		}
+		f := transport.NewFramer(s2tls)
+		reqFrame, err := f.ReadFrame()
+		if err != nil {
+			return
+		}
+		req, err := wire.DecodeRequest(reqFrame)
+		if err != nil {
+			return
+		}
+		ok, _ := wire.EncodeResponse(&wire.Response{MessageID: req.MessageID, Status: wire.StatusSuccess})
+		_ = f.WriteFrame(ok)
+	}()
+	if err := c2tls.Handshake(); err != nil {
+		t.Fatalf("client handshake #2 failed: %v", err)
+	}
+
+	mockDialer.EXPECT().
+		DialOperational(mock.Anything, mock.Anything, mock.Anything).
+		Return(c1tls, nil).
+		Once()
+	mockDialer.EXPECT().
+		DialOperational(mock.Anything, mock.Anything, mock.Anything).
+		Return(c2tls, nil).
+		Once()
+
+	err := r.reconnectToZone(engine.NewExecutionState(context.Background()))
+	_ = c1tls.Close()
+	_ = s1tls.Close()
+	_ = c2tls.Close()
+	_ = s2tls.Close()
+	select {
+	case <-done1:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first reconnect attempt goroutine did not finish")
+	}
+	select {
+	case <-done2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second reconnect attempt goroutine did not finish")
+	}
+	if err != nil {
+		t.Fatalf("expected reconnectToZone to recover after EOF, got: %v", err)
+	}
+	if r.suite.Conn() == nil || !r.suite.Conn().isConnected() {
+		t.Fatal("expected suite connection to be re-established")
+	}
+}
+
 func TestEnsureDisconnected_ClearsSuiteCrypto(t *testing.T) {
 	// When ensureDisconnected is called (fresh_commission, suite teardown),
 	// it must clear both current AND suite crypto. Without this, a subsequent
@@ -479,5 +760,25 @@ func TestEnsureDisconnected_ClearsSuiteCrypto(t *testing.T) {
 	crypto := r.suite.Crypto()
 	if crypto.ZoneCA != nil || crypto.ControllerCert != nil || crypto.ZoneCAPool != nil || crypto.IssuedDeviceCert != nil {
 		t.Error("expected suite crypto to be nil after ensureDisconnected")
+	}
+}
+
+func TestCommissionSuiteZone_ClearsStaleSessionBeforeCommissioning(t *testing.T) {
+	r := newTestRunner()
+	r.pool.SetMain(&Connection{state: ConnOperational})
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{1, 2, 3}})
+	r.connMgr.SetZoneCA(&cert.ZoneCA{})
+	r.connMgr.SetControllerCert(&cert.OperationalCert{})
+	r.connMgr.SetZoneCAPool(x509.NewCertPool())
+
+	err := r.commissionSuiteZone(context.Background())
+	if err == nil {
+		t.Fatal("expected suite commissioning to fail without target")
+	}
+	if r.connMgr.PASEState() != nil {
+		t.Fatal("expected stale PASE state to be cleared before suite commissioning")
+	}
+	if r.connMgr.ZoneCA() != nil || r.connMgr.ControllerCert() != nil || r.connMgr.ZoneCAPool() != nil {
+		t.Fatal("expected working crypto to be cleared before suite commissioning")
 	}
 }

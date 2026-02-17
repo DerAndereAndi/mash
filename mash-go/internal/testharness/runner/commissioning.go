@@ -26,6 +26,21 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 		r.connMgr.PASEState() != nil,
 		r.connMgr.PASEState() != nil && r.connMgr.PASEState().completed)
 
+	// If main is dead but we have a commissioned suite zone, recover main
+	// operationally from suite crypto context before any fresh commissioning.
+	if !wasConnected && r.connMgr.PASEState() != nil && r.connMgr.PASEState().completed && r.suite.ZoneID() != "" {
+		r.debugf("ensureCommissioned: recovering dead main from suite zone before ensureConnected")
+		if err := r.reconnectMainFromSuite(state); err == nil {
+			state.Set(KeySessionEstablished, true)
+			state.Set(KeyConnectionEstablished, true)
+			if r.connMgr.PASEState().sessionKey != nil {
+				state.Set(StateSessionKey, r.connMgr.PASEState().sessionKey)
+				state.Set(StateSessionKeyLen, len(r.connMgr.PASEState().sessionKey))
+			}
+			return nil
+		}
+	}
+
 	// First ensure we're connected.
 	if err := r.ensureConnected(ctx, state); err != nil {
 		r.debugf("ensureCommissioned: ensureConnected failed: %v", err)
@@ -60,6 +75,20 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 				state.Set(StateSessionKeyLen, len(r.connMgr.PASEState().sessionKey))
 			}
 			return nil
+		}
+		if r.suite.ZoneID() != "" {
+			r.debugf("ensureCommissioned: main connection was re-established, recovering main from suite zone")
+			if err := r.reconnectMainFromSuite(state); err == nil {
+				state.Set(KeySessionEstablished, true)
+				state.Set(KeyConnectionEstablished, true)
+				if r.connMgr.PASEState() != nil && r.connMgr.PASEState().sessionKey != nil {
+					state.Set(StateSessionKey, r.connMgr.PASEState().sessionKey)
+					state.Set(StateSessionKeyLen, len(r.connMgr.PASEState().sessionKey))
+				}
+				return nil
+			} else {
+				r.debugf("ensureCommissioned: recover main from suite failed: %v", err)
+			}
 		}
 		// Connection was re-established -- old PASE session is stale.
 		r.debugf("ensureCommissioned: connection was re-established, clearing stale PASE state")
@@ -205,6 +234,57 @@ func (r *Runner) isSuiteZoneCommission() bool {
 	return true
 }
 
+// reconnectMainFromSuite rebuilds pool.Main() as an operational connection
+// using the suite zone's crypto context, without mutating suite.Conn().
+func (r *Runner) reconnectMainFromSuite(state *engine.ExecutionState) error {
+	if r.suite.ZoneID() == "" {
+		return fmt.Errorf("no suite zone to recover main from")
+	}
+
+	suiteZoneID := r.suite.ZoneID()
+	if !r.connMgr.LoadZoneCrypto(suiteZoneID) {
+		crypto := r.suite.Crypto()
+		if crypto.ZoneCAPool == nil || crypto.ControllerCert == nil {
+			return fmt.Errorf("no suite crypto material for main recovery")
+		}
+		r.connMgr.SetWorkingCrypto(crypto)
+		r.debugf("reconnectMainFromSuite: restored suite crypto from snapshot")
+	} else {
+		r.debugf("reconnectMainFromSuite: restored suite crypto from zone map")
+	}
+
+	target := r.getTarget(nil)
+	ctx := context.Background()
+	wc := r.WorkingCrypto()
+	tlsConn, dialErr := dialWithRetry(ctx, 3, func() (*tls.Conn, error) {
+		return r.dialer.DialOperational(ctx, target, wc)
+	})
+	if dialErr != nil {
+		return fmt.Errorf("reconnect main from suite failed: %w", dialErr)
+	}
+
+	newConn := &Connection{
+		tlsConn: tlsConn,
+		framer:  transport.NewFramer(tlsConn),
+		state:   ConnOperational,
+	}
+	if err := waitForOperationalReadyOnConn(
+		newConn,
+		2*time.Second,
+		r.nextMessageID,
+		r.pool.AppendNotification,
+		r.debugf,
+	); err != nil {
+		newConn.transitionTo(ConnDisconnected)
+		return fmt.Errorf("reconnect main from suite readiness failed: %w", err)
+	}
+
+	r.pool.SetMain(newConn)
+	state.Set(StateConnection, newConn)
+	state.Set(StateOperationalConnEstablished, time.Now())
+	return nil
+}
+
 // transitionToOperational closes the commissioning connection and establishes
 // a new operational TLS connection using the controller certificate received
 // during cert exchange. This implements DEC-066: the device closes the
@@ -242,6 +322,7 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 		return r.dialer.DialOperational(ctx, target, crypto)
 	})
 	if dialErr != nil {
+		r.invalidateCommissioningState(state)
 		return fmt.Errorf("operational reconnection failed: %w", dialErr)
 	}
 
@@ -258,7 +339,9 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 
 	// Verify the device is processing protocol messages on this connection.
 	if err := r.waitForOperationalReady(2 * time.Second); err != nil {
-		r.debugf("transitionToOperational: %v (continuing)", err)
+		newConn.transitionTo(ConnDisconnected)
+		r.invalidateCommissioningState(state)
+		return fmt.Errorf("operational readiness failed: %w", err)
 	}
 
 	// Register the commissioned zone so closeActiveZoneConns can clean it up.
@@ -301,45 +384,59 @@ func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
 	target := r.getTarget(nil)
 	ctx := context.Background()
 	wc := r.WorkingCrypto()
-	tlsConn, dialErr := dialWithRetry(ctx, 3, func() (*tls.Conn, error) {
-		return r.dialer.DialOperational(ctx, target, wc)
-	})
-	if dialErr != nil {
-		return fmt.Errorf("reconnectToZone failed: %w", dialErr)
-	}
+	const readinessRetries = 2
+	var lastErr error
 
-	newConn := &Connection{
-		tlsConn: tlsConn,
-		framer:  transport.NewFramer(tlsConn),
-		state:   ConnOperational,
-	}
 	prevMain := r.pool.Main()
-
-	// Verify the device accepts us on this connection.
-	if err := waitForOperationalReadyOnConn(
-		newConn,
-		2*time.Second,
-		r.nextMessageID,
-		r.pool.AppendNotification,
-		r.debugf,
-	); err != nil {
-		r.debugf("reconnectToZone: readiness check failed: %v", err)
-		newConn.transitionTo(ConnDisconnected)
-		restoreMainControlChannel(r.pool, prevMain, state)
-		return fmt.Errorf("reconnectToZone readiness failed: %w", err)
-	}
-	setMainControlChannel(r.pool, newConn, state)
-
-	// Store on suite session (not in pool -- suite zone lives outside pool).
-	r.suite.SetConn(newConn)
-	r.debugf("reconnectToZone: reconnected to zone %s", r.suite.ZoneID())
-	if r.strictLifecycleEnabled() {
-		if err := r.lifecycleController().ReconnectOperational(r.suite.ConnKey()); err != nil {
-			return err
+	for attempt := 1; attempt <= readinessRetries; attempt++ {
+		tlsConn, dialErr := dialWithRetry(ctx, 3, func() (*tls.Conn, error) {
+			return r.dialer.DialOperational(ctx, target, wc)
+		})
+		if dialErr != nil {
+			lastErr = fmt.Errorf("reconnectToZone failed: %w", dialErr)
+			break
 		}
-	}
 
-	return nil
+		newConn := &Connection{
+			tlsConn: tlsConn,
+			framer:  transport.NewFramer(tlsConn),
+			state:   ConnOperational,
+		}
+
+		// Verify the device accepts us on this connection.
+		if err := waitForOperationalReadyOnConn(
+			newConn,
+			2*time.Second,
+			r.nextMessageID,
+			r.pool.AppendNotification,
+			r.debugf,
+		); err != nil {
+			lastErr = fmt.Errorf("reconnectToZone readiness failed: %w", err)
+			r.debugf("reconnectToZone: readiness check failed (attempt %d/%d): %v", attempt, readinessRetries, err)
+			newConn.transitionTo(ConnDisconnected)
+			restoreMainControlChannel(r.pool, prevMain, state)
+			if attempt < readinessRetries && isIOError(err) {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			return lastErr
+		}
+		setMainControlChannel(r.pool, newConn, state)
+
+		// Store on suite session (not in pool -- suite zone lives outside pool).
+		r.suite.SetConn(newConn)
+		r.debugf("reconnectToZone: reconnected to zone %s", r.suite.ZoneID())
+		if r.strictLifecycleEnabled() {
+			if err := r.lifecycleController().ReconnectOperational(r.suite.ConnKey()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("reconnectToZone failed")
 }
 
 // cooldownRemaining extracts the remaining cooldown duration from a PASE
@@ -397,6 +494,12 @@ func deriveZoneIDFromSecret(secret []byte) string {
 func (r *Runner) commissionSuiteZone(ctx context.Context) error {
 	r.debugf("commissionSuiteZone: commissioning device for suite")
 	state := engine.NewExecutionState(ctx)
+
+	// Always establish a fresh suite control channel. Reusing stale PASE from
+	// prior test-local commissioning can leave suite attached to a dead socket.
+	r.disconnectConnection()
+	r.connMgr.SetPASEState(nil)
+	r.connMgr.ClearWorkingCrypto()
 
 	r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
 	if err := r.ensureCommissioned(ctx, state); err != nil {

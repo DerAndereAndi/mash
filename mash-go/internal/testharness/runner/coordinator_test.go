@@ -165,6 +165,33 @@ func TestCoordSessionReuse_NoReuseWithFreshCommission(t *testing.T) {
 		tcWith("TC", cond(PrecondDeviceCommissioned, true), cond(PrecondFreshCommission, true)), st()))
 }
 
+func TestCoordSetup_CommissionStepAtConnectedLevel_ForcesFreshCommission(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{Target: "localhost:8443", EnableKey: "0011"})
+	tc := tcWith("TC-COMM-SETUP",
+		cond(PrecondDeviceInCommissioningMode, true),
+		cond(PrecondTLSConnectionEstablished, true),
+	)
+	tc.Steps = []loader.Step{{Action: ActionCommission}}
+
+	o.EXPECT().PASEState().Return(completedPASE()).Maybe()
+	o.EXPECT().WorkingCrypto().Return(CryptoState{}).Maybe()
+	o.EXPECT().CommissionZoneType().Return(cert.ZoneTypeTest).Maybe()
+	p.EXPECT().Main().Return(&Connection{state: ConnOperational}).Maybe()
+	p.EXPECT().ZoneCount().Return(1).Maybe()
+
+	s.EXPECT().ZoneID().Return("suite-1").Maybe()
+	s.EXPECT().Conn().Return(&Connection{state: ConnOperational, framer: &transport.Framer{}}).Maybe()
+	s.EXPECT().ConnKey().Return("main-suite-1").Maybe()
+	o.EXPECT().SetCommissionZoneType(cert.ZoneTypeLocal).Return().Once()
+	p.EXPECT().CloseZonesExcept("main-suite-1").Return(time.Time{}).Maybe()
+	o.EXPECT().DisconnectConnection().Return().Once()
+	o.EXPECT().ClearWorkingCrypto().Return().Once()
+	o.EXPECT().SetPASEState((*PASEState)(nil)).Return().Once()
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(), tc, st()))
+}
+
 func TestCoordSessionReuse_NoReuseWithGridZone(t *testing.T) {
 	c, s, p, o := newCoord(t, nil)
 	o.EXPECT().PASEState().Return(completedPASE())
@@ -1275,7 +1302,7 @@ func TestCoordTeardown_NoProbeWithoutSuiteZone(t *testing.T) {
 	// setup here verifies no suite-zone-specific probe path is triggered.)
 
 	allMaybe(s, p, o)
-	c.TeardownTest(context.Background(), tcWith("TC"), st())
+	c.TeardownTest(context.Background(), tcWith("TC", cond(PrecondDeviceCommissioned, true)), st())
 }
 
 // TestCoordTeardown_NoProbeInSimMode verifies that the health probe is
@@ -1288,6 +1315,25 @@ func TestCoordTeardown_NoProbeInSimMode(t *testing.T) {
 
 	allMaybe(s, p, o)
 	c.TeardownTest(context.Background(), tcWith("TC"), st())
+}
+
+func TestCoordTeardown_DoesNotAdoptMainAsSuite(t *testing.T) {
+	cfg := &Config{Target: "localhost:8443", EnableKey: "0011"}
+	c, s, p, o := newCoord(t, cfg)
+
+	// Suite starts absent and teardown must NOT auto-adopt it.
+	s.EXPECT().ZoneID().Return("").Maybe()
+	p.EXPECT().ZoneKeys().Return([]string{}).Maybe()
+	p.EXPECT().Main().Return((*Connection)(nil)).Maybe()
+	s.EXPECT().Conn().Return((*Connection)(nil)).Maybe()
+	p.EXPECT().UnsubscribeAll(mock.Anything).Return().Maybe()
+	p.EXPECT().ClearNotifications().Return().Maybe()
+	o.EXPECT().PASEState().Return((*PASEState)(nil)).Maybe()
+	o.EXPECT().ProbeSessionHealth().Return(nil).Maybe()
+	o.EXPECT().RequestDeviceState(mock.Anything, mock.Anything).Return(DeviceStateSnapshot(nil)).Maybe()
+
+	c.TeardownTest(context.Background(), tcWith("TC", cond(PrecondDeviceCommissioned, true)), st())
+	o.AssertNotCalled(t, "AdoptMainAsSuiteIfPossible")
 }
 
 // ===========================================================================
@@ -1350,26 +1396,21 @@ func TestCoordSetup_ProtocolTier_DoesNotReuseSession(t *testing.T) {
 	o.EXPECT().PASEState().Return(completedPASE())
 	p.EXPECT().Main().Return(&Connection{state: ConnOperational}).Maybe()
 	p.EXPECT().ZoneCount().Return(1)
-	s.EXPECT().ZoneID().Return("test-zone")
-
-	ensureDisconnected := false
-	o.EXPECT().EnsureDisconnected().Run(func() { ensureDisconnected = true }).Return()
+	s.EXPECT().ZoneID().Return("test-zone").Maybe()
+	s.EXPECT().ConnKey().Return("main-test-zone").Maybe()
+	p.EXPECT().CloseZonesExcept("main-test-zone").Return(time.Time{}).Maybe()
+	o.EXPECT().DisconnectConnection().Return().Once()
+	o.EXPECT().ClearWorkingCrypto().Return().Once()
+	o.EXPECT().SetPASEState((*PASEState)(nil)).Return().Once()
 
 	allMaybe(s, p, o)
 	_ = c.SetupPreconditions(context.Background(), tc, st())
-
-	// Protocol tier with fresh_commission should force full disconnect.
-	assert.True(t, ensureDisconnected, "protocol tier forces disconnect for fresh_commission")
 }
 
-// TestFreshCommission_SendsRemoveZoneBeforeDisconnect verifies that
-// fresh_commission sends RemoveZone on the live connection BEFORE calling
-// EnsureDisconnected. Without this, the device keeps the old zone registered
-// and presents the old zone's cert on operational reconnect, causing x509
-// verification failures.
-func TestFreshCommission_SendsRemoveZoneBeforeDisconnect(t *testing.T) {
+// TestFreshCommission_PreservesSuiteZone verifies that fresh_commission resets
+// only test-session state and does not mutate suite zone state.
+func TestFreshCommission_PreservesSuiteZone(t *testing.T) {
 	c, s, p, o := newCoord(t, nil)
-	suiteConn := &Connection{state: ConnOperational}
 	tc := &loader.TestCase{
 		ID:             "TC-FRESH",
 		ConnectionTier: TierProtocol,
@@ -1382,35 +1423,42 @@ func TestFreshCommission_SendsRemoveZoneBeforeDisconnect(t *testing.T) {
 	o.EXPECT().PASEState().Return(completedPASE())
 	p.EXPECT().Main().Return(&Connection{state: ConnOperational}).Maybe()
 	p.EXPECT().ZoneCount().Return(1)
-	s.EXPECT().ZoneID().Return("test-zone")
-	s.EXPECT().Conn().Return(suiteConn).Maybe()
+	s.EXPECT().ZoneID().Return("test-zone").Maybe()
+	s.EXPECT().ConnKey().Return("main-test-zone").Maybe()
+	p.EXPECT().CloseZonesExcept("main-test-zone").Return(time.Time{}).Maybe()
+	o.EXPECT().DisconnectConnection().Return().Once()
+	o.EXPECT().ClearWorkingCrypto().Return().Once()
+	o.EXPECT().SetPASEState((*PASEState)(nil)).Return().Once()
 
-	// Track call order.
-	var callOrder []string
-	o.EXPECT().SendRemoveZoneOnConn(suiteConn, "test-zone").Run(func(conn *Connection, zoneID string) {
-		callOrder = append(callOrder, "remove")
-	}).Return()
-	o.EXPECT().EnsureDisconnected().Run(func() { callOrder = append(callOrder, "disconnect") }).Return()
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(), tc, st()))
+}
+
+func TestFreshCommission_DoesNotReconnectOrRemoveSuite(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	tc := &loader.TestCase{
+		ID:             "TC-FRESH-RECONNECT",
+		ConnectionTier: TierProtocol,
+		Preconditions: []loader.Condition{
+			{PrecondDeviceCommissioned: true},
+			{PrecondFreshCommission: true},
+		},
+	}
+
+	o.EXPECT().PASEState().Return(completedPASE())
+	p.EXPECT().Main().Return(&Connection{state: ConnOperational}).Maybe()
+	p.EXPECT().ZoneCount().Return(1)
+	s.EXPECT().ZoneID().Return("test-zone").Maybe()
+	s.EXPECT().ConnKey().Return("main-test-zone").Maybe()
+	p.EXPECT().CloseZonesExcept("main-test-zone").Return(time.Time{}).Maybe()
+	o.EXPECT().DisconnectConnection().Return().Once()
+	o.EXPECT().ClearWorkingCrypto().Return().Once()
+	o.EXPECT().SetPASEState((*PASEState)(nil)).Return().Once()
 
 	allMaybe(s, p, o)
 	_ = c.SetupPreconditions(context.Background(), tc, st())
-
-	// SendRemoveZoneOnConn must happen before EnsureDisconnected.
-	assert.Contains(t, callOrder, "remove", "SendRemoveZoneOnConn should be called")
-	assert.Contains(t, callOrder, "disconnect", "EnsureDisconnected should be called")
-	idx := 0
-	for i, v := range callOrder {
-		if v == "remove" {
-			idx = i
-			break
-		}
-	}
-	for i, v := range callOrder {
-		if v == "disconnect" {
-			assert.Greater(t, i, idx, "SendRemoveZoneOnConn must be called before EnsureDisconnected")
-			break
-		}
-	}
+	o.AssertNotCalled(t, "ReconnectToZone", mock.Anything)
+	o.AssertNotCalled(t, "SendRemoveZoneOnConn", mock.Anything, "test-zone")
 }
 
 // ===========================================================================
@@ -1669,22 +1717,21 @@ func TestCoordSetup_StoresSimulationPreconds(t *testing.T) {
 	assert.Equal(t, true, val)
 }
 
-func TestCoordSetup_FreshCommissionClearsSuiteZone(t *testing.T) {
+func TestCoordSetup_FreshCommissionPreservesSuiteZone(t *testing.T) {
 	c, s, p, o := newCoord(t, nil)
 	s.EXPECT().ZoneID().Return("old-sz")
 	s.EXPECT().ConnKey().Return("main-old-sz").Maybe()
 
-	closeAllCalled := false
-	p.EXPECT().CloseAllZones().Run(func() { closeAllCalled = true }).Return(time.Time{})
-
-	ensureDisconnectedCalled := false
-	o.EXPECT().EnsureDisconnected().Run(func() { ensureDisconnectedCalled = true }).Return()
+	closeExceptCalled := false
+	p.EXPECT().CloseZonesExcept("main-old-sz").Run(func(string) { closeExceptCalled = true }).Return(time.Time{})
+	o.EXPECT().DisconnectConnection().Return().Once()
+	o.EXPECT().ClearWorkingCrypto().Return().Once()
+	o.EXPECT().SetPASEState((*PASEState)(nil)).Return().Once()
 
 	allMaybe(s, p, o)
 	assert.NoError(t, c.SetupPreconditions(context.Background(),
 		tcWith("TC", cond(PrecondDeviceCommissioned, true), cond(PrecondFreshCommission, true)), st()))
-	assert.True(t, closeAllCalled, "CloseAllZones called for fresh_commission")
-	assert.True(t, ensureDisconnectedCalled, "EnsureDisconnected called for fresh_commission")
+	assert.True(t, closeExceptCalled, "CloseZonesExcept called for fresh_commission with suite present")
 }
 
 func TestCoordSetup_ClearLimitWhenNoExistingLimits(t *testing.T) {

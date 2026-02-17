@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/fxamacker/cbor/v2"
@@ -180,6 +181,57 @@ func TestCertExchange_FullFlow(t *testing.T) {
 	}
 }
 
+func TestCertExchange_FailsWhenAckMissing(t *testing.T) {
+	clientR, serverW := io.Pipe()
+	serverR, clientW := io.Pipe()
+	defer clientR.Close()
+	defer serverW.Close()
+	defer serverR.Close()
+	defer clientW.Close()
+
+	clientFramer := transport.NewFramer(&pipeReadWriter{Reader: clientR, Writer: clientW})
+	serverFramer := transport.NewFramer(&pipeReadWriter{Reader: serverR, Writer: serverW})
+
+	deviceKeyPair, err := cert.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+
+	deviceErr := make(chan error, 1)
+	go func() {
+		deviceErr <- mockDeviceCertExchangeNoAck(serverFramer, deviceKeyPair)
+		_ = serverW.Close()
+	}()
+
+	r := &Runner{
+		config: &Config{},
+		pool:   NewConnPool(func(string, ...any) {}, nil),
+		suite:  NewSuiteSession(),
+	}
+	r.dialer = NewDialer(false, r.debugf)
+	r.connMgr = NewConnectionManager(r.pool, r.suite, r.dialer, r.config, r.debugf, connMgrDeps{})
+	r.connMgr.SetPASEState(&PASEState{
+		sessionKey: []byte("test-session-key-for-zone-deriv"),
+		completed:  true,
+	})
+	r.pool.SetMain(&Connection{
+		framer: clientFramer,
+		state:  ConnTLSConnected,
+	})
+
+	_, err = r.performCertExchange(context.Background())
+	if err == nil {
+		t.Fatal("expected performCertExchange to fail when ack is missing")
+	}
+	if !strings.Contains(err.Error(), "read ack") {
+		t.Fatalf("expected read ack error, got %v", err)
+	}
+
+	if devErr := <-deviceErr; devErr != nil {
+		t.Fatalf("mock device error: %v", devErr)
+	}
+}
+
 // mockDeviceCertExchange simulates the device side of the cert exchange.
 // Receives CertRenewalRequest, responds with CSR, receives Install, sends Ack.
 func mockDeviceCertExchange(framer *transport.Framer, keyPair *cert.KeyPair) error {
@@ -247,4 +299,51 @@ func mockDeviceCertExchange(framer *transport.Framer, keyPair *cert.KeyPair) err
 		return err
 	}
 	return framer.WriteFrame(ackData)
+}
+
+func mockDeviceCertExchangeNoAck(framer *transport.Framer, keyPair *cert.KeyPair) error {
+	reqData, err := framer.ReadFrame()
+	if err != nil {
+		return err
+	}
+
+	msg, err := commissioning.DecodeRenewalMessage(reqData)
+	if err != nil {
+		return err
+	}
+	if _, ok := msg.(*commissioning.CertRenewalRequest); !ok {
+		return io.ErrUnexpectedEOF
+	}
+
+	csrDER, err := cert.CreateCSR(keyPair, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "mock-device"},
+	})
+	if err != nil {
+		return err
+	}
+	csrResp := &commissioning.CertRenewalCSR{
+		MsgType: commissioning.MsgCertRenewalCSR,
+		CSR:     csrDER,
+	}
+	csrData, err := cbor.Marshal(csrResp)
+	if err != nil {
+		return err
+	}
+	if err := framer.WriteFrame(csrData); err != nil {
+		return err
+	}
+
+	installData, err := framer.ReadFrame()
+	if err != nil {
+		return err
+	}
+	msg, err = commissioning.DecodeRenewalMessage(installData)
+	if err != nil {
+		return err
+	}
+	if _, ok := msg.(*commissioning.CertRenewalInstall); !ok {
+		return io.ErrUnexpectedEOF
+	}
+
+	return nil
 }

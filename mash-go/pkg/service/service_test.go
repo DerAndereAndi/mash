@@ -4,6 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
+	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,9 +14,11 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/transport"
 )
 
 // Test helpers
@@ -1703,6 +1708,106 @@ func TestHandleCommissioningConnection_DoesNotPolluteTLSConfigOnRejection(t *tes
 
 	if currentConfig != originalConfig {
 		t.Error("operationalTLSConfig was modified -- it should remain unchanged when zone validation would reject")
+	}
+}
+
+func TestRollbackCommissioningCertArtifacts_RemovesRejectedZoneCerts(t *testing.T) {
+	device := model.NewDevice("test-cert-rollback", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService: %v", err)
+	}
+
+	store := cert.NewMemoryStore()
+	svc.SetCertStore(store)
+
+	zone1CA, _ := cert.GenerateZoneCA("zone-1", cert.ZoneTypeLocal)
+	kp1, _ := cert.GenerateKeyPair()
+	csr1, _ := cert.CreateCSR(kp1, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "dev-1", VendorID: 1, ProductID: 1},
+		ZoneID:   "zone-1",
+	})
+	cert1, _ := cert.SignCSR(zone1CA, csr1)
+	opCert1 := &cert.OperationalCert{Certificate: cert1, PrivateKey: kp1.PrivateKey, ZoneID: "zone-1"}
+	_ = store.SetOperationalCert(opCert1)
+	_ = store.SetZoneCACert("zone-1", zone1CA.Certificate)
+
+	zone2CA, _ := cert.GenerateZoneCA("zone-2", cert.ZoneTypeLocal)
+	kp2, _ := cert.GenerateKeyPair()
+	csr2, _ := cert.CreateCSR(kp2, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "dev-1", VendorID: 1, ProductID: 1},
+		ZoneID:   "zone-2",
+	})
+	cert2, _ := cert.SignCSR(zone2CA, csr2)
+	opCert2 := &cert.OperationalCert{Certificate: cert2, PrivateKey: kp2.PrivateKey, ZoneID: "zone-2"}
+	_ = store.SetOperationalCert(opCert2)
+	_ = store.SetZoneCACert("zone-2", zone2CA.Certificate)
+
+	svc.rollbackCommissioningCertArtifacts("zone-2")
+
+	if _, err := store.GetOperationalCert("zone-2"); !errors.Is(err, cert.ErrCertNotFound) {
+		t.Fatalf("expected zone-2 operational cert removed, got err=%v", err)
+	}
+	if _, err := store.GetZoneCACert("zone-2"); !errors.Is(err, cert.ErrCertNotFound) {
+		t.Fatalf("expected zone-2 zone CA removed, got err=%v", err)
+	}
+	if _, err := store.GetOperationalCert("zone-1"); err != nil {
+		t.Fatalf("expected zone-1 cert to remain, got err=%v", err)
+	}
+}
+
+func TestPerformCertExchange_RejectsZoneBeforeCSRWhenValidationFails(t *testing.T) {
+	device := model.NewDevice("test-early-zone-validation", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService: %v", err)
+	}
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	deviceFramed := newFramedConnection(serverConn)
+	clientFramer := transport.NewFramer(clientConn)
+
+	zoneCA, err := cert.GenerateZoneCA("zone-test", cert.ZoneTypeTest)
+	if err != nil {
+		t.Fatalf("GenerateZoneCA: %v", err)
+	}
+	reqData, err := commissioning.EncodeRenewalMessage(&commissioning.CertRenewalRequest{
+		MsgType: commissioning.MsgCertRenewalRequest,
+		Nonce:   make([]byte, 32),
+		ZoneCA:  zoneCA.Certificate.Raw,
+	})
+	if err != nil {
+		t.Fatalf("EncodeRenewalMessage: %v", err)
+	}
+
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- clientFramer.WriteFrame(reqData)
+	}()
+
+	_, _, err = svc.performCertExchange(deviceFramed, "zone-test", func(_ *x509.Certificate) error {
+		return errCommissionZoneTypeExists
+	})
+	if !errors.Is(err, errCommissionZoneTypeExists) {
+		t.Fatalf("expected zone type rejection, got %v", err)
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatalf("failed writing request frame: %v", err)
+	}
+
+	// Critical proof: no CSR should be sent when zone validation rejects.
+	_ = clientConn.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+	_, err = clientFramer.ReadFrame()
+	if err == nil {
+		t.Fatal("expected no CSR frame after early zone validation rejection")
+	}
+	if !strings.Contains(err.Error(), "i/o timeout") {
+		t.Fatalf("expected timeout waiting for CSR (none should be sent), got %v", err)
 	}
 }
 

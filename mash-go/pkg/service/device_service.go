@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -28,6 +29,12 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/subscription"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
+)
+
+var (
+	errCommissionTestZoneDisabled = errors.New("commissioning: test zone rejected (no valid enable-key)")
+	errCommissionZoneTypeExists   = errors.New("commissioning: zone type already exists")
+	errCommissionZoneSlotsFull    = errors.New("commissioning: zone slots full")
 )
 
 // DeviceService orchestrates a MASH device.
@@ -1041,12 +1048,64 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 
 	// Perform certificate exchange with controller
 	// This is the critical step that gives us an operational cert from the Zone CA
-	operationalCert, zoneCA, err := s.performCertExchange(framedConn, zoneID)
+	zoneType := cert.ZoneTypeLocal
+	operationalCert, zoneCA, err := s.performCertExchange(framedConn, zoneID, func(zoneCA *x509.Certificate) error {
+		// Extract zone type from the Zone CA certificate's OU field.
+		// Falls back to LOCAL if extraction fails (backward compatibility).
+		if zt, parseErr := cert.ExtractZoneTypeFromCert(zoneCA); parseErr == nil {
+			zoneType = zt
+		}
+
+		// Reject TEST zones unless a valid enable-key is configured (DEC-060).
+		// TEST zones are an extra "observer" slot that doesn't count against MaxZones.
+		if zoneType == cert.ZoneTypeTest && !s.isEnableKeyValid() {
+			return errCommissionTestZoneDisabled
+		}
+
+		// Reject zones when a zone of the same type already exists (DEC-043).
+		// Each device supports max 1 zone per type.
+		if s.hasZoneOfType(zoneType) {
+			return errCommissionZoneTypeExists
+		}
+
+		// Reject GRID/LOCAL zones when slots are full.
+		// We accepted the connection earlier because enable-key was valid (potential TEST zone),
+		// but now we know it's not a TEST zone, so check slots again.
+		if zoneType != cert.ZoneTypeTest && s.isZonesFull() {
+			return errCommissionZoneSlotsFull
+		}
+
+		return nil
+	})
 	if err != nil {
+		if errors.Is(err, errCommissionTestZoneDisabled) {
+			s.debugLog("handleCommissioningConnection: TEST zone rejected (no valid enable-key)", "zoneID", zoneID)
+			conn.Close()
+			return
+		}
+		if errors.Is(err, errCommissionZoneTypeExists) {
+			s.debugLog("handleCommissioningConnection: zone type already exists", "zoneID", zoneID, "zoneType", zoneType)
+			_ = commissioning.WriteCommissioningError(conn, commissioning.ErrCodeZoneTypeExists, "zone type already exists", 0)
+			conn.Close()
+			return
+		}
+		if errors.Is(err, errCommissionZoneSlotsFull) {
+			s.debugLog("handleCommissioningConnection: GRID/LOCAL zone rejected (slots full)", "zoneID", zoneID, "zoneType", zoneType)
+			retryAfterMs := s.computeBusyRetryAfter()
+			_ = commissioning.WriteCommissioningError(conn, commissioning.ErrCodeBusy, "zone slots full", retryAfterMs)
+			conn.Close()
+			return
+		}
 		s.debugLog("handleCommissioningConnection: cert exchange failed", "error", err)
 		conn.Close()
 		return
 	}
+	commissionAccepted := false
+	defer func() {
+		if !commissionAccepted {
+			s.rollbackCommissioningCertArtifacts(zoneID)
+		}
+	}()
 
 	// Extract device ID from operational certificate (Matter-style: embedded in CommonName)
 	deviceID, err := cert.ExtractDeviceID(operationalCert.Certificate)
@@ -1078,41 +1137,6 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	// Store Zone CA for future verification of controller connections
 	_ = zoneCA // Zone CA already stored in performCertExchange
 
-	// Extract zone type from the Zone CA certificate's OU field.
-	// Falls back to LOCAL if extraction fails (backward compatibility).
-	zoneType := cert.ZoneTypeLocal
-	if zt, err := cert.ExtractZoneTypeFromCert(zoneCA); err == nil {
-		zoneType = zt
-	}
-
-	// Reject TEST zones unless a valid enable-key is configured (DEC-060).
-	// TEST zones are an extra "observer" slot that doesn't count against MaxZones.
-	if zoneType == cert.ZoneTypeTest && !s.isEnableKeyValid() {
-		s.debugLog("handleCommissioningConnection: TEST zone rejected (no valid enable-key)", "zoneID", zoneID)
-		conn.Close()
-		return
-	}
-
-	// Reject zones when a zone of the same type already exists (DEC-043).
-	// Each device supports max 1 zone per type.
-	if s.hasZoneOfType(zoneType) {
-		s.debugLog("handleCommissioningConnection: zone type already exists", "zoneID", zoneID, "zoneType", zoneType)
-		_ = commissioning.WriteCommissioningError(conn, commissioning.ErrCodeZoneTypeExists, "zone type already exists", 0)
-		conn.Close()
-		return
-	}
-
-	// Reject GRID/LOCAL zones when slots are full.
-	// We accepted the connection earlier because enable-key was valid (potential TEST zone),
-	// but now we know it's not a TEST zone, so check slots again.
-	if zoneType != cert.ZoneTypeTest && s.isZonesFull() {
-		s.debugLog("handleCommissioningConnection: GRID/LOCAL zone rejected (slots full)", "zoneID", zoneID, "zoneType", zoneType)
-		retryAfterMs := s.computeBusyRetryAfter()
-		_ = commissioning.WriteCommissioningError(conn, commissioning.ErrCodeBusy, "zone slots full", retryAfterMs)
-		conn.Close()
-		return
-	}
-
 	// All validation passed -- now update TLS cert to use the latest operational cert.
 	// This is intentionally placed AFTER zone validation so that rejected zones
 	// (e.g., duplicate zone type) do not pollute the device's TLS configuration.
@@ -1132,6 +1156,7 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	// The zone is marked as disconnected; the controller will reconnect
 	// with operational certificates via handleOperationalConnection.
 	s.RegisterZoneAwaitingConnection(zoneID, zoneType)
+	commissionAccepted = true
 
 	// Persist state immediately after commissioning
 	_ = s.SaveState()
@@ -1172,6 +1197,23 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 	})
 }
 
+func (s *DeviceService) rollbackCommissioningCertArtifacts(zoneID string) {
+	s.mu.RLock()
+	certStore := s.certStore
+	s.mu.RUnlock()
+	if certStore == nil {
+		return
+	}
+
+	if err := certStore.RemoveOperationalCert(zoneID); err != nil && err != cert.ErrCertNotFound {
+		s.debugLog("rollbackCommissioningCertArtifacts: remove operational cert failed", "zoneID", zoneID, "error", err)
+		return
+	}
+	if err := certStore.Save(); err != nil {
+		s.debugLog("rollbackCommissioningCertArtifacts: save failed", "zoneID", zoneID, "error", err)
+	}
+}
+
 // performCertExchange handles the certificate exchange protocol with the controller.
 // It receives the Zone CA, generates a new key pair, sends a CSR, and installs
 // the signed operational certificate.
@@ -1183,7 +1225,11 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 // 4. Receive CertRenewalInstall with signed operational cert
 // 5. Verify and store operational cert + Zone CA
 // 6. Send CertRenewalAck
-func (s *DeviceService) performCertExchange(conn *framedConnection, zoneID string) (*cert.OperationalCert, *x509.Certificate, error) {
+func (s *DeviceService) performCertExchange(
+	conn *framedConnection,
+	zoneID string,
+	validateZone func(*x509.Certificate) error,
+) (*cert.OperationalCert, *x509.Certificate, error) {
 	// Step 1: Wait for CertRenewalRequest from controller
 	data, err := conn.ReadFrame()
 	if err != nil {
@@ -1214,6 +1260,11 @@ func (s *DeviceService) performCertExchange(conn *framedConnection, zoneID strin
 	s.debugLog("performCertExchange: received Zone CA",
 		"issuer", zoneCA.Issuer.String(),
 		"notAfter", zoneCA.NotAfter)
+	if validateZone != nil {
+		if err := validateZone(zoneCA); err != nil {
+			return nil, nil, err
+		}
+	}
 
 	// Step 2: Generate NEW key pair for this zone
 	// Important: We generate a fresh key pair, NOT reusing the commissioning key

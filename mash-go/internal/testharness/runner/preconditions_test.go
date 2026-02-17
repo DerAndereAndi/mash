@@ -707,16 +707,36 @@ func TestSetupPreconditions_StrictMode_BubblesRemoveZoneFailure(t *testing.T) {
 	}
 }
 
-func TestSendRemoveZoneOnConn_StrictMode_IgnoresBestEffortFailure(t *testing.T) {
+func TestSendRemoveZoneOnConn_StrictMode_RecordsAckReadFailure(t *testing.T) {
 	r := newTestRunner()
 	r.config.StrictLifecycle = true
 	r.clearStrictLifecycleErr()
 
-	// "Connected" but no framer -> errRemoveZoneNoConnection in strict sender.
-	r.SendRemoveZoneOnConn(&Connection{state: ConnOperational}, "zone-1")
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	conn := &Connection{
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
+	}
 
-	if r.strictLifecycleErr != nil {
-		t.Fatalf("expected best-effort remove-zone-on-conn failure to be ignored, got: %v", r.strictLifecycleErr)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Read the request frame and then close before sending an ack frame.
+		_, _ = transport.NewFramer(server).ReadFrame()
+		_ = server.Close()
+	}()
+
+	r.SendRemoveZoneOnConn(conn, "zone-1")
+	<-done
+
+	if r.strictLifecycleErr == nil {
+		t.Fatal("expected strict lifecycle error when remove-zone ack read fails")
+	}
+	if !strings.Contains(r.strictLifecycleErr.Error(), "remove zone ack read") {
+		t.Fatalf("expected remove-zone ack read error, got: %v", r.strictLifecycleErr)
 	}
 }
 
@@ -1696,6 +1716,48 @@ func TestRemoveSuiteZone_CleansUpEvenWhenReconnectFails(t *testing.T) {
 	}
 }
 
+func TestAdoptMainAsSuiteIfPossible_SucceedsForCommissionedTestZone(t *testing.T) {
+	r := newTestRunner()
+
+	main := &Connection{state: ConnOperational}
+	r.pool.SetMain(main)
+	r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{0xAA, 0xBB, 0xCC}})
+	r.connMgr.SetWorkingCrypto(makeCryptoState())
+
+	ok := r.adoptMainAsSuiteIfPossible()
+	if !ok {
+		t.Fatal("expected adoption to succeed")
+	}
+	if r.suite.ZoneID() == "" {
+		t.Fatal("expected suite zone id to be populated")
+	}
+	if r.suite.Conn() != main {
+		t.Fatal("expected main connection to become suite connection")
+	}
+	if r.pool.Main() == main {
+		t.Fatal("expected main to be detached after suite adoption")
+	}
+}
+
+func TestAdoptMainAsSuiteIfPossible_RejectsNonTestCommissionType(t *testing.T) {
+	r := newTestRunner()
+
+	main := &Connection{state: ConnOperational}
+	r.pool.SetMain(main)
+	r.connMgr.SetCommissionZoneType(cert.ZoneTypeGrid)
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{0xAA}})
+	r.connMgr.SetWorkingCrypto(makeCryptoState())
+
+	ok := r.adoptMainAsSuiteIfPossible()
+	if ok {
+		t.Fatal("expected adoption to be rejected for non-TEST commission type")
+	}
+	if r.suite.ZoneID() != "" {
+		t.Fatal("expected suite to remain empty")
+	}
+}
+
 func TestDeviceHasGridZone_KeepsNewCryptoOnFreshCommission(t *testing.T) {
 	// When there's NO existing PASE session, ensureCommissioned does a fresh
 	// commission. In this case the new GRID crypto IS correct (it matches
@@ -1723,5 +1785,42 @@ func TestDeviceHasGridZone_KeepsNewCryptoOnFreshCommission(t *testing.T) {
 	}
 	if r.connMgr.ControllerCert() == nil {
 		t.Error("expected controllerCert to be set by handleCreateZone (not restored to nil)")
+	}
+}
+
+func TestRecoverDeadSuiteControlChannel_ClearsSuiteOnReconnectFailure(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "localhost:8443"
+	r.config.EnableKey = "deadbeef"
+	r.suite.Record("suite-zone-1", makeCryptoState())
+	// Dead suite connection.
+	r.suite.SetConn(&Connection{state: ConnDisconnected})
+
+	// No reconnect target/crypto should make reconnectToZone fail.
+	r.recoverDeadSuiteControlChannel(engine.NewExecutionState(context.Background()))
+
+	if r.suite.ZoneID() != "" {
+		t.Fatal("expected suite zone to be cleared when reconnect is unrecoverable")
+	}
+	if r.connMgr.PASEState() != nil {
+		t.Fatal("expected PASE state cleared when suite is cleared")
+	}
+}
+
+func TestRecoverDeadSuiteControlChannel_NoopWhenSuiteAlive(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "localhost:8443"
+	r.config.EnableKey = "deadbeef"
+	liveConn := &Connection{state: ConnOperational, framer: &transport.Framer{}}
+	r.suite.Record("suite-zone-1", makeCryptoState())
+	r.suite.SetConn(liveConn)
+
+	r.recoverDeadSuiteControlChannel(engine.NewExecutionState(context.Background()))
+
+	if r.suite.ZoneID() == "" {
+		t.Fatal("expected suite zone to be preserved when suite conn is alive")
+	}
+	if r.suite.Conn() != liveConn {
+		t.Fatal("expected suite connection to be unchanged when alive")
 	}
 }

@@ -197,6 +197,12 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 	// Connection tier determines session isolation strategy.
 	tier := connectionTierFor(tc)
 	c.debugf("preconditions: tier=%s needed=%d current=%d for %s", tier, needed, current, tc.ID)
+	forceFreshForCommissionStep := needed <= precondLevelConnected && testCaseHasAction(tc, ActionCommission)
+	if forceFreshForCommissionStep && c.suite.ZoneID() != "" && c.ops.CommissionZoneType() == cert.ZoneTypeTest {
+		// Keep suite on TEST; commission-step tests use a disposable non-suite zone.
+		c.debugf("commission-step: overriding test session zone type to LOCAL (suite TEST preserved)")
+		c.ops.SetCommissionZoneType(cert.ZoneTypeLocal)
+	}
 
 	// Session reuse decision: only application-tier tests can reuse.
 	canReuseSession := tier == TierApplication &&
@@ -227,28 +233,60 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 	}
 
 	if !canReuseSession {
+		freshTeardownDone := false
 		hadActive := c.pool.ZoneCount() > 0
 		if hadActive {
 			c.debugf("closing %d stale zone connections", c.pool.ZoneCount())
 		}
-		if needsFreshCommission(tc.Preconditions) && c.suite.ZoneID() != "" {
-			c.debugf("fresh_commission: removing suite zone %s", c.suite.ZoneID())
-			// Send RemoveZone on the suite connection (not pool.Main() which
-			// is detached/empty after recordSuiteZone). The suite connection
-			// is the only live link to the device at this point.
-			if sc := c.suite.Conn(); sc != nil && sc.isConnected() {
-				c.ops.SendRemoveZoneOnConn(sc, c.suite.ZoneID())
-			}
-			c.ops.EnsureDisconnected()
-			// EnsureDisconnected clears the suite, so close all zones
-			// (the suite zone should be torn down for fresh_commission).
+		if (needsFreshCommission(tc.Preconditions) || forceFreshForCommissionStep) && c.suite.ZoneID() != "" {
+			// Clean architecture invariant: fresh_commission is test-session
+			// isolation only and must never mutate suite control session state.
+			c.debugf("fresh_commission: preserving suite zone %s; resetting test session only", c.suite.ZoneID())
+			c.pool.CloseZonesExcept(c.suite.ConnKey())
+			c.ops.DisconnectConnection()
+			c.ops.ClearWorkingCrypto()
+			c.ops.SetPASEState(nil)
+			freshTeardownDone = true
+		} else if (needsFreshCommission(tc.Preconditions) || forceFreshForCommissionStep) && c.suite.ZoneID() == "" {
+			// No suite to preserve: full reset is allowed.
 			c.pool.CloseAllZones()
+			c.ops.EnsureDisconnected()
+			freshTeardownDone = true
 		} else if c.suite.ZoneID() != "" {
 			// Preserve the suite zone's pool entry so that the device keeps
 			// it registered (onZoneClose sends RemoveZone which would kill it).
 			c.pool.CloseZonesExcept(c.suite.ConnKey())
 		} else {
 			c.pool.CloseAllZones()
+		}
+		// DEC-059: backward transition from commissioned.
+		if current >= precondLevelCommissioned && needed <= precondLevelCommissioning && !freshTeardownDone {
+			if c.suite.ZoneID() != "" {
+				c.debugf("backward transition: detaching main (suite zone %s stays alive)", c.suite.ZoneID())
+				c.pool.SetMain(&Connection{})
+				c.ops.SetPASEState(nil)
+			} else {
+				c.debugf("backward transition: sending RemoveZone (current=%d -> needed=%d)", current, needed)
+				c.ops.SendRemoveZone()
+			}
+		}
+
+		// Backwards transition: disconnect to give the device a clean state.
+		if needed < current && needed <= precondLevelCommissioning && !freshTeardownDone {
+			c.debugf("backward transition: disconnecting (current=%d -> needed=%d)", current, needed)
+			if c.suite.ZoneID() != "" {
+				if sc := c.suite.Conn(); sc != nil && sc.isConnected() {
+					c.debugf("backward transition: closing suite zone TCP to free cap slot")
+					sc.transitionTo(ConnDisconnected)
+				}
+				c.pool.SetMain(&Connection{})
+				c.ops.SetPASEState(nil)
+			} else {
+				c.ops.EnsureDisconnected()
+			}
+			if c.config.Target != "" {
+				c.ops.SetLastDeviceConnClose(time.Now())
+			}
 		}
 	} else {
 		// Clean up extra zones from previous multi-zone tests.
@@ -272,40 +310,6 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 			}
 		}
 		c.debugf("reusing session for %s (skipping closeActiveZoneConns)", tc.ID)
-	}
-
-	// DEC-059: backward transition from commissioned.
-	if current >= precondLevelCommissioned && needed <= precondLevelCommissioning {
-		if c.suite.ZoneID() != "" {
-			c.debugf("backward transition: detaching main (suite zone %s stays alive)", c.suite.ZoneID())
-			c.pool.SetMain(&Connection{})
-			c.ops.SetPASEState(nil)
-		} else {
-			c.debugf("backward transition: sending RemoveZone (current=%d -> needed=%d)", current, needed)
-			c.ops.SendRemoveZone()
-		}
-	}
-
-	// Backwards transition: disconnect to give the device a clean state.
-	// When a suite zone exists, close its TCP connection so the device's
-	// cap slots are fully available for L1 tests (e.g. TC-CONN-CAP-001).
-	// The zone stays registered; suiteCanReconnect will re-establish TCP
-	// when a L3 test needs it again.
-	if needed < current && needed <= precondLevelCommissioning {
-		c.debugf("backward transition: disconnecting (current=%d -> needed=%d)", current, needed)
-		if c.suite.ZoneID() != "" {
-			if sc := c.suite.Conn(); sc != nil && sc.isConnected() {
-				c.debugf("backward transition: closing suite zone TCP to free cap slot")
-				sc.transitionTo(ConnDisconnected)
-			}
-			c.pool.SetMain(&Connection{})
-			c.ops.SetPASEState(nil)
-		} else {
-			c.ops.EnsureDisconnected()
-		}
-		if c.config.Target != "" {
-			c.ops.SetLastDeviceConnClose(time.Now())
-		}
 	}
 
 	// Store simulation precondition keys in state.
@@ -566,10 +570,22 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 	return nil
 }
 
+func testCaseHasAction(tc *loader.TestCase, action string) bool {
+	if tc == nil || action == "" {
+		return false
+	}
+	for _, step := range tc.Steps {
+		if step.Action == action {
+			return true
+		}
+	}
+	return false
+}
+
 // TeardownTest is called after each test completes (pass or fail).
 // It cleans up subscriptions, notifications, stale PASE state, and
 // per-test security pool connections.
-func (c *coordinatorImpl) TeardownTest(_ context.Context, _ *loader.TestCase, state *engine.ExecutionState) {
+func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, state *engine.ExecutionState) {
 	// Unsubscribe all active subscriptions.
 	c.pool.UnsubscribeAll(c.pool.Main())
 	c.pool.ClearNotifications()
@@ -586,6 +602,9 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, _ *loader.TestCase, st
 		sc.pendingNotifications = nil
 	}
 
+	// Fresh-commission tests can remove the old suite and run against a newly
+	// commissioned TEST zone. Preserve that live TEST session as the next suite
+	// before cleanup disconnects/untracks it.
 	// Remove per-test zones created by multi-zone commissioning steps.
 	// Keep only the suite zone (if present) so strict cleanup invariants are
 	// evaluated against a single authoritative control channel.

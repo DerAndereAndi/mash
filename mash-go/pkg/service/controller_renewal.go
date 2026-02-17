@@ -37,6 +37,23 @@ type ControllerRenewalHandler struct {
 	responseWait chan any
 }
 
+func decodeRenewalOrCommissioningError(data []byte, phase string) (any, error) {
+	msg, err := commissioning.DecodeRenewalMessage(data)
+	if err == nil {
+		return msg, nil
+	}
+
+	// Device may send a commissioning error (msgType=255) during the renewal
+	// exchange when zone validation rejects the attempt before CSR.
+	if genericMsg, genericErr := commissioning.DecodePASEMessage(data); genericErr == nil {
+		if cerr, ok := genericMsg.(*commissioning.CommissioningError); ok {
+			return nil, fmt.Errorf("%s: commissioning error (%s, code %d)", phase, cerr.Message, cerr.ErrorCode)
+		}
+	}
+
+	return nil, fmt.Errorf("decode %s: %w", phase, err)
+}
+
 // NewControllerRenewalHandler creates a new ControllerRenewalHandler.
 func NewControllerRenewalHandler(zoneCA *cert.ZoneCA, conn Sendable) *ControllerRenewalHandler {
 	return &ControllerRenewalHandler{
@@ -204,9 +221,9 @@ func (h *ControllerRenewalHandler) IssueInitialCertSync(ctx context.Context, syn
 		return nil, fmt.Errorf("read CSR: %w", err)
 	}
 
-	msg, err := commissioning.DecodeRenewalMessage(csrData)
+	msg, err := decodeRenewalOrCommissioningError(csrData, "CSR")
 	if err != nil {
-		return nil, fmt.Errorf("decode CSR: %w", err)
+		return nil, err
 	}
 
 	csrResp, ok := msg.(*commissioning.CertRenewalCSR)
@@ -253,9 +270,9 @@ func (h *ControllerRenewalHandler) IssueInitialCertSync(ctx context.Context, syn
 		return nil, fmt.Errorf("read ack: %w", err)
 	}
 
-	msg, err = commissioning.DecodeRenewalMessage(ackData)
+	msg, err = decodeRenewalOrCommissioningError(ackData, "ack")
 	if err != nil {
-		return nil, fmt.Errorf("decode ack: %w", err)
+		return nil, err
 	}
 
 	ack, ok := msg.(*commissioning.CertRenewalAck)
