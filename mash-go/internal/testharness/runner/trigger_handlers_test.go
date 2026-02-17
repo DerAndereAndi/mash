@@ -269,3 +269,26 @@ func TestSendTriggerViaZone_FallsBackToMainWhenNoSuite(t *testing.T) {
 		t.Error("expected deviceStateModified=true (proves Main was used as fallback)")
 	}
 }
+
+// TestSendTriggerViaZone_StrictMode_RejectsFallbackToMain verifies that strict
+// lifecycle mode refuses implicit fallback to pool.Main() when suite.Conn() is absent.
+func TestSendTriggerViaZone_StrictMode_RejectsFallbackToMain(t *testing.T) {
+	r := newTestRunner()
+	r.config.EnableKey = "00112233445566778899aabbccddeeff"
+	r.config.StrictLifecycle = true
+
+	// No suite connection, but main is live.
+	mainConn, mainServer := newPipeConnection()
+	r.pool.SetMain(mainConn)
+	defer mainServer.Close()
+
+	state := engine.NewExecutionState(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := r.sendTriggerViaZone(ctx, features.TriggerEnterCommissioningMode, state)
+	if err == nil {
+		t.Fatal("expected strict mode to reject fallback to main connection")
+	}
+}

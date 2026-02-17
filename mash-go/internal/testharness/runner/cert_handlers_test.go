@@ -92,6 +92,26 @@ func TestHandleVerifyCommissioningState(t *testing.T) {
 	}
 }
 
+func TestHandleVerifyCommissioningState_OperationalSuiteWithoutPASEIsCommissioned(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	main := &Connection{state: ConnOperational}
+	r.pool.SetMain(main)
+	r.suite.Record("suite-zone-1", CryptoState{})
+	r.suite.SetConn(main)
+	r.connMgr.SetPASEState(nil)
+
+	step := &loader.Step{Params: map[string]any{ParamExpectedState: CommissioningStateCommissioned}}
+	out, _ := r.handleVerifyCommissioningState(context.Background(), step, state)
+	if out[KeyCommissioningState] != CommissioningStateCommissioned {
+		t.Errorf("expected %s, got %v", CommissioningStateCommissioned, out[KeyCommissioningState])
+	}
+	if out[KeyStateMatches] != true {
+		t.Error("expected state_matches=true")
+	}
+}
+
 // TestHandleVerifyCommissioningState_BufferedDataDetection verifies that when
 // the device sends data on a commissioning connection (e.g., PASEResponse after
 // invalid PASE X bytes), the probe correctly detects this as a closing connection

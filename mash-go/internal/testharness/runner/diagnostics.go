@@ -23,6 +23,19 @@ type StateDiff struct {
 	After  any    `json:"after"`
 }
 
+var volatileBaselineKeys = map[string]struct{}{
+	// Zone identity and per-zone timer internals are expected to change when
+	// suite zones are re-created across fresh_commission transitions.
+	"zones":           {},
+	"failsafe_timers": {},
+	// Pairing state can toggle around commissioning transitions and is not
+	// a stable per-test baseline invariant.
+	"pairing_active": {},
+	// Connection accounting can vary around fresh_commission reconnect windows.
+	"active_conns":       {},
+	"conn_tracker_count": {},
+}
+
 // diffSnapshots compares two device state snapshots and returns fields that
 // differ. Keys present in only one snapshot are included (with nil for the
 // missing side). This is the core leak-detection mechanism: if post-test
@@ -53,6 +66,20 @@ func diffSnapshots(before, after DeviceStateSnapshot) []StateDiff {
 
 	sort.Slice(diffs, func(i, j int) bool { return diffs[i].Key < diffs[j].Key })
 	return diffs
+}
+
+func filterBaselineDiffs(diffs []StateDiff) []StateDiff {
+	if len(diffs) == 0 {
+		return nil
+	}
+	out := make([]StateDiff, 0, len(diffs))
+	for _, d := range diffs {
+		if _, volatile := volatileBaselineKeys[d.Key]; volatile {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 // requestDeviceState sends a getTestState invoke to the device and returns
@@ -100,6 +127,7 @@ func (r *Runner) requestDeviceState(ctx context.Context, state *engine.Execution
 	}
 
 	// Read frames, skipping notifications, until we get the invoke response.
+	discarded := 0
 	for range 10 {
 		respData, err := conn.framer.ReadFrame()
 		if err != nil {
@@ -118,16 +146,29 @@ func (r *Runner) requestDeviceState(ctx context.Context, state *engine.Execution
 			r.debugf("requestDeviceState: decode error: %v", err)
 			return nil
 		}
+		if resp.MessageID == 0 {
+			conn.pendingNotifications = append(conn.pendingNotifications, respData)
+			discarded++
+			continue
+		}
+		if resp.MessageID != req.MessageID {
+			r.debugf("requestDeviceState: discarding orphaned response (got msgID=%d, want %d)", resp.MessageID, req.MessageID)
+			discarded++
+			continue
+		}
 
 		if !resp.IsSuccess() {
 			r.debugf("requestDeviceState: status %d", resp.Status)
 			return nil
 		}
+		if discarded > 0 {
+			r.debugf("requestDeviceState: discarded %d stale frames", discarded)
+		}
 
 		return payloadToSnapshot(resp.Payload)
 	}
 
-	r.debugf("requestDeviceState: no response after 10 frames")
+	r.debugf("requestDeviceState: no matching response after 10 frames (discarded=%d)", discarded)
 	return nil
 }
 

@@ -8,6 +8,74 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
+func waitForOperationalReadyOnConn(
+	conn *Connection,
+	timeout time.Duration,
+	nextMsgID func() uint32,
+	appendNotification func([]byte),
+	debugf func(string, ...any),
+) error {
+	if conn == nil || !conn.isConnected() {
+		return fmt.Errorf("not connected")
+	}
+	if conn.framer == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	req := &wire.Request{
+		MessageID:  nextMsgID(),
+		Operation:  wire.OpSubscribe,
+		EndpointID: 0,
+		FeatureID:  0x01, // FeatureDeviceInfo
+	}
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return fmt.Errorf("encode readiness probe: %w", err)
+	}
+
+	if err := conn.framer.WriteFrame(data); err != nil {
+		conn.transitionTo(ConnDisconnected)
+		return fmt.Errorf("send readiness probe: %w", err)
+	}
+
+	if conn.tlsConn != nil {
+		_ = conn.tlsConn.SetReadDeadline(time.Now().Add(timeout))
+		defer func() { _ = conn.tlsConn.SetReadDeadline(time.Time{}) }()
+	} else if conn.conn != nil {
+		_ = conn.conn.SetReadDeadline(time.Now().Add(timeout))
+		defer func() { _ = conn.conn.SetReadDeadline(time.Time{}) }()
+	}
+
+	for range 10 {
+		respData, err := conn.framer.ReadFrame()
+		if err != nil {
+			conn.transitionTo(ConnDisconnected)
+			return fmt.Errorf("read readiness response: %w", err)
+		}
+		resp, err := wire.DecodeResponse(respData)
+		if err != nil {
+			return fmt.Errorf("decode readiness response: %w", err)
+		}
+		if resp.MessageID == 0 {
+			if appendNotification != nil {
+				appendNotification(respData)
+			}
+			continue
+		}
+		if resp.MessageID != req.MessageID {
+			if debugf != nil {
+				debugf("waitForOperationalReady: discarding orphaned response (got msgID=%d, want %d)", resp.MessageID, req.MessageID)
+			}
+			continue
+		}
+		if debugf != nil {
+			debugf("waitForOperationalReady: device responded (status=%d)", resp.Status)
+		}
+		return nil
+	}
+	return fmt.Errorf("readiness probe: too many interleaved frames")
+}
+
 // waitForCommissioningMode uses the persistent mDNS observer to wait until
 // the device advertises the commissionable service (_mash-comm._tcp),
 // indicating it has re-entered commissioning mode.
@@ -112,62 +180,11 @@ func (r *Runner) probeSessionHealth() error {
 // a fixed duration, we perform a protocol-level probe that returns as soon as
 // the device is ready.
 func (r *Runner) waitForOperationalReady(timeout time.Duration) error {
-	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
-		return fmt.Errorf("not connected")
-	}
-
-	// Subscribe to DeviceInfo (feature 0x01) on endpoint 0.
-	// DeviceInfo is always present and the subscribe response includes
-	// priming data, confirming the full protocol stack is operational.
-	req := &wire.Request{
-		MessageID:  r.nextMessageID(),
-		Operation:  wire.OpSubscribe,
-		EndpointID: 0,
-		FeatureID:  0x01, // FeatureDeviceInfo
-	}
-	data, err := wire.EncodeRequest(req)
-	if err != nil {
-		return fmt.Errorf("encode readiness probe: %w", err)
-	}
-
-	// Send the subscribe frame.
-	if err := r.pool.Main().framer.WriteFrame(data); err != nil {
-		r.pool.Main().transitionTo(ConnDisconnected)
-		return fmt.Errorf("send readiness probe: %w", err)
-	}
-
-	// Set a tight read deadline so we don't block long on an unresponsive device.
-	if r.pool.Main().tlsConn != nil {
-		_ = r.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(timeout))
-		defer func() {
-			if r.pool.Main().tlsConn != nil {
-				_ = r.pool.Main().tlsConn.SetReadDeadline(time.Time{})
-			}
-		}()
-	}
-
-	// Read response, skipping notifications and orphaned responses.
-	for range 10 {
-		respData, err := r.pool.Main().framer.ReadFrame()
-		if err != nil {
-			r.pool.Main().transitionTo(ConnDisconnected)
-			return fmt.Errorf("read readiness response: %w", err)
-		}
-		resp, err := wire.DecodeResponse(respData)
-		if err != nil {
-			return fmt.Errorf("decode readiness response: %w", err)
-		}
-		// Notifications have messageId=0; buffer them for later consumption.
-		if resp.MessageID == 0 {
-			r.pool.AppendNotification(respData)
-			continue
-		}
-		if resp.MessageID != req.MessageID {
-			r.debugf("waitForOperationalReady: discarding orphaned response (got msgID=%d, want %d)", resp.MessageID, req.MessageID)
-			continue
-		}
-		r.debugf("waitForOperationalReady: device responded (status=%d)", resp.Status)
-		return nil
-	}
-	return fmt.Errorf("readiness probe: too many interleaved frames")
+	return waitForOperationalReadyOnConn(
+		r.pool.Main(),
+		timeout,
+		r.nextMessageID,
+		r.pool.AppendNotification,
+		r.debugf,
+	)
 }

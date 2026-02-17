@@ -2,6 +2,7 @@ package runner
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -42,6 +43,24 @@ type ClassifiedError struct {
 
 func (e *ClassifiedError) Error() string { return e.Err.Error() }
 func (e *ClassifiedError) Unwrap() error { return e.Err }
+
+// TeardownError identifies a strict teardown failure step and cause.
+type TeardownError struct {
+	Step  string
+	Cause error
+}
+
+func (e *TeardownError) Error() string {
+	if e == nil {
+		return "teardown error"
+	}
+	if e.Step == "" {
+		return fmt.Sprintf("teardown: %v", e.Cause)
+	}
+	return fmt.Sprintf("teardown[%s]: %v", e.Step, e.Cause)
+}
+
+func (e *TeardownError) Unwrap() error { return e.Cause }
 
 // Infrastructure wraps an error as an infrastructure (retryable) error.
 func Infrastructure(err error) error {

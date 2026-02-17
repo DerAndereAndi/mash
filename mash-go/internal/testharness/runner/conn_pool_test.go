@@ -5,6 +5,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -237,6 +238,87 @@ func TestConnPool_SendRequest_TooManyInterleavedFrames_ReturnsError(t *testing.T
 	_, err := pool.SendRequest(data, "read", msgID)
 	if err == nil {
 		t.Fatal("expected error from too many interleaved frames")
+	}
+}
+
+func TestConnPool_SendRequest_ReadTimeout_RetriesOnce(t *testing.T) {
+	oldWindow := sendRequestReadRetryWindow
+	sendRequestReadRetryWindow = 30 * time.Millisecond
+	t.Cleanup(func() { sendRequestReadRetryWindow = oldWindow })
+
+	pool, server := newPipedPool()
+	defer server.Close()
+
+	msgID := pool.NextMessageID()
+	var reads int32
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		framer := transport.NewFramer(server)
+		_, _ = framer.ReadFrame()
+		atomic.AddInt32(&reads, 1)
+
+		// Force first attempt to timeout.
+		time.Sleep(60 * time.Millisecond)
+
+		// Read retry send and answer it.
+		_, _ = framer.ReadFrame()
+		atomic.AddInt32(&reads, 1)
+		resp := &wire.Response{MessageID: msgID, Status: wire.StatusSuccess}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = framer.WriteFrame(respData)
+	}()
+
+	req := &wire.Request{MessageID: msgID, Operation: wire.OpRead}
+	data, _ := wire.EncodeRequest(req)
+
+	resp, err := pool.SendRequest(data, "read", msgID)
+	if err != nil {
+		t.Fatalf("expected read retry to succeed, got error: %v", err)
+	}
+	if resp.MessageID != msgID {
+		t.Fatalf("expected msgID=%d, got %d", msgID, resp.MessageID)
+	}
+	<-done
+	if got := atomic.LoadInt32(&reads); got != 2 {
+		t.Fatalf("expected 2 read attempts on server side, got %d", got)
+	}
+}
+
+func TestConnPool_SendRequest_NonReadTimeout_DoesNotRetry(t *testing.T) {
+	oldWindow := sendRequestReadRetryWindow
+	sendRequestReadRetryWindow = 30 * time.Millisecond
+	t.Cleanup(func() { sendRequestReadRetryWindow = oldWindow })
+
+	pool, server := newPipedPool()
+	defer server.Close()
+
+	msgID := pool.NextMessageID()
+	var reads int32
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		framer := transport.NewFramer(server)
+		_, _ = framer.ReadFrame()
+		atomic.AddInt32(&reads, 1)
+		_ = server.SetReadDeadline(time.Now().Add(120 * time.Millisecond))
+		if _, err := framer.ReadFrame(); err == nil {
+			atomic.AddInt32(&reads, 1)
+		}
+	}()
+
+	req := &wire.Request{MessageID: msgID, Operation: wire.OpWrite, Payload: wire.WritePayload{}}
+	data, _ := wire.EncodeRequest(req)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	_, err := pool.SendRequestWithDeadline(ctx, data, "write", msgID)
+	if err == nil {
+		t.Fatal("expected timeout error for write request")
+	}
+	<-done
+	if got := atomic.LoadInt32(&reads); got != 1 {
+		t.Fatalf("expected exactly 1 send attempt for non-read op, got %d", got)
 	}
 }
 

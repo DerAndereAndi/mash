@@ -70,28 +70,29 @@ import (
 )
 
 var (
-	target         = flag.String("target", "", "Target address (host:port) of device/controller under test")
-	mode           = flag.String("mode", "device", "Test mode: device, controller")
-	pics           = flag.String("pics", "", "Path to PICS file for the target")
-	tests          = flag.String("tests", "./testdata/cases", "Path to test cases directory")
-	timeout        = flag.Duration("timeout", 30*time.Second, "Test timeout")
-	verbose        = flag.Bool("verbose", false, "Enable verbose output")
-	jsonOut        = flag.Bool("json", false, "Output results as JSON")
-	junitOut       = flag.Bool("junit", false, "Output results as JUnit XML")
-	insecure       = flag.Bool("insecure", false, "Skip TLS certificate verification")
-	setupCode      = flag.String("setup-code", "", "PASE setup code (8-digit numeric string)")
-	clientIdentity = flag.String("client-identity", "", "Client identity for PASE (default: test-client)")
-	serverIdentity = flag.String("server-identity", "", "Server identity for PASE (default: test-device)")
-	protocolLog    = flag.String("protocol-log", "", "File path for protocol event logging (CBOR format)")
-	enableKey      = flag.String("enable-key", "00112233445566778899aabbccddeeff", "128-bit hex key for TestControl triggers (32 hex chars)")
-	debug          = flag.Bool("debug", false, "Enable debug logging (connection lifecycle, precondition transitions, state snapshots)")
-	suiteTimeout   = flag.Duration("suite-timeout", 0, "Suite timeout (0 = auto-calculate from test timeouts)")
-	filter         = flag.String("filter", "", "Filter test cases by ID glob pattern (e.g., 'TC-CERT*' or '*ZONE*')")
-	files          = flag.String("files", "", "Filter test files by name pattern (e.g., 'protocol-*,connection-*')")
-	tags           = flag.String("tags", "", "Include only tests with these tags (comma-separated)")
-	excludeTags    = flag.String("exclude-tags", "", "Exclude tests with these tags (comma-separated)")
-	shuffle        = flag.Bool("shuffle", false, "Randomize test order within each precondition level")
-	shuffleSeed    = flag.Int64("shuffle-seed", 0, "Seed for shuffle randomization (0 = auto-generate)")
+	target          = flag.String("target", "", "Target address (host:port) of device/controller under test")
+	mode            = flag.String("mode", "device", "Test mode: device, controller")
+	pics            = flag.String("pics", "", "Path to PICS file for the target")
+	tests           = flag.String("tests", "./testdata/cases", "Path to test cases directory")
+	timeout         = flag.Duration("timeout", 30*time.Second, "Test timeout")
+	verbose         = flag.Bool("verbose", false, "Enable verbose output")
+	jsonOut         = flag.Bool("json", false, "Output results as JSON")
+	junitOut        = flag.Bool("junit", false, "Output results as JUnit XML")
+	insecure        = flag.Bool("insecure", false, "Skip TLS certificate verification")
+	setupCode       = flag.String("setup-code", "", "PASE setup code (8-digit numeric string)")
+	clientIdentity  = flag.String("client-identity", "", "Client identity for PASE (default: test-client)")
+	serverIdentity  = flag.String("server-identity", "", "Server identity for PASE (default: test-device)")
+	protocolLog     = flag.String("protocol-log", "", "File path for protocol event logging (CBOR format)")
+	enableKey       = flag.String("enable-key", "00112233445566778899aabbccddeeff", "128-bit hex key for TestControl triggers (32 hex chars)")
+	debug           = flag.Bool("debug", false, "Enable debug logging (connection lifecycle, precondition transitions, state snapshots)")
+	suiteTimeout    = flag.Duration("suite-timeout", 0, "Suite timeout (0 = auto-calculate from test timeouts)")
+	filter          = flag.String("filter", "", "Filter test cases by ID glob pattern (e.g., 'TC-CERT*' or '*ZONE*')")
+	files           = flag.String("files", "", "Filter test files by name pattern (e.g., 'protocol-*,connection-*')")
+	tags            = flag.String("tags", "", "Include only tests with these tags (comma-separated)")
+	excludeTags     = flag.String("exclude-tags", "", "Exclude tests with these tags (comma-separated)")
+	shuffle         = flag.Bool("shuffle", false, "Randomize test order within each precondition level")
+	shuffleSeed     = flag.Int64("shuffle-seed", 0, "Seed for shuffle randomization (0 = auto-generate)")
+	strictLifecycle = flag.Bool("strict-lifecycle", false, "Fail tests when teardown cleanup invariants are violated")
 )
 
 func main() {
@@ -203,6 +204,7 @@ func run() int {
 		SuiteTimeout:       *suiteTimeout,
 		Shuffle:            *shuffle,
 		ShuffleSeed:        *shuffleSeed,
+		StrictLifecycle:    *strictLifecycle,
 	}
 	// Only set logger when non-nil to avoid typed-nil interface issue.
 	if protocolLogger != nil {

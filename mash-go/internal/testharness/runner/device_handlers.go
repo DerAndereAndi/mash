@@ -180,7 +180,6 @@ func (r *Runner) handleDeviceLocalAction(ctx context.Context, step *loader.Step,
 	return result, err
 }
 
-
 // handleDeviceSetValue sets an attribute value on the device.
 func (r *Runner) handleDeviceSetValue(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
@@ -216,10 +215,10 @@ func (r *Runner) handleDeviceSetValue(ctx context.Context, step *loader.Step, st
 		ds.attributes[attribute] = value
 		state.Set(attribute, value)
 		return map[string]any{
-			KeyValueSet:   true,
-			KeyKey:        attribute,
+			KeyValueSet:    true,
+			KeyKey:         attribute,
 			KeyTriggerSent: true,
-			KeyStatus:     result,
+			KeyStatus:      result,
 		}, nil
 	}
 
@@ -477,10 +476,10 @@ func (r *Runner) handleChangeState(ctx context.Context, step *loader.Step, state
 	}
 
 	return map[string]any{
-		KeyStateChanged:      changed,
-		StateOperatingState:  ds.operatingState,
-		StateControlState:    ds.controlState,
-		StateProcessState:    ds.processState,
+		KeyStateChanged:     changed,
+		StateOperatingState: ds.operatingState,
+		StateControlState:   ds.controlState,
+		StateProcessState:   ds.processState,
 	}, nil
 }
 
@@ -501,6 +500,10 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 	conn := r.suite.Conn()
 	if conn != nil && conn.isConnected() && conn.framer != nil {
 		return r.sendTriggerOnConn(ctx, trigger, conn)
+	}
+
+	if r.config != nil && r.config.StrictLifecycle {
+		return fmt.Errorf("strict lifecycle: no suite zone connection available for trigger")
 	}
 
 	// Fall back to pool.Main() (L3 tests where Main is the operational connection).
@@ -623,8 +626,8 @@ func (r *Runner) handleTriggerFault(ctx context.Context, step *loader.Step, stat
 	}
 
 	return map[string]any{
-		KeyFaultTriggered:    true,
-		KeyFaultCode:         code,
+		KeyFaultTriggered:     true,
+		KeyFaultCode:          code,
 		StateActiveFaultCount: len(ds.faults),
 	}, nil
 }
@@ -678,7 +681,7 @@ func (r *Runner) handleQueryDeviceState(ctx context.Context, step *loader.Step, 
 		KeyEVConnected:      ds.evConnected,
 		KeyCablePluggedIn:   ds.cablePluggedIn,
 		KeyDeviceID:         deviceIDStr,
-		KeyDeviceIDPresent: deviceIDStr != "",
+		KeyDeviceIDPresent:  deviceIDStr != "",
 	}, nil
 }
 
@@ -781,7 +784,7 @@ func (r *Runner) handleSetFailsafeLimit(ctx context.Context, step *loader.Step, 
 
 	return map[string]any{
 		KeyFailsafeLimitSet: true,
-		KeyLimitWatts:        limit,
+		KeyLimitWatts:       limit,
 	}, nil
 }
 
@@ -815,7 +818,7 @@ func (r *Runner) handleStartOperation(ctx context.Context, step *loader.Step, st
 	}
 
 	return map[string]any{
-		StateProcessState:  ProcessStateRunning,
+		StateProcessState:   ProcessStateRunning,
 		KeyOperationStarted: true,
 	}, nil
 }
@@ -987,4 +990,3 @@ func (r *Runner) handleReboot(ctx context.Context, step *loader.Step, state *eng
 func (r *Runner) handleRestart(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	return r.handlePowerCycle(ctx, step, state)
 }
-

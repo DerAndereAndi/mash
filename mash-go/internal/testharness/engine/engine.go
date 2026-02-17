@@ -139,6 +139,29 @@ func (e *Engine) Run(ctx context.Context, tc *loader.TestCase) *TestResult {
 		e.config.TeardownTest(testCtx, tc, state)
 	}
 
+	// Teardown can communicate strict cleanup failures via execution state.
+	if teardownErr, ok := state.Custom[StateKeyTeardownError]; ok {
+		switch v := teardownErr.(type) {
+		case string:
+			if v == "" {
+				break
+			}
+			result.Passed = false
+			if result.Error == nil {
+				result.Error = fmt.Errorf("%s", v)
+			} else {
+				result.Error = fmt.Errorf("%v; teardown: %s", result.Error, v)
+			}
+		case error:
+			result.Passed = false
+			if result.Error == nil {
+				result.Error = v
+			} else {
+				result.Error = fmt.Errorf("%v; teardown: %v", result.Error, v)
+			}
+		}
+	}
+
 	// Transfer device state snapshots from execution state to test result.
 	if before, ok := state.Custom[StateKeyDeviceStateBefore]; ok {
 		if m, ok := before.(map[string]any); ok {
@@ -153,6 +176,11 @@ func (e *Engine) Run(ctx context.Context, tc *loader.TestCase) *TestResult {
 	if diffs, ok := state.Custom[StateKeyDeviceStateDiffs]; ok {
 		if d, ok := diffs.([]map[string]any); ok {
 			result.DeviceStateDiffs = d
+		}
+	}
+	if cr, ok := state.Custom[StateKeyCleanupReport]; ok {
+		if m, ok := cr.(map[string]any); ok {
+			result.CleanupReport = m
 		}
 	}
 

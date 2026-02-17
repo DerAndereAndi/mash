@@ -1814,6 +1814,60 @@ func TestMatchConnectedZoneByPeerCert_NilCert(t *testing.T) {
 	}
 }
 
+func TestHandleZoneSessionClose_StaleSessionDoesNotCloseActiveSession(t *testing.T) {
+	device := model.NewDevice("test-stale-session-close", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService: %v", err)
+	}
+
+	const zoneID = "zone-1"
+	staleSession := NewZoneSession(zoneID, newMockSendableConnection(), device)
+	activeSession := NewZoneSession(zoneID, newMockSendableConnection(), device)
+	t.Cleanup(staleSession.Close)
+	t.Cleanup(activeSession.Close)
+
+	svc.mu.Lock()
+	svc.connectedZones[zoneID] = &ConnectedZone{
+		ID:        zoneID,
+		Type:      cert.ZoneTypeLocal,
+		Connected: true,
+	}
+	svc.zoneSessions[zoneID] = activeSession
+	svc.mu.Unlock()
+
+	// Simulate stale session loop exiting after a replacement. This must not
+	// remove or close the currently active session for the same zone.
+	svc.handleZoneSessionClose(zoneID, staleSession)
+
+	svc.mu.RLock()
+	gotSession := svc.zoneSessions[zoneID]
+	gotConnected := svc.connectedZones[zoneID].Connected
+	svc.mu.RUnlock()
+
+	if gotSession != activeSession {
+		t.Fatal("stale close removed active session mapping")
+	}
+	if !gotConnected {
+		t.Fatal("stale close marked active zone disconnected")
+	}
+
+	// Active session close should still clean up the mapping and disconnect state.
+	svc.handleZoneSessionClose(zoneID, activeSession)
+
+	svc.mu.RLock()
+	_, stillTracked := svc.zoneSessions[zoneID]
+	disconnected := !svc.connectedZones[zoneID].Connected
+	svc.mu.RUnlock()
+	if stillTracked {
+		t.Fatal("active close did not remove session mapping")
+	}
+	if !disconnected {
+		t.Fatal("active close did not mark zone disconnected")
+	}
+}
+
 func TestEvictDisconnectedZone_SkipsTESTZones(t *testing.T) {
 	device := model.NewDevice("test-evict", 0x1234, 0x5678)
 	config := validDeviceConfig()

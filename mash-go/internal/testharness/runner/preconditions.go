@@ -2,9 +2,11 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	mathrand "math/rand"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -13,6 +15,12 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/wire"
+)
+
+var (
+	errRemoveZoneNoConnection = errors.New("remove zone: no live connection")
+	errRemoveZoneNoPASE       = errors.New("remove zone: no completed PASE session")
+	errRemoveZoneNoZoneID     = errors.New("remove zone: empty zone id")
 )
 
 // Precondition levels form a hierarchy:
@@ -288,6 +296,7 @@ func (r *Runner) currentLevel() int {
 // It delegates to the coordinator for test cleanup and stops the mDNS observer
 // so the next test starts with a fresh observer.
 func (r *Runner) teardownTest(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState) {
+	r.clearStrictLifecycleErr()
 	r.stopObserver()
 	if r.pairingAdvertiser != nil {
 		r.pairingAdvertiser.StopAll()
@@ -313,12 +322,70 @@ func (r *Runner) teardownTest(ctx context.Context, tc *loader.TestCase, state *e
 		}
 		reCancel()
 	}
+
+	report := r.BuildCleanupReport()
+	state.Custom[engine.StateKeyCleanupReport] = report.ToMap()
+	if r.config != nil && r.config.StrictLifecycle && r.strictLifecycleErr != nil {
+		appendTeardownError(state, &TeardownError{
+			Step:  "strict_lifecycle",
+			Cause: r.strictLifecycleErr,
+		})
+	}
+	if !report.IsClean() {
+		r.debugf("teardown: cleanup invariants failed: %s", report.Summary())
+		if r.config != nil && r.config.StrictLifecycle {
+			appendTeardownError(state, &TeardownError{
+				Step:  "cleanup_invariants",
+				Cause: errors.New(report.Summary()),
+			})
+		}
+	}
+	if r.config != nil && r.config.StrictLifecycle {
+		contract := r.runStrictCleanupContract(ctx, state)
+		state.Custom[stateKeyStrictCleanupContract] = contract.ToMap()
+		if !contract.IsClean() {
+			r.debugf("teardown: strict cleanup contract failed: %s", contract.Summary())
+			appendTeardownError(state, &TeardownError{
+				Step:  "strict_cleanup_contract",
+				Cause: errors.New(contract.Summary()),
+			})
+		}
+	}
+}
+
+func appendTeardownError(state *engine.ExecutionState, err error) {
+	if state == nil || err == nil {
+		return
+	}
+	if existing, ok := state.Custom[engine.StateKeyTeardownError]; ok {
+		switch v := existing.(type) {
+		case error:
+			state.Custom[engine.StateKeyTeardownError] = errors.Join(v, err)
+		case string:
+			if v == "" {
+				state.Custom[engine.StateKeyTeardownError] = err
+			} else {
+				state.Custom[engine.StateKeyTeardownError] = errors.Join(errors.New(v), err)
+			}
+		default:
+			state.Custom[engine.StateKeyTeardownError] = err
+		}
+		return
+	}
+	state.Custom[engine.StateKeyTeardownError] = err
 }
 
 // setupPreconditions is the callback registered with the engine.
 // It delegates to the coordinator for all lifecycle orchestration.
 func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, state *engine.ExecutionState) error {
-	return r.coordinator.SetupPreconditions(ctx, tc, state)
+	r.clearStrictLifecycleErr()
+	if err := r.coordinator.SetupPreconditions(ctx, tc, state); err != nil {
+		return err
+	}
+	if r.config != nil && r.config.StrictLifecycle && r.strictLifecycleErr != nil {
+		return r.strictLifecycleErr
+	}
+	return nil
 }
 
 // sendClearLimitInvoke sends a ClearLimit invoke (direction=nil, i.e. clear both)
@@ -355,26 +422,78 @@ func (r *Runner) ensureConnected(ctx context.Context, state *engine.ExecutionSta
 		return nil
 	}
 
-	// Create a synthetic step to drive handleConnect.
-	step := &loader.Step{
-		Action: "connect",
-		Params: map[string]any{
-			KeyCommissioning: true,
-		},
+	maxAttempts := 1
+	if r.config != nil && r.config.Target != "" {
+		maxAttempts = 3
 	}
 
-	outputs, err := r.handleConnect(ctx, step, state)
-	if err != nil {
-		return fmt.Errorf("precondition connect failed: %w", err)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// Create a synthetic step to drive handleConnect.
+		step := &loader.Step{
+			Action: "connect",
+			Params: map[string]any{
+				KeyCommissioning: true,
+			},
+		}
+
+		outputs, err := r.handleConnect(ctx, step, state)
+		if err != nil {
+			if attempt < maxAttempts && isTransientError(err) {
+				r.debugf("ensureConnected: transient connect error on attempt %d/%d: %v", attempt, maxAttempts, err)
+				_ = contextSleep(ctx, time.Duration(attempt)*200*time.Millisecond)
+				continue
+			}
+			return fmt.Errorf("precondition connect failed: %w", err)
+		}
+
+		// handleConnect returns connection_established in outputs even on TLS failure.
+		if established, ok := outputs[KeyConnectionEstablished].(bool); ok && !established {
+			errCode, _ := outputs[KeyError].(string)
+			errDetail, _ := outputs[KeyErrorDetail].(string)
+			if attempt < maxAttempts && shouldRetryConnectFailure(errCode, errDetail) {
+				r.debugf("ensureConnected: retryable connect failure on attempt %d/%d: code=%s detail=%s", attempt, maxAttempts, errCode, errDetail)
+				_ = contextSleep(ctx, time.Duration(attempt)*200*time.Millisecond)
+				continue
+			}
+			return formatPreconditionConnectFailure(errCode, errDetail)
+		}
+		if r.strictLifecycleEnabled() {
+			// setupPreconditions may detach pool.Main while the lifecycle
+			// controller still tracks an operational authority. Align before
+			// entering a fresh commissioning connection.
+			if r.lifecycleController().State() != LifecycleDisconnected {
+				r.lifecycleController().ToDisconnected()
+			}
+			if err := r.lifecycleController().ToCommissioning("main"); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
-	// handleConnect returns connection_established in outputs even on TLS failure.
-	if established, ok := outputs[KeyConnectionEstablished].(bool); ok && !established {
-		errMsg, _ := outputs[KeyError].(string)
-		return fmt.Errorf("precondition connect failed: %s", errMsg)
-	}
+	return fmt.Errorf("precondition connect failed: %s", ErrCodeConnectionError)
+}
 
-	return nil
+func shouldRetryConnectFailure(errCode, errDetail string) bool {
+	if strings.Contains(strings.ToLower(errDetail), "simulated") {
+		return false
+	}
+	switch errCode {
+	case ErrCodeConnectionError, ErrCodeConnectionFailed, ErrCodeTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func formatPreconditionConnectFailure(errCode, errDetail string) error {
+	if errCode == "" {
+		errCode = ErrCodeConnectionError
+	}
+	if errDetail == "" || errDetail == errCode {
+		return fmt.Errorf("precondition connect failed: %s", errCode)
+	}
+	return fmt.Errorf("precondition connect failed: %s (%s)", errCode, errDetail)
 }
 
 // closeActiveZoneConns closes runner-tracked zone connections from previous
@@ -460,6 +579,9 @@ func (r *Runner) disconnectConnection() {
 		r.pool.Main().clearConnectionRefs()
 	}
 	r.connMgr.SetPASEState(nil)
+	if r.strictLifecycleEnabled() {
+		r.lifecycleController().ToDisconnected()
+	}
 }
 
 // ensureDisconnected closes the connection AND clears all crypto material.
@@ -480,7 +602,8 @@ func (r *Runner) ensureDisconnected() {
 // commissioning mode (DEC-059). Errors are ignored because the device may
 // have already closed the connection.
 func (r *Runner) sendRemoveZone() {
-	if r.pool.Main() == nil || !r.pool.Main().isConnected() || r.pool.Main().framer == nil {
+	main := r.pool.Main()
+	if main == nil || !main.isConnected() || main.framer == nil {
 		return
 	}
 	ps := r.connMgr.PASEState()
@@ -492,18 +615,7 @@ func (r *Runner) sendRemoveZone() {
 	zoneID := deriveZoneIDFromSecret(ps.sessionKey)
 
 	// Build RemoveZone invoke: endpoint 0, DeviceInfo feature (1), command 0x10.
-	req := &wire.Request{
-		MessageID:  r.pool.NextMessageID(),
-		Operation:  wire.OpInvoke,
-		EndpointID: 0,
-		FeatureID:  1, // DeviceInfo
-		Payload: &wire.InvokePayload{
-			CommandID:  16, // DeviceInfoCmdRemoveZone
-			Parameters: map[string]any{"zoneId": zoneID},
-		},
-	}
-
-	data, err := wire.EncodeRequest(req)
+	_, data, err := r.buildRemoveZoneRequest(zoneID)
 	if err != nil {
 		return
 	}
@@ -511,16 +623,16 @@ func (r *Runner) sendRemoveZone() {
 	// Best-effort: send and read response with a short deadline to avoid
 	// blocking forever when the device closes the connection (e.g., last
 	// zone removed triggers commissioning mode).
-	if err := r.pool.Main().framer.WriteFrame(data); err != nil {
+	if err := main.framer.WriteFrame(data); err != nil {
 		return
 	}
-	if r.pool.Main().tlsConn != nil {
-		r.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	if main.tlsConn != nil {
+		main.tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	}
-	_, _ = r.pool.Main().framer.ReadFrame()
+	_, _ = main.framer.ReadFrame()
 	// Reset deadline for subsequent operations.
-	if r.pool.Main().tlsConn != nil {
-		r.pool.Main().tlsConn.SetReadDeadline(time.Time{})
+	if main.tlsConn != nil {
+		main.tlsConn.SetReadDeadline(time.Time{})
 	}
 }
 
@@ -530,18 +642,7 @@ func (r *Runner) sendRemoveZone() {
 // async disconnect detection. A short read deadline prevents blocking when
 // the device enters commissioning mode before responding (e.g., last zone).
 func (r *Runner) sendRemoveZoneOnConn(conn *Connection, zoneID string) {
-	req := &wire.Request{
-		MessageID:  r.pool.NextMessageID(),
-		Operation:  wire.OpInvoke,
-		EndpointID: 0,
-		FeatureID:  1, // DeviceInfo
-		Payload: &wire.InvokePayload{
-			CommandID:  16, // DeviceInfoCmdRemoveZone
-			Parameters: map[string]any{"zoneId": zoneID},
-		},
-	}
-
-	data, err := wire.EncodeRequest(req)
+	_, data, err := r.buildRemoveZoneRequest(zoneID)
 	if err != nil {
 		return
 	}
@@ -558,6 +659,82 @@ func (r *Runner) sendRemoveZoneOnConn(conn *Connection, zoneID string) {
 		conn.tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	}
 	_, _ = conn.framer.ReadFrame()
+}
+
+func (r *Runner) buildRemoveZoneRequest(zoneID string) (*wire.Request, []byte, error) {
+	req := &wire.Request{
+		MessageID:  r.pool.NextMessageID(),
+		Operation:  wire.OpInvoke,
+		EndpointID: 0,
+		FeatureID:  1, // DeviceInfo
+		Payload: &wire.InvokePayload{
+			CommandID:  16, // DeviceInfoCmdRemoveZone
+			Parameters: map[string]any{"zoneId": zoneID},
+		},
+	}
+	data, err := wire.EncodeRequest(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	return req, data, nil
+}
+
+// sendRemoveZoneStrict sends RemoveZone and returns errors instead of silently
+// continuing. Used in strict lifecycle mode where cleanup must be deterministic.
+func (r *Runner) sendRemoveZoneStrict() error {
+	main := r.pool.Main()
+	if main == nil || !main.isConnected() || main.framer == nil {
+		return errRemoveZoneNoConnection
+	}
+	ps := r.connMgr.PASEState()
+	if ps == nil || !ps.completed || ps.sessionKey == nil {
+		return errRemoveZoneNoPASE
+	}
+	zoneID := deriveZoneIDFromSecret(ps.sessionKey)
+	if zoneID == "" {
+		return errRemoveZoneNoZoneID
+	}
+	return r.sendRemoveZoneOnConnStrict(main, zoneID)
+}
+
+// sendRemoveZoneOnConnStrict is the strict variant of sendRemoveZoneOnConn.
+func (r *Runner) sendRemoveZoneOnConnStrict(conn *Connection, zoneID string) error {
+	if conn == nil || !conn.isConnected() || conn.framer == nil {
+		return errRemoveZoneNoConnection
+	}
+	if zoneID == "" {
+		return errRemoveZoneNoZoneID
+	}
+	req, data, err := r.buildRemoveZoneRequest(zoneID)
+	if err != nil {
+		return fmt.Errorf("remove zone encode: %w", err)
+	}
+
+	if err := conn.framer.WriteFrame(data); err != nil {
+		return fmt.Errorf("remove zone send: %w", err)
+	}
+
+	if conn.tlsConn != nil {
+		conn.tlsConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		defer conn.tlsConn.SetReadDeadline(time.Time{})
+	}
+
+	respData, err := conn.framer.ReadFrame()
+	if err != nil {
+		return fmt.Errorf("remove zone ack read: %w", err)
+	}
+	resp, err := wire.DecodeResponse(respData)
+	if err != nil {
+		return fmt.Errorf("remove zone ack decode: %w", err)
+	}
+	if resp.MessageID != req.MessageID {
+		return fmt.Errorf("remove zone ack message mismatch: got %d want %d", resp.MessageID, req.MessageID)
+	}
+	if resp.Status != wire.StatusSuccess {
+		return fmt.Errorf("remove zone ack status: %d", resp.Status)
+	}
+
+	return nil
 }
 
 // hasZoneOfType checks if a zone of the given type exists in zone state.
@@ -614,12 +791,38 @@ func (r *Runner) WaitForCommissioningMode(ctx context.Context, timeout time.Dura
 
 // SendRemoveZone wraps sendRemoveZone.
 func (r *Runner) SendRemoveZone() {
+	if r.config != nil && r.config.StrictLifecycle {
+		if err := r.sendRemoveZoneStrict(); err != nil {
+			r.setStrictLifecycleErr(err)
+		}
+		return
+	}
 	r.sendRemoveZone()
 }
 
 // SendRemoveZoneOnConn wraps sendRemoveZoneOnConn.
 func (r *Runner) SendRemoveZoneOnConn(conn *Connection, zoneID string) {
+	if r.config != nil && r.config.StrictLifecycle {
+		if err := r.sendRemoveZoneOnConnStrict(conn, zoneID); err != nil {
+			if isBestEffortRemoveZoneOnConnError(err) {
+				r.debugf("remove zone on conn best-effort cleanup failed: %v (continuing)", err)
+				return
+			}
+			r.setStrictLifecycleErr(err)
+		}
+		return
+	}
 	r.sendRemoveZoneOnConn(conn, zoneID)
+}
+
+func isBestEffortRemoveZoneOnConnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, errRemoveZoneNoConnection) {
+		return true
+	}
+	return strings.Contains(err.Error(), "remove zone ack read")
 }
 
 // SendTriggerViaZone wraps sendTriggerViaZone.
@@ -888,7 +1091,13 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 						ps := r.connMgr.PASEState()
 						if r.pool.Main() != nil && r.pool.Main().isConnected() && ps != nil && ps.completed {
 							r.debugf("two_zones_connected: sending RemoveZone before disconnect (zone %d)", i)
-							r.sendRemoveZone()
+							if r.config != nil && r.config.StrictLifecycle {
+								if err := r.sendRemoveZoneStrict(); err != nil {
+									return fmt.Errorf("two_zones_connected: strict remove zone: %w", err)
+								}
+							} else {
+								r.sendRemoveZone()
+							}
 						}
 
 						r.disconnectConnection()
@@ -996,7 +1205,13 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 						ps := r.connMgr.PASEState()
 						if r.pool.Main() != nil && r.pool.Main().isConnected() && ps != nil && ps.completed {
 							r.debugf("device_zones_full: sending RemoveZone before disconnect (zone %d)", i)
-							r.sendRemoveZone()
+							if r.config != nil && r.config.StrictLifecycle {
+								if err := r.sendRemoveZoneStrict(); err != nil {
+									return fmt.Errorf("device_zones_full: strict remove zone: %w", err)
+								}
+							} else {
+								r.sendRemoveZone()
+							}
 						}
 
 						r.disconnectConnection()

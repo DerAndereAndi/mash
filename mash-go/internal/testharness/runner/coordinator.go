@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
@@ -402,12 +403,10 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 			}
 
 			// Borrow suite connection if it's alive; fall back to reconnect.
-			sc := c.suite.Conn()
-			if sc != nil && sc.isConnected() {
-				c.pool.SetMain(sc)
+			if borrowSuiteControlChannelIfAlive(c.pool, c.suite, state) {
 				c.debugf("borrowing suite zone %s for %s", c.suite.ZoneID(), tc.ID)
 			} else {
-				c.pool.SetMain(&Connection{})
+				detachMainControlChannel(c.pool, state)
 				c.debugf("reconnecting to suite zone %s for %s (suite conn dead)", c.suite.ZoneID(), tc.ID)
 				setupErr = c.ops.ReconnectToZone(state)
 				if setupErr != nil {
@@ -457,7 +456,7 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		if current > precondLevelConnected {
 			c.debugf("downgrading from commissioned to connected for %s", tc.ID)
 			if c.suite.ZoneID() != "" {
-				c.pool.SetMain(&Connection{})
+				detachMainControlChannel(c.pool, state)
 				c.ops.SetPASEState(nil)
 			} else {
 				c.ops.EnsureDisconnected()
@@ -473,7 +472,7 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		if c.suite.ZoneID() != "" {
 			c.debugf("preserving suite zone %s during commissioning setup", c.suite.ZoneID())
 			if c.pool.Main() != nil && c.pool.Main().isConnected() {
-				c.pool.SetMain(&Connection{})
+				detachMainControlChannel(c.pool, state)
 			}
 			c.ops.SetPASEState(nil)
 		} else {
@@ -559,7 +558,7 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		if c.pool.Main() != nil {
 			_ = c.pool.Main().Close()
 		}
-		c.pool.SetMain(&Connection{})
+		detachMainControlChannel(c.pool, state)
 		c.ops.SetPASEState(nil)
 		c.ops.SetWorkingCrypto(savedCr)
 	}
@@ -571,47 +570,6 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 // It cleans up subscriptions, notifications, stale PASE state, and
 // per-test security pool connections.
 func (c *coordinatorImpl) TeardownTest(_ context.Context, _ *loader.TestCase, state *engine.ExecutionState) {
-	// Capture device state snapshot AFTER the test ran, BEFORE cleanup.
-	if c.config.Target != "" && c.config.EnableKey != "" {
-		afterCtx, afterCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if after := c.ops.RequestDeviceState(afterCtx, state); after != nil {
-			state.Custom[engine.StateKeyDeviceStateAfter] = map[string]any(after)
-
-			if beforeRaw, ok := state.Custom[engine.StateKeyDeviceStateBefore]; ok {
-				if before, ok := beforeRaw.(map[string]any); ok {
-					diffs := diffSnapshots(DeviceStateSnapshot(before), DeviceStateSnapshot(after))
-					if len(diffs) > 0 {
-						diffMaps := make([]map[string]any, len(diffs))
-						for i, d := range diffs {
-							diffMaps[i] = map[string]any{
-								"key":    d.Key,
-								"before": d.Before,
-								"after":  d.After,
-							}
-						}
-						state.Custom[engine.StateKeyDeviceStateDiffs] = diffMaps
-						c.debugf("teardown: baseline diverged on %d fields, re-resetting", len(diffs))
-
-						// Re-reset and verify baseline is restored.
-						resetCtx, resetCancel := context.WithTimeout(context.Background(), 5*time.Second)
-						_ = c.ops.SendTriggerViaZone(resetCtx, features.TriggerResetTestState, state)
-						resetCancel()
-
-						verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 3*time.Second)
-						if recheck := c.ops.RequestDeviceState(verifyCtx, state); recheck != nil {
-							recheckDiffs := diffSnapshots(DeviceStateSnapshot(before), recheck)
-							if len(recheckDiffs) > 0 {
-								c.debugf("teardown: baseline STILL diverged after re-reset (%d fields)", len(recheckDiffs))
-							}
-						}
-						verifyCancel()
-					}
-				}
-			}
-		}
-		afterCancel()
-	}
-
 	// Unsubscribe all active subscriptions.
 	c.pool.UnsubscribeAll(c.pool.Main())
 	c.pool.ClearNotifications()
@@ -626,6 +584,29 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, _ *loader.TestCase, st
 	// Suite zone conn lives outside the pool -- clear its buffer too.
 	if sc := c.suite.Conn(); sc != nil {
 		sc.pendingNotifications = nil
+	}
+
+	// Remove per-test zones created by multi-zone commissioning steps.
+	// Keep only the suite zone (if present) so strict cleanup invariants are
+	// evaluated against a single authoritative control channel.
+	suiteKey := ""
+	if c.suite.ZoneID() != "" {
+		suiteKey = c.suite.ConnKey()
+	}
+	for _, key := range c.pool.ZoneKeys() {
+		if suiteKey != "" && key == suiteKey {
+			continue
+		}
+		zc := c.pool.Zone(key)
+		if zc != nil && zc.isConnected() && zc.framer != nil {
+			if zoneID := c.pool.ZoneID(key); zoneID != "" {
+				c.ops.SendRemoveZoneOnConn(zc, zoneID)
+			}
+		}
+		if zc != nil {
+			zc.transitionTo(ConnDisconnected)
+		}
+		c.pool.UntrackZone(key)
 	}
 
 	// Close connections with incomplete PASE state.
@@ -668,19 +649,97 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, _ *loader.TestCase, st
 		// After non-L3 tests, pool.Main() may be dead/empty while
 		// suite.Conn() is alive. Restore main to suite conn so
 		// ProbeSessionHealth can use it.
-		if sc := c.suite.Conn(); sc != nil && sc.isConnected() {
-			if m := c.pool.Main(); m == nil || !m.isConnected() {
-				c.pool.SetMain(sc)
-			}
+		if m := c.pool.Main(); m == nil || !m.isConnected() {
+			_ = borrowSuiteControlChannelIfAlive(c.pool, c.suite, state)
 		}
 
 		if err := c.ops.ProbeSessionHealth(); err != nil {
 			c.debugf("teardown: suite zone health probe failed: %v, reconnecting", err)
 			if reconErr := c.ops.ReconnectToZone(state); reconErr != nil {
 				c.debugf("teardown: suite zone reconnect failed: %v (continuing)", reconErr)
+				// Keep teardown deterministic: no stale main/suite alias after
+				// failed reconnect.
+				detachMainControlChannel(c.pool, state)
+				c.markTeardownError(state, "suite_zone_reconnect", reconErr)
 			}
 		}
 	}
+
+	// Capture device state snapshot after teardown cleanup and verify baseline.
+	// This avoids false diffs from transient per-test subscriptions/notifications
+	// and gives teardown one chance to repair a broken suite connection first.
+	if c.config.Target != "" && c.config.EnableKey != "" {
+		afterCtx, afterCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if after := c.ops.RequestDeviceState(afterCtx, state); after != nil {
+			state.Custom[engine.StateKeyDeviceStateAfter] = map[string]any(after)
+
+			if beforeRaw, ok := state.Custom[engine.StateKeyDeviceStateBefore]; ok {
+				if before, ok := beforeRaw.(map[string]any); ok {
+					diffs := filterBaselineDiffs(diffSnapshots(DeviceStateSnapshot(before), DeviceStateSnapshot(after)))
+					if len(diffs) > 0 {
+						diffMaps := make([]map[string]any, len(diffs))
+						for i, d := range diffs {
+							diffMaps[i] = map[string]any{
+								"key":    d.Key,
+								"before": d.Before,
+								"after":  d.After,
+							}
+						}
+						state.Custom[engine.StateKeyDeviceStateDiffs] = diffMaps
+						c.debugf("teardown: baseline diverged on %d fields, re-resetting", len(diffs))
+
+						// Re-reset and verify baseline is restored, but only when a
+						// suite zone control channel exists for trigger delivery.
+						canReset := c.suite.ZoneID() != ""
+						if !canReset {
+							c.debugf("teardown: baseline reset skipped (no suite zone)")
+						}
+						if canReset {
+							resetCtx, resetCancel := context.WithTimeout(context.Background(), 5*time.Second)
+							if err := c.ops.SendTriggerViaZone(resetCtx, features.TriggerResetTestState, state); err != nil {
+								c.markTeardownError(state, "baseline_reset_retry", err)
+							} else {
+								verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 3*time.Second)
+								if recheck := c.ops.RequestDeviceState(verifyCtx, state); recheck != nil {
+									recheckDiffs := filterBaselineDiffs(diffSnapshots(DeviceStateSnapshot(before), recheck))
+									if len(recheckDiffs) > 0 {
+										c.debugf("teardown: baseline STILL diverged after re-reset (%d fields)", len(recheckDiffs))
+										c.markTeardownError(state, "baseline_still_diverged", errors.New("device state baseline still diverged after re-reset"))
+									}
+								}
+								verifyCancel()
+							}
+							resetCancel()
+						}
+					}
+				}
+			}
+		}
+		afterCancel()
+	}
+}
+
+func (c *coordinatorImpl) markTeardownError(state *engine.ExecutionState, step string, err error) {
+	if err == nil || c.config == nil || !c.config.StrictLifecycle {
+		return
+	}
+	te := &TeardownError{Step: step, Cause: err}
+	if existing, ok := state.Custom[engine.StateKeyTeardownError]; ok {
+		switch v := existing.(type) {
+		case error:
+			state.Custom[engine.StateKeyTeardownError] = errors.Join(v, te)
+		case string:
+			if v == "" {
+				state.Custom[engine.StateKeyTeardownError] = te
+			} else {
+				state.Custom[engine.StateKeyTeardownError] = errors.Join(errors.New(v), te)
+			}
+		default:
+			state.Custom[engine.StateKeyTeardownError] = te
+		}
+		return
+	}
+	state.Custom[engine.StateKeyTeardownError] = te
 }
 
 // CurrentLevel returns the runner's current precondition level based on

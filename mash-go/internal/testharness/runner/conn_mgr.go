@@ -351,14 +351,20 @@ func (m *connMgrImpl) TransitionToOperational(state *engine.ExecutionState) erro
 		framer:  transport.NewFramer(tlsConn),
 		state:   ConnOperational,
 	}
-	m.pool.SetMain(newConn)
-	state.Set(StateConnection, newConn)
 
 	// Verify device is ready.
-	if err := m.WaitForOperationalReady(2 * time.Second); err != nil {
+	if err := waitForOperationalReadyOnConn(
+		newConn,
+		2*time.Second,
+		m.deps.nextMsgIDFn,
+		m.pool.AppendNotification,
+		m.debugf,
+	); err != nil {
 		m.debugf("transitionToOperational: readiness check failed: %v", err)
+		newConn.transitionTo(ConnDisconnected)
 		return fmt.Errorf("operational readiness failed: %w", err)
 	}
+	setMainControlChannel(m.pool, newConn, state)
 
 	state.Set(StateOperationalConnEstablished, time.Now())
 	m.pool.TrackZone("main-"+zoneID, m.pool.Main(), zoneID)
@@ -399,14 +405,21 @@ func (m *connMgrImpl) ReconnectToZone(state *engine.ExecutionState) error {
 		framer:  transport.NewFramer(tlsConn),
 		state:   ConnOperational,
 	}
-	m.pool.SetMain(newConn)
-	state.Set(StateConnection, newConn)
+	prevMain := m.pool.Main()
 
-	if err := m.WaitForOperationalReady(2 * time.Second); err != nil {
+	if err := waitForOperationalReadyOnConn(
+		newConn,
+		2*time.Second,
+		m.deps.nextMsgIDFn,
+		m.pool.AppendNotification,
+		m.debugf,
+	); err != nil {
 		m.debugf("reconnectToZone: readiness check failed: %v", err)
-		m.pool.Main().transitionTo(ConnDisconnected)
+		newConn.transitionTo(ConnDisconnected)
+		restoreMainControlChannel(m.pool, prevMain, state)
 		return fmt.Errorf("reconnectToZone readiness failed: %w", err)
 	}
+	setMainControlChannel(m.pool, newConn, state)
 
 	m.pool.TrackZone(m.suite.ConnKey(), m.pool.Main(), m.suite.ZoneID())
 	m.debugf("reconnectToZone: reconnected to zone %s", m.suite.ZoneID())
@@ -500,57 +513,13 @@ func (m *connMgrImpl) ProbeSessionHealth() error {
 // WaitForOperationalReady subscribes to DeviceInfo and waits for the
 // priming report, confirming the device's operational handler is ready.
 func (m *connMgrImpl) WaitForOperationalReady(timeout time.Duration) error {
-	if m.pool.Main() == nil || !m.pool.Main().isConnected() {
-		return fmt.Errorf("not connected")
-	}
-
-	req := &wire.Request{
-		MessageID:  m.deps.nextMsgIDFn(),
-		Operation:  wire.OpSubscribe,
-		EndpointID: 0,
-		FeatureID:  0x01, // FeatureDeviceInfo
-	}
-	data, err := wire.EncodeRequest(req)
-	if err != nil {
-		return fmt.Errorf("encode readiness probe: %w", err)
-	}
-
-	if err := m.pool.Main().framer.WriteFrame(data); err != nil {
-		m.pool.Main().transitionTo(ConnDisconnected)
-		return fmt.Errorf("send readiness probe: %w", err)
-	}
-
-	if m.pool.Main().tlsConn != nil {
-		_ = m.pool.Main().tlsConn.SetReadDeadline(time.Now().Add(timeout))
-		defer func() {
-			if m.pool.Main().tlsConn != nil {
-				_ = m.pool.Main().tlsConn.SetReadDeadline(time.Time{})
-			}
-		}()
-	}
-
-	for range 10 {
-		respData, err := m.pool.Main().framer.ReadFrame()
-		if err != nil {
-			m.pool.Main().transitionTo(ConnDisconnected)
-			return fmt.Errorf("read readiness response: %w", err)
-		}
-		resp, err := wire.DecodeResponse(respData)
-		if err != nil {
-			return fmt.Errorf("decode readiness response: %w", err)
-		}
-		if resp.MessageID == 0 {
-			m.pool.AppendNotification(respData)
-			continue
-		}
-		if resp.MessageID != req.MessageID {
-			m.debugf("waitForOperationalReady: discarding orphaned response (got msgID=%d, want %d)", resp.MessageID, req.MessageID)
-			continue
-		}
-		m.debugf("waitForOperationalReady: device responded (status=%d)", resp.Status)
-		return nil
-	}
-	return fmt.Errorf("readiness probe: too many interleaved frames")
+	return waitForOperationalReadyOnConn(
+		m.pool.Main(),
+		timeout,
+		m.deps.nextMsgIDFn,
+		m.pool.AppendNotification,
+		m.debugf,
+	)
 }
 
 // EnsureCommissioned is a stub that delegates to the Runner's ensureCommissioned.

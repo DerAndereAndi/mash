@@ -3,11 +3,16 @@ package runner
 import (
 	"context"
 	"crypto/x509"
+	"errors"
+	"net"
+	"strings"
 	"testing"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
+	"github.com/mash-protocol/mash-go/pkg/transport"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 func TestPreconditionLevel(t *testing.T) {
@@ -169,6 +174,47 @@ func TestEnsureConnected_AlreadyConnected(t *testing.T) {
 	err := r.ensureConnected(context.Background(), state)
 	if err != nil {
 		t.Fatalf("unexpected error when already connected: %v", err)
+	}
+}
+
+func TestEnsureConnected_IncludesErrorDetailFromConnectFailure(t *testing.T) {
+	r := newTestRunner()
+	state := engine.NewExecutionState(context.Background())
+	state.Set(PrecondDevicePortClosed, true)
+
+	err := r.ensureConnected(context.Background(), state)
+	if err == nil {
+		t.Fatal("expected ensureConnected error when simulated port is closed")
+	}
+	if !strings.Contains(err.Error(), ErrCodeConnectionFailed) {
+		t.Fatalf("expected error code in message, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "connection refused (simulated)") {
+		t.Fatalf("expected error detail in message, got: %v", err)
+	}
+}
+
+func TestShouldRetryConnectFailure(t *testing.T) {
+	tests := []struct {
+		name   string
+		code   string
+		detail string
+		want   bool
+	}{
+		{name: "retry connection error", code: ErrCodeConnectionError, detail: "dial tcp timeout", want: true},
+		{name: "retry connection failed", code: ErrCodeConnectionFailed, detail: "connection refused", want: true},
+		{name: "retry timeout", code: ErrCodeTimeout, detail: "i/o timeout", want: true},
+		{name: "no retry simulated", code: ErrCodeConnectionFailed, detail: "connection refused (simulated)", want: false},
+		{name: "no retry non-connect", code: ErrCodeTLSError, detail: "bad certificate", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldRetryConnectFailure(tt.code, tt.detail)
+			if got != tt.want {
+				t.Fatalf("shouldRetryConnectFailure(%q, %q) = %v, want %v", tt.code, tt.detail, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -543,6 +589,156 @@ func TestSendRemoveZone_NoSessionKey(t *testing.T) {
 
 	// Should not panic.
 	r.sendRemoveZone()
+}
+
+func TestSendRemoveZoneStrict_NoLiveConn(t *testing.T) {
+	r := newTestRunner()
+	r.pool.Main().state = ConnDisconnected
+
+	err := r.sendRemoveZoneStrict()
+	if !errors.Is(err, errRemoveZoneNoConnection) {
+		t.Fatalf("expected no-connection error, got: %v", err)
+	}
+}
+
+func TestSendRemoveZoneStrict_NoPASE(t *testing.T) {
+	r := newTestRunner()
+	r.pool.Main().state = ConnOperational
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	r.pool.Main().conn = client
+	r.pool.Main().framer = transport.NewFramer(client)
+	r.connMgr.SetPASEState(nil)
+
+	err := r.sendRemoveZoneStrict()
+	if !errors.Is(err, errRemoveZoneNoPASE) {
+		t.Fatalf("expected no-PASE error, got: %v", err)
+	}
+}
+
+func TestSendRemoveZoneStrict_WriteError(t *testing.T) {
+	r := newTestRunner()
+	client, server := net.Pipe()
+	r.pool.Main().state = ConnOperational
+	r.pool.Main().conn = client
+	r.pool.Main().framer = transport.NewFramer(client)
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{0xAA, 0xBB, 0xCC, 0xDD}})
+
+	_ = server.Close()
+	defer client.Close()
+
+	err := r.sendRemoveZoneStrict()
+	if err == nil {
+		t.Fatal("expected write/read error")
+	}
+	if !strings.Contains(err.Error(), "remove zone") {
+		t.Fatalf("expected remove zone error context, got: %v", err)
+	}
+}
+
+func TestSendRemoveZoneStrict_SucceedsOnAck(t *testing.T) {
+	r := newTestRunner()
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	r.pool.Main().state = ConnOperational
+	r.pool.Main().conn = client
+	r.pool.Main().framer = transport.NewFramer(client)
+	r.connMgr.SetPASEState(&PASEState{completed: true, sessionKey: []byte{0x11, 0x22, 0x33, 0x44}})
+
+	done := make(chan error, 1)
+	go func() {
+		fr := transport.NewFramer(server)
+		reqData, err := fr.ReadFrame()
+		if err != nil {
+			done <- err
+			return
+		}
+		req, err := wire.DecodeRequest(reqData)
+		if err != nil {
+			done <- err
+			return
+		}
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+		}
+		respData, err := wire.EncodeResponse(resp)
+		if err != nil {
+			done <- err
+			return
+		}
+		done <- fr.WriteFrame(respData)
+	}()
+
+	if err := r.sendRemoveZoneStrict(); err != nil {
+		t.Fatalf("expected strict remove zone success, got: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("server goroutine failed: %v", err)
+	}
+}
+
+func TestSetupPreconditions_StrictMode_BubblesRemoveZoneFailure(t *testing.T) {
+	r := newTestRunner()
+	r.config.StrictLifecycle = true
+	r.pool.Main().state = ConnOperational
+	r.connMgr.SetPASEState(&PASEState{
+		completed:  true,
+		sessionKey: []byte{0xDE, 0xAD, 0xBE, 0xEF},
+	})
+
+	state := engine.NewExecutionState(context.Background())
+	tc := &loader.TestCase{
+		ID: "TC-BACK-REMOVE-STRICT-001",
+		Preconditions: []loader.Condition{
+			{"device_in_commissioning_mode": true},
+		},
+	}
+
+	err := r.setupPreconditions(context.Background(), tc, state)
+	if err == nil {
+		t.Fatal("expected strict setup to fail on RemoveZone cleanup failure")
+	}
+	if !errors.Is(err, errRemoveZoneNoConnection) {
+		t.Fatalf("expected no-connection strict error, got: %v", err)
+	}
+}
+
+func TestSendRemoveZoneOnConn_StrictMode_IgnoresBestEffortFailure(t *testing.T) {
+	r := newTestRunner()
+	r.config.StrictLifecycle = true
+	r.clearStrictLifecycleErr()
+
+	// "Connected" but no framer -> errRemoveZoneNoConnection in strict sender.
+	r.SendRemoveZoneOnConn(&Connection{state: ConnOperational}, "zone-1")
+
+	if r.strictLifecycleErr != nil {
+		t.Fatalf("expected best-effort remove-zone-on-conn failure to be ignored, got: %v", r.strictLifecycleErr)
+	}
+}
+
+func TestSendRemoveZoneOnConn_StrictMode_RecordsHardFailure(t *testing.T) {
+	r := newTestRunner()
+	r.config.StrictLifecycle = true
+	r.clearStrictLifecycleErr()
+
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	conn := &Connection{
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
+	}
+
+	// Empty zone ID is a hard failure (not best-effort).
+	r.SendRemoveZoneOnConn(conn, "")
+	if !errors.Is(r.strictLifecycleErr, errRemoveZoneNoZoneID) {
+		t.Fatalf("expected strict lifecycle error %v, got: %v", errRemoveZoneNoZoneID, r.strictLifecycleErr)
+	}
 }
 
 func TestSetupPreconditions_BackwardsFromCommissioned_SendsRemoveZone(t *testing.T) {
@@ -1529,4 +1725,3 @@ func TestDeviceHasGridZone_KeepsNewCryptoOnFreshCommission(t *testing.T) {
 		t.Error("expected controllerCert to be set by handleCreateZone (not restored to nil)")
 	}
 }
-

@@ -1,7 +1,13 @@
 package runner
 
 import (
+	"context"
+	"net"
 	"testing"
+
+	"github.com/mash-protocol/mash-go/internal/testharness/engine"
+	"github.com/mash-protocol/mash-go/pkg/transport"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 func TestDiffSnapshots_NoDiffs(t *testing.T) {
@@ -73,5 +79,84 @@ func TestDiffSnapshots_NilInputs(t *testing.T) {
 	}
 	if diffs := diffSnapshots(DeviceStateSnapshot{"a": 1}, nil); diffs != nil {
 		t.Errorf("expected nil for nil after, got %v", diffs)
+	}
+}
+
+func TestFilterBaselineDiffs_RemovesVolatileKeys(t *testing.T) {
+	diffs := []StateDiff{
+		{Key: "zones", Before: 0, After: 1},
+		{Key: "failsafe_timers", Before: "a", After: "b"},
+		{Key: "pairing_active", Before: false, After: true},
+		{Key: "active_conns", Before: 0, After: 1},
+		{Key: "conn_tracker_count", Before: 0, After: 1},
+		{Key: "status_operating_state", Before: 2, After: 4},
+	}
+	got := filterBaselineDiffs(diffs)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 stable diff, got %d: %+v", len(got), got)
+	}
+	if got[0].Key != "status_operating_state" {
+		t.Fatalf("expected status_operating_state to remain, got %q", got[0].Key)
+	}
+}
+
+func TestRequestDeviceState_IgnoresOrphanedResponses(t *testing.T) {
+	r := newTestRunner()
+	r.config.EnableKey = "deadbeefdeadbeefdeadbeefdeadbeef"
+
+	client, server := net.Pipe()
+	r.pool.SetMain(&Connection{
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srvFramer := transport.NewFramer(server)
+		reqData, err := srvFramer.ReadFrame()
+		if err != nil {
+			return
+		}
+		req, err := wire.DecodeRequest(reqData)
+		if err != nil {
+			return
+		}
+
+		// Orphaned response from a different in-flight request.
+		orphan := &wire.Response{
+			MessageID: req.MessageID + 99,
+			Status:    wire.StatusSuccess,
+			Payload: map[string]any{
+				"stale": true,
+			},
+		}
+		orphanData, _ := wire.EncodeResponse(orphan)
+		_ = srvFramer.WriteFrame(orphanData)
+
+		// Matching response for requestDeviceState.
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+			Payload: map[string]any{
+				"zone_count": 1,
+			},
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = srvFramer.WriteFrame(respData)
+	}()
+
+	snap := r.requestDeviceState(context.Background(), engine.NewExecutionState(context.Background()))
+	<-done
+
+	if snap == nil {
+		t.Fatal("expected non-nil snapshot")
+	}
+	if _, ok := snap["stale"]; ok {
+		t.Fatal("orphaned response payload must be ignored")
+	}
+	if got, ok := snap["zone_count"]; !ok || got != uint64(1) {
+		t.Fatalf("expected zone_count=1 from matching response, got %v", snap["zone_count"])
 	}
 }

@@ -409,10 +409,21 @@ func (r *Runner) handleRemoveDevice(ctx context.Context, step *loader.Step, stat
 			suiteConn := r.suite.Conn()
 			if suiteConn != nil && suiteConn.isConnected() && suiteConn.framer != nil {
 				r.debugf("handleRemoveDevice: sending RemoveZone on suite conn (zone=%s)", r.suite.ZoneID())
-				r.sendRemoveZoneOnConn(suiteConn, r.suite.ZoneID())
+				if r.config != nil && r.config.StrictLifecycle {
+					if err := r.sendRemoveZoneOnConnStrict(suiteConn, r.suite.ZoneID()); err != nil {
+						return nil, fmt.Errorf("remove_device strict remove zone failed: %w", err)
+					}
+				} else {
+					r.sendRemoveZoneOnConn(suiteConn, r.suite.ZoneID())
+				}
+			} else if r.config != nil && r.config.StrictLifecycle {
+				return nil, fmt.Errorf("remove_device strict mode requires active suite connection")
 			}
 			r.suite.Clear()
 		} else {
+			if r.config != nil && r.config.StrictLifecycle {
+				return nil, fmt.Errorf("remove_device strict mode requires suite zone for zone=all")
+			}
 			r.sendRemoveZone()
 		}
 	}

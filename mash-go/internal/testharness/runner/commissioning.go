@@ -265,6 +265,11 @@ func (r *Runner) transitionToOperational(state *engine.ExecutionState) error {
 	connKey := "main-" + zoneID
 	r.pool.TrackZone(connKey, newConn, zoneID)
 	r.debugf("transitionToOperational: reconnected and registered zone %s in activeZoneConns", zoneID)
+	if r.strictLifecycleEnabled() {
+		if err := r.lifecycleController().ToOperational(connKey); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -308,19 +313,31 @@ func (r *Runner) reconnectToZone(state *engine.ExecutionState) error {
 		framer:  transport.NewFramer(tlsConn),
 		state:   ConnOperational,
 	}
-	r.pool.SetMain(newConn)
-	state.Set(StateConnection, newConn)
+	prevMain := r.pool.Main()
 
 	// Verify the device accepts us on this connection.
-	if err := r.waitForOperationalReady(2 * time.Second); err != nil {
+	if err := waitForOperationalReadyOnConn(
+		newConn,
+		2*time.Second,
+		r.nextMessageID,
+		r.pool.AppendNotification,
+		r.debugf,
+	); err != nil {
 		r.debugf("reconnectToZone: readiness check failed: %v", err)
-		r.pool.Main().transitionTo(ConnDisconnected)
+		newConn.transitionTo(ConnDisconnected)
+		restoreMainControlChannel(r.pool, prevMain, state)
 		return fmt.Errorf("reconnectToZone readiness failed: %w", err)
 	}
+	setMainControlChannel(r.pool, newConn, state)
 
 	// Store on suite session (not in pool -- suite zone lives outside pool).
 	r.suite.SetConn(newConn)
 	r.debugf("reconnectToZone: reconnected to zone %s", r.suite.ZoneID())
+	if r.strictLifecycleEnabled() {
+		if err := r.lifecycleController().ReconnectOperational(r.suite.ConnKey()); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -446,7 +463,13 @@ func (r *Runner) removeSuiteZone() {
 		}
 	}
 
-	r.sendRemoveZone()
+	if r.config != nil && r.config.StrictLifecycle {
+		if err := r.sendRemoveZoneStrict(); err != nil {
+			r.setStrictLifecycleErr(err)
+		}
+	} else {
+		r.sendRemoveZone()
+	}
 	r.closeAllZoneConns()
 	r.ensureDisconnected()
 }

@@ -2,12 +2,16 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"sync/atomic"
 	"time"
 
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
+
+var sendRequestReadRetryWindow = 10 * time.Second
 
 // ConnReader provides read-only access to pool state.
 // Used by handlers that need to inspect connections and zone state.
@@ -96,7 +100,7 @@ func (p *connPoolImpl) debugf(format string, args ...any) {
 
 // --- Main connection ---
 
-func (p *connPoolImpl) Main() *Connection     { return p.main }
+func (p *connPoolImpl) Main() *Connection        { return p.main }
 func (p *connPoolImpl) SetMain(conn *Connection) { p.main = conn }
 
 // --- Message ID ---
@@ -112,64 +116,90 @@ func (p *connPoolImpl) SendRequest(data []byte, op string, expectedMsgID uint32)
 }
 
 func (p *connPoolImpl) SendRequestWithDeadline(ctx context.Context, data []byte, op string, expectedMsgID uint32) (*wire.Response, error) {
-	if err := p.main.framer.WriteFrame(data); err != nil {
-		p.main.transitionTo(ConnDisconnected)
-		return nil, fmt.Errorf("failed to send %s request: %w", op, err)
+	readReq := false
+	if req, decErr := wire.DecodeRequest(data); decErr == nil && req.Operation == wire.OpRead {
+		readReq = true
 	}
 
-	// Set a read deadline so we don't block forever if the device never
-	// responds. Use context deadline if available, otherwise 30s.
-	deadline := time.Now().Add(30 * time.Second)
-	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
-		deadline = ctxDeadline
-	}
-	if p.main.tlsConn != nil {
-		_ = p.main.tlsConn.SetReadDeadline(deadline)
-		defer func() {
-			if p.main.tlsConn != nil {
-				_ = p.main.tlsConn.SetReadDeadline(time.Time{})
-			}
-		}()
-	} else if p.main.conn != nil {
-		_ = p.main.conn.SetReadDeadline(deadline)
-		defer func() {
-			if p.main.conn != nil {
-				_ = p.main.conn.SetReadDeadline(time.Time{})
-			}
-		}()
+	maxAttempts := 1
+	if _, hasDeadline := ctx.Deadline(); readReq && !hasDeadline {
+		maxAttempts = 2
 	}
 
-	// Read frames until we get a matching response. Skip notifications
-	// (messageId=0) and discard orphaned responses from previous operations.
-	for range 10 {
-		respData, err := p.main.framer.ReadFrame()
-		if err != nil {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		retryOnTimeout := false
+		if err := p.main.framer.WriteFrame(data); err != nil {
 			p.main.transitionTo(ConnDisconnected)
-			return nil, fmt.Errorf("failed to read %s response: %w", op, err)
+			return nil, fmt.Errorf("failed to send %s request: %w", op, err)
 		}
 
-		resp, err := wire.DecodeResponse(respData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode %s response: %w", op, err)
+		// Set a read deadline so we don't block forever if the device never
+		// responds. Use context deadline if available, otherwise per-attempt
+		// retry window for idempotent reads and 30s for all other operations.
+		deadline := time.Now().Add(30 * time.Second)
+		if readReq && maxAttempts > 1 {
+			deadline = time.Now().Add(sendRequestReadRetryWindow)
+		}
+		if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+			deadline = ctxDeadline
+		}
+		if p.main.tlsConn != nil {
+			_ = p.main.tlsConn.SetReadDeadline(deadline)
+			defer func() {
+				if p.main.tlsConn != nil {
+					_ = p.main.tlsConn.SetReadDeadline(time.Time{})
+				}
+			}()
+		} else if p.main.conn != nil {
+			_ = p.main.conn.SetReadDeadline(deadline)
+			defer func() {
+				if p.main.conn != nil {
+					_ = p.main.conn.SetReadDeadline(time.Time{})
+				}
+			}()
 		}
 
-		// Notifications have messageId=0. Queue them for later consumption.
-		if resp.MessageID == 0 {
-			p.debugf("sendRequest(%s): skipping notification frame (buffered)", op)
-			p.notifications = append(p.notifications, respData)
-			continue
-		}
+		// Read frames until we get a matching response. Skip notifications
+		// (messageId=0) and discard orphaned responses from previous operations.
+		for range 10 {
+			respData, err := p.main.framer.ReadFrame()
+			if err != nil {
+				var ne net.Error
+				if attempt < maxAttempts && errors.As(err, &ne) && ne.Timeout() {
+					p.debugf("sendRequest(%s): read timeout on attempt %d/%d, retrying idempotent request", op, attempt, maxAttempts)
+					retryOnTimeout = true
+					break
+				}
+				p.main.transitionTo(ConnDisconnected)
+				return nil, fmt.Errorf("failed to read %s response: %w", op, err)
+			}
 
-		// Discard orphaned responses from previous operations.
-		if resp.MessageID != expectedMsgID {
-			p.debugf("sendRequest(%s): discarding orphaned response (got msgID=%d, want %d)", op, resp.MessageID, expectedMsgID)
-			continue
-		}
+			resp, err := wire.DecodeResponse(respData)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode %s response: %w", op, err)
+			}
 
-		return resp, nil
+			// Notifications have messageId=0. Queue them for later consumption.
+			if resp.MessageID == 0 {
+				p.debugf("sendRequest(%s): skipping notification frame (buffered)", op)
+				p.notifications = append(p.notifications, respData)
+				continue
+			}
+
+			// Discard orphaned responses from previous operations.
+			if resp.MessageID != expectedMsgID {
+				p.debugf("sendRequest(%s): discarding orphaned response (got msgID=%d, want %d)", op, resp.MessageID, expectedMsgID)
+				continue
+			}
+
+			return resp, nil
+		}
+		if !retryOnTimeout {
+			return nil, fmt.Errorf("failed to read %s response: too many interleaved frames", op)
+		}
 	}
 
-	return nil, fmt.Errorf("failed to read %s response: too many interleaved frames", op)
+	return nil, fmt.Errorf("failed to read %s response: timeout after retry", op)
 }
 
 // --- Zone tracking ---

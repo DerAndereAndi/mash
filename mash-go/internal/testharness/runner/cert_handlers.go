@@ -315,13 +315,21 @@ func (r *Runner) handleVerifyCommissioningState(ctx context.Context, step *loade
 
 	// Determine current commissioning state:
 	// - COMMISSIONED: PASE completed successfully
+	// - COMMISSIONED: operational suite channel is alive (even if PASE state
+	//   was cleared during lower-tier transitions)
 	// - CONNECTED: TLS connected but not yet commissioned
 	// - ADVERTISING: was connected but device closed the connection
 	//   (e.g., PASE timeout or failure), device returns to commissioning mode
 	// - IDLE: no connection was ever established in this test
 	var currentState string
+	operationalSuiteAlive := connected &&
+		r.pool.Main() != nil &&
+		r.pool.Main().state == ConnOperational &&
+		r.suite.ZoneID() != ""
 	switch {
 	case paseCompleted:
+		currentState = CommissioningStateCommissioned
+	case operationalSuiteAlive:
 		currentState = CommissioningStateCommissioned
 	case connected:
 		currentState = CommissioningStateConnected

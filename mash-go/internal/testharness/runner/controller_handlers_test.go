@@ -449,6 +449,37 @@ func TestHandleRemoveDevice_SimOnly_PreservesSuite(t *testing.T) {
 	}
 }
 
+func TestHandleRemoveDevice_StrictMode_RequiresSuiteZone(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "localhost:9999" // real-device mode
+	r.config.StrictLifecycle = true
+	state := newTestState()
+	state.Set(PrecondDeviceInZone, true)
+
+	step := &loader.Step{Params: map[string]any{"zone": "all"}}
+	_, err := r.handleRemoveDevice(context.Background(), step, state)
+	if err == nil {
+		t.Fatal("expected strict mode to require suite zone for remove_device zone=all")
+	}
+}
+
+func TestHandleRemoveDevice_StrictMode_RequiresActiveSuiteConnection(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "localhost:9999" // real-device mode
+	r.config.StrictLifecycle = true
+	state := newTestState()
+	state.Set(PrecondDeviceInZone, true)
+
+	// Suite zone exists but has no active connection.
+	r.suite.Record("test-zone-1234", CryptoState{})
+
+	step := &loader.Step{Params: map[string]any{"zone": "all"}}
+	_, err := r.handleRemoveDevice(context.Background(), step, state)
+	if err == nil {
+		t.Fatal("expected strict mode to require active suite connection")
+	}
+}
+
 func TestHandleCheckRenewal(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()

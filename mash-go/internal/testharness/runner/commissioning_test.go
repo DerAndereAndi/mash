@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -197,6 +198,37 @@ func TestIsSuiteZoneCommission_SuiteZoneDead(t *testing.T) {
 
 	if !r.isSuiteZoneCommission() {
 		t.Error("expected true when suite zone connection is dead")
+	}
+}
+
+func TestStrictCleanup_LeavesDeviceCommissionable(t *testing.T) {
+	zoneCount := 0
+	report := evaluateStrictCleanupContract(true, CommissioningStateCommissioned, &zoneCount, nil)
+	if !report.IsClean() {
+		t.Fatalf("expected clean strict cleanup contract, got issues: %v", report.Issues)
+	}
+}
+
+func TestStrictCleanup_NoResidualZonesAfterGroupRun(t *testing.T) {
+	zoneCount := 2
+	report := evaluateStrictCleanupContract(true, CommissioningStateCommissioned, &zoneCount, nil)
+	if report.IsClean() {
+		t.Fatal("expected residual zone contract failure")
+	}
+}
+
+func TestStrictCleanup_NoUnknownAuthorityCascadeAfterRecommission(t *testing.T) {
+	zoneCount := 0
+	report := evaluateStrictCleanupContract(true, CommissioningStateCommissioned, &zoneCount, errors.New("tls: unknown authority"))
+	if report.IsClean() {
+		t.Fatal("expected reconnect probe failure in strict cleanup contract")
+	}
+}
+
+func TestStrictCleanup_ZoneCountUnavailableWithHealthyProbeIsNonFatal(t *testing.T) {
+	report := evaluateStrictCleanupContract(true, CommissioningStateCommissioned, nil, nil)
+	if !report.IsClean() {
+		t.Fatalf("expected clean strict cleanup contract when probe is healthy and zone count is unavailable, got issues: %v", report.Issues)
 	}
 }
 

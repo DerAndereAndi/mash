@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	stdlog "log"
@@ -50,6 +51,12 @@ type Runner struct {
 	// pairingAdvertiser is a real mDNS advertiser used by announce_pairing_request
 	// to advertise _mashp._udp services. Cleaned up in Close().
 	pairingAdvertiser *discovery.MDNSAdvertiser
+
+	// strictLifecycleErr captures the first strict lifecycle failure that occurs
+	// in callback paths that cannot return errors directly (e.g. coordinator
+	// invoking WireOps with void signatures). setupPreconditions consumes it.
+	strictLifecycleErr error
+	lifecycleCtrl      *LifecycleController
 }
 
 // Config configures the test runner.
@@ -136,6 +143,10 @@ type Config struct {
 	// ProtocolLogger receives structured protocol events for debugging.
 	// Set to nil to disable protocol logging.
 	ProtocolLogger log.Logger
+
+	// StrictLifecycle enables strict teardown/lifecycle invariant enforcement.
+	// When false, invariant violations are recorded but do not fail the test.
+	StrictLifecycle bool
 }
 
 // ConnState represents the connection lifecycle state.
@@ -274,12 +285,13 @@ func New(config *Config) *Runner {
 	}
 
 	r := &Runner{
-		config:       config,
-		engine:       engine.NewWithConfig(engineConfig),
-		engineConfig: engineConfig,
-		resolver:     NewResolver(),
-		pics:         pics,
-		suite:        NewSuiteSession(),
+		config:        config,
+		engine:        engine.NewWithConfig(engineConfig),
+		engineConfig:  engineConfig,
+		resolver:      NewResolver(),
+		pics:          pics,
+		suite:         NewSuiteSession(),
+		lifecycleCtrl: NewLifecycleController(),
 	}
 
 	// Initialize connection pool. The onZoneClose callback sends protocol-level
@@ -358,6 +370,32 @@ func New(config *Config) *Runner {
 // nextMessageID returns the next message ID (delegates to pool).
 func (r *Runner) nextMessageID() uint32 {
 	return r.pool.NextMessageID()
+}
+
+func (r *Runner) clearStrictLifecycleErr() {
+	r.strictLifecycleErr = nil
+}
+
+func (r *Runner) setStrictLifecycleErr(err error) {
+	if err == nil {
+		return
+	}
+	if r.strictLifecycleErr == nil {
+		r.strictLifecycleErr = err
+		return
+	}
+	r.strictLifecycleErr = errors.Join(r.strictLifecycleErr, err)
+}
+
+func (r *Runner) strictLifecycleEnabled() bool {
+	return r.config != nil && r.config.StrictLifecycle
+}
+
+func (r *Runner) lifecycleController() *LifecycleController {
+	if r.lifecycleCtrl == nil {
+		r.lifecycleCtrl = NewLifecycleController()
+	}
+	return r.lifecycleCtrl
 }
 
 // getTarget returns the host:port for connections.

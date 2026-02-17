@@ -808,7 +808,7 @@ func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.
 	// close the old session first so the zone transitions to disconnected state.
 	if needsSessionReplace {
 		s.debugLog("handleOperationalConnection: replacing stale session for connected zone", "zoneID", targetZoneID)
-		s.handleZoneSessionClose(targetZoneID)
+		s.handleZoneSessionClose(targetZoneID, nil)
 	}
 
 	// Mark zone as connected
@@ -904,7 +904,7 @@ func (s *DeviceService) handleOperationalConnection(rawConn net.Conn, conn *tls.
 	framedConn.Close()
 
 	// Clean up on disconnect
-	s.handleZoneSessionClose(targetZoneID)
+	s.handleZoneSessionClose(targetZoneID, zoneSession)
 }
 
 // handleCommissioningConnection handles PASE commissioning over TLS.
@@ -1392,19 +1392,27 @@ func (s *DeviceService) runZoneMessageLoop(zoneID string, conn *framedConnection
 }
 
 // handleZoneSessionClose cleans up when a zone session closes.
-func (s *DeviceService) handleZoneSessionClose(zoneID string) {
+// When closingSession is non-nil, cleanup only runs if it is still the active
+// session mapped for zoneID (protects against stale loop exits after reconnect).
+func (s *DeviceService) handleZoneSessionClose(zoneID string, closingSession *ZoneSession) {
 	s.mu.Lock()
 	var sessionToClose *ZoneSession
 	if session, exists := s.zoneSessions[zoneID]; exists {
+		if closingSession != nil && session != closingSession {
+			s.mu.Unlock()
+			return
+		}
 		sessionToClose = session
 		delete(s.zoneSessions, zoneID)
 	}
 	s.mu.Unlock()
 
-	// Close session outside the lock (dispatcher.Stop may block).
-	if sessionToClose != nil {
-		sessionToClose.Close()
+	if sessionToClose == nil {
+		return
 	}
+
+	// Close session outside the lock (dispatcher.Stop may block).
+	sessionToClose.Close()
 
 	// Notify disconnect
 	s.HandleZoneDisconnect(zoneID)

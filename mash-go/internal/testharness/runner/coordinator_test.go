@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/features"
+	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -568,7 +570,9 @@ func TestCoordStateTrigger_ControlState(t *testing.T) {
 
 	var triggers []uint64
 	o.EXPECT().SendTriggerViaZone(mock.Anything, mock.Anything, mock.Anything).Run(
-		func(_ context.Context, trigger uint64, _ *engine.ExecutionState) { triggers = append(triggers, trigger) },
+		func(_ context.Context, trigger uint64, _ *engine.ExecutionState) {
+			triggers = append(triggers, trigger)
+		},
 	).Return(nil)
 
 	allMaybe(s, p, o)
@@ -587,7 +591,9 @@ func TestCoordStateTrigger_ProcessState(t *testing.T) {
 
 	var triggers []uint64
 	o.EXPECT().SendTriggerViaZone(mock.Anything, mock.Anything, mock.Anything).Run(
-		func(_ context.Context, trigger uint64, _ *engine.ExecutionState) { triggers = append(triggers, trigger) },
+		func(_ context.Context, trigger uint64, _ *engine.ExecutionState) {
+			triggers = append(triggers, trigger)
+		},
 	).Return(nil)
 
 	allMaybe(s, p, o)
@@ -672,6 +678,55 @@ func TestCoordTeardown_UnsubscribesAndClearsNotifications(t *testing.T) {
 	assert.True(t, clearCalled)
 }
 
+func TestCoordTeardown_RemovesNonSuiteZones(t *testing.T) {
+	cfg := &Config{Target: "localhost:8443", EnableKey: "0011"}
+	c, s, p, o := newCoord(t, cfg)
+
+	mainA, mainB := net.Pipe()
+	defer mainA.Close()
+	defer mainB.Close()
+	suiteA, suiteB := net.Pipe()
+	defer suiteA.Close()
+	defer suiteB.Close()
+	z1a, z1b := net.Pipe()
+	defer z1a.Close()
+	defer z1b.Close()
+	z2a, z2b := net.Pipe()
+	defer z2a.Close()
+	defer z2b.Close()
+
+	main := &Connection{state: ConnOperational, conn: mainA, framer: transport.NewFramer(mainA)}
+	suiteConn := &Connection{state: ConnOperational, conn: suiteA, framer: transport.NewFramer(suiteA)}
+	zone1 := &Connection{state: ConnOperational, conn: z1a, framer: transport.NewFramer(z1a)}
+	zone2 := &Connection{state: ConnOperational, conn: z2a, framer: transport.NewFramer(z2a)}
+
+	p.EXPECT().Main().Return(main).Maybe()
+	p.EXPECT().ZoneKeys().Return([]string{"main-suite", "step-z1", "step-z2"}).Maybe()
+	p.EXPECT().Zone("main-suite").Return(suiteConn).Maybe()
+	p.EXPECT().Zone("step-z1").Return(zone1).Maybe()
+	p.EXPECT().Zone("step-z2").Return(zone2).Maybe()
+	p.EXPECT().ZoneID("step-z1").Return("zone-1").Maybe()
+	p.EXPECT().ZoneID("step-z2").Return("zone-2").Maybe()
+	p.EXPECT().UntrackZone("step-z1").Return().Once()
+	p.EXPECT().UntrackZone("step-z2").Return().Once()
+
+	o.EXPECT().PASEState().Return(completedPASE()).Maybe()
+	o.EXPECT().SendRemoveZoneOnConn(zone1, "zone-1").Return().Once()
+	o.EXPECT().SendRemoveZoneOnConn(zone2, "zone-2").Return().Once()
+	o.EXPECT().RequestDeviceState(mock.Anything, mock.Anything).Return(DeviceStateSnapshot(nil)).Maybe()
+	o.EXPECT().ProbeSessionHealth().Return(nil).Maybe()
+
+	s.EXPECT().ZoneID().Return("suite-123").Maybe()
+	s.EXPECT().ConnKey().Return("main-suite").Maybe()
+	s.EXPECT().Conn().Return(suiteConn).Maybe()
+
+	allMaybe(s, p, o)
+	c.TeardownTest(context.Background(), tcWith("TC"), st())
+
+	assert.False(t, zone1.isConnected(), "zone1 should be disconnected in teardown")
+	assert.False(t, zone2.isConnected(), "zone2 should be disconnected in teardown")
+}
+
 func TestCoordTeardown_ClosesConnectionWithIncompletePASE(t *testing.T) {
 	c, s, p, o := newCoord(t, nil)
 	conn := &Connection{state: ConnTLSConnected}
@@ -728,6 +783,44 @@ func TestCoordTeardown_CapturesDeviceState(t *testing.T) {
 	assert.NotNil(t, after)
 }
 
+func TestCoordTeardown_CleansTransientStateBeforeBaselineCapture(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{Target: "localhost:8443", EnableKey: "0011"})
+	conn := &Connection{state: ConnOperational}
+	p.EXPECT().Main().Return(conn).Maybe()
+	p.EXPECT().ZoneKeys().Return([]string(nil))
+	o.EXPECT().PASEState().Return(completedPASE())
+
+	callOrder := make([]string, 0, 3)
+	p.EXPECT().UnsubscribeAll(mock.Anything).Run(func(*Connection) {
+		callOrder = append(callOrder, "unsubscribe")
+	}).Return().Once()
+	p.EXPECT().ClearNotifications().Run(func() {
+		callOrder = append(callOrder, "clear_notifications")
+	}).Return().Once()
+	o.EXPECT().RequestDeviceState(mock.Anything, mock.Anything).Run(func(context.Context, *engine.ExecutionState) {
+		callOrder = append(callOrder, "snapshot")
+	}).Return(DeviceStateSnapshot{"zoneCount": 0}).Once()
+
+	allMaybe(s, p, o)
+	state := st()
+	state.Custom[engine.StateKeyDeviceStateBefore] = map[string]any(DeviceStateSnapshot{"zoneCount": 0})
+
+	c.TeardownTest(context.Background(), tcWith("TC"), state)
+
+	uIdx, snapIdx := -1, -1
+	for i, v := range callOrder {
+		if v == "unsubscribe" && uIdx < 0 {
+			uIdx = i
+		}
+		if v == "snapshot" && snapIdx < 0 {
+			snapIdx = i
+		}
+	}
+	assert.GreaterOrEqual(t, uIdx, 0, "unsubscribe should be called")
+	assert.GreaterOrEqual(t, snapIdx, 0, "snapshot should be captured")
+	assert.Greater(t, snapIdx, uIdx, "snapshot must happen after transient teardown cleanup")
+}
+
 // ===========================================================================
 // 9b. Teardown baseline enforcement
 // ===========================================================================
@@ -737,6 +830,8 @@ func TestCoordTeardown_ResendsResetOnBaselineDivergence(t *testing.T) {
 	p.EXPECT().Main().Return(&Connection{state: ConnOperational}).Maybe()
 	p.EXPECT().ZoneKeys().Return([]string(nil))
 	o.EXPECT().PASEState().Return(completedPASE())
+	s.EXPECT().ZoneID().Return("suite-123").Maybe()
+	s.EXPECT().Conn().Return(&Connection{state: ConnOperational}).Maybe()
 
 	before := DeviceStateSnapshot{"zoneCount": 0, "controlState": "AUTONOMOUS"}
 	after := DeviceStateSnapshot{"zoneCount": 1, "controlState": "AUTONOMOUS"}
@@ -833,6 +928,8 @@ func TestCoordTeardown_LogsWarningWhenResetFails(t *testing.T) {
 	p.EXPECT().Main().Return(&Connection{state: ConnOperational}).Maybe()
 	p.EXPECT().ZoneKeys().Return([]string(nil))
 	o.EXPECT().PASEState().Return(completedPASE())
+	s.EXPECT().ZoneID().Return("suite-123").Maybe()
+	s.EXPECT().Conn().Return(&Connection{state: ConnOperational}).Maybe()
 
 	before := DeviceStateSnapshot{"zoneCount": 0}
 	after := DeviceStateSnapshot{"zoneCount": 1}
@@ -869,6 +966,8 @@ func TestCoordTeardown_SucceedsWhenResetRestoresBaseline(t *testing.T) {
 	p.EXPECT().Main().Return(&Connection{state: ConnOperational}).Maybe()
 	p.EXPECT().ZoneKeys().Return([]string(nil))
 	o.EXPECT().PASEState().Return(completedPASE())
+	s.EXPECT().ZoneID().Return("suite-123").Maybe()
+	s.EXPECT().Conn().Return(&Connection{state: ConnOperational}).Maybe()
 
 	before := DeviceStateSnapshot{"zoneCount": 0}
 	after := DeviceStateSnapshot{"zoneCount": 1}
@@ -980,8 +1079,9 @@ func TestCoordTeardown_ReconnectFailureIsNonFatal(t *testing.T) {
 	o.EXPECT().ReconnectToZone(mock.Anything).Return(fmt.Errorf("dial failed"))
 
 	allMaybe(s, p, o)
+	state := st()
 	// Should not panic.
-	c.TeardownTest(context.Background(), tcWith("TC"), st())
+	c.TeardownTest(context.Background(), tcWith("TC"), state)
 
 	// Verify the failure was logged.
 	found := false
@@ -991,6 +1091,121 @@ func TestCoordTeardown_ReconnectFailureIsNonFatal(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "reconnect failure should be logged")
+	_, hasTeardownErr := state.Custom[engine.StateKeyTeardownError]
+	assert.False(t, hasTeardownErr, "legacy mode must not set teardown error")
+}
+
+func TestCoordTeardown_StrictMode_ReconnectFailureIsFatal(t *testing.T) {
+	cfg := &Config{Target: "localhost:8443", EnableKey: "0011", StrictLifecycle: true}
+	c, s, p, o := newCoord(t, cfg)
+
+	brokenConn := &Connection{state: ConnOperational}
+	p.EXPECT().Main().Return(brokenConn).Maybe()
+	p.EXPECT().ZoneKeys().Return([]string(nil))
+	o.EXPECT().PASEState().Return(completedPASE())
+
+	s.EXPECT().ZoneID().Return("suite-123").Maybe()
+	s.EXPECT().Conn().Return(brokenConn).Maybe()
+	o.EXPECT().RequestDeviceState(mock.Anything, mock.Anything).Return(DeviceStateSnapshot(nil))
+	o.EXPECT().ProbeSessionHealth().Return(fmt.Errorf("broken pipe"))
+	o.EXPECT().ReconnectToZone(mock.Anything).Return(fmt.Errorf("dial failed"))
+
+	allMaybe(s, p, o)
+	state := st()
+	c.TeardownTest(context.Background(), tcWith("TC"), state)
+
+	v, ok := state.Custom[engine.StateKeyTeardownError]
+	assert.True(t, ok, "strict mode should set teardown error on reconnect failure")
+	assert.Error(t, v.(error))
+	assert.Contains(t, v.(error).Error(), "suite_zone_reconnect")
+}
+
+func TestCoordTeardown_ReconnectFailureDetachesMainToAvoidPhantomSocket(t *testing.T) {
+	cfg := &Config{Target: "localhost:8443", EnableKey: "0011", StrictLifecycle: true}
+	c, s, p, o := newCoord(t, cfg)
+
+	deadMain := &Connection{state: ConnDisconnected}
+	suiteConn := &Connection{state: ConnOperational}
+	p.EXPECT().Main().Return(deadMain).Maybe()
+	p.EXPECT().ZoneKeys().Return([]string(nil))
+	o.EXPECT().PASEState().Return(completedPASE())
+
+	s.EXPECT().ZoneID().Return("suite-123").Maybe()
+	s.EXPECT().Conn().Return(suiteConn).Maybe()
+	o.EXPECT().RequestDeviceState(mock.Anything, mock.Anything).Return(DeviceStateSnapshot(nil))
+	o.EXPECT().ProbeSessionHealth().Return(fmt.Errorf("broken pipe"))
+	o.EXPECT().ReconnectToZone(mock.Anything).Return(fmt.Errorf("dial failed"))
+
+	var lastMain *Connection
+	p.EXPECT().SetMain(mock.Anything).Run(func(conn *Connection) {
+		lastMain = conn
+	}).Maybe()
+
+	allMaybe(s, p, o)
+	state := st()
+	c.TeardownTest(context.Background(), tcWith("TC"), state)
+
+	if assert.NotNil(t, lastMain, "expected teardown to set pool main") {
+		assert.False(t, lastMain.isConnected(), "pool main should be detached after reconnect failure")
+		assert.Nil(t, lastMain.tlsConn, "pool main should not keep a closed TLS pointer")
+		assert.Nil(t, lastMain.conn, "pool main should not keep a closed raw socket pointer")
+	}
+}
+
+func TestCoordTeardown_StrictMode_ResetRetryFailureIsFatal(t *testing.T) {
+	cfg := &Config{Target: "localhost:8443", EnableKey: "0011", StrictLifecycle: true}
+	c, s, p, o := newCoord(t, cfg)
+
+	p.EXPECT().Main().Return(&Connection{state: ConnOperational}).Maybe()
+	p.EXPECT().ZoneKeys().Return([]string(nil))
+	o.EXPECT().PASEState().Return(completedPASE())
+	s.EXPECT().ZoneID().Return("suite-123").Maybe()
+	s.EXPECT().Conn().Return(&Connection{state: ConnOperational}).Maybe()
+
+	before := DeviceStateSnapshot{"zoneCount": 0}
+	after := DeviceStateSnapshot{"zoneCount": 1}
+	// Snapshot diverged and reset retry itself fails.
+	o.EXPECT().RequestDeviceState(mock.Anything, mock.Anything).Return(after).Once()
+	o.EXPECT().SendTriggerViaZone(mock.Anything, features.TriggerResetTestState, mock.Anything).
+		Return(fmt.Errorf("trigger failed")).Once()
+
+	allMaybe(s, p, o)
+	state := st()
+	state.Custom[engine.StateKeyDeviceStateBefore] = map[string]any(before)
+
+	c.TeardownTest(context.Background(), tcWith("TC"), state)
+
+	v, ok := state.Custom[engine.StateKeyTeardownError]
+	assert.True(t, ok, "strict mode should set teardown error on reset retry failure")
+	assert.Error(t, v.(error))
+	assert.Contains(t, v.(error).Error(), "baseline_reset_retry")
+}
+
+func TestCoordTeardown_StrictMode_SkipsBaselineResetWithoutSuiteZone(t *testing.T) {
+	cfg := &Config{Target: "localhost:8443", EnableKey: "0011", StrictLifecycle: true}
+	c, s, p, o := newCoord(t, cfg)
+
+	p.EXPECT().Main().Return(&Connection{state: ConnOperational}).Maybe()
+	p.EXPECT().ZoneKeys().Return([]string(nil))
+	o.EXPECT().PASEState().Return(completedPASE())
+
+	// No suite zone available for trigger delivery.
+	s.EXPECT().ZoneID().Return("").Maybe()
+	s.EXPECT().Conn().Return((*Connection)(nil)).Maybe()
+
+	before := DeviceStateSnapshot{"zoneCount": 0}
+	after := DeviceStateSnapshot{"zoneCount": 1}
+	o.EXPECT().RequestDeviceState(mock.Anything, mock.Anything).Return(after).Once()
+
+	allMaybe(s, p, o)
+	state := st()
+	state.Custom[engine.StateKeyDeviceStateBefore] = map[string]any(before)
+
+	c.TeardownTest(context.Background(), tcWith("TC"), state)
+
+	o.AssertNotCalled(t, "SendTriggerViaZone", mock.Anything, features.TriggerResetTestState, mock.Anything)
+	_, hasErr := state.Custom[engine.StateKeyTeardownError]
+	assert.False(t, hasErr, "missing suite zone should not produce strict reset retry error")
 }
 
 // TestCoordTeardown_SuiteAlive_RestoresMainBeforeProbe verifies that teardown

@@ -51,6 +51,10 @@ type TestResult struct {
 	// DeviceStateDiffs lists fields that changed between before and after.
 	// Empty means no state leakage detected.
 	DeviceStateDiffs []map[string]any
+
+	// CleanupReport contains post-test runner cleanup invariants.
+	// When present, it provides visibility into leaked state.
+	CleanupReport map[string]any
 }
 
 // StepResult represents the outcome of a single step.
@@ -195,6 +199,8 @@ const (
 	StateKeyDeviceStateBefore = "__device_state_before"
 	StateKeyDeviceStateAfter  = "__device_state_after"
 	StateKeyDeviceStateDiffs  = "__device_state_diffs"
+	StateKeyCleanupReport     = "__cleanup_report"
+	StateKeyTeardownError     = "__teardown_error"
 )
 
 // EngineConfig configures the test engine.
