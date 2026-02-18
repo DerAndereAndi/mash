@@ -239,6 +239,18 @@ Acceptance criteria for completing Phase 1:
 - No manual retries or ad-hoc restarts required
 - Deterministic pass behavior in both sequential and shuffled mode
 
+### Phase 1 Step 4 Status (2026-02-18)
+
+Completed with full pass after enforcing fresh-wrapper isolation and correct shuffle flags.
+
+- Run directory: `mash-go/stabilization/phase1-runs/20260218-210919-phase1-step4-fresh-wrapper-rerun3`
+- Sequential runs: `5/5` passed (`A9-seq 1..5`)
+- Shuffled runs: `5/5` passed (`A9-shuf seeds 501..505`)
+- Aggregate: `10/10` passed (`392s` total)
+- Validation notes:
+  - Use `-shuffle -shuffle-seed <seed>` (not `-shuffle <seed>`)
+  - Run via `./stabilization/run_mash_test_fresh.sh` for each invocation
+
 ## Phase 2: Discovery & mDNS (Group 12) -- Highest Priority
 
 After excluding environmental tests (~11), the remaining ~35 discovery tests have two failure patterns:
