@@ -166,6 +166,14 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 		// Create new commissioning connection
 		target := r.getTarget(params)
 
+		// Multi-step commissioning flows can call commission again immediately
+		// after a successful cert exchange. Wait until the device is advertising
+		// commissionable mode before dialing mash-comm/1 to avoid transient TLS
+		// "internal error" races while the window is reopening.
+		if err := r.waitForCommissioningAvailable(ctx, 3*time.Second); err != nil {
+			r.debugf("handleCommission: %v (continuing)", err)
+		}
+
 		r.debugf("handleCommission: dialing new commissioning connection to %s", target)
 		tlsConn, err := r.dialer.DialCommissioning(ctx, target)
 		if err != nil {
@@ -779,12 +787,22 @@ func deriveSetupCodeFromPassword(password string) commissioning.SetupCode {
 // extractPASEErrorCode parses a PASE error code from an error string like
 // "PASE failed: error code 2" or "commissioning error code 5: device busy".
 func extractPASEErrorCode(errStr string) (uint8, bool) {
-	// Match "error code N" anywhere in the string.
-	idx := strings.Index(errStr, "error code ")
-	if idx < 0 {
+	// Match either "error code N" or "(..., code N)" anywhere in the string.
+	markers := []string{"error code ", "code "}
+	start := -1
+	for _, marker := range markers {
+		if idx := strings.Index(errStr, marker); idx >= 0 {
+			candidate := idx + len(marker)
+			if start == -1 || candidate < start {
+				start = candidate
+			}
+		}
+	}
+	if start < 0 || start >= len(errStr) {
 		return 0, false
 	}
-	numStr := errStr[idx+len("error code "):]
+
+	numStr := errStr[start:]
 	// Extract digits (may be followed by ":" or end of string).
 	end := 0
 	for end < len(numStr) && numStr[end] >= '0' && numStr[end] <= '9' {

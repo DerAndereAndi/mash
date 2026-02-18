@@ -104,6 +104,30 @@ func (r *Runner) waitForCommissioningMode(ctx context.Context, timeout time.Dura
 	return nil
 }
 
+// waitForCommissioningAvailable waits until a commissionable advertisement is
+// present in the observer snapshot. Unlike waitForCommissioningMode, it does
+// not clear the snapshot first, so it can return immediately when the device
+// is already advertising.
+func (r *Runner) waitForCommissioningAvailable(ctx context.Context, timeout time.Duration) error {
+	start := time.Now()
+	obs := r.getOrCreateObserver()
+	if obs == nil {
+		return fmt.Errorf("failed to create mDNS observer")
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	_, err := obs.WaitFor(waitCtx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) > 0
+	})
+	if err != nil {
+		return fmt.Errorf("timeout waiting for commissioning availability after %v", timeout)
+	}
+	r.debugf("waitForCommissioningAvailable: device found after %v", time.Since(start))
+	return nil
+}
+
 // probeSessionHealth sends a lightweight Read request to DeviceInfo (endpoint 0,
 // feature 0x01) to verify the connection is still alive and the device is
 // responding. Returns nil if the session is healthy, an error otherwise.

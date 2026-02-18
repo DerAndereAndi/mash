@@ -1,10 +1,12 @@
 package runner
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
 
+	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -104,5 +106,40 @@ func TestWaitForOperationalReadyOnConn_ReadFailureDisconnectsConn(t *testing.T) 
 	}
 	if conn.state != ConnDisconnected {
 		t.Fatalf("expected disconnected conn after read failure, got state %v", conn.state)
+	}
+}
+
+func TestWaitForCommissioningAvailable_UsesCurrentSnapshot(t *testing.T) {
+	tb := newTestBrowser()
+	r := newTestRunner()
+	r.observer = newMDNSObserver(tb, func(string, ...any) {})
+	t.Cleanup(r.stopObserver)
+
+	// First call waits for an emitted commissionable service.
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		tb.commAdded <- &discovery.CommissionableService{
+			InstanceName:  "MASH-READY",
+			Host:          "device.local",
+			Port:          8443,
+			Discriminator: 1234,
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := r.waitForCommissioningAvailable(ctx, 500*time.Millisecond); err != nil {
+		t.Fatalf("first waitForCommissioningAvailable failed: %v", err)
+	}
+
+	// Second call should succeed immediately from existing snapshot state,
+	// without requiring a new browse event.
+	start := time.Now()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel2()
+	if err := r.waitForCommissioningAvailable(ctx2, 150*time.Millisecond); err != nil {
+		t.Fatalf("second waitForCommissioningAvailable failed: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 60*time.Millisecond {
+		t.Fatalf("expected snapshot-based readiness, took too long: %v", elapsed)
 	}
 }

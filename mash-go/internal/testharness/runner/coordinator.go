@@ -401,6 +401,23 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 			!(c.ops.PASEState().Completed() && c.pool.Main() != nil && c.pool.Main().isConnected())
 
 		if suiteCanReconnect {
+			suiteZoneID := c.suite.ZoneID()
+			// Borrowing the live suite control channel must also restore the
+			// suite zone crypto context (zone CA/controller cert pool). Some TLS
+			// negative-cert tests construct certs from the active zone CA and will
+			// fail with "requires a zone CA" if working crypto stays empty.
+			if suiteZoneID != "" {
+				if c.ops.LoadZoneCrypto(suiteZoneID) {
+					c.debugf("restored suite zone crypto from zone map for %s", tc.ID)
+				} else {
+					crypto := c.suite.Crypto()
+					if crypto.ZoneCA != nil || crypto.ControllerCert != nil || crypto.ZoneCAPool != nil {
+						c.ops.SetWorkingCrypto(crypto)
+						c.debugf("restored suite zone crypto from suite snapshot for %s", tc.ID)
+					}
+				}
+			}
+
 			// Close stale main if it's not the suite conn.
 			if m := c.pool.Main(); m != nil && m != c.suite.Conn() && m.isConnected() {
 				_ = m.Close()

@@ -95,6 +95,11 @@ func allMaybe(s *MockSuiteSession, p *MockConnPool, o *MockCommissioningOps) {
 	o.EXPECT().SetDeviceStateModified(mock.Anything).Return().Maybe()
 	o.EXPECT().SetLastDeviceConnClose(mock.Anything).Return().Maybe()
 	o.EXPECT().SetWorkingCrypto(mock.Anything).Return().Maybe()
+	o.EXPECT().LoadZoneCrypto(mock.Anything).Return(false).Maybe()
+	o.EXPECT().HasZoneCrypto(mock.Anything).Return(false).Maybe()
+	o.EXPECT().StoreZoneCrypto(mock.Anything).Return().Maybe()
+	o.EXPECT().RemoveZoneCrypto(mock.Anything).Return().Maybe()
+	o.EXPECT().ClearAllCrypto().Return().Maybe()
 	o.EXPECT().ClearWorkingCrypto().Return().Maybe()
 	o.EXPECT().EnsureDisconnected().Return().Maybe()
 	o.EXPECT().DisconnectConnection().Return().Maybe()
@@ -1481,6 +1486,7 @@ func TestSuiteCanReconnect_BorrowsExistingConn(t *testing.T) {
 	// Main is nil/dead -> triggers suiteCanReconnect.
 	o.EXPECT().PASEState().Return((*PASEState)(nil))
 	o.EXPECT().CommissionZoneType().Return(cert.ZoneTypeTest)
+	o.EXPECT().LoadZoneCrypto("sz1").Return(true).Once()
 	p.EXPECT().Main().Return((*Connection)(nil)).Maybe()
 
 	// Track that SetMain is called with suiteConn (borrow).
@@ -1510,6 +1516,31 @@ func TestSuiteCanReconnect_BorrowsExistingConn(t *testing.T) {
 	v, ok = state.Get(StateCurrentZoneID)
 	assert.True(t, ok)
 	assert.Equal(t, "sz1", v)
+}
+
+func TestSuiteCanReconnect_BorrowRestoresCryptoFallbackFromSuiteSnapshot(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	suiteConn := &Connection{state: ConnOperational}
+	suiteCrypto := CryptoState{
+		ZoneCA:         &cert.ZoneCA{},
+		ControllerCert: &cert.OperationalCert{},
+		ZoneCAPool:     x509.NewCertPool(),
+	}
+
+	s.EXPECT().ZoneID().Return("sz1")
+	s.EXPECT().ConnKey().Return("main-sz1").Maybe()
+	s.EXPECT().Conn().Return(suiteConn)
+	s.EXPECT().Crypto().Return(suiteCrypto).Once()
+
+	o.EXPECT().PASEState().Return((*PASEState)(nil))
+	o.EXPECT().CommissionZoneType().Return(cert.ZoneTypeTest)
+	o.EXPECT().LoadZoneCrypto("sz1").Return(false).Once()
+	o.EXPECT().SetWorkingCrypto(suiteCrypto).Return().Once()
+	p.EXPECT().Main().Return((*Connection)(nil)).Maybe()
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(),
+		tcWith("TC-L3", cond(PrecondDeviceCommissioned, true)), st()))
 }
 
 // TestSuiteCanReconnect_FallsBackToReconnect verifies that when the suite zone

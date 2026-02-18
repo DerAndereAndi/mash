@@ -86,6 +86,7 @@ func TestClassifyPASEError_Device(t *testing.T) {
 		{"CSR failed (code 3)", fmt.Errorf("PASE failed: error code 3: CSR failed")},
 		{"cert install (code 4)", fmt.Errorf("PASE failed: error code 4: cert install failed")},
 		{"zone type exists (code 10)", fmt.Errorf("commissioning error code 10: zone type already exists")},
+		{"zone type exists in cert exchange format", fmt.Errorf("cert exchange failed: cert exchange: CSR: commissioning error (zone type already exists, code 10)")},
 		{"zone slots full", fmt.Errorf("zone slots full")},
 	}
 	for _, tt := range tests {
