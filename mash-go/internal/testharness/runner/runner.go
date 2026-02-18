@@ -1055,42 +1055,33 @@ func (r *Runner) handleConnect(ctx context.Context, step *loader.Step, state *en
 		}
 	}
 	if probeForRejection {
-		_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-		probe := make([]byte, 1)
-		_, probeErr := conn.Read(probe)
-		_ = conn.SetReadDeadline(time.Time{}) // clear deadline
-		if probeErr != nil {
-			isTimeout := false
-			if ne, ok := probeErr.(net.Error); ok && ne.Timeout() {
-				isTimeout = true
+		closed, probeErr := detectPostHandshakeClose(conn, postHandshakeRejectionProbeTimeout)
+		if closed {
+			// Server closed the connection -- cert was rejected.
+			// Classify based on what test cert we sent, since the server
+			// can't send a specific reason in TLS 1.3 post-handshake.
+			conn.Close()
+			state.Set(StateEndTime, time.Now())
+			tlsError := classifyTestCertRejection(clientCertType, probeErr)
+			// For post-handshake rejection, the probe error is typically
+			// io.EOF which doesn't contain a TLS alert keyword. Use the
+			// inferred classification for tls_alert as well.
+			alert := extractTLSAlert(probeErr)
+			if alert == "" || alert == probeErr.Error() {
+				alert = tlsError
 			}
-			if !isTimeout {
-				// Server closed the connection -- cert was rejected.
-				// Classify based on what test cert we sent, since the server
-				// can't send a specific reason in TLS 1.3 post-handshake.
-				conn.Close()
-				state.Set(StateEndTime, time.Now())
-				tlsError := classifyTestCertRejection(clientCertType, probeErr)
-				// For post-handshake rejection, the probe error is typically
-				// io.EOF which doesn't contain a TLS alert keyword. Use the
-				// inferred classification for tls_alert as well.
-				alert := extractTLSAlert(probeErr)
-				if alert == "" || alert == probeErr.Error() {
-					alert = tlsError
-				}
-				return map[string]any{
-					KeyConnectionEstablished: false,
-					KeyConnected:             false,
-					KeyTLSHandshakeSuccess:   false,
-					KeyTLSHandshakeFailed:    true,
-					KeyTarget:                target,
-					KeyError:                 tlsError,
-					KeyErrorCode:             tlsError,
-					KeyErrorDetail:           probeErr.Error(),
-					KeyTLSError:              tlsError,
-					KeyTLSAlert:              alert,
-				}, nil
-			}
+			return map[string]any{
+				KeyConnectionEstablished: false,
+				KeyConnected:             false,
+				KeyTLSHandshakeSuccess:   false,
+				KeyTLSHandshakeFailed:    true,
+				KeyTarget:                target,
+				KeyError:                 tlsError,
+				KeyErrorCode:             tlsError,
+				KeyErrorDetail:           probeErr.Error(),
+				KeyTLSError:              tlsError,
+				KeyTLSAlert:              alert,
+			}, nil
 		}
 	}
 

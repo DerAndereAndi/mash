@@ -129,9 +129,12 @@ func (r *Runner) handleOpenCommissioningConnection(ctx context.Context, step *lo
 	// Create commissioning TLS config
 	tlsConfig := transport.NewCommissioningTLSConfig()
 
-	// Attempt connection with timeout
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+	// Attempt connection with transient retry. Immediately after flood tests, the
+	// first dial can race with socket teardown and fail with reset/EOF.
+	conn, err := dialWithTransientRetry(ctx, 3, func() (*tls.Conn, error) {
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		return tls.DialWithDialer(dialer, "tcp", target, tlsConfig)
+	})
 	if err != nil {
 		// DEC-063: When send_pase is requested and the TLS connection fails
 		// (e.g., device is in cooldown and may transiently reject), delegate

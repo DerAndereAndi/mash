@@ -183,6 +183,71 @@ func TestZoneSession_HandleWriteRequest(t *testing.T) {
 	}
 }
 
+func TestZoneSession_InvokeResponseWaitsForCommandCompletion(t *testing.T) {
+	device := createTestDevice()
+	endpoint, _ := device.GetEndpoint(0)
+	feature, err := endpoint.GetFeatureByID(uint8(model.FeatureDeviceInfo))
+	if err != nil {
+		t.Fatalf("GetFeatureByID failed: %v", err)
+	}
+
+	const slowCmdID uint8 = 99
+	feature.AddCommand(model.NewCommand(&model.CommandMetadata{
+		ID:   slowCmdID,
+		Name: "SlowCommand",
+	}, func(ctx context.Context, params map[string]any) (map[string]any, error) {
+		time.Sleep(700 * time.Millisecond)
+		return map[string]any{"ok": true}, nil
+	}))
+
+	conn := newMockSendableConnection()
+	session := NewZoneSession("zone-1", conn, device)
+
+	req := &wire.Request{
+		MessageID:  99,
+		Operation:  wire.OpInvoke,
+		EndpointID: 0,
+		FeatureID:  uint8(model.FeatureDeviceInfo),
+		Payload: &wire.InvokePayload{
+			CommandID:  slowCmdID,
+			Parameters: map[string]any{},
+		},
+	}
+	reqData, err := wire.EncodeRequest(req)
+	if err != nil {
+		t.Fatalf("EncodeRequest failed: %v", err)
+	}
+
+	start := time.Now()
+	done := make(chan struct{})
+	go func() {
+		session.OnMessage(reqData)
+		close(done)
+	}()
+
+	time.Sleep(550 * time.Millisecond)
+	if got := len(conn.SentMessages()); got != 0 {
+		t.Fatalf("expected no response before command completion, got %d", got)
+	}
+
+	<-done
+	if elapsed := time.Since(start); elapsed < 650*time.Millisecond {
+		t.Fatalf("expected invoke handling to block on command, elapsed=%v", elapsed)
+	}
+
+	sent := conn.SentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("expected exactly one response after completion, got %d", len(sent))
+	}
+	resp, err := wire.DecodeResponse(sent[0])
+	if err != nil {
+		t.Fatalf("DecodeResponse failed: %v", err)
+	}
+	if resp.Status != wire.StatusSuccess {
+		t.Fatalf("expected success status, got %v", resp.Status)
+	}
+}
+
 func TestZoneSession_HandleSubscribeRequest(t *testing.T) {
 	device := createTestDevice()
 	conn := newMockSendableConnection()

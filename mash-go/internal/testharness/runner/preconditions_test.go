@@ -682,6 +682,37 @@ func TestSendRemoveZoneStrict_SucceedsOnAck(t *testing.T) {
 	}
 }
 
+func TestSendRemoveZoneOnConnStrict_AckTimeoutWhenResponseIsLate(t *testing.T) {
+	r := newTestRunner()
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	conn := &Connection{
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
+	}
+
+	go func() {
+		fr := transport.NewFramer(server)
+		_, _ = fr.ReadFrame()
+		time.Sleep(strictRemoveZoneAckTimeout + 150*time.Millisecond)
+		_ = server.Close()
+	}()
+
+	err := r.sendRemoveZoneOnConnStrict(conn, "zone-1")
+	if err == nil {
+		t.Fatal("expected timeout waiting for remove-zone ack")
+	}
+	if !strings.Contains(err.Error(), "remove zone ack read") {
+		t.Fatalf("expected remove-zone ack read error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("expected timeout in error, got: %v", err)
+	}
+}
+
 func TestSetupPreconditions_StrictMode_BubblesRemoveZoneFailure(t *testing.T) {
 	r := newTestRunner()
 	r.config.StrictLifecycle = true

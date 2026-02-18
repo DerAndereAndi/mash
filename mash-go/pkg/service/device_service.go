@@ -2513,9 +2513,8 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 	}
 
 	// Capture zone session reference and remove from map under lock.
-	// Actual close happens outside the lock to avoid deadlock: session.Close()
-	// calls dispatcher.Stop() which blocks on processWg.Wait(), and the
-	// dispatcher goroutine may be blocked on conn.Send().
+	// Actual close happens asynchronously outside the lock because
+	// session.Close() can block on dispatcher shutdown.
 	var sessionToClose *ZoneSession
 	if session, exists := s.zoneSessions[zoneID]; exists {
 		sessionToClose = session
@@ -2541,6 +2540,16 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 
 	// Remove from connected zones
 	delete(s.connectedZones, zoneID)
+
+	// Keep TLS identity coherent for immediate follow-up handshakes.
+	if s.certStore != nil {
+		_ = s.certStore.RemoveOperationalCert(zoneID)
+	}
+	s.refreshTLSCert()
+
+	// Capture references needed by async cleanup.
+	dm := s.discoveryManager
+	hasAvailableSlots := s.nonTestZoneCountLocked() < s.config.MaxZones
 	s.mu.Unlock()
 
 	// Clear LimitResolver state outside the lock.
@@ -2548,53 +2557,13 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 		lr.ClearZone(zoneID)
 	}
 
-	// Close the zone session outside the lock. dispatcher.Stop() blocks
-	// on processWg.Wait() which may take time.
-	if sessionToClose != nil {
-		sessionToClose.Close()
-	}
-
-	// Stop operational mDNS advertising for this zone. This happens outside
-	// the lock because mDNS shutdown (sending goodbye packets) can take >1s
-	// and would block new connections from acquiring even a read lock.
-	if s.discoveryManager != nil {
-		if err := s.discoveryManager.RemoveZone(zoneID); err != nil {
-			s.debugLog("RemoveZone: failed to stop operational advertising",
-				"zoneID", zoneID, "error", err)
-		}
-	}
-
-	// Remove operational cert and Zone CA from cert store so the zone
-	// slot is freed for future commissioning.
-	if s.certStore != nil {
-		_ = s.certStore.RemoveOperationalCert(zoneID)
-	}
-
-	// Update s.tlsCert to a remaining zone's cert. Without this, the device
-	// presents a stale cert from the removed zone during TLS handshake,
-	// which controllers cannot verify against their Zone CA pool.
-	s.mu.Lock()
-	s.refreshTLSCert()
-	s.mu.Unlock()
-
-	// Save state to persist the removal
-	_ = s.SaveState() // Ignore error - zone is already removed from memory
-
-	// Emit event
+	// Preserve existing RemoveZone behavior for callers that expect
+	// immediate removal signal and commissioning re-entry.
 	s.emitEvent(Event{
 		Type:   EventZoneRemoved,
 		ZoneID: zoneID,
 	})
-
-	// Update pairing request listening state based on zone count
 	s.updatePairingRequestListening()
-
-	// DEC-059: Auto re-enter commissioning mode when zone slots become available.
-	// After any zone removal, if the device is below max capacity it should
-	// advertise _mash-comm._tcp so new controllers can discover and commission it.
-	s.mu.RLock()
-	hasAvailableSlots := s.nonTestZoneCountLocked() < s.config.MaxZones
-	s.mu.RUnlock()
 	s.debugLog("RemoveZone: auto-reentry check",
 		"zoneID", zoneID,
 		"hasAvailableSlots", hasAvailableSlots)
@@ -2604,7 +2573,29 @@ func (s *DeviceService) RemoveZone(zoneID string) error {
 		}
 	}
 
+	// Complete potentially slow side effects in the background so RemoveZone
+	// response ACK can be sent without waiting on mDNS/session/persistence work.
+	go s.finishRemoveZoneCleanup(zoneID, sessionToClose, dm)
+
 	return nil
+}
+
+func (s *DeviceService) finishRemoveZoneCleanup(zoneID string, sessionToClose *ZoneSession, dm *discovery.DiscoveryManager) {
+	if sessionToClose != nil {
+		sessionToClose.Close()
+	}
+
+	// Stop operational mDNS advertising for this zone. mDNS goodbye/stop may
+	// block and must never hold up RemoveZone response timing.
+	if dm != nil {
+		if err := dm.RemoveZone(zoneID); err != nil {
+			s.debugLog("RemoveZone: failed to stop operational advertising",
+				"zoneID", zoneID, "error", err)
+		}
+	}
+
+	// Save state to persist the removal.
+	_ = s.SaveState() // Ignore error - zone is already removed from memory
 }
 
 // StartOperationalAdvertising starts mDNS operational advertising for all known zones.

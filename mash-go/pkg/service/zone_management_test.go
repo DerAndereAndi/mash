@@ -385,6 +385,71 @@ func TestDeviceServiceRemoveZoneWithRemainingZonesStaysOperational(t *testing.T)
 	}
 }
 
+func TestDeviceServiceRemoveZone_ReturnsBeforeSlowAdvertisingCleanup(t *testing.T) {
+	svc := createTestDeviceService(t)
+
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseCommissionable(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Maybe()
+	advertiser.EXPECT().StopCommissionable().Return(nil).Maybe()
+	advertiser.EXPECT().StopAll().Return().Maybe()
+
+	cleanupStarted := make(chan struct{}, 1)
+	cleanupRelease := make(chan struct{})
+	advertiser.EXPECT().StopOperational("zone-slow-cleanup").
+		Run(func(_ string) {
+			cleanupStarted <- struct{}{}
+			<-cleanupRelease
+		}).
+		Return(nil).
+		Once()
+	svc.SetAdvertiser(advertiser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() {
+		close(cleanupRelease)
+		_ = svc.Stop()
+	}()
+
+	svc.deviceID = "device-slow-cleanup"
+	svc.HandleZoneConnect("zone-slow-cleanup", cert.ZoneTypeLocal)
+	if got := svc.discoveryManager.ZoneCount(); got != 1 {
+		t.Fatalf("expected operational zone to be advertised before remove, got zone count=%d", got)
+	}
+
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.RemoveZone("zone-slow-cleanup")
+	}()
+
+	select {
+	case <-cleanupStarted:
+		// expected: background cleanup reached stop operational
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected StopOperational to be reached quickly")
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RemoveZone returned error: %v", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("RemoveZone should return before slow StopOperational completes")
+	}
+
+	if elapsed := time.Since(start); elapsed > 300*time.Millisecond {
+		t.Fatalf("expected fast RemoveZone return, elapsed=%v", elapsed)
+	}
+	if svc.GetZone("zone-slow-cleanup") != nil {
+		t.Fatal("zone should be removed from in-memory state immediately")
+	}
+}
+
 func TestDeviceServiceListZoneIDs(t *testing.T) {
 	svc := createTestDeviceService(t)
 

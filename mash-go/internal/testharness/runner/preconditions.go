@@ -23,6 +23,8 @@ var (
 	errRemoveZoneNoZoneID     = errors.New("remove zone: empty zone id")
 )
 
+const strictRemoveZoneAckTimeout = 500 * time.Millisecond
+
 // Precondition levels form a hierarchy:
 //
 //	Level 0: No relevant preconditions     -> no-op
@@ -756,9 +758,9 @@ func (r *Runner) sendRemoveZoneOnConnStrict(conn *Connection, zoneID string) err
 		return fmt.Errorf("remove zone send: %w", err)
 	}
 
-	if conn.tlsConn != nil {
-		conn.tlsConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-		defer conn.tlsConn.SetReadDeadline(time.Time{})
+	if conn.conn != nil {
+		_ = conn.conn.SetReadDeadline(time.Now().Add(strictRemoveZoneAckTimeout))
+		defer conn.conn.SetReadDeadline(time.Time{})
 	}
 
 	respData, err := conn.framer.ReadFrame()

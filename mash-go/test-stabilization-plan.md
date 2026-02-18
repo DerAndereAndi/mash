@@ -117,6 +117,17 @@ BASE_ARGS=(
 )
 ```
 
+#### B.1) Hard Isolation Rule (mandatory)
+
+Every `mash-test` invocation must run against a freshly reset `mash-device`.
+Do not run `go run ./cmd/mash-test ...` directly for Phase 1 matrix work.
+Use:
+
+```bash
+cd mash-go
+./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "<FILTER>"
+```
+
 #### C) Group filter lookup (Phase 1 only)
 
 ```bash
@@ -138,14 +149,14 @@ For each group `Gi` in `{G1,G2,G3,G4,G5,G6,G7,G8,G11}`:
 1) Sequential gate: run 5 times
 ```bash
 for i in 1 2 3 4 5; do
-  go run ./cmd/mash-test "${BASE_ARGS[@]}" -filter "$Gi"
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$Gi"
 done
 ```
 
 2) Shuffled gate: run 5 times with fixed seeds
 ```bash
 for seed in 101 202 303 404 505; do
-  go run ./cmd/mash-test "${BASE_ARGS[@]}" -filter "$Gi" -shuffle -shuffle-seed "$seed"
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$Gi" -shuffle -shuffle-seed "$seed"
 done
 ```
 
@@ -165,14 +176,14 @@ For each pair filter `P='(<A>),(<B>)'` (comma-separated glob union):
 1) Sequential gate: 3 runs
 ```bash
 for i in 1 2 3; do
-  go run ./cmd/mash-test "${BASE_ARGS[@]}" -filter "$P"
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$P"
 done
 ```
 
 2) Shuffled gate: 3 runs
 ```bash
 for seed in 111 222 333; do
-  go run ./cmd/mash-test "${BASE_ARGS[@]}" -filter "$P" -shuffle -shuffle-seed "$seed"
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$P" -shuffle -shuffle-seed "$seed"
 done
 ```
 
@@ -192,14 +203,14 @@ For each accumulated filter `Ak`:
 1) Sequential gate: 3 runs
 ```bash
 for i in 1 2 3; do
-  go run ./cmd/mash-test "${BASE_ARGS[@]}" -filter "$Ak"
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$Ak"
 done
 ```
 
 2) Shuffled gate: 3 runs
 ```bash
 for seed in 123 234 345; do
-  go run ./cmd/mash-test "${BASE_ARGS[@]}" -filter "$Ak" -shuffle -shuffle-seed "$seed"
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$Ak" -shuffle -shuffle-seed "$seed"
 done
 ```
 
@@ -212,14 +223,14 @@ Run all Phase 1 groups together:
 1) Sequential: 5 runs
 ```bash
 for i in 1 2 3 4 5; do
-  go run ./cmd/mash-test "${BASE_ARGS[@]}" -filter "$A9"
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$A9"
 done
 ```
 
 2) Shuffled: 5 runs
 ```bash
 for seed in 501 502 503 504 505; do
-  go run ./cmd/mash-test "${BASE_ARGS[@]}" -filter "$A9" -shuffle -shuffle-seed "$seed"
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$A9" -shuffle -shuffle-seed "$seed"
 done
 ```
 
@@ -274,11 +285,11 @@ Work through groups 9, 10, 13-18 one at a time:
 
 ```bash
 # Per-group verification
-mash-test -target localhost:8443 -setup-code 20220211 -enable-key deadbeefdeadbeefdeadbeefdeadbeef \
+./stabilization/run_mash_test_fresh.sh -target localhost:8443 -setup-code 20220211 -enable-key deadbeefdeadbeefdeadbeefdeadbeef \
   -tags base-protocol -exclude-tags env:multi-device -filter "<GROUP_FILTER>" -json
 
 # Full suite (exclude env tests)
-mash-test -target localhost:8443 -setup-code 20220211 -enable-key deadbeefdeadbeefdeadbeefdeadbeef \
+./stabilization/run_mash_test_fresh.sh -target localhost:8443 -setup-code 20220211 -enable-key deadbeefdeadbeefdeadbeefdeadbeef \
   -tags base-protocol -exclude-tags env:multi-device -json
 ```
 

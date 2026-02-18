@@ -75,6 +75,35 @@ func dialWithRetry(ctx context.Context, maxAttempts int, dialFn func() (*tls.Con
 	return conn, err
 }
 
+// dialWithTransientRetry retries only transient dial errors (EOF/reset/refused/etc).
+// Non-transient errors fail fast on the first attempt.
+func dialWithTransientRetry(ctx context.Context, maxAttempts int, dialFn func() (*tls.Conn, error)) (*tls.Conn, error) {
+	var conn *tls.Conn
+	err := retryWithBackoff(ctx, RetryConfig{
+		MaxAttempts: maxAttempts,
+		BaseDelay:   50 * time.Millisecond,
+		MaxDelay:    200 * time.Millisecond,
+	}, func() error {
+		var dialErr error
+		conn, dialErr = dialFn()
+		if dialErr == nil {
+			return nil
+		}
+		if isTransientError(dialErr) {
+			return Infrastructure(dialErr)
+		}
+		return Protocol(dialErr)
+	})
+	if err != nil {
+		var ce *ClassifiedError
+		if errors.As(err, &ce) {
+			return nil, ce.Err
+		}
+		return nil, err
+	}
+	return conn, nil
+}
+
 // contextSleep waits for the given duration or until the context is done,
 // whichever comes first. Returns ctx.Err() if the context was cancelled.
 func contextSleep(ctx context.Context, d time.Duration) error {
