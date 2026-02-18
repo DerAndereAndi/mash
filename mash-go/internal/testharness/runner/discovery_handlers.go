@@ -39,20 +39,23 @@ func (r *Runner) registerDiscoveryHandlers() {
 }
 
 // browseViaObserver queries the mDNS observer for services of the given type,
-// waiting up to timeoutMs for at least one service to appear.
+// waiting up to timeoutMs for at least minCount services to appear.
 // For commissionable services, it also stores the discovered discriminator.
-func (r *Runner) browseViaObserver(ctx context.Context, serviceType string, timeoutMs int) ([]discoveredService, error) {
+func (r *Runner) browseViaObserver(ctx context.Context, serviceType string, timeoutMs int, minCount int) ([]discoveredService, error) {
 	obs := r.getOrCreateObserver()
 	if obs == nil {
 		return nil, fmt.Errorf("failed to create mDNS observer")
+	}
+	if minCount < 1 {
+		minCount = 1
 	}
 
 	browseCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
-	// Wait for at least one service, or until timeout.
+	// Wait for at least minCount services, or until timeout.
 	services, _ := obs.WaitFor(browseCtx, serviceType, func(svcs []discoveredService) bool {
-		return len(svcs) > 0
+		return len(svcs) >= minCount
 	})
 
 	// Store discovered discriminator for {{ device_discriminator }}.
@@ -82,6 +85,21 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 
 	serviceType, _ := params[KeyServiceType].(string)
 	timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
+	minServices := 1
+	if step != nil && step.Expect != nil {
+		if v, ok := step.Expect[KeyInstancesForDevice]; ok {
+			switch n := v.(type) {
+			case int:
+				if n > 1 {
+					minServices = n
+				}
+			case float64:
+				if int(n) > 1 {
+					minServices = int(n)
+				}
+			}
+		}
+	}
 
 	// Determine if retry is requested. With the persistent observer, retries
 	// are less critical (the observer accumulates services continuously), but
@@ -96,7 +114,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		timeoutMs *= 2 // equivalent of two browse windows
 	}
 
-	services, err := r.browseViaObserver(ctx, serviceType, timeoutMs)
+	services, err := r.browseViaObserver(ctx, serviceType, timeoutMs, minServices)
 	if err != nil {
 		return nil, err
 	}

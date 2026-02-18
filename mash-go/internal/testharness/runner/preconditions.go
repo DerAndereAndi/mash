@@ -686,6 +686,9 @@ func (r *Runner) sendRemoveZone() {
 // async disconnect detection. A short read deadline prevents blocking when
 // the device enters commissioning mode before responding (e.g., last zone).
 func (r *Runner) sendRemoveZoneOnConn(conn *Connection, zoneID string) {
+	if conn == nil || !conn.isConnected() || conn.framer == nil {
+		return
+	}
 	_, data, err := r.buildRemoveZoneRequest(zoneID)
 	if err != nil {
 		return
@@ -703,6 +706,51 @@ func (r *Runner) sendRemoveZoneOnConn(conn *Connection, zoneID string) {
 		conn.tlsConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	}
 	_, _ = conn.framer.ReadFrame()
+}
+
+// removeSuiteZoneForTwoZonePrecondition removes the suite TEST zone so
+// two_zones_connected can construct exactly two operational zones (GRID+LOCAL).
+func (r *Runner) removeSuiteZoneForTwoZonePrecondition(ctx context.Context, state *engine.ExecutionState) error {
+	suiteZoneID := r.suite.ZoneID()
+	if suiteZoneID == "" {
+		return nil
+	}
+	r.debugf("two_zones_connected: removing suite zone %s before provisioning GRID+LOCAL", suiteZoneID)
+
+	sc := r.suite.Conn()
+	if sc == nil || !sc.isConnected() || sc.framer == nil {
+		if err := r.reconnectToZone(state); err != nil {
+			return fmt.Errorf("reconnect suite zone for removal: %w", err)
+		}
+		sc = r.suite.Conn()
+	}
+	if sc == nil || !sc.isConnected() || sc.framer == nil {
+		return fmt.Errorf("suite zone %s not connected for removal", suiteZoneID)
+	}
+
+	if r.config != nil && r.config.StrictLifecycle {
+		if err := r.sendRemoveZoneOnConnStrict(sc, suiteZoneID); err != nil {
+			return fmt.Errorf("remove suite zone strict: %w", err)
+		}
+	} else {
+		r.sendRemoveZoneOnConn(sc, suiteZoneID)
+	}
+
+	// Detach suite metadata/connection so this precondition starts from
+	// a true two-zone baseline and teardown can re-establish suite later.
+	if r.pool.Main() == sc {
+		r.pool.SetMain(&Connection{})
+	}
+	if ck := r.suite.ConnKey(); ck != "" {
+		r.pool.UntrackZone(ck)
+	}
+	r.connMgr.RemoveZoneCrypto(suiteZoneID)
+	r.suite.Clear()
+
+	if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+		r.debugf("two_zones_connected: %v (continuing)", err)
+	}
+	return nil
 }
 
 func (r *Runner) buildRemoveZoneRequest(zoneID string) (*wire.Request, []byte, error) {
@@ -1121,6 +1169,9 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 				}
 				if r.config.Target != "" {
 					r.debugf("two_zones_connected: commissioning against real device")
+					if err := r.removeSuiteZoneForTwoZonePrecondition(ctx, state); err != nil {
+						return fmt.Errorf("precondition two_zones_connected remove suite zone: %w", err)
+					}
 					if !r.connMgr.LastDeviceConnClose().IsZero() {
 						if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
 							r.debugf("two_zones_connected: %v (continuing)", err)

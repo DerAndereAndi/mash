@@ -429,7 +429,7 @@ pics_requirements:
   - D.ZONE.MULTI
 
 preconditions:
-  - device_in_two_zones: true
+  - two_zones_connected: true
 
 steps:
   - name: Browse operational services

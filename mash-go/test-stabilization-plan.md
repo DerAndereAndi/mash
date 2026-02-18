@@ -269,6 +269,105 @@ After excluding environmental tests (~11), the remaining ~35 discovery tests hav
 3. For sequence failures: add targeted cleanup or waiting
 4. Run full group 5x shuffled, confirm stable
 
+### Phase 2 Execution Runbook (step-by-step)
+
+Use the same hard isolation rule as Phase 1: every invocation must use
+`./stabilization/run_mash_test_fresh.sh` (fresh `mash-device -reset` each run).
+
+#### Tool Calls / Commands
+
+```bash
+cd mash-go
+
+BASE_ARGS=(
+  -target localhost:8443
+  -mode device
+  -setup-code 20220211
+  -enable-key deadbeefdeadbeefdeadbeefdeadbeef
+  -tags base-protocol
+  -exclude-tags env:multi-device
+  -strict-lifecycle
+  -json
+  -debug
+)
+
+# Group 12 full filter
+G12='TC-DISC*,TC-DSTATE*,TC-MASHO*,TC-MASHC*,TC-MASHD*,TC-BROWSE*,TC-NOTFOUND*,TC-MDNS-REC*,TC-MULTIIF*'
+
+# Pattern buckets (current known flaky set)
+P2A='TC-MASHO-001,TC-DSTATE-003,TC-DSTATE-005,TC-MASHO-004,TC-MASHC-003,TC-MASHC-006'
+P2B='TC-DSTATE-001,TC-MASHO-005'
+```
+
+### Step 1: Per-test isolation gate (known failing tests)
+
+For each test in `{TC-MASHO-001, TC-DSTATE-003, TC-DSTATE-005, TC-MASHO-004, TC-MASHC-003, TC-MASHC-006, TC-DSTATE-001, TC-MASHO-005}`:
+
+1) Sequential gate: 5 runs
+```bash
+for i in 1 2 3 4 5; do
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "TC-...-..."
+done
+```
+
+2) Shuffled gate: 5 runs
+```bash
+for seed in 101 202 303 404 505; do
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "TC-...-..." -shuffle -shuffle-seed "$seed"
+done
+```
+
+Acceptance: `10/10` pass per test before grouping.
+
+### Step 2: Pattern-bucket gate
+
+Run Pattern A and Pattern B as grouped filters:
+
+1) Sequential gate: 5 runs each bucket
+```bash
+for i in 1 2 3 4 5; do
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$P2A"
+done
+
+for i in 1 2 3 4 5; do
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$P2B"
+done
+```
+
+2) Shuffled gate: 5 runs each bucket
+```bash
+for seed in 601 602 603 604 605; do
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$P2A" -shuffle -shuffle-seed "$seed"
+done
+
+for seed in 701 702 703 704 705; do
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$P2B" -shuffle -shuffle-seed "$seed"
+done
+```
+
+Acceptance: `10/10` pass per bucket.
+
+### Step 3: Full Group 12 gate
+
+1) Sequential gate: 5 runs
+```bash
+for i in 1 2 3 4 5; do
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$G12"
+done
+```
+
+2) Shuffled gate: 5 runs
+```bash
+for seed in 801 802 803 804 805; do
+  ./stabilization/run_mash_test_fresh.sh "${BASE_ARGS[@]}" -filter "$G12" -shuffle -shuffle-seed "$seed"
+done
+```
+
+Acceptance criteria for completing Phase 2:
+- `5/5` sequential pass for full `G12`
+- `5/5` shuffled pass for full `G12`
+- Reproducible run directories + seed list captured in logs/summary
+
 ## Phase 3: Remaining Medium-Priority Groups
 
 Work through groups 9, 10, 13-18 one at a time:

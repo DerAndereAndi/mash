@@ -635,7 +635,7 @@ func TestBrowseViaObserver_ReturnsExistingEntries(t *testing.T) {
 	}
 
 	// browseViaObserver should return the existing service immediately.
-	services, err := r.browseViaObserver(context.Background(), "commissionable", 500)
+	services, err := r.browseViaObserver(context.Background(), "commissionable", 500, 1)
 	if err != nil {
 		t.Fatalf("browseViaObserver error: %v", err)
 	}
@@ -666,7 +666,7 @@ func TestBrowseViaObserver_ReturnsFreshServices(t *testing.T) {
 		}
 	}()
 
-	services, err := r.browseViaObserver(context.Background(), "commissionable", 2000)
+	services, err := r.browseViaObserver(context.Background(), "commissionable", 2000, 1)
 	if err != nil {
 		t.Fatalf("browseViaObserver error: %v", err)
 	}
@@ -703,7 +703,7 @@ func TestBrowseViaObserver_ExistingAndNew(t *testing.T) {
 	}
 
 	// browseViaObserver returns immediately since there's already a service.
-	services, err := r.browseViaObserver(context.Background(), "commissionable", 2000)
+	services, err := r.browseViaObserver(context.Background(), "commissionable", 2000, 1)
 	if err != nil {
 		t.Fatalf("browseViaObserver error: %v", err)
 	}
@@ -714,5 +714,56 @@ func TestBrowseViaObserver_ExistingAndNew(t *testing.T) {
 	}
 	if services[0].InstanceName != "MASH-OLD" {
 		t.Errorf("expected MASH-OLD, got %s", services[0].InstanceName)
+	}
+}
+
+// TestHandleBrowseMDNS_WaitsForExpectedInstancesForDevice verifies that
+// browse_mdns waits for the expected instance count instead of returning on
+// the first operational service.
+func TestHandleBrowseMDNS_WaitsForExpectedInstancesForDevice(t *testing.T) {
+	r := newTestRunner()
+	tb := newTestBrowser()
+	r.observer = newMDNSObserver(tb, r.debugf)
+	defer r.observer.Stop()
+	state := newTestState()
+
+	step := &loader.Step{
+		Action: ActionBrowseMDNS,
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasOperational,
+			KeyTimeoutMs:   float64(2000),
+		},
+		Expect: map[string]any{
+			KeyInstancesForDevice: float64(2),
+		},
+	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		tb.opAdded <- &discovery.OperationalService{
+			InstanceName: "zone-a-device-1",
+			ZoneID:       "zone-a",
+			DeviceID:     "device-1",
+			Host:         "host.local",
+			Port:         8443,
+			Addresses:    []string{"fd00::1"},
+		}
+		time.Sleep(50 * time.Millisecond)
+		tb.opAdded <- &discovery.OperationalService{
+			InstanceName: "zone-b-device-1",
+			ZoneID:       "zone-b",
+			DeviceID:     "device-1",
+			Host:         "host.local",
+			Port:         8443,
+			Addresses:    []string{"fd00::1"},
+		}
+	}()
+
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("handleBrowseMDNS error: %v", err)
+	}
+	if got, _ := out[KeyInstancesForDevice].(int); got != 2 {
+		t.Fatalf("instances_for_device = %v, want 2", out[KeyInstancesForDevice])
 	}
 }

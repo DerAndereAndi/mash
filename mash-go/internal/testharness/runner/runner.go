@@ -324,7 +324,7 @@ func New(config *Config) *Runner {
 			return r.handleCommission(ctx, step, state)
 		},
 		browseFn: func(ctx context.Context, serviceType string, _ map[string]any, timeoutMs int) (int, error) {
-			services, err := r.browseViaObserver(ctx, serviceType, timeoutMs)
+			services, err := r.browseViaObserver(ctx, serviceType, timeoutMs, 1)
 			return len(services), err
 		},
 		clearSnapshotFn: func(serviceType string) {
