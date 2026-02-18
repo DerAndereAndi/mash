@@ -217,6 +217,16 @@ func (r *Runner) ensureCommissioned(ctx context.Context, state *engine.Execution
 	return nil
 }
 
+func (r *Runner) alignLifecycleForCommissioning(authority string) error {
+	if !r.strictLifecycleEnabled() {
+		return nil
+	}
+	if r.lifecycleController().State() != LifecycleDisconnected {
+		r.lifecycleController().ToDisconnected()
+	}
+	return r.lifecycleController().ToCommissioning(authority)
+}
+
 // isSuiteZoneCommission returns true when the most recent commission created
 // (or re-created) the suite zone. Secondary zones such as GRID/LOCAL from
 // two_zones_connected must not overwrite the suite zone's saved crypto.
@@ -546,33 +556,52 @@ func (r *Runner) recordSuiteZone() {
 // promotes suite.Conn() to main for sending RemoveZone. If the suite
 // connection is dead, we attempt reconnection. Cleanup always proceeds.
 func (r *Runner) removeSuiteZone() {
-	r.debugf("removeSuiteZone: tearing down suite zone %s", r.suite.ZoneID())
+	zoneID := r.suite.ZoneID()
+	r.debugf("removeSuiteZone: tearing down suite zone %s", zoneID)
 
-	// Ensure we have a live connection to send RemoveZone.
-	// The main pool connection may be dead from tier transitions.
-	mainAlive := r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().framer != nil
-	if !mainAlive {
-		// Try to promote the suite connection to main if it is still alive.
-		if sc := r.suite.Conn(); sc != nil && sc.isConnected() {
-			r.debugf("removeSuiteZone: promoting suite conn to main (main is dead)")
-			r.pool.SetMain(sc)
-		} else if r.config.Target != "" {
-			// Suite conn is also dead; attempt reconnection.
-			r.debugf("removeSuiteZone: main and suite conns dead, attempting reconnect")
-			state := engine.NewExecutionState(context.Background())
-			if err := r.reconnectToZone(state); err != nil {
-				r.debugf("removeSuiteZone: reconnect failed: %v (proceeding with cleanup)", err)
+	conn := r.resolveSuiteTeardownConn()
+	if zoneID != "" {
+		if conn != nil {
+			if r.config != nil && r.config.StrictLifecycle {
+				if err := r.sendRemoveZoneOnConnStrict(conn, zoneID); err != nil {
+					r.setStrictLifecycleErr(err)
+				}
+			} else {
+				r.sendRemoveZoneOnConn(conn, zoneID)
 			}
+		} else if r.config != nil && r.config.StrictLifecycle {
+			r.setStrictLifecycleErr(errRemoveZoneNoConnection)
 		}
-	}
-
-	if r.config != nil && r.config.StrictLifecycle {
-		if err := r.sendRemoveZoneStrict(); err != nil {
-			r.setStrictLifecycleErr(err)
-		}
-	} else {
-		r.sendRemoveZone()
 	}
 	r.closeAllZoneConns()
 	r.ensureDisconnected()
+}
+
+func (r *Runner) resolveSuiteTeardownConn() *Connection {
+	isLive := func(c *Connection) bool {
+		return c != nil && c.isConnected() && c.framer != nil
+	}
+
+	if sc := r.suite.Conn(); isLive(sc) {
+		return sc
+	}
+	if mc := r.pool.Main(); isLive(mc) {
+		r.suite.SetConn(mc)
+		return mc
+	}
+	if r.config != nil && r.config.Target != "" && r.suite.ZoneID() != "" {
+		state := engine.NewExecutionState(context.Background())
+		if err := r.reconnectToZone(state); err != nil {
+			r.debugf("removeSuiteZone: reconnect failed: %v", err)
+			return nil
+		}
+		if sc := r.suite.Conn(); isLive(sc) {
+			return sc
+		}
+		if mc := r.pool.Main(); isLive(mc) {
+			r.suite.SetConn(mc)
+			return mc
+		}
+	}
+	return nil
 }

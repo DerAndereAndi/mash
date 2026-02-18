@@ -74,19 +74,10 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 	// Interpolate parameters so ${setup_code} etc. resolve.
 	params := engine.InterpolateParams(step.Params, state)
 
-	// Apply zone_type from params if specified.
-	requestedZoneType := ""
-	if zt, ok := params[KeyZoneType].(string); ok && zt != "" {
-		requestedZoneType = strings.ToUpper(zt)
-		switch requestedZoneType {
-		case "GRID":
-			r.connMgr.SetCommissionZoneType(cert.ZoneTypeGrid)
-		case "LOCAL":
-			r.connMgr.SetCommissionZoneType(cert.ZoneTypeLocal)
-		case "TEST":
-			r.connMgr.SetCommissionZoneType(cert.ZoneTypeTest)
-		}
-	}
+	// Resolve commission zone type using explicit policy:
+	// explicit request wins; otherwise, when suite TEST exists, use LOCAL for
+	// test-step commissioning so suite control zone remains isolated.
+	requestedZoneType := r.applyCommissionZoneType(params)
 
 	// Check for duplicate zone type before attempting PASE.
 	// The device will reject this, but we can return structured output.
@@ -192,6 +183,11 @@ func (r *Runner) handleCommission(ctx context.Context, step *loader.Step, state 
 
 		state.Set(StateConnection, r.pool.Main())
 		state.Set(KeyConnectionEstablished, true)
+	}
+
+	// Create PASE client session
+	if err := r.alignLifecycleForCommissioning("main"); err != nil {
+		return nil, err
 	}
 
 	// Create PASE client session

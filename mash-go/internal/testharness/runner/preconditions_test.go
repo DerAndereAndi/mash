@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
@@ -1713,6 +1714,60 @@ func TestRemoveSuiteZone_CleansUpEvenWhenReconnectFails(t *testing.T) {
 	}
 	if r.connMgr.ZoneCA() != nil {
 		t.Error("expected zone CA cleared")
+	}
+}
+
+func TestRemoveSuiteZone_UsesLiveMainWhenSuiteConnDead(t *testing.T) {
+	r := newTestRunner()
+
+	// Suite identity exists, but suite connection is dead.
+	r.suite.Record("suite-zone-id", makeCryptoState())
+	r.suite.SetConn(&Connection{state: ConnDisconnected})
+
+	// Main connection is live and must be used for teardown RemoveZone.
+	client, server := net.Pipe()
+	mainConn := &Connection{
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
+	}
+	r.pool.SetMain(mainConn)
+
+	gotFrame := make(chan error, 1)
+	go func() {
+		fr := transport.NewFramer(server)
+		for i := 0; i < 3; i++ {
+			frame, err := fr.ReadFrame()
+			if err != nil {
+				gotFrame <- err
+				return
+			}
+			req, err := wire.DecodeRequest(frame)
+			if err != nil {
+				continue
+			}
+			if req.Operation == wire.OpInvoke {
+				gotFrame <- nil
+				_ = server.Close()
+				return
+			}
+		}
+		gotFrame <- errors.New("did not observe invoke request")
+		_ = server.Close()
+	}()
+
+	r.removeSuiteZone()
+
+	select {
+	case err := <-gotFrame:
+		if err != nil {
+			t.Fatalf("expected RemoveZone request frame, got read/decode error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected removeSuiteZone to send RemoveZone on live main connection")
+	}
+	if r.suite.ZoneID() != "" {
+		t.Fatal("expected suite zone to be cleared after teardown")
 	}
 }
 

@@ -50,6 +50,25 @@ func TestEnsureCommissioned_AlreadyDone(t *testing.T) {
 	}
 }
 
+func TestAlignLifecycleForCommissioning_FromOperational(t *testing.T) {
+	r := newTestRunner()
+	r.config.StrictLifecycle = true
+	if err := r.lifecycleController().ReconnectOperational("suite-zone"); err != nil {
+		t.Fatalf("seed lifecycle operational: %v", err)
+	}
+
+	if err := r.alignLifecycleForCommissioning("main"); err != nil {
+		t.Fatalf("alignLifecycleForCommissioning failed: %v", err)
+	}
+
+	if got := r.lifecycleController().State(); got != LifecycleCommissioning {
+		t.Fatalf("expected lifecycle commissioning, got %v", got)
+	}
+	if got := r.lifecycleController().Authority(); got != "main" {
+		t.Fatalf("expected lifecycle authority main, got %q", got)
+	}
+}
+
 func TestEnsureCommissioned_RestoresSuiteZoneCrypto(t *testing.T) {
 	// When a lower-level test clears zoneCAPool and a subsequent
 	// commissioned test reuses the suite zone session, ensureCommissioned
