@@ -496,6 +496,24 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 				detachMainControlChannel(c.pool, state)
 			}
 			c.ops.SetPASEState(nil)
+
+			needsControlChannel := c.config.Target != "" &&
+				c.config.EnableKey != "" &&
+				testCaseHasAction(tc, ActionTriggerTestEvent)
+			if needsControlChannel {
+				if !borrowSuiteControlChannelIfAlive(c.pool, c.suite, state) {
+					c.debugf("commissioning setup: suite control channel dead, reconnecting")
+					if err := c.ops.ReconnectToZone(state); err != nil {
+						return err
+					}
+				}
+				if err := c.ops.ProbeSessionHealth(); err != nil {
+					c.debugf("commissioning setup: suite control probe failed: %v, reconnecting", err)
+					if err := c.ops.ReconnectToZone(state); err != nil {
+						return err
+					}
+				}
+			}
 		} else {
 			c.ops.EnsureDisconnected()
 		}

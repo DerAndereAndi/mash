@@ -767,3 +767,94 @@ func TestHandleBrowseMDNS_WaitsForExpectedInstancesForDevice(t *testing.T) {
 		t.Fatalf("instances_for_device = %v, want 2", out[KeyInstancesForDevice])
 	}
 }
+
+// TestHandleBrowseMDNS_ExpectDeviceAbsent_WaitsForRemoval verifies that when a
+// step expects device_found=false, handler waits for removal updates instead of
+// returning immediately from a stale positive snapshot.
+func TestHandleBrowseMDNS_ExpectDeviceAbsent_WaitsForRemoval(t *testing.T) {
+	r := newTestRunner()
+	tb := newTestBrowser()
+	r.observer = newMDNSObserver(tb, r.debugf)
+	defer r.observer.Stop()
+	state := newTestState()
+
+	// Seed observer with a commissionable service first.
+	tb.commAdded <- &discovery.CommissionableService{
+		InstanceName:  "MASH-1234",
+		Discriminator: 1234,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := r.observer.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) == 1
+	}); err != nil {
+		t.Fatalf("setup observer seed failed: %v", err)
+	}
+
+	step := &loader.Step{
+		Action: ActionBrowseMDNS,
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasCommissionable,
+			KeyTimeoutMs:   float64(1000),
+		},
+		Expect: map[string]any{
+			KeyDeviceFound: false,
+		},
+	}
+
+	// Remove service shortly after browse starts.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		tb.commRemoved <- &discovery.CommissionableService{InstanceName: "MASH-1234"}
+	}()
+
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("handleBrowseMDNS error: %v", err)
+	}
+	if got, _ := out[KeyDeviceFound].(bool); got {
+		t.Fatalf("device_found = %v, want false", got)
+	}
+}
+
+// TestHandleBrowseMDNS_ExpectDeviceAbsent_TimeoutReturnsLatestSnapshot verifies
+// timeout behavior remains deterministic: latest snapshot is returned and
+// expectation can fail normally when service never disappears.
+func TestHandleBrowseMDNS_ExpectDeviceAbsent_TimeoutReturnsLatestSnapshot(t *testing.T) {
+	r := newTestRunner()
+	tb := newTestBrowser()
+	r.observer = newMDNSObserver(tb, r.debugf)
+	defer r.observer.Stop()
+	state := newTestState()
+
+	tb.commAdded <- &discovery.CommissionableService{
+		InstanceName:  "MASH-ALWAYS",
+		Discriminator: 1234,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := r.observer.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) == 1
+	}); err != nil {
+		t.Fatalf("setup observer seed failed: %v", err)
+	}
+
+	step := &loader.Step{
+		Action: ActionBrowseMDNS,
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasCommissionable,
+			KeyTimeoutMs:   float64(150),
+		},
+		Expect: map[string]any{
+			KeyDeviceFound: false,
+		},
+	}
+
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("handleBrowseMDNS error: %v", err)
+	}
+	if got, _ := out[KeyDeviceFound].(bool); !got {
+		t.Fatalf("device_found = %v, want true when service remains present", got)
+	}
+}

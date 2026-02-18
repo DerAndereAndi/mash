@@ -23,10 +23,37 @@ func (r *Runner) registerTriggerHandlers() {
 // TestControl feature on endpoint 0.
 func (r *Runner) handleTriggerTestEvent(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
+		params := engine.InterpolateParams(step.Params, state)
+
+		// Real-device mode: trigger delivery must happen on an actual control
+		// channel. Do not silently simulate state transitions.
+		if r.config.Target != "" {
+			if r.config.EnableKey == "" {
+				return nil, fmt.Errorf("no enable key configured (set --enable-key or provide enable_key param)")
+			}
+			trigger, err := parseEventTrigger(params[KeyEventTrigger])
+			if err != nil {
+				return nil, fmt.Errorf("invalid event_trigger: %w", err)
+			}
+			if err := r.sendTriggerViaZone(ctx, trigger, state); err != nil {
+				return nil, fmt.Errorf("send trigger via control channel: %w", err)
+			}
+			switch trigger {
+			case features.TriggerExitCommissioningMode:
+				state.Set(StateCommissioningActive, false)
+			case features.TriggerEnterCommissioningMode:
+				state.Set(StateCommissioningActive, true)
+			}
+			return map[string]any{
+				KeyTriggerSent:  true,
+				KeyEventTrigger: trigger,
+				KeySuccess:      true,
+			}, nil
+		}
+
 		// Not connected via Main() -- try sending via the suite zone
 		// connection (the control channel).
 		if r.config.EnableKey != "" {
-			params := engine.InterpolateParams(step.Params, state)
 			trigger, parseErr := parseEventTrigger(params[KeyEventTrigger])
 			if parseErr == nil {
 				if err := r.sendTriggerViaZone(ctx, trigger, state); err == nil {

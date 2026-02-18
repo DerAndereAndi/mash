@@ -1628,6 +1628,47 @@ func TestCoordLevel_WaitForCommissioningMode(t *testing.T) {
 	assert.True(t, waitCalled, "WaitForCommissioningMode when Target configured")
 }
 
+func TestCoordLevel_CommissioningTrigger_ReconnectsDeadSuiteControlChannel(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{Target: "localhost:8443", EnableKey: "0011"})
+	tc := tcWith("TC", cond(PrecondDeviceInCommissioningMode, true))
+	tc.Steps = []loader.Step{{Action: ActionTriggerTestEvent}}
+
+	s.EXPECT().ZoneID().Return("suite-1").Maybe()
+	s.EXPECT().Conn().Return(&Connection{state: ConnDisconnected}).Maybe()
+	s.EXPECT().ConnKey().Return("main-suite-1").Maybe()
+	p.EXPECT().Main().Return((*Connection)(nil)).Maybe()
+
+	reconnectCalled := false
+	o.EXPECT().ReconnectToZone(mock.Anything).Run(func(_ *engine.ExecutionState) {
+		reconnectCalled = true
+	}).Return(nil).Once()
+	o.EXPECT().ProbeSessionHealth().Return(nil).Once()
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(), tc, st()))
+	assert.True(t, reconnectCalled, "ReconnectToZone should be called for dead suite control channel")
+}
+
+func TestCoordLevel_CommissioningTrigger_BorrowsAliveSuiteControlChannelWithoutReconnect(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{Target: "localhost:8443", EnableKey: "0011"})
+	tc := tcWith("TC", cond(PrecondDeviceInCommissioningMode, true))
+	tc.Steps = []loader.Step{{Action: ActionTriggerTestEvent}}
+
+	aliveSuiteConn := &Connection{state: ConnOperational}
+	s.EXPECT().ZoneID().Return("suite-1").Maybe()
+	s.EXPECT().Conn().Return(aliveSuiteConn).Maybe()
+	p.EXPECT().Main().Return((*Connection)(nil)).Maybe()
+
+	setMainCalled := false
+	p.EXPECT().SetMain(aliveSuiteConn).Run(func(_ *Connection) { setMainCalled = true }).Return().Once()
+	o.EXPECT().ProbeSessionHealth().Return(nil).Once()
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(), tc, st()))
+	assert.True(t, setMainCalled, "alive suite connection should be borrowed as main control channel")
+	o.AssertNotCalled(t, "ReconnectToZone", mock.Anything)
+}
+
 // ===========================================================================
 // 11. Multi-zone detection
 // ===========================================================================

@@ -37,6 +37,8 @@ var (
 	errCommissionZoneSlotsFull    = errors.New("commissioning: zone slots full")
 )
 
+const defaultDisconnectReentryHoldoff = 3 * time.Second
+
 // DeviceService orchestrates a MASH device.
 type DeviceService struct {
 	mu sync.RWMutex
@@ -95,6 +97,11 @@ type DeviceService struct {
 	// The next handleOperationalConnection consumes it to re-enter
 	// commissioning mode without a sleep-based delay.
 	autoReentryPending bool
+
+	// disconnectReentryHoldoff suppresses auto-reentry in HandleZoneDisconnect
+	// for a short period after explicit commissioning exit.
+	disconnectReentryHoldoff      time.Duration
+	disconnectReentryBlockedUntil time.Time
 
 	// Logger for debug output (optional)
 	logger *slog.Logger
@@ -158,6 +165,7 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 		certStore:      cert.NewMemoryStore(),
 		logger:         config.Logger,
 		protocolLogger: config.ProtocolLogger,
+		disconnectReentryHoldoff: defaultDisconnectReentryHoldoff,
 	}
 
 	// Initialize duration manager with expiry callback
@@ -1746,6 +1754,7 @@ func (s *DeviceService) ExitCommissioningMode() error {
 
 	zoneCount := len(s.connectedZones)
 	dm := s.discoveryManager
+	s.disconnectReentryBlockedUntil = time.Now().Add(s.disconnectReentryHoldoff)
 	s.mu.Unlock()
 
 	// Close the commissioning ALPN gate.
@@ -1795,6 +1804,7 @@ func (s *DeviceService) exitCommissioningForEpoch(epoch uint64) error {
 	// Close the gate under the same lock that verified the epoch,
 	// so no concurrent EnterCommissioningMode can slip in between.
 	s.commissioningOpen.Store(false)
+	s.disconnectReentryBlockedUntil = time.Now().Add(s.disconnectReentryHoldoff)
 
 	zoneCount := len(s.connectedZones)
 	dm := s.discoveryManager
@@ -2012,8 +2022,14 @@ func (s *DeviceService) HandleZoneDisconnect(zoneID string) {
 				break
 			}
 		}
+		blockedUntil := s.disconnectReentryBlockedUntil
 		s.mu.RUnlock()
 		if allDisconnected {
+			if !blockedUntil.IsZero() && time.Now().Before(blockedUntil) {
+				s.debugLog("HandleZoneDisconnect: auto-reentry suppressed during post-exit holdoff",
+					"blockedUntil", blockedUntil.Format(time.RFC3339Nano))
+				return
+			}
 			s.debugLog("HandleZoneDisconnect: all zones disconnected, re-entering commissioning mode")
 			_ = s.EnterCommissioningMode()
 		}

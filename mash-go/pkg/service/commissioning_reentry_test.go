@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -197,4 +198,56 @@ func TestEpochGuard_NoReentry_ExitProceeds(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, svc.commissioningOpen.Load(),
 		"gate should be closed when epoch matches (no auto-reentry)")
+}
+
+func TestHandleZoneDisconnect_SuppressesAutoReentryDuringPostExitHoldoff(t *testing.T) {
+	svc := startDeviceWithEnableKey(t)
+	svc.disconnectReentryHoldoff = 200 * time.Millisecond
+
+	require.NoError(t, svc.EnterCommissioningMode())
+
+	zoneID := "1122334455667788"
+	svc.RegisterZoneAwaitingConnection(zoneID, cert.ZoneTypeTest)
+	svc.mu.Lock()
+	if cz := svc.connectedZones[zoneID]; cz != nil {
+		cz.Connected = true
+	}
+	svc.mu.Unlock()
+
+	require.NoError(t, svc.ExitCommissioningMode())
+	assert.False(t, svc.commissioningOpen.Load(), "gate should be closed after explicit exit")
+
+	// Immediate disconnect should not re-open commissioning while holdoff is active.
+	svc.HandleZoneDisconnect(zoneID)
+	assert.False(t, svc.commissioningOpen.Load(),
+		"auto-reentry should be suppressed during post-exit holdoff")
+}
+
+func TestHandleZoneDisconnect_ReenablesAutoReentryAfterPostExitHoldoff(t *testing.T) {
+	svc := startDeviceWithEnableKey(t)
+	svc.disconnectReentryHoldoff = 20 * time.Millisecond
+
+	require.NoError(t, svc.EnterCommissioningMode())
+
+	zoneID := "8877665544332211"
+	svc.RegisterZoneAwaitingConnection(zoneID, cert.ZoneTypeTest)
+	svc.mu.Lock()
+	if cz := svc.connectedZones[zoneID]; cz != nil {
+		cz.Connected = true
+	}
+	svc.mu.Unlock()
+
+	require.NoError(t, svc.ExitCommissioningMode())
+	assert.False(t, svc.commissioningOpen.Load(), "gate should be closed after explicit exit")
+
+	// First disconnect inside holdoff should be ignored.
+	svc.HandleZoneDisconnect(zoneID)
+	assert.False(t, svc.commissioningOpen.Load(), "holdoff should suppress immediate auto-reentry")
+
+	time.Sleep(30 * time.Millisecond)
+
+	// A subsequent disconnect after holdoff expiry should re-open commissioning.
+	svc.HandleZoneDisconnect(zoneID)
+	assert.True(t, svc.commissioningOpen.Load(),
+		"auto-reentry should resume after post-exit holdoff expires")
 }

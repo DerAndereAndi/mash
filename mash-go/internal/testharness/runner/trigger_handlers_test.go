@@ -292,3 +292,54 @@ func TestSendTriggerViaZone_StrictMode_RejectsFallbackToMain(t *testing.T) {
 		t.Fatal("expected strict mode to reject fallback to main connection")
 	}
 }
+
+// TestTriggerTestEvent_RealTargetNoControlChannel_ReturnsError verifies that
+// trigger_test_event fails fast in real-device mode when no control channel is
+// available. It must not fall back to runner-local simulation.
+func TestTriggerTestEvent_RealTargetNoControlChannel_ReturnsError(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "127.0.0.1:8443"
+	r.config.EnableKey = "00112233445566778899aabbccddeeff"
+	r.config.StrictLifecycle = true
+	r.pool.Main().state = ConnDisconnected
+	r.suite.SetConn(nil)
+
+	state := engine.NewExecutionState(context.Background())
+	step := &loader.Step{
+		Action: ActionTriggerTestEvent,
+		Params: map[string]any{
+			KeyEventTrigger: features.TriggerExitCommissioningMode,
+		},
+	}
+
+	out, err := r.handleTriggerTestEvent(context.Background(), step, state)
+	if err == nil {
+		t.Fatalf("expected error, got out=%v", out)
+	}
+}
+
+// TestTriggerTestEvent_StubModeNoControlChannel_Simulates verifies that
+// simulation fallback remains available when not running against a real target.
+func TestTriggerTestEvent_StubModeNoControlChannel_Simulates(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = ""
+	r.config.EnableKey = ""
+	r.pool.Main().state = ConnDisconnected
+	r.suite.SetConn(nil)
+
+	state := engine.NewExecutionState(context.Background())
+	step := &loader.Step{
+		Action: ActionTriggerTestEvent,
+		Params: map[string]any{
+			KeyEventTrigger: features.TriggerExitCommissioningMode,
+		},
+	}
+
+	out, err := r.handleTriggerTestEvent(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyTriggerSent] != true {
+		t.Fatalf("expected trigger_sent=true, got out=%v", out)
+	}
+}

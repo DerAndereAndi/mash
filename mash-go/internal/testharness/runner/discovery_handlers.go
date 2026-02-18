@@ -86,6 +86,12 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	serviceType, _ := params[KeyServiceType].(string)
 	timeoutMs := paramInt(params, KeyTimeoutMs, 5000)
 	minServices := 1
+	expectDeviceAbsent := false
+	if step != nil && step.Expect != nil {
+		if v, ok := step.Expect[KeyDeviceFound].(bool); ok && !v {
+			expectDeviceAbsent = true
+		}
+	}
 	if step != nil && step.Expect != nil {
 		if v, ok := step.Expect[KeyInstancesForDevice]; ok {
 			switch n := v.(type) {
@@ -114,7 +120,15 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		timeoutMs *= 2 // equivalent of two browse windows
 	}
 
-	services, err := r.browseViaObserver(ctx, serviceType, timeoutMs, minServices)
+	var (
+		services []discoveredService
+		err      error
+	)
+	if expectDeviceAbsent {
+		services, err = r.browseViaObserverUntilAbsent(ctx, serviceType, timeoutMs)
+	} else {
+		services, err = r.browseViaObserver(ctx, serviceType, timeoutMs, minServices)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -163,6 +177,32 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	addWindowExpiryWarning(outputs, state)
 
 	return outputs, nil
+}
+
+// browseViaObserverUntilAbsent waits up to timeoutMs for zero services of the
+// requested type. If timeout expires, it returns the latest snapshot so caller
+// expectation logic can fail deterministically instead of erroring.
+func (r *Runner) browseViaObserverUntilAbsent(ctx context.Context, serviceType string, timeoutMs int) ([]discoveredService, error) {
+	obs := r.getOrCreateObserver()
+	if obs == nil {
+		return nil, fmt.Errorf("failed to create mDNS observer")
+	}
+
+	// Ensure the browse session is started for this service type.
+	_ = obs.Snapshot(serviceType)
+
+	browseCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+	defer cancel()
+
+	services, err := obs.WaitFor(browseCtx, serviceType, func(svcs []discoveredService) bool {
+		return len(svcs) == 0
+	})
+	if err == nil {
+		return services, nil
+	}
+
+	// Timeout or cancellation: return latest snapshot for expectation check.
+	return obs.Snapshot(serviceType), nil
 }
 
 // buildBrowseOutput constructs the standard output map from discovery state.
