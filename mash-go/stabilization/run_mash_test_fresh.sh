@@ -36,10 +36,23 @@ cleanup() {
     kill "$DEVICE_PID" >/dev/null 2>&1 || true
     wait "$DEVICE_PID" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${DEVICE_BIN:-}" ]]; then
+    rm -f "$DEVICE_BIN" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 
-go run ./cmd/mash-device \
+# Ensure the target port is not already occupied by a stale process.
+if lsof -nP -iTCP:"$MASH_DEVICE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "error: tcp port $MASH_DEVICE_PORT is already in use; stop stale mash-device processes first" >&2
+  lsof -nP -iTCP:"$MASH_DEVICE_PORT" -sTCP:LISTEN >&2 || true
+  exit 1
+fi
+
+DEVICE_BIN="$(mktemp /tmp/mash-device-wrapper-bin-XXXXXX)"
+go build -o "$DEVICE_BIN" ./cmd/mash-device
+
+"$DEVICE_BIN" \
   -type "$MASH_DEVICE_TYPE" \
   -port "$MASH_DEVICE_PORT" \
   -setup-code "$MASH_SETUP_CODE" \
@@ -52,12 +65,21 @@ go run ./cmd/mash-device \
   >"$DEVICE_LOG" 2>&1 &
 DEVICE_PID=$!
 
-# Wait until mash-device starts listening.
+# Wait until THIS mash-device process starts listening.
 for _ in $(seq 1 40); do
-  if lsof -nP -iTCP:"$MASH_DEVICE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  if ! kill -0 "$DEVICE_PID" >/dev/null 2>&1; then
+    echo "error: mash-device exited before becoming ready; see $DEVICE_LOG" >&2
+    exit 1
+  fi
+  if lsof -nP -a -p "$DEVICE_PID" -iTCP:"$MASH_DEVICE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
     break
   fi
   sleep 0.25
 done
+
+if ! lsof -nP -a -p "$DEVICE_PID" -iTCP:"$MASH_DEVICE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "error: mash-device did not become ready on port $MASH_DEVICE_PORT; see $DEVICE_LOG" >&2
+  exit 1
+fi
 
 go run ./cmd/mash-test "$@"
