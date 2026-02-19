@@ -550,6 +550,17 @@ func (r *Runner) handleConnectOperational(ctx context.Context, step *loader.Step
 // In stub mode (no connection), sets StateCommissioningActive so that
 // handleBrowseMDNS returns a synthetic commissionable service.
 func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// Real-device mode must never silently simulate commissioning-mode changes.
+	// If trigger delivery fails, return an error and keep runner state unchanged.
+	if r.config.Target != "" {
+		if r.config.EnableKey == "" {
+			return nil, fmt.Errorf("enter commissioning mode: no enable key configured")
+		}
+		if err := r.sendTriggerViaZone(ctx, features.TriggerEnterCommissioningMode, state); err != nil {
+			return nil, fmt.Errorf("enter commissioning mode trigger failed: %w", err)
+		}
+	}
+
 	secState := getSecurityState(state)
 	secState.commissioningActive = true
 	state.Set(StateCommissioningActive, true)
@@ -561,14 +572,9 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 		state.Set(StateCommWindowStart, time.Now())
 	}
 
-	// Send trigger via main connection or suite zone connection.
-	if r.config.EnableKey != "" {
-		if err := r.sendTriggerViaZone(ctx, features.TriggerEnterCommissioningMode, state); err == nil {
-			return map[string]any{
-				KeyCommissioningModeEntered:      true,
-				KeyCommissioningModeEnteredAlias: true,
-			}, nil
-		}
+	// Stub mode: best-effort trigger (if connected) but state remains simulated.
+	if r.config.Target == "" && r.config.EnableKey != "" {
+		_ = r.sendTriggerViaZone(ctx, features.TriggerEnterCommissioningMode, state)
 	}
 
 	return map[string]any{
@@ -582,17 +588,24 @@ func (r *Runner) handleEnterCommissioningMode(ctx context.Context, step *loader.
 // In stub mode, clears StateCommissioningActive so that handleBrowseMDNS
 // no longer returns a synthetic commissionable service.
 func (r *Runner) handleExitCommissioningMode(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	// Real-device mode must never silently simulate commissioning-mode changes.
+	// If trigger delivery fails, return an error and keep runner state unchanged.
+	if r.config.Target != "" {
+		if r.config.EnableKey == "" {
+			return nil, fmt.Errorf("exit commissioning mode: no enable key configured")
+		}
+		if err := r.sendTriggerViaZone(ctx, features.TriggerExitCommissioningMode, state); err != nil {
+			return nil, fmt.Errorf("exit commissioning mode trigger failed: %w", err)
+		}
+	}
+
 	secState := getSecurityState(state)
 	secState.commissioningActive = false
 	state.Set(StateCommissioningActive, false)
 
-	// Send trigger via main connection or suite zone connection.
-	if r.config.EnableKey != "" {
-		if err := r.sendTriggerViaZone(ctx, features.TriggerExitCommissioningMode, state); err == nil {
-			return map[string]any{
-				KeyCommissioningModeExited: true,
-			}, nil
-		}
+	// Stub mode: best-effort trigger (if connected) but state remains simulated.
+	if r.config.Target == "" && r.config.EnableKey != "" {
+		_ = r.sendTriggerViaZone(ctx, features.TriggerExitCommissioningMode, state)
 	}
 
 	return map[string]any{
@@ -954,6 +967,12 @@ func (r *Runner) handleMeasureErrorTiming(ctx context.Context, step *loader.Step
 
 		delay, _, _ := r.measurePASEAttempt(ctx, setupCode)
 		sample.Samples = append(sample.Samples, delay)
+
+		// Avoid immediate follow-up attempts that get measured as cooldown/busy
+		// handling rather than the target authentication error timing.
+		if i < iterations-1 {
+			time.Sleep(1 * time.Second)
+		}
 	}
 
 	// Calculate statistics

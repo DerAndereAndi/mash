@@ -441,6 +441,53 @@ Verification evidence:
   - shuffled (seeds `911..915`): `5/5` passed
   - aggregate: `10/10` passed (`16/16` per run)
 
+### Phase 3 Group 10 Status (2026-02-19)
+
+Group 10 (`TC-CERT-VAL*`) is stable under fresh-wrapper isolation.
+
+- run dir: `mash-go/stabilization/phase1-runs/20260219-224711-phase3-g10-gate`
+- sequential: `5/5` passed
+- shuffled (seeds `1001..1005`): `5/5` passed
+- aggregate: `10/10` passed
+
+### Phase 3 Group 14 Status (2026-02-19)
+
+Group 14 (`TC-SEC-*`) is now stable under fresh-wrapper isolation.
+
+Initial deterministic failure baseline:
+- run dir: `mash-go/stabilization/phase1-runs/20260219-224820-phase3-g14-gate`
+- sequential: `0/5` passed
+- shuffled (seeds `1401..1405`): `0/5` passed
+- aggregate: `0/10` passed (`11/13` per run)
+- failing tests:
+  - `TC-SEC-BACKOFF-002` (`response_delay_ms~9999ms` after window close/reopen)
+  - `TC-SEC-ERR-002` (`distributions_overlap=false`, means diverged)
+
+Root cause and clean fix:
+- Root cause: real-device commissioning mode actions in runner (`enter_commissioning_mode` / `exit_commissioning_mode`) could return success even when TestControl trigger delivery failed, creating false state assumptions and poisoned timing/backoff measurements.
+- Fix:
+  - enforce fail-fast in real-device mode when commissioning trigger cannot be delivered
+  - mutate runner commissioning state only after confirmed trigger send success
+  - in strict lifecycle, keep suite-only control path and attempt suite reconnect before failing
+  - add pacing between timing samples to avoid cooldown/backoff artifact contamination in `measure_error_timing`
+
+TDD evidence:
+- new tests in `internal/testharness/runner/security_handlers_trigger_test.go` verify real-mode trigger failures are surfaced and state is not silently mutated.
+
+Validation:
+- isolated rerun post-fix:
+  - run dir: `mash-go/stabilization/phase1-runs/20260219-231726-phase3-g14-isolation-post-controlpath`
+  - `TC-SEC-BACKOFF-002`: passed
+  - `TC-SEC-ERR-002`: passed
+- focused stability check:
+  - run dir: `mash-go/stabilization/phase1-runs/20260219-232424-g14-backoff003-3x`
+  - `TC-SEC-BACKOFF-003`: `3/3` passed
+- final full gate:
+  - run dir: `mash-go/stabilization/phase1-runs/20260219-232545-phase3-g14-gate-post-controlpath-rerun`
+  - sequential: `5/5` passed
+  - shuffled (seeds `1401..1405`): `5/5` passed
+  - aggregate: `10/10` passed
+
 ## Phase 4: Full Suite Combination
 
 1. Run all groups together 5x sequential (no shuffle)

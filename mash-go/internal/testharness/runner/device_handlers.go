@@ -499,7 +499,32 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 	// that shadow the working suite zone.
 	conn := r.suite.Conn()
 	if conn != nil && conn.isConnected() && conn.framer != nil {
-		return r.sendTriggerOnConn(ctx, trigger, conn)
+		if err := r.sendTriggerOnConn(ctx, trigger, conn); err == nil {
+			return nil
+		} else if isIOError(err) && r.suite.ZoneID() != "" {
+			// Connection can go stale between health checks and trigger readback.
+			// Keep the strict suite-only contract by reconnecting suite control
+			// channel and retrying once on that same path.
+			if recErr := r.reconnectToZone(state); recErr == nil {
+				conn = r.suite.Conn()
+				if conn != nil && conn.isConnected() && conn.framer != nil {
+					return r.sendTriggerOnConn(ctx, trigger, conn)
+				}
+			}
+		} else {
+			return err
+		}
+	}
+
+	// In strict mode, maintain the authoritative suite control path by
+	// attempting to reconnect the suite zone before failing.
+	if r.config != nil && r.config.StrictLifecycle && r.suite.ZoneID() != "" {
+		if err := r.reconnectToZone(state); err == nil {
+			conn = r.suite.Conn()
+			if conn != nil && conn.isConnected() && conn.framer != nil {
+				return r.sendTriggerOnConn(ctx, trigger, conn)
+			}
+		}
 	}
 
 	if r.config != nil && r.config.StrictLifecycle {
