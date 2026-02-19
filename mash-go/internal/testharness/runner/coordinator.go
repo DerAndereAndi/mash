@@ -203,11 +203,35 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		c.debugf("commission-step: overriding test session zone type to LOCAL (suite TEST preserved)")
 		c.ops.SetCommissionZoneType(cert.ZoneTypeLocal)
 	}
+	needsIsolatedConnectSession := testCaseNeedsIsolatedCommissionedSession(tc)
+	restoreCommissionZoneType := cert.ZoneTypeTest
+	restoreCommissionZoneTypeSet := false
+	if needed >= precondLevelCommissioned && needsIsolatedConnectSession && c.suite.ZoneID() != "" {
+		// Connection-probing tests must not mutate the suite control channel.
+		// Force a disposable commissioned session for this test.
+		if c.ops.CommissionZoneType() == cert.ZoneTypeTest {
+			restoreCommissionZoneTypeSet = true
+			c.ops.SetCommissionZoneType(cert.ZoneTypeLocal)
+		}
+		if m := c.pool.Main(); m != nil && m == c.suite.Conn() {
+			detachMainControlChannel(c.pool, state)
+		} else {
+			c.ops.DisconnectConnection()
+		}
+		c.ops.SetPASEState(nil)
+		c.ops.ClearWorkingCrypto()
+		defer func() {
+			if restoreCommissionZoneTypeSet {
+				c.ops.SetCommissionZoneType(restoreCommissionZoneType)
+			}
+		}()
+	}
 
 	// Session reuse decision: only application-tier tests can reuse.
 	canReuseSession := tier == TierApplication &&
 		current >= precondLevelCommissioned &&
 		needed >= precondLevelCommissioned &&
+		!needsIsolatedConnectSession &&
 		!needsZoneConns &&
 		!hasPrecondition(tc.Preconditions, PrecondDeviceZonesFull) &&
 		!hasPrecondition(tc.Preconditions, PrecondDeviceHasGridZone) &&
@@ -399,7 +423,8 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		// This keeps current_zone_id aligned with the control channel and avoids
 		// stale PASE/session-key drift from previous non-suite commissions.
 		suiteCanReconnect := c.suite.ZoneID() != "" &&
-			c.ops.CommissionZoneType() == cert.ZoneTypeTest
+			c.ops.CommissionZoneType() == cert.ZoneTypeTest &&
+			!needsIsolatedConnectSession
 
 		if suiteCanReconnect {
 			suiteZoneID := c.suite.ZoneID()
@@ -619,6 +644,19 @@ func testCaseHasAction(tc *loader.TestCase, action string) bool {
 	return false
 }
 
+func testCaseNeedsIsolatedCommissionedSession(tc *loader.TestCase) bool {
+	if tc == nil {
+		return false
+	}
+	for _, step := range tc.Steps {
+		switch step.Action {
+		case ActionConnect, ActionConnectAsController, ActionConnectAsZone, ActionConnectWithTiming, ActionConnectOperational, ActionConnectExpectFailure:
+			return true
+		}
+	}
+	return false
+}
+
 // TeardownTest is called after each test completes (pass or fail).
 // It cleans up subscriptions, notifications, stale PASE state, and
 // per-test security pool connections.
@@ -685,6 +723,13 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 		if zc != nil && zc.isConnected() && zc.framer != nil {
 			if zoneID != "" {
 				c.ops.SendRemoveZoneOnConn(zc, zoneID)
+			}
+		} else if zoneID != "" {
+			// A disconnected non-suite zone still exists on the device until
+			// explicitly removed. When suite control is alive, remove by zoneID
+			// via the suite channel to keep strict cleanup deterministic.
+			if sc := c.suite.Conn(); sc != nil && sc.isConnected() && sc.framer != nil {
+				c.ops.SendRemoveZoneOnConn(sc, zoneID)
 			}
 		}
 		if zc != nil {

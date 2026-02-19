@@ -856,6 +856,29 @@ func TestCoordTeardown_DoesNotRemoveSuiteConnAliasEvenWithStaleZoneID(t *testing
 	o.AssertNotCalled(t, "SendRemoveZoneOnConn", suiteConn, mock.Anything)
 }
 
+func TestCoordTeardown_RemovesDisconnectedZoneViaSuiteControl(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{StrictLifecycle: true})
+	suiteConn := &Connection{state: ConnOperational, framer: &transport.Framer{}}
+	disconnected := &Connection{state: ConnDisconnected}
+
+	p.EXPECT().ZoneKeys().Return([]string{"step-z2"}).Maybe()
+	p.EXPECT().Zone("step-z2").Return(disconnected).Maybe()
+	p.EXPECT().ZoneID("step-z2").Return("zone-2").Maybe()
+	p.EXPECT().UntrackZone("step-z2").Return().Once()
+
+	o.EXPECT().PASEState().Return(completedPASE()).Maybe()
+	s.EXPECT().ZoneID().Return("suite-zone").Maybe()
+	s.EXPECT().ConnKey().Return("main-suite-zone").Maybe()
+	s.EXPECT().Conn().Return(suiteConn).Maybe()
+
+	// Fallback path under test: zone connection is disconnected, so RemoveZone
+	// is sent via alive suite control by zone ID.
+	o.EXPECT().SendRemoveZoneOnConn(suiteConn, "zone-2").Return().Once()
+
+	allMaybe(s, p, o)
+	c.TeardownTest(context.Background(), tcWith("TC-DISC-ZONE"), st())
+}
+
 func TestCoordTeardown_SuiteRemovedInTest_SkipsReconnect(t *testing.T) {
 	c, s, p, o := newCoord(t, &Config{StrictLifecycle: true, Target: "localhost:8443", EnableKey: "k"})
 
@@ -1714,6 +1737,83 @@ func TestSuiteCanReconnect_PrefersSuiteWhenMainAndPASELookHealthy(t *testing.T) 
 	assert.True(t, ok)
 	assert.Equal(t, suiteZoneID, v, "must prefer suite zone over stale PASE-derived zone")
 	o.AssertNotCalled(t, "EnsureCommissioned", mock.Anything, mock.Anything)
+}
+
+func TestCaseNeedsIsolatedCommissionedSession(t *testing.T) {
+	tcs := []struct {
+		name string
+		tc   *loader.TestCase
+		want bool
+	}{
+		{
+			name: "no steps",
+			tc:   &loader.TestCase{},
+			want: false,
+		},
+		{
+			name: "non-connect action",
+			tc: &loader.TestCase{
+				Steps: []loader.Step{{Action: ActionRead}},
+			},
+			want: false,
+		},
+		{
+			name: "connect action",
+			tc: &loader.TestCase{
+				Steps: []loader.Step{{Action: ActionConnect}},
+			},
+			want: true,
+		},
+		{
+			name: "connect as controller action",
+			tc: &loader.TestCase{
+				Steps: []loader.Step{{Action: ActionConnectAsController}},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tcs {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, testCaseNeedsIsolatedCommissionedSession(tt.tc))
+		})
+	}
+}
+
+func TestSuiteCanReconnect_ConnectTestsUseIsolatedSession(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	suiteConn := &Connection{state: ConnOperational}
+	tc := &loader.TestCase{
+		ID:             "TC-CONN-ISOLATED",
+		ConnectionTier: TierApplication,
+		Preconditions:  []loader.Condition{{PrecondDeviceCommissioned: true}},
+		Steps:          []loader.Step{{Action: ActionConnectAsController}},
+	}
+
+	// Current state appears commissioned via suite.
+	o.EXPECT().PASEState().Return(completedPASE()).Maybe()
+	s.EXPECT().ZoneID().Return("sz1").Maybe()
+	s.EXPECT().Conn().Return(suiteConn).Maybe()
+	p.EXPECT().Main().Return(suiteConn).Maybe()
+	p.EXPECT().SetMain(mock.Anything).Return().Maybe()
+
+	// Isolated connect session setup.
+	o.EXPECT().CommissionZoneType().Return(cert.ZoneTypeTest).Maybe()
+	o.EXPECT().SetCommissionZoneType(cert.ZoneTypeLocal).Return().Once()
+	o.EXPECT().SetPASEState((*PASEState)(nil)).Return().Once()
+	o.EXPECT().ClearWorkingCrypto().Return().Once()
+	p.EXPECT().ZoneCount().Return(1).Maybe()
+	s.EXPECT().ConnKey().Return("main-sz1").Maybe()
+	p.EXPECT().CloseZonesExcept("main-sz1").Return(time.Time{}).Maybe()
+
+	// Must not borrow/reconnect suite path; should ensure a disposable commissioned session.
+	o.EXPECT().EnsureCommissioned(mock.Anything, mock.Anything).Return(nil).Once()
+	o.EXPECT().SetCommissionZoneType(cert.ZoneTypeTest).Return().Once()
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(), tc, st()))
+
+	o.AssertNotCalled(t, "ReconnectToZone", mock.Anything)
 }
 
 // ===========================================================================
