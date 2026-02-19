@@ -21,6 +21,7 @@ var (
 	errRemoveZoneNoConnection = errors.New("remove zone: no live connection")
 	errRemoveZoneNoPASE       = errors.New("remove zone: no completed PASE session")
 	errRemoveZoneNoZoneID     = errors.New("remove zone: empty zone id")
+	errRemoveZoneAckRead      = errors.New("remove zone: ack read failure")
 )
 
 const strictRemoveZoneAckTimeout = 500 * time.Millisecond
@@ -813,7 +814,7 @@ func (r *Runner) sendRemoveZoneOnConnStrict(conn *Connection, zoneID string) err
 
 	respData, err := conn.framer.ReadFrame()
 	if err != nil {
-		return fmt.Errorf("remove zone ack read: %w", err)
+		return fmt.Errorf("%w: %v", errRemoveZoneAckRead, err)
 	}
 	resp, err := wire.DecodeResponse(respData)
 	if err != nil {
@@ -916,7 +917,7 @@ func isBestEffortRemoveZoneOnConnError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, errRemoveZoneNoConnection)
+	return errors.Is(err, errRemoveZoneNoConnection) || errors.Is(err, errRemoveZoneAckRead)
 }
 
 // SendTriggerViaZone wraps sendTriggerViaZone.

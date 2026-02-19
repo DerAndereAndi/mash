@@ -705,8 +705,8 @@ func TestSendRemoveZoneOnConnStrict_AckTimeoutWhenResponseIsLate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected timeout waiting for remove-zone ack")
 	}
-	if !strings.Contains(err.Error(), "remove zone ack read") {
-		t.Fatalf("expected remove-zone ack read error, got: %v", err)
+	if !errors.Is(err, errRemoveZoneAckRead) {
+		t.Fatalf("expected remove-zone ack read sentinel, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "timeout") {
 		t.Fatalf("expected timeout in error, got: %v", err)
@@ -739,7 +739,7 @@ func TestSetupPreconditions_StrictMode_BubblesRemoveZoneFailure(t *testing.T) {
 	}
 }
 
-func TestSendRemoveZoneOnConn_StrictMode_RecordsAckReadFailure(t *testing.T) {
+func TestSendRemoveZoneOnConn_StrictMode_AckReadFailureIsBestEffort(t *testing.T) {
 	r := newTestRunner()
 	r.config.StrictLifecycle = true
 	r.clearStrictLifecycleErr()
@@ -764,11 +764,8 @@ func TestSendRemoveZoneOnConn_StrictMode_RecordsAckReadFailure(t *testing.T) {
 	r.SendRemoveZoneOnConn(conn, "zone-1")
 	<-done
 
-	if r.strictLifecycleErr == nil {
-		t.Fatal("expected strict lifecycle error when remove-zone ack read fails")
-	}
-	if !strings.Contains(r.strictLifecycleErr.Error(), "remove zone ack read") {
-		t.Fatalf("expected remove-zone ack read error, got: %v", r.strictLifecycleErr)
+	if r.strictLifecycleErr != nil {
+		t.Fatalf("expected no strict lifecycle error for best-effort ack read failure, got: %v", r.strictLifecycleErr)
 	}
 }
 

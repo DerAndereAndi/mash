@@ -1863,6 +1863,7 @@ func (r *Runner) handleInvoke(ctx context.Context, step *loader.Step, state *eng
 		if cmdName, ok := params[ParamCommand].(string); ok && strings.EqualFold(cmdName, "RemoveZone") {
 			if argsMap, ok := params[ParamArgs].(map[string]any); ok {
 				if removedID, ok := argsMap["zoneId"].(string); ok && removedID != "" {
+					recordRemovedZoneID(state, removedID)
 					zs := getZoneState(state)
 					// The zone state may be keyed by label (e.g. "GRID")
 					// or by actual device zone ID. Search by both key and

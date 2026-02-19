@@ -785,6 +785,54 @@ func TestCoordTeardown_ClearsIncompletePASEState(t *testing.T) {
 	assert.True(t, paseCleared, "incomplete PASE state cleared")
 }
 
+// TestCoordTeardown_DedupesRemoveZonePerZone verifies teardown only sends
+// RemoveZone once per zone ID even when the pool tracks alias keys that point
+// to the same live connection (e.g. "GRID" and "main-<zoneID>").
+func TestCoordTeardown_DedupesRemoveZonePerZone(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{StrictLifecycle: true})
+
+	pipeA, pipeB := net.Pipe()
+	t.Cleanup(func() {
+		_ = pipeA.Close()
+		_ = pipeB.Close()
+	})
+	shared := &Connection{
+		conn:   pipeA,
+		framer: transport.NewFramer(pipeA),
+		state:  ConnOperational,
+	}
+
+	// Provide duplicate alias keys that point to the same zone connection.
+	p.EXPECT().ZoneKeys().Return([]string{"GRID", "main-zone-1"}).Maybe()
+	p.EXPECT().Zone("GRID").Return(shared).Maybe()
+	p.EXPECT().Zone("main-zone-1").Return(shared).Maybe()
+	p.EXPECT().ZoneID("GRID").Return("zone-1").Maybe()
+	p.EXPECT().ZoneID("main-zone-1").Return("zone-1").Maybe()
+	allMaybe(s, p, o)
+
+	state := st()
+	c.TeardownTest(context.Background(), tcWith("TC-DEDUPE"), state)
+	o.AssertNumberOfCalls(t, "SendRemoveZoneOnConn", 1)
+}
+
+func TestCoordTeardown_SuiteRemovedInTest_SkipsReconnect(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{StrictLifecycle: true, Target: "localhost:8443", EnableKey: "k"})
+
+	s.EXPECT().ZoneID().Return("suite-zone").Maybe()
+	s.EXPECT().Clear().Return().Once()
+	o.EXPECT().SetPASEState((*PASEState)(nil)).Return().Once()
+	o.EXPECT().ClearWorkingCrypto().Return().Once()
+	p.EXPECT().Main().Return((*Connection)(nil)).Maybe()
+
+	allMaybe(s, p, o)
+	state := st()
+	state.Set(StateRemovedZoneIDs, []string{"suite-zone"})
+	c.TeardownTest(context.Background(), tcWith("TC-REMOVE-SUITE"), state)
+
+	o.AssertNotCalled(t, "ReconnectToZone", mock.Anything)
+	o.AssertNotCalled(t, "ProbeSessionHealth")
+}
+
 func TestCoordTeardown_ResetsHadConnection(t *testing.T) {
 	c, s, p, o := newCoord(t, nil)
 	conn := &Connection{state: ConnOperational, hadConnection: true}
@@ -1568,6 +1616,35 @@ func TestSuiteCanReconnect_FallsBackToReconnect(t *testing.T) {
 		tcWith("TC-L3", cond(PrecondDeviceCommissioned, true)), st()))
 
 	assert.True(t, reconnectCalled, "ReconnectToZone must be called when suite conn is dead")
+}
+
+// TestSuiteCanReconnect_DoesNotOverwriteCurrentZoneFromStalePASE verifies that
+// when SetupPreconditions reuses a suite zone, it must keep current_zone_id
+// bound to suite.ZoneID() and not overwrite it from unrelated stale PASE data.
+func TestSuiteCanReconnect_DoesNotOverwriteCurrentZoneFromStalePASE(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	suiteConn := &Connection{state: ConnOperational}
+	suiteZoneID := deriveZoneIDFromSecret([]byte("suite-zone-key"))
+	stalePASE := &PASEState{completed: true, sessionKey: []byte("stale-pase-key")}
+
+	s.EXPECT().ZoneID().Return(suiteZoneID)
+	s.EXPECT().ConnKey().Return("main-" + suiteZoneID).Maybe()
+	s.EXPECT().Conn().Return(suiteConn)
+
+	o.EXPECT().PASEState().Return(stalePASE).Maybe()
+	o.EXPECT().CommissionZoneType().Return(cert.ZoneTypeTest)
+	o.EXPECT().LoadZoneCrypto(suiteZoneID).Return(true).Once()
+	p.EXPECT().Main().Return((*Connection)(nil)).Maybe()
+	p.EXPECT().SetMain(mock.Anything).Return().Maybe()
+
+	allMaybe(s, p, o)
+	state := st()
+	assert.NoError(t, c.SetupPreconditions(context.Background(),
+		tcWith("TC-L3", cond(PrecondDeviceCommissioned, true)), state))
+
+	v, ok := state.Get(StateCurrentZoneID)
+	assert.True(t, ok)
+	assert.Equal(t, suiteZoneID, v, "current_zone_id must remain the suite zone ID")
 }
 
 // ===========================================================================

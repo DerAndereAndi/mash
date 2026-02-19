@@ -389,6 +389,7 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 
 	// Level switch: ensure the right connection/commissioning level.
 	var setupErr error
+	usedSuiteSession := false
 	switch needed {
 	case precondLevelCommissioned:
 		// Determine whether we can reconnect to the existing suite zone
@@ -439,6 +440,7 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 			state.Set(KeyConnectionEstablished, true)
 			state.Set(StateCurrentZoneID, c.suite.ZoneID())
 			state.Set(StateTestZoneID, c.suite.ZoneID())
+			usedSuiteSession = true
 		} else {
 			c.debugf("ensuring commissioned for %s", tc.ID)
 			setupErr = c.ops.EnsureCommissioned(ctx, state)
@@ -448,7 +450,7 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 			}
 		}
 		// Store zone IDs for test interpolation.
-		if !needsZoneConns && c.ops.PASEState().Completed() && c.ops.PASEState().SessionKey() != nil {
+		if !usedSuiteSession && !needsZoneConns && c.ops.PASEState().Completed() && c.ops.PASEState().SessionKey() != nil {
 			zID := deriveZoneIDFromSecret(c.ops.PASEState().SessionKey())
 			var stateKey, zoneLabel string
 			switch c.ops.CommissionZoneType() {
@@ -621,6 +623,16 @@ func testCaseHasAction(tc *loader.TestCase, action string) bool {
 // It cleans up subscriptions, notifications, stale PASE state, and
 // per-test security pool connections.
 func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, state *engine.ExecutionState) {
+	suiteRemovedDuringTest := false
+	if sz := c.suite.ZoneID(); sz != "" && wasZoneRemovedInTest(state, sz) {
+		suiteRemovedDuringTest = true
+		c.debugf("teardown: suite zone %s was removed during test, clearing suite state", sz)
+		detachMainControlChannel(c.pool, state)
+		c.suite.Clear()
+		c.ops.SetPASEState(nil)
+		c.ops.ClearWorkingCrypto()
+	}
+
 	// Unsubscribe all active subscriptions.
 	c.pool.UnsubscribeAll(c.pool.Main())
 	c.pool.ClearNotifications()
@@ -699,7 +711,7 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 	// (isConnected()=true) but is unusable. Detecting this here -- in
 	// teardown, which has independent timeouts -- avoids burning the next
 	// test's tight timeout on failed reconnect attempts.
-	if c.config.Target != "" && c.suite.ZoneID() != "" {
+	if !suiteRemovedDuringTest && c.config.Target != "" && c.suite.ZoneID() != "" {
 		// After non-L3 tests, pool.Main() may be dead/empty while
 		// suite.Conn() is alive. Restore main to suite conn so
 		// ProbeSessionHealth can use it.

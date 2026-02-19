@@ -202,6 +202,7 @@ const (
 	StateTestZoneID    = "test_zone_id"
 	StateCurrentZoneID = "current_zone_id"
 	StateOtherZoneID   = "other_zone_id"
+	StateRemovedZoneIDs = "removed_zone_ids"
 
 	// Setup.
 	StateSetupCode           = "setup_code"

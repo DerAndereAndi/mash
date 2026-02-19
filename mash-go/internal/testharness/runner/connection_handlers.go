@@ -278,6 +278,7 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 		if cmdName, ok := params[ParamCommand].(string); ok && strings.EqualFold(cmdName, "RemoveZone") {
 			if argsMap, ok := params[ParamArgs].(map[string]any); ok {
 				if removedID, ok := argsMap["zoneId"].(string); ok && removedID != "" {
+					recordRemovedZoneID(state, removedID)
 					zs := getZoneState(state)
 					var keyToDelete string
 					for key, z := range zs.zones {
@@ -389,6 +390,11 @@ func (r *Runner) handleInvokeAsZone(ctx context.Context, step *loader.Step, stat
 	// re-enter commissioning mode (e.g. TC-ZTYPE-005).
 	if resp.IsSuccess() {
 		if cmdName, ok := params[ParamCommand].(string); ok && strings.EqualFold(cmdName, "RemoveZone") {
+			if argsMap, ok := params[ParamArgs].(map[string]any); ok {
+				if removedID, ok := argsMap["zoneId"].(string); ok && removedID != "" {
+					recordRemovedZoneID(state, removedID)
+				}
+			}
 			state.Set(StateCommissioningActive, true)
 			state.Set(StateCommissioningCompleted, false)
 		}

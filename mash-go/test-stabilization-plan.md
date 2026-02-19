@@ -368,6 +368,21 @@ Acceptance criteria for completing Phase 2:
 - `5/5` shuffled pass for full `G12`
 - Reproducible run directories + seed list captured in logs/summary
 
+### Phase 2 Status (2026-02-19)
+
+Phase 2 is complete.
+
+- Initial full-`G12` gate run had 4/10 failures, all on `TC-MASHC-002` (`device_found=false` expectation saw stale positive state):
+  - `mash-go/stabilization/phase1-runs/20260219-111246-phase2-step3-g12-full-post-buckets`
+  - failing runs: `G12-seq-3`, `G12-seq-4`, `G12-shuf-802`, `G12-shuf-804`
+- Root cause fixed in runner: absent browse timeout path now re-validates with a fresh browse window before failing (`internal/testharness/runner/discovery_handlers.go`).
+- Regression tests added for stale observer + fresh-browse fallback behavior (`internal/testharness/runner/discovery_handlers_test.go`).
+- Post-fix full-`G12` rerun passed clean:
+  - run dir: `mash-go/stabilization/phase1-runs/20260219-115237-phase2-step3-g12-rerun-post-fresh-browse-fix`
+  - sequential: `5/5` passed
+  - shuffled (seeds `801..805`): `5/5` passed
+  - aggregate: `10/10` passed (`32/32` tests per run)
+
 ## Phase 3: Remaining Medium-Priority Groups
 
 Work through groups 9, 10, 13-18 one at a time:
@@ -384,6 +399,36 @@ Work through groups 9, 10, 13-18 one at a time:
 **Group 16 (Multi-Zone):** TC-MULTI-003 -- trigger returns status 4
 **Group 17 (Conn Reaper):** TC-CONN-REAP-001/002/003 -- suite zone occupies connection slot
 **Group 18 (Comm Window):** TC-COMM-WINDOW-001/002 -- mDNS not reflecting window state
+
+### Phase 3 Group 13 Status (2026-02-19)
+
+Started with Group 13 (`TC-TRANS*,TC-E2E*,TC-IPV6*`) using fresh-wrapper isolation and strict lifecycle.
+
+- Run dir: `mash-go/stabilization/phase1-runs/20260219-120728-phase3-g13-gate`
+- Sequential: `5/5` passed
+- Shuffled (seeds `901..905`): `5/5` passed
+- Aggregate: `10/10` passed (`failed=0` on every run)
+
+### Phase 3 Group 9 Status (2026-02-19)
+
+Group 9 (`TC-ZONE-REMOVE*,TC-ZONE-ADD*,TC-ZTYPE*,TC-ZONE-010`) is currently unstable under fresh-wrapper isolation.
+
+- Run dir: `mash-go/stabilization/phase1-runs/20260219-133640-phase3-g9-gate`
+- Sequential: `0/5` passed (all failed)
+- Shuffled (seeds `911..915`): `0/5` passed (all failed)
+- Aggregate: `0/10` passed
+
+Observed dominant failure signatures:
+- `teardown[strict_lifecycle]: remove zone ack read: EOF`
+- `expectation failed: response - expected map[removed:true], got map[1:device not found]`
+- `expectation failed: invoke_success - expected true, got false`
+
+Top recurring failing tests across the 10 runs:
+- `TC-ZONE-REMOVE-001` (19)
+- `TC-ZTYPE-007` (17)
+- `TC-ZTYPE-005` (10)
+- `TC-ZONE-REMOVE-002` (10)
+- `TC-ZONE-ADD-005` (10)
 
 ## Phase 4: Full Suite Combination
 
