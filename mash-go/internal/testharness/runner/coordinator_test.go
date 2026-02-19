@@ -815,6 +815,47 @@ func TestCoordTeardown_DedupesRemoveZonePerZone(t *testing.T) {
 	o.AssertNumberOfCalls(t, "SendRemoveZoneOnConn", 1)
 }
 
+func TestCoordTeardown_DoesNotRemoveSuiteConnAliasEvenWithStaleZoneID(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{StrictLifecycle: true})
+
+	mainA, mainB := net.Pipe()
+	defer mainA.Close()
+	defer mainB.Close()
+	suiteA, suiteB := net.Pipe()
+	defer suiteA.Close()
+	defer suiteB.Close()
+	z1a, z1b := net.Pipe()
+	defer z1a.Close()
+	defer z1b.Close()
+
+	main := &Connection{state: ConnOperational, conn: mainA, framer: transport.NewFramer(mainA)}
+	suiteConn := &Connection{state: ConnOperational, conn: suiteA, framer: transport.NewFramer(suiteA)}
+	zone1 := &Connection{state: ConnOperational, conn: z1a, framer: transport.NewFramer(z1a)}
+
+	p.EXPECT().Main().Return(main).Maybe()
+	p.EXPECT().ZoneKeys().Return([]string{"step-suite", "step-z1"}).Maybe()
+	p.EXPECT().Zone("step-suite").Return(suiteConn).Maybe()
+	p.EXPECT().Zone("step-z1").Return(zone1).Maybe()
+	// Stale alias metadata can carry an old non-suite zone ID even though the
+	// connection pointer is the live suite control channel.
+	p.EXPECT().ZoneID("step-suite").Return("stale-zone-id").Maybe()
+	p.EXPECT().ZoneID("step-z1").Return("zone-1").Maybe()
+	p.EXPECT().UntrackZone("step-suite").Return().Once()
+	p.EXPECT().UntrackZone("step-z1").Return().Once()
+
+	o.EXPECT().PASEState().Return(completedPASE()).Maybe()
+	o.EXPECT().SendRemoveZoneOnConn(zone1, "zone-1").Return().Once()
+
+	s.EXPECT().ZoneID().Return("suite-zone").Maybe()
+	s.EXPECT().ConnKey().Return("main-suite-zone").Maybe()
+	s.EXPECT().Conn().Return(suiteConn).Maybe()
+
+	allMaybe(s, p, o)
+	c.TeardownTest(context.Background(), tcWith("TC-SUITE-ALIAS"), st())
+
+	o.AssertNotCalled(t, "SendRemoveZoneOnConn", suiteConn, mock.Anything)
+}
+
 func TestCoordTeardown_SuiteRemovedInTest_SkipsReconnect(t *testing.T) {
 	c, s, p, o := newCoord(t, &Config{StrictLifecycle: true, Target: "localhost:8443", EnableKey: "k"})
 
@@ -1645,6 +1686,34 @@ func TestSuiteCanReconnect_DoesNotOverwriteCurrentZoneFromStalePASE(t *testing.T
 	v, ok := state.Get(StateCurrentZoneID)
 	assert.True(t, ok)
 	assert.Equal(t, suiteZoneID, v, "current_zone_id must remain the suite zone ID")
+}
+
+func TestSuiteCanReconnect_PrefersSuiteWhenMainAndPASELookHealthy(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	suiteConn := &Connection{state: ConnOperational}
+	mainConn := &Connection{state: ConnOperational}
+	suiteZoneID := deriveZoneIDFromSecret([]byte("suite-zone-key"))
+	stalePASE := &PASEState{completed: true, sessionKey: []byte("stale-pase-key")}
+
+	s.EXPECT().ZoneID().Return(suiteZoneID).Maybe()
+	s.EXPECT().ConnKey().Return("main-" + suiteZoneID).Maybe()
+	s.EXPECT().Conn().Return(suiteConn).Maybe()
+
+	o.EXPECT().PASEState().Return(stalePASE).Maybe()
+	o.EXPECT().CommissionZoneType().Return(cert.ZoneTypeTest).Maybe()
+	o.EXPECT().LoadZoneCrypto(suiteZoneID).Return(true).Once()
+	p.EXPECT().Main().Return(mainConn).Maybe()
+	p.EXPECT().SetMain(suiteConn).Return().Maybe()
+
+	allMaybe(s, p, o)
+	state := st()
+	assert.NoError(t, c.SetupPreconditions(context.Background(),
+		tcWith("TC-L3", cond(PrecondDeviceCommissioned, true)), state))
+
+	v, ok := state.Get(StateCurrentZoneID)
+	assert.True(t, ok)
+	assert.Equal(t, suiteZoneID, v, "must prefer suite zone over stale PASE-derived zone")
+	o.AssertNotCalled(t, "EnsureCommissioned", mock.Anything, mock.Anything)
 }
 
 // ===========================================================================

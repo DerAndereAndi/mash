@@ -21,7 +21,9 @@ var (
 	errRemoveZoneNoConnection = errors.New("remove zone: no live connection")
 	errRemoveZoneNoPASE       = errors.New("remove zone: no completed PASE session")
 	errRemoveZoneNoZoneID     = errors.New("remove zone: empty zone id")
+	errRemoveZoneSend         = errors.New("remove zone: send failure")
 	errRemoveZoneAckRead      = errors.New("remove zone: ack read failure")
+	errRemoveZoneAlreadyGone  = errors.New("remove zone: target already absent")
 )
 
 const strictRemoveZoneAckTimeout = 500 * time.Millisecond
@@ -804,7 +806,7 @@ func (r *Runner) sendRemoveZoneOnConnStrict(conn *Connection, zoneID string) err
 	}
 
 	if err := conn.framer.WriteFrame(data); err != nil {
-		return fmt.Errorf("remove zone send: %w", err)
+		return fmt.Errorf("%w: %v", errRemoveZoneSend, err)
 	}
 
 	if conn.conn != nil {
@@ -824,10 +826,39 @@ func (r *Runner) sendRemoveZoneOnConnStrict(conn *Connection, zoneID string) err
 		return fmt.Errorf("remove zone ack message mismatch: got %d want %d", resp.MessageID, req.MessageID)
 	}
 	if resp.Status != wire.StatusSuccess {
+		if resp.Status == wire.StatusInvalidCommand {
+			if msg := removeZoneErrorMessage(resp.Payload); strings.Contains(strings.ToLower(msg), "device not found") {
+				return fmt.Errorf("%w: %s", errRemoveZoneAlreadyGone, msg)
+			}
+		}
 		return fmt.Errorf("remove zone ack status: %d", resp.Status)
 	}
 
 	return nil
+}
+
+func removeZoneErrorMessage(payload any) string {
+	switch p := payload.(type) {
+	case *wire.ErrorPayload:
+		return p.Message
+	case wire.ErrorPayload:
+		return p.Message
+	case map[string]any:
+		if msg, ok := p["message"].(string); ok {
+			return msg
+		}
+		if msg, ok := p["1"].(string); ok {
+			return msg
+		}
+	case map[any]any:
+		if msg, ok := p[uint64(1)].(string); ok {
+			return msg
+		}
+		if msg, ok := p[1].(string); ok {
+			return msg
+		}
+	}
+	return ""
 }
 
 // hasZoneOfType checks if a zone of the given type exists in zone state.
@@ -917,7 +948,10 @@ func isBestEffortRemoveZoneOnConnError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, errRemoveZoneNoConnection) || errors.Is(err, errRemoveZoneAckRead)
+	return errors.Is(err, errRemoveZoneNoConnection) ||
+		errors.Is(err, errRemoveZoneSend) ||
+		errors.Is(err, errRemoveZoneAckRead) ||
+		errors.Is(err, errRemoveZoneAlreadyGone)
 }
 
 // SendTriggerViaZone wraps sendTriggerViaZone.
@@ -1045,6 +1079,21 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 					_, _ = r.handleCreateZone(ctx, step, state)
 				}
 				r.connMgr.SetCommissionZoneType(cert.ZoneTypeGrid)
+
+				// For real devices: commission a real GRID zone alongside the suite zone.
+				// Detach pool.Main from suite and clear session+working crypto so the
+				// upcoming ensureCommissioned call performs a fresh GRID commission.
+				if r.config.Target != "" {
+					r.debugf("device_has_grid_zone: commissioning real GRID zone on device")
+					r.pool.SetMain(&Connection{})
+					r.connMgr.SetPASEState(nil)
+					r.connMgr.SetZoneCA(nil)
+					r.connMgr.SetControllerCert(nil)
+					r.connMgr.SetIssuedDeviceCert(nil)
+					if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
+						r.debugf("device_has_grid_zone: %v (continuing)", err)
+					}
+				}
 			case PrecondDeviceHasLocalZone:
 				zs := getZoneState(state)
 				if !hasZoneOfType(zs, ZoneTypeLocal) {

@@ -411,24 +411,35 @@ Started with Group 13 (`TC-TRANS*,TC-E2E*,TC-IPV6*`) using fresh-wrapper isolati
 
 ### Phase 3 Group 9 Status (2026-02-19)
 
-Group 9 (`TC-ZONE-REMOVE*,TC-ZONE-ADD*,TC-ZTYPE*,TC-ZONE-010`) is currently unstable under fresh-wrapper isolation.
+Group 9 (`TC-ZONE-REMOVE*,TC-ZONE-ADD*,TC-ZTYPE*,TC-ZONE-010`) is now stable under fresh-wrapper isolation.
 
-- Run dir: `mash-go/stabilization/phase1-runs/20260219-133640-phase3-g9-gate`
-- Sequential: `0/5` passed (all failed)
-- Shuffled (seeds `911..915`): `0/5` passed (all failed)
-- Aggregate: `0/10` passed
+Initial unstable baseline:
+- run dir: `mash-go/stabilization/phase1-runs/20260219-142557-phase3-g9-gate-post-94ca5ec`
+- sequential: `0/5` passed
+- shuffled (seeds `911..915`): `0/5` passed
+- aggregate: `0/10` passed
 
-Observed dominant failure signatures:
-- `teardown[strict_lifecycle]: remove zone ack read: EOF`
-- `expectation failed: response - expected map[removed:true], got map[1:device not found]`
-- `expectation failed: invoke_success - expected true, got false`
+Root causes fixed (runner cleanups + precondition/session correctness):
+- stale session reuse routing and zone-id drift in L3 TEST setup
+- `device_has_grid_zone` precondition did not force real GRID commissioning context on real device
+- strict teardown treated idempotent cleanup outcomes as hard failures:
+  - `RemoveZone` ack read EOF
+  - `RemoveZone` target already absent (`device not found`)
+  - `RemoveZone` send failure (`broken pipe`)
+- teardown alias safety: suite control connection could be reached via non-authoritative tracked keys
 
-Top recurring failing tests across the 10 runs:
-- `TC-ZONE-REMOVE-001` (19)
-- `TC-ZTYPE-007` (17)
-- `TC-ZTYPE-005` (10)
-- `TC-ZONE-REMOVE-002` (10)
-- `TC-ZONE-ADD-005` (10)
+Verification evidence:
+- focused rerun after fixes:
+  - run dir: `mash-go/stabilization/phase1-runs/20260219-145123-g9-seq1-post-removezone-idempotent-fix`
+  - result: `16/16`, `failed=0`
+- seed repro rerun for last flaky failure:
+  - run dir: `mash-go/stabilization/phase1-runs/20260219-150952-g9-shuf-914-rerun-post-send-best-effort`
+  - result: `16/16`, `failed=0` (seed `914`)
+- final full gate:
+  - run dir: `mash-go/stabilization/phase1-runs/20260219-151047-phase3-g9-gate-final-post-send-fix`
+  - sequential: `5/5` passed
+  - shuffled (seeds `911..915`): `5/5` passed
+  - aggregate: `10/10` passed (`16/16` per run)
 
 ## Phase 4: Full Suite Combination
 

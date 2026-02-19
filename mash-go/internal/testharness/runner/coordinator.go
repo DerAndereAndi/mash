@@ -392,14 +392,14 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 	usedSuiteSession := false
 	switch needed {
 	case precondLevelCommissioned:
-		// Determine whether we can reconnect to the existing suite zone
-		// instead of creating a new zone on the device.
-		// Reconnect when: (1) suite zone exists, (2) zone type is still TEST
-		// (not overridden by a precondition like device_has_grid_zone), and
-		// (3) the current session is NOT already good (PASE completed + conn alive).
+		// Determine whether we should use the existing suite zone instead of
+		// creating or revalidating a separate test session zone.
+		// Use suite when: (1) suite zone exists and (2) zone type is still TEST
+		// (not overridden by a precondition like device_has_grid_zone).
+		// This keeps current_zone_id aligned with the control channel and avoids
+		// stale PASE/session-key drift from previous non-suite commissions.
 		suiteCanReconnect := c.suite.ZoneID() != "" &&
-			c.ops.CommissionZoneType() == cert.ZoneTypeTest &&
-			!(c.ops.PASEState().Completed() && c.pool.Main() != nil && c.pool.Main().isConnected())
+			c.ops.CommissionZoneType() == cert.ZoneTypeTest
 
 		if suiteCanReconnect {
 			suiteZoneID := c.suite.ZoneID()
@@ -655,8 +655,9 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 	// Remove per-test zones created by multi-zone commissioning steps.
 	// Keep only the suite zone (if present) so strict cleanup invariants are
 	// evaluated against a single authoritative control channel.
+	suiteZoneID := c.suite.ZoneID()
 	suiteKey := ""
-	if c.suite.ZoneID() != "" {
+	if suiteZoneID != "" {
 		suiteKey = c.suite.ConnKey()
 	}
 	for _, key := range c.pool.ZoneKeys() {
@@ -664,8 +665,25 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 			continue
 		}
 		zc := c.pool.Zone(key)
+		zoneID := c.pool.ZoneID(key)
+		// If a tracked key aliases the live suite control connection, never use
+		// it for per-test RemoveZone cleanup; only untrack the alias.
+		if zc != nil && zc == c.suite.Conn() {
+			c.pool.UntrackZone(key)
+			continue
+		}
+		// The suite zone can appear under alias keys (for example "step-<id>")
+		// while the authoritative suite key is "main-<id>". Never RemoveZone
+		// the suite zone during per-test teardown; just untrack alias entries.
+		if suiteZoneID != "" && zoneID == suiteZoneID {
+			if zc != nil && zc != c.suite.Conn() {
+				zc.transitionTo(ConnDisconnected)
+			}
+			c.pool.UntrackZone(key)
+			continue
+		}
 		if zc != nil && zc.isConnected() && zc.framer != nil {
-			if zoneID := c.pool.ZoneID(key); zoneID != "" {
+			if zoneID != "" {
 				c.ops.SendRemoveZoneOnConn(zc, zoneID)
 			}
 		}

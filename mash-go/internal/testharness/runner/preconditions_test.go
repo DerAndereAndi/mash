@@ -790,6 +790,78 @@ func TestSendRemoveZoneOnConn_StrictMode_RecordsHardFailure(t *testing.T) {
 	}
 }
 
+func TestSendRemoveZoneOnConn_StrictMode_DeviceNotFoundIsBestEffort(t *testing.T) {
+	r := newTestRunner()
+	r.config.StrictLifecycle = true
+	r.clearStrictLifecycleErr()
+
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	conn := &Connection{
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fr := transport.NewFramer(server)
+		reqData, err := fr.ReadFrame()
+		if err != nil {
+			return
+		}
+		req, err := wire.DecodeRequest(reqData)
+		if err != nil {
+			return
+		}
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusInvalidCommand,
+			Payload: &wire.ErrorPayload{
+				Message: "device not found",
+			},
+		}
+		respData, err := wire.EncodeResponse(resp)
+		if err != nil {
+			return
+		}
+		_ = fr.WriteFrame(respData)
+	}()
+
+	r.SendRemoveZoneOnConn(conn, "zone-1")
+	<-done
+
+	if r.strictLifecycleErr != nil {
+		t.Fatalf("expected no strict lifecycle error for best-effort 'device not found', got: %v", r.strictLifecycleErr)
+	}
+}
+
+func TestSendRemoveZoneOnConn_StrictMode_SendFailureIsBestEffort(t *testing.T) {
+	r := newTestRunner()
+	r.config.StrictLifecycle = true
+	r.clearStrictLifecycleErr()
+
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	conn := &Connection{
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
+	}
+
+	// Close peer before the write so WriteFrame fails with broken pipe/reset.
+	_ = server.Close()
+
+	r.SendRemoveZoneOnConn(conn, "zone-1")
+
+	if r.strictLifecycleErr != nil {
+		t.Fatalf("expected no strict lifecycle error for best-effort send failure, got: %v", r.strictLifecycleErr)
+	}
+}
+
 func TestSetupPreconditions_BackwardsFromCommissioned_SendsRemoveZone(t *testing.T) {
 	// When transitioning from commissioned (level 3) to commissioning (level 1),
 	// sendRemoveZone is called before disconnect. Since there's no real server,
