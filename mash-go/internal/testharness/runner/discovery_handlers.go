@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -201,8 +202,96 @@ func (r *Runner) browseViaObserverUntilAbsent(ctx context.Context, serviceType s
 		return services, nil
 	}
 
-	// Timeout or cancellation: return latest snapshot for expectation check.
+	// On timeout, re-check with a fresh browse window to avoid stale observer
+	// snapshots from previous tests/runs.
+	if errors.Is(err, context.DeadlineExceeded) {
+		freshTimeout := timeoutMs
+		if freshTimeout > 1000 {
+			freshTimeout = 1000
+		}
+		fresh, freshErr := r.browseFreshWindow(ctx, serviceType, freshTimeout)
+		if freshErr == nil {
+			return fresh, nil
+		}
+	}
+
+	// Cancellation or fallback error: return latest snapshot for expectation check.
 	return obs.Snapshot(serviceType), nil
+}
+
+// browseFreshWindow performs a one-shot browse for timeoutMs and returns
+// services observed during that fresh window, independent of observer history.
+func (r *Runner) browseFreshWindow(ctx context.Context, serviceType string, timeoutMs int) ([]discoveredService, error) {
+	obs := r.getOrCreateObserver()
+	if obs == nil || obs.browser == nil {
+		return nil, fmt.Errorf("failed to create mDNS browser")
+	}
+
+	browseCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+	defer cancel()
+
+	resolved := resolveServiceType(serviceType)
+	switch resolved {
+	case "", discovery.ServiceTypeCommissionable:
+		added, _, err := obs.browser.BrowseCommissionable(browseCtx)
+		if err != nil {
+			return nil, err
+		}
+		services := make([]discoveredService, 0)
+		for {
+			select {
+			case svc, ok := <-added:
+				if !ok {
+					return services, nil
+				}
+				if svc != nil {
+					services = append(services, commissionableToDiscovered(svc))
+				}
+			case <-browseCtx.Done():
+				return services, nil
+			}
+		}
+	case discovery.ServiceTypeOperational:
+		added, err := obs.browser.BrowseOperational(browseCtx, "")
+		if err != nil {
+			return nil, err
+		}
+		services := make([]discoveredService, 0)
+		for {
+			select {
+			case svc, ok := <-added:
+				if !ok {
+					return services, nil
+				}
+				if svc != nil {
+					services = append(services, operationalToDiscovered(svc))
+				}
+			case <-browseCtx.Done():
+				return services, nil
+			}
+		}
+	case discovery.ServiceTypeCommissioner:
+		added, err := obs.browser.BrowseCommissioners(browseCtx)
+		if err != nil {
+			return nil, err
+		}
+		services := make([]discoveredService, 0)
+		for {
+			select {
+			case svc, ok := <-added:
+				if !ok {
+					return services, nil
+				}
+				if svc != nil {
+					services = append(services, commissionerToDiscovered(svc))
+				}
+			case <-browseCtx.Done():
+				return services, nil
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unsupported service type: %q", serviceType)
+	}
 }
 
 // buildBrowseOutput constructs the standard output map from discovery state.

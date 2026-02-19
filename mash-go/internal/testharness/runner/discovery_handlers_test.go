@@ -817,33 +817,34 @@ func TestHandleBrowseMDNS_ExpectDeviceAbsent_WaitsForRemoval(t *testing.T) {
 	}
 }
 
-// TestHandleBrowseMDNS_ExpectDeviceAbsent_TimeoutReturnsLatestSnapshot verifies
-// timeout behavior remains deterministic: latest snapshot is returned and
-// expectation can fail normally when service never disappears.
-func TestHandleBrowseMDNS_ExpectDeviceAbsent_TimeoutReturnsLatestSnapshot(t *testing.T) {
+// TestHandleBrowseMDNS_ExpectDeviceAbsent_TimeoutUsesFreshBrowse verifies that
+// timeout on observer wait re-validates presence with a fresh browse window.
+func TestHandleBrowseMDNS_ExpectDeviceAbsent_TimeoutUsesFreshBrowse(t *testing.T) {
 	r := newTestRunner()
-	tb := newTestBrowser()
-	r.observer = newMDNSObserver(tb, r.debugf)
+	fb := &freshWindowBrowser{
+		commissionableByCall: map[int][]*discovery.CommissionableService{
+			2: {{
+				InstanceName:  "MASH-ALWAYS",
+				Discriminator: 1234,
+			}},
+		},
+	}
+	r.observer = newMDNSObserver(fb, r.debugf)
 	defer r.observer.Stop()
 	state := newTestState()
 
-	tb.commAdded <- &discovery.CommissionableService{
+	// Seed stale-positive observer state.
+	r.observer.addService(discoveredService{
 		InstanceName:  "MASH-ALWAYS",
+		ServiceType:   discovery.ServiceTypeCommissionable,
 		Discriminator: 1234,
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if _, err := r.observer.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
-		return len(svcs) == 1
-	}); err != nil {
-		t.Fatalf("setup observer seed failed: %v", err)
-	}
+	})
 
 	step := &loader.Step{
 		Action: ActionBrowseMDNS,
 		Params: map[string]any{
 			KeyServiceType: ServiceAliasCommissionable,
-			KeyTimeoutMs:   float64(150),
+			KeyTimeoutMs:   float64(200),
 		},
 		Expect: map[string]any{
 			KeyDeviceFound: false,
@@ -858,3 +859,88 @@ func TestHandleBrowseMDNS_ExpectDeviceAbsent_TimeoutReturnsLatestSnapshot(t *tes
 		t.Fatalf("device_found = %v, want true when service remains present", got)
 	}
 }
+
+// TestHandleBrowseMDNS_ExpectDeviceAbsent_StaleObserverSnapshotRecovered verifies
+// stale observer positives do not fail absent checks when a fresh browse window
+// sees no commissionable services.
+func TestHandleBrowseMDNS_ExpectDeviceAbsent_StaleObserverSnapshotRecovered(t *testing.T) {
+	r := newTestRunner()
+	tb := newTestBrowser()
+	r.observer = newMDNSObserver(tb, r.debugf)
+	defer r.observer.Stop()
+	state := newTestState()
+
+	tb.commAdded <- &discovery.CommissionableService{
+		InstanceName:  "MASH-STALE",
+		Discriminator: 1234,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := r.observer.WaitFor(ctx, "commissionable", func(svcs []discoveredService) bool {
+		return len(svcs) == 1
+	}); err != nil {
+		t.Fatalf("setup observer seed failed: %v", err)
+	}
+
+	step := &loader.Step{
+		Action: ActionBrowseMDNS,
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasCommissionable,
+			KeyTimeoutMs:   float64(120),
+		},
+		Expect: map[string]any{
+			KeyDeviceFound: false,
+		},
+	}
+
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("handleBrowseMDNS error: %v", err)
+	}
+	if got, _ := out[KeyDeviceFound].(bool); got {
+		t.Fatalf("device_found = %v, want false when only stale observer state exists", got)
+	}
+}
+
+type freshWindowBrowser struct {
+	commissionableByCall map[int][]*discovery.CommissionableService
+	commCalls            int
+}
+
+func (b *freshWindowBrowser) BrowseCommissionable(_ context.Context) (added, removed <-chan *discovery.CommissionableService, err error) {
+	b.commCalls++
+	addedCh := make(chan *discovery.CommissionableService, 4)
+	removedCh := make(chan *discovery.CommissionableService)
+	for _, svc := range b.commissionableByCall[b.commCalls] {
+		addedCh <- svc
+	}
+	close(addedCh)
+	close(removedCh)
+	return addedCh, removedCh, nil
+}
+
+func (b *freshWindowBrowser) BrowseOperational(context.Context, string) (<-chan *discovery.OperationalService, error) {
+	ch := make(chan *discovery.OperationalService)
+	close(ch)
+	return ch, nil
+}
+
+func (b *freshWindowBrowser) BrowseCommissioners(context.Context) (<-chan *discovery.CommissionerService, error) {
+	ch := make(chan *discovery.CommissionerService)
+	close(ch)
+	return ch, nil
+}
+
+func (b *freshWindowBrowser) BrowsePairingRequests(context.Context, func(discovery.PairingRequestService)) error {
+	return nil
+}
+
+func (b *freshWindowBrowser) FindByDiscriminator(context.Context, uint16) (*discovery.CommissionableService, error) {
+	return nil, nil
+}
+
+func (b *freshWindowBrowser) FindAllByDiscriminator(context.Context, uint16) ([]*discovery.CommissionableService, error) {
+	return nil, nil
+}
+
+func (b *freshWindowBrowser) Stop() {}
