@@ -256,6 +256,35 @@ func (c *Connection) clearReadDeadline() {
 	}
 }
 
+// setWriteDeadlineFromContext sets the underlying connection's write deadline
+// from the context's deadline.
+func (c *Connection) setWriteDeadlineFromContext(ctx context.Context) {
+	if c == nil {
+		return
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return
+	}
+	if c.tlsConn != nil {
+		c.tlsConn.SetWriteDeadline(deadline)
+	} else if c.conn != nil {
+		c.conn.SetWriteDeadline(deadline)
+	}
+}
+
+// clearWriteDeadline removes any write deadline on the underlying connection.
+func (c *Connection) clearWriteDeadline() {
+	if c == nil {
+		return
+	}
+	if c.tlsConn != nil {
+		c.tlsConn.SetWriteDeadline(time.Time{})
+	} else if c.conn != nil {
+		c.conn.SetWriteDeadline(time.Time{})
+	}
+}
+
 // New creates a new test runner.
 func New(config *Config) *Runner {
 	// Create engine with config

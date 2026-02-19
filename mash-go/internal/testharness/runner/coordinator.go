@@ -661,6 +661,10 @@ func testCaseNeedsIsolatedCommissionedSession(tc *loader.TestCase) bool {
 // It cleans up subscriptions, notifications, stale PASE state, and
 // per-test security pool connections.
 func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, state *engine.ExecutionState) {
+	start := time.Now()
+	c.debugf("teardown:start %s", tc.ID)
+	defer c.debugf("teardown:end %s duration=%s", tc.ID, time.Since(start).Round(time.Millisecond))
+
 	suiteRemovedDuringTest := false
 	if sz := c.suite.ZoneID(); sz != "" && wasZoneRemovedInTest(state, sz) {
 		suiteRemovedDuringTest = true
@@ -672,6 +676,7 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 	}
 
 	// Unsubscribe all active subscriptions.
+	c.debugf("teardown:phase=unsubscribe")
 	c.pool.UnsubscribeAll(c.pool.Main())
 	c.pool.ClearNotifications()
 	if c.pool.Main() != nil {
@@ -693,11 +698,14 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 	// Remove per-test zones created by multi-zone commissioning steps.
 	// Keep only the suite zone (if present) so strict cleanup invariants are
 	// evaluated against a single authoritative control channel.
+	c.debugf("teardown:phase=zone_cleanup")
 	suiteZoneID := c.suite.ZoneID()
 	suiteKey := ""
 	if suiteZoneID != "" {
 		suiteKey = c.suite.ConnKey()
 	}
+	removedZoneIDs := make(map[string]struct{})
+	zoneRemovalFallbackConns := make(map[string]*Connection)
 	for _, key := range c.pool.ZoneKeys() {
 		if suiteKey != "" && key == suiteKey {
 			continue
@@ -720,16 +728,10 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 			c.pool.UntrackZone(key)
 			continue
 		}
-		if zc != nil && zc.isConnected() && zc.framer != nil {
-			if zoneID != "" {
-				c.ops.SendRemoveZoneOnConn(zc, zoneID)
-			}
-		} else if zoneID != "" {
-			// A disconnected non-suite zone still exists on the device until
-			// explicitly removed. When suite control is alive, remove by zoneID
-			// via the suite channel to keep strict cleanup deterministic.
-			if sc := c.suite.Conn(); sc != nil && sc.isConnected() && sc.framer != nil {
-				c.ops.SendRemoveZoneOnConn(sc, zoneID)
+		if zoneID != "" {
+			removedZoneIDs[zoneID] = struct{}{}
+			if zc != nil && zc.isConnected() && zc.framer != nil {
+				zoneRemovalFallbackConns[zoneID] = zc
 			}
 		}
 		if zc != nil {
@@ -738,7 +740,60 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 		c.pool.UntrackZone(key)
 	}
 
+	// Clean architecture invariant: RemoveZone is controller authority. Always
+	// issue non-suite removals through the suite control channel when available.
+	sc := c.suite.Conn()
+	if (sc == nil || !sc.isConnected() || sc.framer == nil) && c.suite.ZoneID() != "" {
+		if err := c.ops.ReconnectToZone(state); err != nil {
+			c.debugf("teardown: zone cleanup suite reconnect failed: %v", err)
+		}
+		sc = c.suite.Conn()
+	}
+	if sc != nil && sc.isConnected() && sc.framer != nil {
+		for zoneID := range removedZoneIDs {
+			c.ops.SendRemoveZoneOnConn(sc, zoneID)
+		}
+	} else {
+		for zoneID, conn := range zoneRemovalFallbackConns {
+			c.ops.SendRemoveZoneOnConn(conn, zoneID)
+		}
+	}
+
+	// Retry non-suite zone removals once based on device-reported zone IDs.
+	// This is the authoritative source: tracked pool IDs can be stale if a test
+	// replaced connections mid-step.
+	if c.config != nil && c.config.StrictLifecycle &&
+		c.config.Target != "" && c.config.EnableKey != "" {
+		sc := c.suite.Conn()
+		if (sc == nil || !sc.isConnected() || sc.framer == nil) && c.suite.ZoneID() != "" {
+			if err := c.ops.ReconnectToZone(state); err != nil {
+				c.debugf("teardown: residual sweep reconnect failed: %v", err)
+			}
+			sc = c.suite.Conn()
+		}
+		if sc != nil && sc.isConnected() && sc.framer != nil {
+			checkCtx, checkCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			if snap := c.ops.RequestDeviceState(checkCtx, state); snap != nil {
+				ids := nonSuiteZoneIDsFromSnapshot(snap, c.suite.ZoneID())
+				// Fallback to tracked IDs if snapshot didn't include zone details.
+				if len(ids) == 0 && len(removedZoneIDs) > 0 {
+					for zoneID := range removedZoneIDs {
+						ids = append(ids, zoneID)
+					}
+				}
+				if len(ids) > 0 {
+					c.debugf("teardown: residual non-suite zones=%d, retrying remove sweep", len(ids))
+					for _, zoneID := range ids {
+						c.ops.SendRemoveZoneOnConn(sc, zoneID)
+					}
+				}
+			}
+			checkCancel()
+		}
+	}
+
 	// Close connections with incomplete PASE state.
+	c.debugf("teardown:phase=pase_cleanup")
 	if c.pool.Main() != nil && c.pool.Main().isConnected() && !c.ops.PASEState().Completed() {
 		c.debugf("teardown: closing connection with incomplete PASE state")
 		c.pool.Main().transitionTo(ConnDisconnected)
@@ -757,6 +812,7 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 	}
 
 	// Clean up security pool connections.
+	c.debugf("teardown:phase=security_pool_cleanup")
 	if secState, ok := state.Custom["security"].(*securityState); ok && secState.pool != nil {
 		secState.pool.mu.Lock()
 		for _, conn := range secState.pool.connections {
@@ -775,6 +831,7 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 	// teardown, which has independent timeouts -- avoids burning the next
 	// test's tight timeout on failed reconnect attempts.
 	if !suiteRemovedDuringTest && c.config.Target != "" && c.suite.ZoneID() != "" {
+		c.debugf("teardown:phase=suite_health_probe")
 		// After non-L3 tests, pool.Main() may be dead/empty while
 		// suite.Conn() is alive. Restore main to suite conn so
 		// ProbeSessionHealth can use it.
@@ -798,6 +855,7 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 	// This avoids false diffs from transient per-test subscriptions/notifications
 	// and gives teardown one chance to repair a broken suite connection first.
 	if c.config.Target != "" && c.config.EnableKey != "" {
+		c.debugf("teardown:phase=baseline_snapshot")
 		afterCtx, afterCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		if after := c.ops.RequestDeviceState(afterCtx, state); after != nil {
 			state.Custom[engine.StateKeyDeviceStateAfter] = map[string]any(after)
@@ -869,6 +927,35 @@ func (c *coordinatorImpl) markTeardownError(state *engine.ExecutionState, step s
 		return
 	}
 	state.Custom[engine.StateKeyTeardownError] = te
+}
+
+func nonSuiteZoneIDsFromSnapshot(snap DeviceStateSnapshot, suiteZoneID string) []string {
+	rawZones, ok := snap["zones"]
+	if !ok || rawZones == nil {
+		return nil
+	}
+	list, ok := rawZones.([]any)
+	if !ok {
+		return nil
+	}
+	ids := make([]string, 0, len(list))
+	seen := make(map[string]struct{}, len(list))
+	for _, entry := range list {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := m["id"].(string)
+		if id == "" || id == suiteZoneID {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // CurrentLevel returns the runner's current precondition level based on

@@ -713,6 +713,32 @@ func TestSendRemoveZoneOnConnStrict_AckTimeoutWhenResponseIsLate(t *testing.T) {
 	}
 }
 
+func TestSendRemoveZoneOnConn_DoesNotBlockOnWriteToUnresponsivePeer(t *testing.T) {
+	r := newTestRunner()
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	conn := &Connection{
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		r.sendRemoveZoneOnConn(conn, "zone-1")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Expected: write deadline should bound this path.
+	case <-time.After(removeZoneWriteTimeout + 200*time.Millisecond):
+		t.Fatal("sendRemoveZoneOnConn blocked on write to unresponsive peer")
+	}
+}
+
 func TestSetupPreconditions_StrictMode_BubblesRemoveZoneFailure(t *testing.T) {
 	r := newTestRunner()
 	r.config.StrictLifecycle = true
@@ -1565,6 +1591,34 @@ func TestProbeSessionHealth_NilFramer(t *testing.T) {
 	}
 	if err.Error() != "no active connection" {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestProbeSessionHealth_DoesNotBlockOnWriteToUnresponsivePeer(t *testing.T) {
+	r := newTestRunner()
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	r.pool.Main().state = ConnOperational
+	r.pool.Main().conn = client
+	r.pool.Main().framer = transport.NewFramer(client)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- r.probeSessionHealth()
+	}()
+
+	select {
+	case <-done:
+		// Expected: write deadline should bound this path.
+	case <-time.After(healthProbeWriteTimeout + 300*time.Millisecond):
+		_ = server.Close() // Unblock writer for cleanup.
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+		t.Fatal("probeSessionHealth blocked on write to unresponsive peer")
 	}
 }
 

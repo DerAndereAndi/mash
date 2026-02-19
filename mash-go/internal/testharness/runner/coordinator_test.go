@@ -743,8 +743,8 @@ func TestCoordTeardown_RemovesNonSuiteZones(t *testing.T) {
 	p.EXPECT().UntrackZone("step-z2").Return().Once()
 
 	o.EXPECT().PASEState().Return(completedPASE()).Maybe()
-	o.EXPECT().SendRemoveZoneOnConn(zone1, "zone-1").Return().Once()
-	o.EXPECT().SendRemoveZoneOnConn(zone2, "zone-2").Return().Once()
+	o.EXPECT().SendRemoveZoneOnConn(suiteConn, "zone-1").Return().Once()
+	o.EXPECT().SendRemoveZoneOnConn(suiteConn, "zone-2").Return().Once()
 	o.EXPECT().RequestDeviceState(mock.Anything, mock.Anything).Return(DeviceStateSnapshot(nil)).Maybe()
 	o.EXPECT().ProbeSessionHealth().Return(nil).Maybe()
 
@@ -844,7 +844,7 @@ func TestCoordTeardown_DoesNotRemoveSuiteConnAliasEvenWithStaleZoneID(t *testing
 	p.EXPECT().UntrackZone("step-z1").Return().Once()
 
 	o.EXPECT().PASEState().Return(completedPASE()).Maybe()
-	o.EXPECT().SendRemoveZoneOnConn(zone1, "zone-1").Return().Once()
+	o.EXPECT().SendRemoveZoneOnConn(suiteConn, "zone-1").Return().Once()
 
 	s.EXPECT().ZoneID().Return("suite-zone").Maybe()
 	s.EXPECT().ConnKey().Return("main-suite-zone").Maybe()
@@ -853,7 +853,7 @@ func TestCoordTeardown_DoesNotRemoveSuiteConnAliasEvenWithStaleZoneID(t *testing
 	allMaybe(s, p, o)
 	c.TeardownTest(context.Background(), tcWith("TC-SUITE-ALIAS"), st())
 
-	o.AssertNotCalled(t, "SendRemoveZoneOnConn", suiteConn, mock.Anything)
+	o.AssertNotCalled(t, "SendRemoveZoneOnConn", zone1, mock.Anything)
 }
 
 func TestCoordTeardown_RemovesDisconnectedZoneViaSuiteControl(t *testing.T) {
@@ -2200,4 +2200,21 @@ func TestNarrowInterface_WireOps(t *testing.T) {
 	wireOps.SendRemoveZone()
 	assert.NoError(t, wireOps.SendTriggerViaZone(context.Background(), 1, st()))
 	assert.NoError(t, wireOps.SendClearLimitInvoke(context.Background()))
+}
+
+func TestNonSuiteZoneIDsFromSnapshot(t *testing.T) {
+	snap := DeviceStateSnapshot{
+		"zones": []any{
+			map[string]any{"id": "suite-zone"},
+			map[string]any{"id": "local-zone"},
+			map[string]any{"id": "grid-zone"},
+			map[string]any{"id": "local-zone"},
+			map[string]any{"id": ""},
+		},
+	}
+
+	ids := nonSuiteZoneIDsFromSnapshot(snap, "suite-zone")
+	assert.Len(t, ids, 2)
+	assert.Contains(t, ids, "local-zone")
+	assert.Contains(t, ids, "grid-zone")
 }

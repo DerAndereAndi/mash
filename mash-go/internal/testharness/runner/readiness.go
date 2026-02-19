@@ -8,6 +8,8 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
+const healthProbeWriteTimeout = 500 * time.Millisecond
+
 func waitForOperationalReadyOnConn(
 	conn *Connection,
 	timeout time.Duration,
@@ -147,6 +149,22 @@ func (r *Runner) probeSessionHealth() error {
 	data, err := wire.EncodeRequest(req)
 	if err != nil {
 		return fmt.Errorf("encode health probe: %w", err)
+	}
+
+	if r.pool.Main().tlsConn != nil {
+		_ = r.pool.Main().tlsConn.SetWriteDeadline(time.Now().Add(healthProbeWriteTimeout))
+		defer func() {
+			if r.pool.Main().tlsConn != nil {
+				_ = r.pool.Main().tlsConn.SetWriteDeadline(time.Time{})
+			}
+		}()
+	} else if r.pool.Main().conn != nil {
+		_ = r.pool.Main().conn.SetWriteDeadline(time.Now().Add(healthProbeWriteTimeout))
+		defer func() {
+			if r.pool.Main().conn != nil {
+				_ = r.pool.Main().conn.SetWriteDeadline(time.Time{})
+			}
+		}()
 	}
 
 	if err := r.pool.Main().framer.WriteFrame(data); err != nil {

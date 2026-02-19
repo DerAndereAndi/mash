@@ -71,6 +71,30 @@ func readCommissioningError(t *testing.T, conn net.Conn) *commissioning.Commissi
 	return errMsg
 }
 
+// readNextPASEMessage reads one length-prefixed PASE message and decodes it.
+func readNextPASEMessage(t *testing.T, conn net.Conn) any {
+	t.Helper()
+
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	length := make([]byte, 4)
+	if _, err := io.ReadFull(conn, length); err != nil {
+		t.Fatalf("read length: %v", err)
+	}
+
+	msgLen := binary.BigEndian.Uint32(length)
+	data := make([]byte, msgLen)
+	if _, err := io.ReadFull(conn, data); err != nil {
+		t.Fatalf("read data: %v", err)
+	}
+
+	msg, err := commissioning.DecodePASEMessage(data)
+	if err != nil {
+		t.Fatalf("decode message: %v", err)
+	}
+	return msg
+}
+
 // dialCommissioning opens a TLS connection to the device in commissioning mode.
 func dialCommissioning(t *testing.T, addr net.Addr) *tls.Conn {
 	t.Helper()
@@ -149,6 +173,37 @@ func TestBusyResponse_CooldownActive(t *testing.T) {
 	}
 	if errMsg.RetryAfter == 0 {
 		t.Error("RetryAfter: expected > 0 during cooldown")
+	}
+}
+
+// TestBusyResponse_ImmediateRetryAfterPASEFailure ensures a failed PASE attempt
+// doesn't keep the commissioning lock held long enough to cause an immediate
+// follow-up attempt to be rejected as "already in progress".
+func TestBusyResponse_ImmediateRetryAfterPASEFailure(t *testing.T) {
+	svc := startCappedDevice(t, 2)
+	addr := svc.CommissioningAddr()
+
+	// Disable cooldown to isolate lock-release timing.
+	svc.config.ConnectionCooldown = 0
+	svc.config.TestMode = false
+
+	// First attempt: send malformed PASE and wait until device replies with
+	// a PASE-level error. At this point, the attempt has failed.
+	conn1 := dialCommissioning(t, addr)
+	defer conn1.Close()
+	sendPASERequest(t, conn1)
+	_ = readNextPASEMessage(t, conn1)
+
+	// Immediate retry: should not be rejected as "already in progress".
+	conn2 := dialCommissioning(t, addr)
+	defer conn2.Close()
+	sendPASERequest(t, conn2)
+
+	msg := readNextPASEMessage(t, conn2)
+	if errMsg, ok := msg.(*commissioning.CommissioningError); ok {
+		if errMsg.ErrorCode == commissioning.ErrCodeBusy {
+			t.Fatalf("unexpected busy rejection on immediate retry: reason=%q retry_after=%d", errMsg.Message, errMsg.RetryAfter)
+		}
 	}
 }
 

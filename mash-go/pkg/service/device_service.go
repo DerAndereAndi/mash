@@ -1001,7 +1001,12 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 		conn.Close()
 		return
 	}
-	defer s.releaseCommissioningConnection(commGen)
+	commReleased := false
+	defer func() {
+		if !commReleased {
+			s.releaseCommissioningConnection(commGen)
+		}
+	}()
 
 	// DEC-047: Overall handshake timeout (starts at PASERequest, not TLS accept)
 	handshakeCtx := s.ctx
@@ -1026,6 +1031,11 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 			s.debugLog("handleCommissioningConnection: PASE failed (no tracker)",
 				"error", err)
 		}
+		// Release lock before delay so immediate follow-up attempts are not
+		// rejected as "commissioning already in progress" after the failure
+		// has already been decided.
+		s.releaseCommissioningConnection(commGen)
+		commReleased = true
 		// Brief delay before closing so the error message bytes are fully
 		// delivered to the peer. Without this, the test harness may see an
 		// EOF before reading the CommissioningError frame (TC-ZONE-ADD-003).

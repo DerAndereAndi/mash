@@ -120,6 +120,8 @@ func (r *Runner) requestDeviceState(ctx context.Context, state *engine.Execution
 
 	conn.setReadDeadlineFromContext(ctx)
 	defer conn.clearReadDeadline()
+	conn.setWriteDeadlineFromContext(ctx)
+	defer conn.clearWriteDeadline()
 
 	if err := conn.framer.WriteFrame(data); err != nil {
 		r.debugf("requestDeviceState: write error: %v", err)

@@ -115,7 +115,7 @@ steps:
   - name: Establish operational connection for Zone 1
     action: connect_operational
     params:
-      zone_id: "{{ zone1_id }}"
+      zone_id: "{{ current_zone_id }}"
     expect:
       connection_established: true
 
@@ -130,14 +130,14 @@ steps:
   - name: Verify Zone 1 operational connection still active
     action: send_ping
     params:
-      connection: zone1
+      connection: "{{ current_zone_id }}"
     expect:
       pong_received: true
 
   - name: Simulate Zone 1 reconnection
     action: reconnect_operational
     params:
-      zone_id: "{{ zone1_id }}"
+      zone_id: "{{ current_zone_id }}"
     expect:
       reconnection_successful: true
 

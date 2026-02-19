@@ -12,6 +12,7 @@ import (
 )
 
 var sendRequestReadRetryWindow = 10 * time.Second
+var sendUnsubscribeWriteTimeout = 500 * time.Millisecond
 
 // ConnReader provides read-only access to pool state.
 // Used by handlers that need to inspect connections and zone state.
@@ -306,6 +307,22 @@ func (p *connPoolImpl) sendUnsubscribe(conn *Connection, subID uint32) {
 	if err != nil {
 		return
 	}
+	if conn.tlsConn != nil {
+		_ = conn.tlsConn.SetWriteDeadline(time.Now().Add(sendUnsubscribeWriteTimeout))
+		defer func() {
+			if conn.tlsConn != nil {
+				_ = conn.tlsConn.SetWriteDeadline(time.Time{})
+			}
+		}()
+	} else if conn.conn != nil {
+		_ = conn.conn.SetWriteDeadline(time.Now().Add(sendUnsubscribeWriteTimeout))
+		defer func() {
+			if conn.conn != nil {
+				_ = conn.conn.SetWriteDeadline(time.Time{})
+			}
+		}()
+	}
+
 	if err := conn.framer.WriteFrame(data); err != nil {
 		return
 	}

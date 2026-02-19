@@ -507,6 +507,26 @@ func TestConnPool_TrackSubscription_And_UnsubscribeAll(t *testing.T) {
 	// Success: no hang, no panic. Subscription list is cleared internally.
 }
 
+func TestConnPool_UnsubscribeAll_DoesNotBlockOnWriteToUnresponsivePeer(t *testing.T) {
+	pool, server := newPipedPool()
+	defer server.Close()
+
+	pool.TrackSubscription(42)
+
+	done := make(chan struct{})
+	go func() {
+		pool.UnsubscribeAll(pool.Main())
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Expected: write deadline should bound this path.
+	case <-time.After(sendUnsubscribeWriteTimeout + 300*time.Millisecond):
+		t.Fatal("UnsubscribeAll blocked on write to unresponsive peer")
+	}
+}
+
 func TestConnPool_RemoveSubscription(t *testing.T) {
 	pool := NewConnPool(nil, nil)
 	pool.TrackSubscription(42)

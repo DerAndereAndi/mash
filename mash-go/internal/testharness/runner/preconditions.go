@@ -27,6 +27,7 @@ var (
 )
 
 const strictRemoveZoneAckTimeout = 500 * time.Millisecond
+const removeZoneWriteTimeout = 200 * time.Millisecond
 
 // Precondition levels form a hierarchy:
 //
@@ -670,6 +671,13 @@ func (r *Runner) sendRemoveZone() {
 	// Best-effort: send and read response with a short deadline to avoid
 	// blocking forever when the device closes the connection (e.g., last
 	// zone removed triggers commissioning mode).
+	if main.tlsConn != nil {
+		_ = main.tlsConn.SetWriteDeadline(time.Now().Add(removeZoneWriteTimeout))
+		defer main.tlsConn.SetWriteDeadline(time.Time{})
+	} else if main.conn != nil {
+		_ = main.conn.SetWriteDeadline(time.Now().Add(removeZoneWriteTimeout))
+		defer main.conn.SetWriteDeadline(time.Time{})
+	}
 	if err := main.framer.WriteFrame(data); err != nil {
 		return
 	}
@@ -697,6 +705,13 @@ func (r *Runner) sendRemoveZoneOnConn(conn *Connection, zoneID string) {
 		return
 	}
 
+	if conn.tlsConn != nil {
+		_ = conn.tlsConn.SetWriteDeadline(time.Now().Add(removeZoneWriteTimeout))
+		defer conn.tlsConn.SetWriteDeadline(time.Time{})
+	} else if conn.conn != nil {
+		_ = conn.conn.SetWriteDeadline(time.Now().Add(removeZoneWriteTimeout))
+		defer conn.conn.SetWriteDeadline(time.Time{})
+	}
 	if err := conn.framer.WriteFrame(data); err != nil {
 		return
 	}
@@ -805,11 +820,21 @@ func (r *Runner) sendRemoveZoneOnConnStrict(conn *Connection, zoneID string) err
 		return fmt.Errorf("remove zone encode: %w", err)
 	}
 
+	if conn.tlsConn != nil {
+		_ = conn.tlsConn.SetWriteDeadline(time.Now().Add(strictRemoveZoneAckTimeout))
+		defer conn.tlsConn.SetWriteDeadline(time.Time{})
+	} else if conn.conn != nil {
+		_ = conn.conn.SetWriteDeadline(time.Now().Add(strictRemoveZoneAckTimeout))
+		defer conn.conn.SetWriteDeadline(time.Time{})
+	}
 	if err := conn.framer.WriteFrame(data); err != nil {
 		return fmt.Errorf("%w: %v", errRemoveZoneSend, err)
 	}
 
-	if conn.conn != nil {
+	if conn.tlsConn != nil {
+		_ = conn.tlsConn.SetReadDeadline(time.Now().Add(strictRemoveZoneAckTimeout))
+		defer conn.tlsConn.SetReadDeadline(time.Time{})
+	} else if conn.conn != nil {
 		_ = conn.conn.SetReadDeadline(time.Now().Add(strictRemoveZoneAckTimeout))
 		defer conn.conn.SetReadDeadline(time.Time{})
 	}

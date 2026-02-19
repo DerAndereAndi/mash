@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/pkg/transport"
@@ -158,5 +159,41 @@ func TestRequestDeviceState_IgnoresOrphanedResponses(t *testing.T) {
 	}
 	if got, ok := snap["zone_count"]; !ok || got != uint64(1) {
 		t.Fatalf("expected zone_count=1 from matching response, got %v", snap["zone_count"])
+	}
+}
+
+func TestRequestDeviceState_DoesNotBlockOnWriteToUnresponsivePeer(t *testing.T) {
+	r := newTestRunner()
+	r.config.EnableKey = "deadbeefdeadbeefdeadbeefdeadbeef"
+
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+
+	r.pool.SetMain(&Connection{
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		_ = r.requestDeviceState(ctx, engine.NewExecutionState(context.Background()))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Expected: write should respect context deadline.
+	case <-time.After(2 * time.Second):
+		_ = server.Close() // Unblock writer for cleanup.
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+		t.Fatal("requestDeviceState blocked on write to unresponsive peer")
 	}
 }
