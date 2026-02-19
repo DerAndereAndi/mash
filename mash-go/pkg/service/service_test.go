@@ -859,6 +859,38 @@ func TestDeviceServiceOperationalAdvertisingOnZoneConnect(t *testing.T) {
 	}
 }
 
+func TestDeviceServiceOperationalAdvertising_UpdatesExistingZoneOnReconnect(t *testing.T) {
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService failed: %v", err)
+	}
+
+	zoneID := "a1b2c3d4e5f6a7b8"
+	certStore := createCertStoreWithOperationalCert(t, zoneID)
+	svc.SetCertStore(certStore)
+
+	advertiser := mocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(nil).Once()
+	advertiser.EXPECT().AdvertiseOperational(mock.Anything, mock.Anything).Return(discovery.ErrAlreadyExists).Once()
+	advertiser.EXPECT().UpdateOperational(zoneID, mock.Anything).Return(nil).Once()
+	advertiser.EXPECT().StopAll().Return().Maybe()
+	svc.SetAdvertiser(advertiser)
+
+	ctx := context.Background()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer func() { _ = svc.Stop() }()
+
+	// First connect starts operational advertising.
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
+	// Reconnect same zone should update existing advertising entry.
+	svc.HandleZoneConnect(zoneID, cert.ZoneTypeLocal)
+}
+
 func TestDeviceServiceOperationalAdvertisingPersistsOnDisconnect(t *testing.T) {
 	device := model.NewDevice("test-device", 0x1234, 0x5678)
 	config := validDeviceConfig()

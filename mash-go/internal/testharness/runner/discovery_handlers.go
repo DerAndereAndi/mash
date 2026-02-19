@@ -77,6 +77,7 @@ func (r *Runner) browseViaObserver(ctx context.Context, serviceType string, time
 func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
 	params := engine.InterpolateParams(step.Params, state)
 	ds := getDiscoveryState(state)
+	hints := buildBrowseSelectionHints(state)
 
 	// Track commissioning completion so buildBrowseOutput can filter
 	// commissionable services.
@@ -134,6 +135,29 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		return nil, err
 	}
 
+	// For operational browsing with a known target device ID (e.g. TC-COMM-003),
+	// don't return a stale observer snapshot early. Wait until at least one
+	// matching operational advertisement is visible, bounded by timeoutMs.
+	if !expectDeviceAbsent &&
+		resolveServiceType(serviceType) == discovery.ServiceTypeOperational &&
+		hints.deviceID != "" &&
+		!hasOperationalDeviceID(services, hints.deviceID) {
+		waited, waitErr := r.waitForOperationalDeviceID(ctx, serviceType, timeoutMs, hints.deviceID)
+		if waitErr == nil && len(waited) > 0 {
+			services = waited
+		}
+		if !hasOperationalDeviceID(services, hints.deviceID) {
+			freshTimeout := timeoutMs
+			if freshTimeout > 2000 {
+				freshTimeout = 2000
+			}
+			fresh, freshErr := r.browseFreshWindow(ctx, serviceType, freshTimeout)
+			if freshErr == nil && hasOperationalDeviceID(fresh, hints.deviceID) {
+				services = fresh
+			}
+		}
+	}
+
 	ds.services = services
 
 	// Filter by discriminator when requested.
@@ -150,7 +174,7 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 		}
 	}
 
-	outputs, err := r.buildBrowseOutput(ds)
+	outputs, err := r.buildBrowseOutput(ds, hints)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +202,35 @@ func (r *Runner) handleBrowseMDNS(ctx context.Context, step *loader.Step, state 
 	addWindowExpiryWarning(outputs, state)
 
 	return outputs, nil
+}
+
+func hasOperationalDeviceID(services []discoveredService, deviceID string) bool {
+	want := strings.ToLower(strings.TrimSpace(deviceID))
+	if want == "" {
+		return false
+	}
+	for _, svc := range services {
+		if svc.ServiceType != discovery.ServiceTypeOperational {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(svc.TXTRecords["DI"])) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runner) waitForOperationalDeviceID(ctx context.Context, serviceType string, timeoutMs int, deviceID string) ([]discoveredService, error) {
+	obs := r.getOrCreateObserver()
+	if obs == nil {
+		return nil, fmt.Errorf("failed to create mDNS observer")
+	}
+	browseCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+	defer cancel()
+
+	return obs.WaitFor(browseCtx, serviceType, func(svcs []discoveredService) bool {
+		return hasOperationalDeviceID(svcs, deviceID)
+	})
 }
 
 // browseViaObserverUntilAbsent waits up to timeoutMs for zero services of the
@@ -294,8 +347,93 @@ func (r *Runner) browseFreshWindow(ctx context.Context, serviceType string, time
 	}
 }
 
+type browseSelectionHints struct {
+	zoneID   string
+	deviceID string
+}
+
+func buildBrowseSelectionHints(state *engine.ExecutionState) browseSelectionHints {
+	hints := browseSelectionHints{}
+	if state == nil {
+		return hints
+	}
+
+	if v, ok := state.Get(StateCurrentZoneID); ok {
+		if zoneID, ok := v.(string); ok {
+			hints.zoneID = strings.ToLower(strings.TrimSpace(zoneID))
+		}
+	}
+
+	for _, key := range []string{"state_device_id", "cert_device_id", StateExtractedDeviceID} {
+		v, ok := state.Get(key)
+		if !ok {
+			continue
+		}
+		deviceID, ok := v.(string)
+		if !ok || strings.TrimSpace(deviceID) == "" {
+			continue
+		}
+		hints.deviceID = strings.ToLower(strings.TrimSpace(deviceID))
+		break
+	}
+
+	return hints
+}
+
+func preferredServiceIndex(services []discoveredService, hints browseSelectionHints) int {
+	if len(services) == 0 {
+		return -1
+	}
+	if hints.zoneID == "" && hints.deviceID == "" {
+		return 0
+	}
+
+	matchZoneAndDevice := func(svc discoveredService) bool {
+		zi := strings.ToLower(strings.TrimSpace(svc.TXTRecords["ZI"]))
+		di := strings.ToLower(strings.TrimSpace(svc.TXTRecords["DI"]))
+		if hints.zoneID != "" && zi != hints.zoneID {
+			return false
+		}
+		if hints.deviceID != "" && di != hints.deviceID {
+			return false
+		}
+		return true
+	}
+	matchDevice := func(svc discoveredService) bool {
+		if hints.deviceID == "" {
+			return false
+		}
+		di := strings.ToLower(strings.TrimSpace(svc.TXTRecords["DI"]))
+		return di == hints.deviceID
+	}
+	matchZone := func(svc discoveredService) bool {
+		if hints.zoneID == "" {
+			return false
+		}
+		zi := strings.ToLower(strings.TrimSpace(svc.TXTRecords["ZI"]))
+		return zi == hints.zoneID
+	}
+
+	for i, svc := range services {
+		if matchZoneAndDevice(svc) {
+			return i
+		}
+	}
+	for i, svc := range services {
+		if matchDevice(svc) {
+			return i
+		}
+	}
+	for i, svc := range services {
+		if matchZone(svc) {
+			return i
+		}
+	}
+	return 0
+}
+
 // buildBrowseOutput constructs the standard output map from discovery state.
-func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
+func (r *Runner) buildBrowseOutput(ds *discoveryState, hints browseSelectionHints) (map[string]any, error) {
 	// After commissioning completes, filter out commissionable services
 	// regardless of which code path populated ds.services (simulated or real).
 	if ds.commissioningCompleted {
@@ -308,19 +446,24 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		ds.services = filtered
 	}
 
+	selectedIdx := preferredServiceIndex(ds.services, hints)
+	if selectedIdx < 0 {
+		selectedIdx = 0
+	}
+
 	// Merge addresses injected by device-local actions (e.g. interface_up)
-	// into the first discovered service. This ensures that simulated network
+	// into the selected service. This ensures that simulated network
 	// changes are reflected in browse results regardless of whether services
 	// came from simulation or real mDNS.
 	hasInjectedAddresses := false
 	if len(ds.injectedAddresses) > 0 && len(ds.services) > 0 {
-		existing := make(map[string]bool, len(ds.services[0].Addresses))
-		for _, addr := range ds.services[0].Addresses {
+		existing := make(map[string]bool, len(ds.services[selectedIdx].Addresses))
+		for _, addr := range ds.services[selectedIdx].Addresses {
 			existing[addr] = true
 		}
 		for _, addr := range ds.injectedAddresses {
 			if !existing[addr] {
-				ds.services[0].Addresses = append(ds.services[0].Addresses, addr)
+				ds.services[selectedIdx].Addresses = append(ds.services[selectedIdx].Addresses, addr)
 				hasInjectedAddresses = true
 			}
 		}
@@ -352,11 +495,11 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		}
 	}
 
-	// Count IPv6 (AAAA) addresses for the first service only.
+	// Count IPv6 (AAAA) addresses for the selected service only.
 	// Previously this counted across ALL services, inflating the count.
 	aaaaCount := 0
 	if len(ds.services) > 0 {
-		for _, addr := range ds.services[0].Addresses {
+		for _, addr := range ds.services[selectedIdx].Addresses {
 			if strings.Contains(addr, ":") {
 				aaaaCount++
 			}
@@ -453,42 +596,42 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 		KeyRecordsUnchanged:         recordsUnchanged,
 	}
 
-	// Add first-service details for easy assertion.
+	// Add selected-service details for easy assertion.
 	if len(ds.services) > 0 {
-		first := ds.services[0]
-		outputs[KeyInstanceName] = first.InstanceName
-		outputs["service_has_txt_records"] = len(first.TXTRecords) > 0
+		selected := ds.services[selectedIdx]
+		outputs[KeyInstanceName] = selected.InstanceName
+		outputs["service_has_txt_records"] = len(selected.TXTRecords) > 0
 
 		// SRV record fields.
-		outputs["srv_port"] = int(first.Port)
-		outputs["srv_port_present"] = first.Port > 0
-		outputs[KeySRVHostnameValid] = first.Host != ""
+		outputs["srv_port"] = int(selected.Port)
+		outputs["srv_port_present"] = selected.Port > 0
+		outputs[KeySRVHostnameValid] = selected.Host != ""
 
 		// Add all TXT record fields.
-		for k, v := range first.TXTRecords {
+		for k, v := range selected.TXTRecords {
 			outputs["txt_field_"+k] = v
 		}
 
 		// TXT record length fields.
-		if zi, ok := first.TXTRecords["ZI"]; ok {
+		if zi, ok := selected.TXTRecords["ZI"]; ok {
 			outputs["txt_ZI_length"] = len(zi)
 		}
-		if di, ok := first.TXTRecords["DI"]; ok {
+		if di, ok := selected.TXTRecords["DI"]; ok {
 			outputs["txt_DI_length"] = len(di)
 		}
 
 		// Add service-type-specific derived fields.
-		switch first.ServiceType {
+		switch selected.ServiceType {
 		case discovery.ServiceTypeCommissionable:
 			// Discriminator fields.
-			outputs["txt_field_D"] = fmt.Sprintf("%d", first.Discriminator)
-			if first.Discriminator <= discovery.MaxDiscriminator {
+			outputs["txt_field_D"] = fmt.Sprintf("%d", selected.Discriminator)
+			if selected.Discriminator <= discovery.MaxDiscriminator {
 				outputs[KeyTXTDRange] = "0-4095"
 			} else {
-				outputs[KeyTXTDRange] = fmt.Sprintf("out-of-range(%d)", first.Discriminator)
+				outputs[KeyTXTDRange] = fmt.Sprintf("out-of-range(%d)", selected.Discriminator)
 			}
 			// Instance name format.
-			if strings.HasPrefix(first.InstanceName, "MASH-") {
+			if strings.HasPrefix(selected.InstanceName, "MASH-") {
 				outputs[KeyInstanceNamePrefix] = "MASH-"
 			} else {
 				outputs[KeyInstanceNamePrefix] = ""
@@ -496,23 +639,23 @@ func (r *Runner) buildBrowseOutput(ds *discoveryState) (map[string]any, error) {
 
 		case discovery.ServiceTypeOperational:
 			// Zone/device ID fields from TXT records.
-			zi := first.TXTRecords["ZI"]
-			di := first.TXTRecords["DI"]
+			zi := selected.TXTRecords["ZI"]
+			di := selected.TXTRecords["DI"]
 			outputs[KeyZoneIDLengthDisc] = len(zi)
 			outputs[KeyDeviceIDLength] = len(di)
 			outputs[KeyZoneIDHexValid] = isValidHex(zi)
 			outputs[KeyDeviceIDHexValid] = isValidHex(di)
 			outputs[KeyDeviceID] = di
 			// Instance name format: <zone-id>-<device-id>.
-			if strings.Contains(first.InstanceName, "-") {
+			if strings.Contains(selected.InstanceName, "-") {
 				outputs[KeyInstanceNameFormat] = "<zone-id>-<device-id>"
 			} else {
-				outputs[KeyInstanceNameFormat] = first.InstanceName
+				outputs[KeyInstanceNameFormat] = selected.InstanceName
 			}
 
 		case discovery.ServiceTypeCommissioner:
 			// Commissioner-specific fields.
-			zi := first.TXTRecords["ZI"]
+			zi := selected.TXTRecords["ZI"]
 			outputs[KeyTXTZILength] = len(zi)
 		}
 	}

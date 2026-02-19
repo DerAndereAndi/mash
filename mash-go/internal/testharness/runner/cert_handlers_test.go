@@ -534,14 +534,43 @@ func TestHandleExtractCertDeviceID_ZoneAware(t *testing.T) {
 	if out["device_id"] != "dev222" {
 		t.Errorf("expected dev222 from zone 2, got %v", out["device_id"])
 	}
+	if got, _ := state.Get(StateDeviceID); got != "dev222" {
+		t.Errorf("expected StateDeviceID refreshed to dev222, got %v", got)
+	}
 
-	// Without zone_id, falls back to r.conn (zone 2).
+	// Without zone_id, prefers current_zone_id when available.
+	state.Set(StateCurrentZoneID, "z1")
 	out, err = r.handleExtractCertDeviceID(context.Background(), &loader.Step{}, state)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out["device_id"] != "dev222" {
-		t.Errorf("expected dev222 from r.conn fallback, got %v", out["device_id"])
+	if out["device_id"] != "dev111" {
+		t.Errorf("expected dev111 from current_zone_id, got %v", out["device_id"])
+	}
+
+	// If current zone is the suite zone and not tracked in pool, fallback to
+	// suite.Conn() must still resolve the cert device ID.
+	r.pool.UntrackZone("step-z1")
+	suiteIssued := conn1.tlsConn.ConnectionState().PeerCertificates[0]
+	r.suite.Record("z1", CryptoState{IssuedDeviceCert: suiteIssued})
+	r.suite.SetConn(conn1)
+	out, err = r.handleExtractCertDeviceID(context.Background(), &loader.Step{}, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["device_id"] != "dev111" {
+		t.Errorf("expected dev111 via suite connection fallback, got %v", out["device_id"])
+	}
+
+	// Without explicit zone_id, suite connection must take precedence over
+	// stale current_zone_id values.
+	state.Set(StateCurrentZoneID, "z2")
+	out, err = r.handleExtractCertDeviceID(context.Background(), &loader.Step{}, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["device_id"] != "dev111" {
+		t.Errorf("expected dev111 from suite-preferred source, got %v", out["device_id"])
 	}
 }
 

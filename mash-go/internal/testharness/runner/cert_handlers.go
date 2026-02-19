@@ -231,11 +231,59 @@ func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Ste
 	notFound := map[string]any{KeyDeviceID: "", KeyExtracted: false}
 
 	conn := r.pool.Main()
-	if zoneID, ok := params[KeyZoneID].(string); ok && zoneID != "" {
+	zoneID, _ := params[KeyZoneID].(string)
+	if zoneID != "" {
 		conn = r.findZoneConn(zoneID)
+		if conn == nil && r.suite.ZoneID() == zoneID {
+			conn = r.suite.Conn()
+		}
 		if conn == nil {
 			r.debugf("extract_cert_device_id: no connection found for zone %s", zoneID)
 			return notFound, nil
+		}
+	} else {
+		if r.suite.ZoneID() != "" {
+			if issued := r.suite.Crypto().IssuedDeviceCert; issued != nil {
+				did := issued.Subject.CommonName
+				if idx := strings.LastIndex(did, "-"); idx >= 0 {
+					did = did[idx+1:]
+				}
+				if did != "" {
+					state.Set(StateExtractedDeviceID, did)
+					state.Set(StateDeviceID, did)
+					return map[string]any{
+						KeyDeviceID:  did,
+						KeyExtracted: true,
+					}, nil
+				}
+			}
+		}
+
+		conn = nil
+		// No explicit zone parameter: use the suite control channel as the
+		// authoritative test-session source of identity.
+		if r.suite.ZoneID() != "" {
+			sc := r.suite.Conn()
+			if sc == nil || !sc.isConnected() || sc.tlsConn == nil {
+				_ = r.reconnectToZone(state)
+				sc = r.suite.Conn()
+			}
+			if sc != nil && sc.isConnected() && sc.tlsConn != nil {
+				conn = sc
+			}
+		}
+		if conn == nil && state != nil {
+			// Fallback for non-suite scenarios (simulation/legacy tests).
+			if z, ok := state.Get(StateCurrentZoneID); ok {
+				if zs, ok := z.(string); ok && zs != "" {
+					if byZone := r.findZoneConn(zs); byZone != nil {
+						conn = byZone
+					}
+				}
+			}
+		}
+		if conn == nil {
+			conn = r.pool.Main()
 		}
 	}
 
@@ -258,6 +306,9 @@ func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Ste
 	}
 
 	state.Set(StateExtractedDeviceID, deviceID)
+	// Keep cached device state aligned with cert-derived identity used by
+	// subsequent query_device_state checks in commissioning consistency tests.
+	state.Set(StateDeviceID, deviceID)
 
 	return map[string]any{
 		KeyDeviceID:  deviceID,

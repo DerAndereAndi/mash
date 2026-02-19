@@ -1972,8 +1972,15 @@ func (s *DeviceService) handleZoneConnectInternal(zoneID string, zoneType cert.Z
 	// operations can take >1s on macOS and would block new connections.
 	if dm != nil && opInfo != nil {
 		if err := dm.AddZone(ctx, opInfo); err != nil {
-			s.debugLog("HandleZoneConnect: failed to start operational advertising",
-				"zoneID", zoneID, "error", err)
+			if errors.Is(err, discovery.ErrAlreadyExists) {
+				if updateErr := dm.UpdateZone(opInfo); updateErr != nil {
+					s.debugLog("HandleZoneConnect: failed to update operational advertising",
+						"zoneID", zoneID, "error", updateErr)
+				}
+			} else {
+				s.debugLog("HandleZoneConnect: failed to start operational advertising",
+					"zoneID", zoneID, "error", err)
+			}
 		}
 	}
 

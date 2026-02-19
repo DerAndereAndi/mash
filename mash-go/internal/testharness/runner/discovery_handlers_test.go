@@ -539,7 +539,7 @@ func TestBrowseMDNS_InjectedAddresses_NoBaseline(t *testing.T) {
 	ds.injectedAddresses = []string{"fd34:5678:abcd::1"}
 
 	// buildBrowseOutput should detect the injection even without previousAddresses.
-	out, err := r.buildBrowseOutput(ds)
+	out, err := r.buildBrowseOutput(ds, browseSelectionHints{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -589,7 +589,7 @@ func TestBrowseMDNS_InterfaceUpThenBrowse(t *testing.T) {
 	}
 
 	// Call buildBrowseOutput (simulates what browse_mdns does).
-	out, err := r.buildBrowseOutput(ds)
+	out, err := r.buildBrowseOutput(ds, browseSelectionHints{})
 	if err != nil {
 		t.Fatalf("buildBrowseOutput: %v", err)
 	}
@@ -601,6 +601,54 @@ func TestBrowseMDNS_InterfaceUpThenBrowse(t *testing.T) {
 	// Verify the injected address was merged.
 	if len(ds.services[0].Addresses) != 2 {
 		t.Errorf("expected 2 addresses, got %d: %v", len(ds.services[0].Addresses), ds.services[0].Addresses)
+	}
+}
+
+func TestBuildBrowseOutput_OperationalPrefersStateAlignedService(t *testing.T) {
+	r := newTestRunner()
+	ds := &discoveryState{
+		services: []discoveredService{
+			{
+				InstanceName: "zone-a-stale-di",
+				ServiceType:  discovery.ServiceTypeOperational,
+				Host:         "stale.local",
+				Port:         8443,
+				Addresses:    []string{"fd00::1"},
+				TXTRecords: map[string]string{
+					"ZI": "zone-a",
+					"DI": "stale1111",
+				},
+			},
+			{
+				InstanceName: "zone-a-fresh-di",
+				ServiceType:  discovery.ServiceTypeOperational,
+				Host:         "fresh.local",
+				Port:         8443,
+				Addresses:    []string{"fd00::2"},
+				TXTRecords: map[string]string{
+					"ZI": "zone-a",
+					"DI": "fresh2222",
+				},
+			},
+		},
+	}
+
+	out, err := r.buildBrowseOutput(ds, browseSelectionHints{
+		zoneID:   "zone-a",
+		deviceID: "fresh2222",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := out[KeyDeviceID]; got != "fresh2222" {
+		t.Fatalf("expected selected device_id fresh2222, got %v", got)
+	}
+	if got := out[KeyInstanceName]; got != "zone-a-fresh-di" {
+		t.Fatalf("expected selected instance zone-a-fresh-di, got %v", got)
+	}
+	if got := out["txt_field_DI"]; got != "fresh2222" {
+		t.Fatalf("expected selected txt_field_DI fresh2222, got %v", got)
 	}
 }
 
@@ -768,6 +816,57 @@ func TestHandleBrowseMDNS_WaitsForExpectedInstancesForDevice(t *testing.T) {
 	}
 }
 
+func TestHandleBrowseMDNS_OperationalWaitsForStateDeviceID(t *testing.T) {
+	r := newTestRunner()
+	tb := newTestBrowser()
+	r.observer = newMDNSObserver(tb, r.debugf)
+	defer r.observer.Stop()
+	state := newTestState()
+	state.Set("state_device_id", "fresh2222")
+	state.Set(StateCurrentZoneID, "zone-a")
+
+	step := &loader.Step{
+		Action: ActionBrowseMDNS,
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasOperational,
+			KeyTimeoutMs:   float64(2000),
+		},
+	}
+
+	// Stale entry first; fresh matching DI appears shortly after.
+	go func() {
+		tb.opAdded <- &discovery.OperationalService{
+			InstanceName: "zone-a-stale1111",
+			ZoneID:       "zone-a",
+			DeviceID:     "stale1111",
+			Host:         "host.local",
+			Port:         8443,
+			Addresses:    []string{"fd00::1"},
+		}
+		time.Sleep(100 * time.Millisecond)
+		tb.opAdded <- &discovery.OperationalService{
+			InstanceName: "zone-a-fresh2222",
+			ZoneID:       "zone-a",
+			DeviceID:     "fresh2222",
+			Host:         "host.local",
+			Port:         8443,
+			Addresses:    []string{"fd00::2"},
+		}
+	}()
+
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("handleBrowseMDNS: %v", err)
+	}
+
+	if got := out[KeyDeviceID]; got != "fresh2222" {
+		t.Fatalf("expected device_id=fresh2222, got %v", got)
+	}
+	if got := out[KeyInstanceName]; got != "zone-a-fresh2222" {
+		t.Fatalf("expected instance zone-a-fresh2222, got %v", got)
+	}
+}
+
 // TestHandleBrowseMDNS_ExpectDeviceAbsent_WaitsForRemoval verifies that when a
 // step expects device_found=false, handler waits for removal updates instead of
 // returning immediately from a stale positive snapshot.
@@ -904,7 +1003,9 @@ func TestHandleBrowseMDNS_ExpectDeviceAbsent_StaleObserverSnapshotRecovered(t *t
 
 type freshWindowBrowser struct {
 	commissionableByCall map[int][]*discovery.CommissionableService
+	operationalByCall    map[int][]*discovery.OperationalService
 	commCalls            int
+	opCalls              int
 }
 
 func (b *freshWindowBrowser) BrowseCommissionable(_ context.Context) (added, removed <-chan *discovery.CommissionableService, err error) {
@@ -920,7 +1021,11 @@ func (b *freshWindowBrowser) BrowseCommissionable(_ context.Context) (added, rem
 }
 
 func (b *freshWindowBrowser) BrowseOperational(context.Context, string) (<-chan *discovery.OperationalService, error) {
-	ch := make(chan *discovery.OperationalService)
+	b.opCalls++
+	ch := make(chan *discovery.OperationalService, 4)
+	for _, svc := range b.operationalByCall[b.opCalls] {
+		ch <- svc
+	}
 	close(ch)
 	return ch, nil
 }
@@ -944,3 +1049,56 @@ func (b *freshWindowBrowser) FindAllByDiscriminator(context.Context, uint16) ([]
 }
 
 func (b *freshWindowBrowser) Stop() {}
+
+func TestHandleBrowseMDNS_OperationalMismatch_UsesFreshWindowRecovery(t *testing.T) {
+	r := newTestRunner()
+	fb := &freshWindowBrowser{
+		// Call #1 is the observer session startup (no events).
+		operationalByCall: map[int][]*discovery.OperationalService{
+			2: {
+				{
+					InstanceName: "zone-a-fresh2222",
+					ZoneID:       "zone-a",
+					DeviceID:     "fresh2222",
+					Host:         "host.local",
+					Port:         8443,
+					Addresses:    []string{"fd00::2"},
+				},
+			},
+		},
+	}
+	r.observer = newMDNSObserver(fb, r.debugf)
+	defer r.observer.Stop()
+	state := newTestState()
+	state.Set("state_device_id", "fresh2222")
+	state.Set(StateCurrentZoneID, "zone-a")
+
+	// Seed stale operational snapshot entry that does NOT match state device ID.
+	r.observer.addService(discoveredService{
+		InstanceName: "zone-a-stale1111",
+		ServiceType:  discovery.ServiceTypeOperational,
+		Host:         "host.local",
+		Port:         8443,
+		Addresses:    []string{"fd00::1"},
+		TXTRecords: map[string]string{
+			"ZI": "zone-a",
+			"DI": "stale1111",
+		},
+	})
+
+	step := &loader.Step{
+		Action: ActionBrowseMDNS,
+		Params: map[string]any{
+			KeyServiceType: ServiceAliasOperational,
+			KeyTimeoutMs:   float64(150),
+		},
+	}
+
+	out, err := r.handleBrowseMDNS(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("handleBrowseMDNS: %v", err)
+	}
+	if got := out[KeyDeviceID]; got != "fresh2222" {
+		t.Fatalf("expected fresh recovered DI, got %v", got)
+	}
+}
