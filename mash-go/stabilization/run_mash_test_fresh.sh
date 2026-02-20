@@ -24,12 +24,15 @@ MASH_SETUP_CODE="${MASH_SETUP_CODE:-20220211}"
 MASH_DISCRIMINATOR="${MASH_DISCRIMINATOR:-1234}"
 MASH_ENABLE_KEY="${MASH_ENABLE_KEY:-deadbeefdeadbeefdeadbeefdeadbeef}"
 MASH_DEVICE_LOG_LEVEL="${MASH_DEVICE_LOG_LEVEL:-debug}"
+MASH_SINGLE_OWNER="${MASH_SINGLE_OWNER:-1}"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 STATE_DIR="${MASH_STATE_DIR:-/tmp/mash-device-state-${STAMP}-fresh}"
 LOG_DIR="${MASH_LOG_DIR:-$ROOT_DIR/stabilization/phase1-runs}"
 mkdir -p "$LOG_DIR"
 DEVICE_LOG="${MASH_DEVICE_LOG:-$LOG_DIR/device-${STAMP}.log}"
+LOCK_DIR="/tmp/mash-fresh-wrapper-${MASH_DEVICE_PORT}.lock"
+LOCK_PID_FILE="$LOCK_DIR/pid"
 
 cleanup() {
   if [[ -n "${DEVICE_PID:-}" ]]; then
@@ -39,8 +42,53 @@ cleanup() {
   if [[ -n "${DEVICE_BIN:-}" ]]; then
     rm -f "$DEVICE_BIN" >/dev/null 2>&1 || true
   fi
+  if [[ "${LOCK_HELD:-0}" == "1" && -d "$LOCK_DIR" ]]; then
+    rm -rf "$LOCK_DIR" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
+
+acquire_lock() {
+  if [[ "$MASH_SINGLE_OWNER" != "1" ]]; then
+    return 0
+  fi
+
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    LOCK_HELD=1
+    echo "$$" > "$LOCK_PID_FILE"
+    return 0
+  fi
+
+  # Stale lock recovery.
+  if [[ -f "$LOCK_PID_FILE" ]]; then
+    lock_pid="$(cat "$LOCK_PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+      rm -rf "$LOCK_DIR" >/dev/null 2>&1 || true
+      if mkdir "$LOCK_DIR" 2>/dev/null; then
+        LOCK_HELD=1
+        echo "$$" > "$LOCK_PID_FILE"
+        return 0
+      fi
+    fi
+  fi
+
+  echo "error: another run_mash_test_fresh owner is active for port $MASH_DEVICE_PORT" >&2
+  if [[ -f "$LOCK_PID_FILE" ]]; then
+    echo "lock pid: $(cat "$LOCK_PID_FILE" 2>/dev/null || echo unknown)" >&2
+  fi
+  exit 1
+}
+
+acquire_lock
+
+# Single-owner preflight: reject concurrent mash-test processes before startup.
+if [[ "$MASH_SINGLE_OWNER" == "1" ]]; then
+  if pgrep -f "cmd/mash-test|/mash-test" >/dev/null 2>&1; then
+    echo "error: mash-test process already running; aborting to avoid shared-state interference" >&2
+    pgrep -fal "cmd/mash-test|/mash-test" >&2 || true
+    exit 1
+  fi
+fi
 
 # Ensure the target port is not already occupied by a stale process.
 if lsof -nP -iTCP:"$MASH_DEVICE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then

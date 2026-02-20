@@ -308,6 +308,24 @@ func TestCoordBackward_RemoveZoneWhenNoSuiteZone(t *testing.T) {
 	assert.True(t, removeZoneCalled, "SendRemoveZone called when no suite zone")
 }
 
+func TestCoordBackward_SkipsRemoveZoneWhenNoLiveConnection(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	o.EXPECT().PASEState().Return(completedPASE())
+	p.EXPECT().Main().Return(&Connection{state: ConnDisconnected}).Maybe()
+	s.EXPECT().ZoneID().Return("")
+
+	disconnected := false
+	o.EXPECT().EnsureDisconnected().Run(func() {
+		disconnected = true
+	}).Return()
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(),
+		tcWith("TC", cond(PrecondDeviceInCommissioningMode, true)), st()))
+	assert.True(t, disconnected, "EnsureDisconnected called")
+	o.AssertNotCalled(t, "SendRemoveZone")
+}
+
 func TestCoordBackward_DisconnectWhenNoSuiteZone(t *testing.T) {
 	c, s, p, o := newCoord(t, nil)
 	o.EXPECT().PASEState().Return(completedPASE())

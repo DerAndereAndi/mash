@@ -296,8 +296,15 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 				c.pool.SetMain(&Connection{})
 				c.ops.SetPASEState(nil)
 			} else {
-				c.debugf("backward transition: sending RemoveZone (current=%d -> needed=%d)", current, needed)
-				c.ops.SendRemoveZone()
+				// Strict lifecycle: avoid raising a synthetic "no live connection"
+				// error when the main socket is already gone. The disconnect path
+				// below will reset state deterministically.
+				if m := c.pool.Main(); m != nil && m.isConnected() && c.ops.PASEState().Completed() {
+					c.debugf("backward transition: sending RemoveZone (current=%d -> needed=%d)", current, needed)
+					c.ops.SendRemoveZone()
+				} else {
+					c.debugf("backward transition: skipping RemoveZone (no live commissioned connection)")
+				}
 			}
 		}
 
