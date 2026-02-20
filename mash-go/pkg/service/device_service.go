@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -411,16 +412,26 @@ func (s *DeviceService) buildOperationalTLSConfig() {
 	// signature algorithm. Putting the newest cert first ensures fresh
 	// commissions present the correct cert to the reconnecting controller.
 	var certs []tls.Certificate
+	deviceCertByID := make(map[string]*tls.Certificate)
+	addCert := func(tc tls.Certificate) {
+		certs = append(certs, tc)
+		if deviceID, ok := tlsCertDeviceID(tc); ok {
+			certCopy := tc
+			deviceCertByID[deviceID] = &certCopy
+			deviceCertByID[strings.ToLower(deviceID)] = &certCopy
+		}
+	}
+
 	hasTLSCert := len(s.tlsCert.Certificate) > 0
 	if hasTLSCert {
-		certs = append(certs, s.tlsCert) // newest cert first
+		addCert(s.tlsCert) // newest cert first
 	}
 	if s.certStore != nil {
 		for _, zoneID := range s.certStore.ListZones() {
 			if opCert, err := s.certStore.GetOperationalCert(zoneID); err == nil {
 				tc := opCert.TLSCertificate()
 				if !hasTLSCert || !sameTLSCert(tc, s.tlsCert) {
-					certs = append(certs, tc)
+					addCert(tc)
 				}
 			}
 		}
@@ -433,6 +444,20 @@ func (s *DeviceService) buildOperationalTLSConfig() {
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		ClientCAs:    caPool,
 		NextProtos:   []string{transport.ALPNProtocol},
+		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			if hello != nil && hello.ServerName != "" {
+				if certByID, ok := deviceCertByID[hello.ServerName]; ok {
+					return certByID, nil
+				}
+				if certByID, ok := deviceCertByID[strings.ToLower(hello.ServerName)]; ok {
+					return certByID, nil
+				}
+			}
+			if len(certs) == 0 {
+				return nil, fmt.Errorf("no operational certificate configured")
+			}
+			return &certs[0], nil
+		},
 		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			if len(rawCerts) == 0 {
 				return fmt.Errorf("no peer certificate")
@@ -469,6 +494,17 @@ func sameTLSCert(a, b tls.Certificate) bool {
 		return false
 	}
 	return bytes.Equal(a.Certificate[0], b.Certificate[0])
+}
+
+func tlsCertDeviceID(c tls.Certificate) (string, bool) {
+	if len(c.Certificate) == 0 {
+		return "", false
+	}
+	leaf, err := x509.ParseCertificate(c.Certificate[0])
+	if err != nil || leaf.Subject.CommonName == "" {
+		return "", false
+	}
+	return leaf.Subject.CommonName, true
 }
 
 // refreshTLSCert updates s.tlsCert to a remaining zone's operational cert.

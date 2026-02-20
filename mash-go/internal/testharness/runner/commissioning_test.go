@@ -202,27 +202,38 @@ func TestIsSuiteZoneCommission_NoSuiteZone(t *testing.T) {
 }
 
 func TestIsSuiteZoneCommission_SuiteZoneAlive(t *testing.T) {
-	// When the suite zone connection is alive, a new commission is for a
-	// secondary zone (GRID/LOCAL), not the suite zone itself.
+	// Suite zone can only be considered a suite re-commission when the
+	// current PASE session maps to the same zone ID.
 	r := newTestRunner()
 	r.suite.Record("suite-123", CryptoState{})
+	r.connMgr.SetPASEState(&PASEState{
+		completed:  true,
+		sessionKey: []byte("other-zone"),
+	})
 	suiteConn := &Connection{state: ConnOperational}
 	r.suite.SetConn(suiteConn)
 
 	if r.isSuiteZoneCommission() {
-		t.Error("expected false when suite zone connection is alive")
+		t.Error("expected false when PASE zone does not match suite zone")
 	}
 }
 
 func TestIsSuiteZoneCommission_SuiteZoneDead(t *testing.T) {
-	// When the suite zone connection is dead, a new commission replaces it.
+	// A suite re-commission is detected by zone ID equality, independent of
+	// connection liveness.
 	r := newTestRunner()
-	r.suite.Record("suite-123", CryptoState{})
+	key := []byte("suite-zone-key")
+	zoneID := deriveZoneIDFromSecret(key)
+	r.suite.Record(zoneID, CryptoState{})
+	r.connMgr.SetPASEState(&PASEState{
+		completed:  true,
+		sessionKey: key,
+	})
 	suiteConn := &Connection{state: ConnDisconnected}
 	r.suite.SetConn(suiteConn)
 
 	if !r.isSuiteZoneCommission() {
-		t.Error("expected true when suite zone connection is dead")
+		t.Error("expected true when PASE zone matches suite zone")
 	}
 }
 
@@ -258,12 +269,40 @@ func TestStrictCleanup_ZoneCountUnavailableWithHealthyProbeIsNonFatal(t *testing
 }
 
 func TestIsSuiteZoneCommission_SuiteConnNil(t *testing.T) {
-	// When suite.Conn() is nil, a new commission replaces it.
+	// Connection liveness is not used for suite-zone detection.
 	r := newTestRunner()
 	r.suite.Record("suite-123", CryptoState{})
+	r.connMgr.SetPASEState(&PASEState{
+		completed:  true,
+		sessionKey: []byte("other-zone"),
+	})
 
+	if r.isSuiteZoneCommission() {
+		t.Error("expected false when PASE zone does not match suite zone")
+	}
+}
+
+func TestIsSuiteZoneCommission_TrueOnlyWhenZoneMatchesSuite(t *testing.T) {
+	r := newTestRunner()
+	suiteKey := []byte("suite-zone-key")
+	suiteZoneID := deriveZoneIDFromSecret(suiteKey)
+	r.suite.Record(suiteZoneID, CryptoState{})
+
+	otherKey := []byte("other-zone-key")
+	r.connMgr.SetPASEState(&PASEState{
+		completed:  true,
+		sessionKey: otherKey,
+	})
+	if r.isSuiteZoneCommission() {
+		t.Fatal("expected false for different zone IDs")
+	}
+
+	r.connMgr.SetPASEState(&PASEState{
+		completed:  true,
+		sessionKey: suiteKey,
+	})
 	if !r.isSuiteZoneCommission() {
-		t.Error("expected true when suite conn is nil")
+		t.Fatal("expected true for matching zone IDs")
 	}
 }
 

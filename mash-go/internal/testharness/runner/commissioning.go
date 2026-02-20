@@ -238,10 +238,11 @@ func (r *Runner) isSuiteZoneCommission() bool {
 	if r.suite.ZoneID() == "" {
 		return false
 	}
-	if r.suite.Conn() != nil && r.suite.Conn().isConnected() {
+	ps := r.connMgr.PASEState()
+	if ps == nil || len(ps.sessionKey) == 0 {
 		return false
 	}
-	return true
+	return deriveZoneIDFromSecret(ps.sessionKey) == r.suite.ZoneID()
 }
 
 // reconnectMainFromSuite rebuilds pool.Main() as an operational connection

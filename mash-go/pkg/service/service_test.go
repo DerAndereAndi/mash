@@ -1642,6 +1642,66 @@ func TestBuildOperationalTLSConfig_NewestCertFirst(t *testing.T) {
 	}
 }
 
+func TestBuildOperationalTLSConfig_SelectsCertByServerName(t *testing.T) {
+	device := model.NewDevice("test-sni", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService: %v", err)
+	}
+
+	store := cert.NewMemoryStore()
+
+	zone1CA, _ := cert.GenerateZoneCA("zone-1", cert.ZoneTypeLocal)
+	kp1, _ := cert.GenerateKeyPair()
+	csr1, _ := cert.CreateCSR(kp1, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "dev-1111", VendorID: 1, ProductID: 1},
+		ZoneID:   "zone-1",
+	})
+	cert1, _ := cert.SignCSR(zone1CA, csr1)
+	opCert1 := &cert.OperationalCert{Certificate: cert1, PrivateKey: kp1.PrivateKey, ZoneID: "zone-1"}
+	_ = store.SetOperationalCert(opCert1)
+	_ = store.SetZoneCACert("zone-1", zone1CA.Certificate)
+
+	zone2CA, _ := cert.GenerateZoneCA("zone-2", cert.ZoneTypeGrid)
+	kp2, _ := cert.GenerateKeyPair()
+	csr2, _ := cert.CreateCSR(kp2, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: "dev-2222", VendorID: 1, ProductID: 1},
+		ZoneID:   "zone-2",
+	})
+	cert2, _ := cert.SignCSR(zone2CA, csr2)
+	opCert2 := &cert.OperationalCert{Certificate: cert2, PrivateKey: kp2.PrivateKey, ZoneID: "zone-2"}
+	_ = store.SetOperationalCert(opCert2)
+	_ = store.SetZoneCACert("zone-2", zone2CA.Certificate)
+
+	svc.SetCertStore(store)
+	svc.tlsCert = opCert2.TLSCertificate()
+	svc.buildOperationalTLSConfig()
+
+	tlsCfg := svc.operationalTLSConfig
+	if tlsCfg == nil {
+		t.Fatal("operationalTLSConfig is nil")
+	}
+	if tlsCfg.GetCertificate == nil {
+		t.Fatal("expected GetCertificate callback for SNI cert routing, got nil")
+	}
+
+	selected, err := tlsCfg.GetCertificate(&tls.ClientHelloInfo{ServerName: "dev-1111"})
+	if err != nil {
+		t.Fatalf("GetCertificate(dev-1111) failed: %v", err)
+	}
+	if selected == nil || len(selected.Certificate) == 0 {
+		t.Fatal("GetCertificate(dev-1111) returned empty certificate")
+	}
+	leaf, err := x509.ParseCertificate(selected.Certificate[0])
+	if err != nil {
+		t.Fatalf("parse selected cert: %v", err)
+	}
+	if leaf.Subject.CommonName != "dev-1111" {
+		t.Fatalf("selected cert CN = %q, want %q", leaf.Subject.CommonName, "dev-1111")
+	}
+}
+
 // ===========================================================================
 // Issue 2: TLS config must not be updated before zone validation
 // ===========================================================================
