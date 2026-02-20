@@ -232,12 +232,19 @@ func isOperationalZoneID(zoneID string) bool {
 }
 
 func (r *Runner) getZoneConnection(state *engine.ExecutionState, params map[string]any) (*Connection, string, error) {
-	zoneID := resolveZoneParam(params)
+	requestedZoneID := resolveZoneParam(params)
+	zoneID := resolveOperationalZoneID(requestedZoneID, state)
 	ct := getConnectionTracker(state)
 
 	conn, ok := ct.zoneConnections[zoneID]
+	if (!ok || !conn.isConnected()) && zoneID != requestedZoneID {
+		conn, ok = ct.zoneConnections[requestedZoneID]
+		if ok && conn.isConnected() {
+			zoneID = requestedZoneID
+		}
+	}
 	if !ok || !conn.isConnected() {
-		return nil, zoneID, fmt.Errorf("no active connection for zone %s", zoneID)
+		return nil, requestedZoneID, fmt.Errorf("no active connection for zone %s", requestedZoneID)
 	}
 	if conn.framer == nil {
 		return nil, zoneID, fmt.Errorf("connection for zone %s has no framer (dummy connection cannot perform I/O)", zoneID)
@@ -249,14 +256,21 @@ func (r *Runner) getZoneConnection(state *engine.ExecutionState, params map[stri
 // exists and is connected but has no framer (dummy). Returns nil if the
 // connection is real or doesn't exist.
 func (r *Runner) isDummyZoneConnection(state *engine.ExecutionState, params map[string]any) (*Connection, string) {
-	zoneID := resolveZoneParam(params)
+	requestedZoneID := resolveZoneParam(params)
+	zoneID := resolveOperationalZoneID(requestedZoneID, state)
 	ct := getConnectionTracker(state)
 
 	conn, ok := ct.zoneConnections[zoneID]
+	if (!ok || !conn.isConnected()) && zoneID != requestedZoneID {
+		conn, ok = ct.zoneConnections[requestedZoneID]
+		if ok && conn.isConnected() {
+			zoneID = requestedZoneID
+		}
+	}
 	if ok && conn.isConnected() && conn.framer == nil {
 		return conn, zoneID
 	}
-	return nil, zoneID
+	return nil, requestedZoneID
 }
 
 // handleReadAsZone reads using a zone-scoped connection.

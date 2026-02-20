@@ -443,3 +443,20 @@ func TestHandleVerifyZoneCA_FallbackToMostRecent(t *testing.T) {
 		t.Errorf("expected basic_constraints_ca=true, got %v", out[KeyBasicConstraintsCA])
 	}
 }
+
+func TestVisibleZoneCount_SubtractsSuiteWhenSuiteConnDisconnected(t *testing.T) {
+	r := newTestRunner()
+	r.suite.Record("suite-zone-1", CryptoState{})
+	r.suite.SetConn(&Connection{state: ConnDisconnected})
+
+	if got := r.visibleZoneCount(2); got != 1 {
+		t.Fatalf("visibleZoneCount(2) = %d, want 1", got)
+	}
+}
+
+func TestVisibleZoneCount_NoSuiteNoAdjustment(t *testing.T) {
+	r := newTestRunner()
+	if got := r.visibleZoneCount(2); got != 2 {
+		t.Fatalf("visibleZoneCount(2) without suite = %d, want 2", got)
+	}
+}

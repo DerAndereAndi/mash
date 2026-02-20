@@ -430,7 +430,8 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		// stale PASE/session-key drift from previous non-suite commissions.
 		suiteCanReconnect := c.suite.ZoneID() != "" &&
 			c.ops.CommissionZoneType() == cert.ZoneTypeTest &&
-			!needsIsolatedConnectSession
+			!needsIsolatedConnectSession &&
+			!needsZoneConns
 
 		if suiteCanReconnect {
 			suiteZoneID := c.suite.ZoneID()
@@ -450,9 +451,12 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 				}
 			}
 
-			// Close stale main if it's not the suite conn.
-			if m := c.pool.Main(); m != nil && m != c.suite.Conn() && m.isConnected() {
-				_ = m.Close()
+			// Close stale main if it's not the suite conn and this test does not
+			// require additional non-suite zone channels.
+			if !needsZoneConns {
+				if m := c.pool.Main(); m != nil && m != c.suite.Conn() && m.isConnected() {
+					_ = m.Close()
+				}
 			}
 
 			// Borrow suite connection if it's alive; fall back to reconnect.

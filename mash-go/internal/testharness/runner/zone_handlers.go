@@ -658,10 +658,7 @@ func (r *Runner) visibleZoneCount(rawCount int) int {
 	if r.suite.ZoneID() == "" || rawCount <= 0 {
 		return rawCount
 	}
-	if r.suite.Conn() != nil && r.suite.Conn().isConnected() {
-		return rawCount - 1
-	}
-	return rawCount
+	return rawCount - 1
 }
 
 // toIntValue converts a CBOR-decoded numeric value to int.

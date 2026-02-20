@@ -1724,6 +1724,47 @@ func TestSuiteCanReconnect_FallsBackToReconnect(t *testing.T) {
 	assert.True(t, reconnectCalled, "ReconnectToZone must be called when suite conn is dead")
 }
 
+func TestSuiteCanReconnect_DoesNotCloseMainWhenTwoZonesNeeded(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	mainConn := &Connection{state: ConnOperational}
+
+	s.EXPECT().ZoneID().Return("sz1")
+	s.EXPECT().Conn().Return((*Connection)(nil)).Maybe()
+
+	o.EXPECT().CommissionZoneType().Return(cert.ZoneTypeTest).Maybe()
+	o.EXPECT().EnsureCommissioned(mock.Anything, mock.Anything).Return(nil).Once()
+
+	p.EXPECT().Main().Return(mainConn).Maybe()
+	p.EXPECT().SetMain(mock.Anything).Return().Maybe()
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(),
+		tcWith("TC-L3", cond(PrecondDeviceCommissioned, true), cond(PrecondTwoZonesConnected, true)), st()))
+
+	assert.Equal(t, ConnOperational, mainConn.state, "main non-suite channel must remain usable for zone-scoped actions")
+}
+
+func TestSuiteCanReconnect_SkippedWhenTwoZonesNeeded(t *testing.T) {
+	c, s, p, o := newCoord(t, nil)
+	suiteConn := &Connection{state: ConnDisconnected}
+	mainConn := &Connection{state: ConnOperational}
+
+	s.EXPECT().ZoneID().Return("sz1").Maybe()
+	s.EXPECT().Conn().Return(suiteConn).Maybe()
+
+	o.EXPECT().CommissionZoneType().Return(cert.ZoneTypeTest).Maybe()
+	o.EXPECT().EnsureCommissioned(mock.Anything, mock.Anything).Return(nil).Once()
+
+	p.EXPECT().Main().Return(mainConn).Maybe()
+	p.EXPECT().SetMain(mock.Anything).Return().Maybe()
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(),
+		tcWith("TC-L3", cond(PrecondSessionEstablished, true), cond(PrecondTwoZonesConnected, true)), st()))
+
+	o.AssertNotCalled(t, "ReconnectToZone", mock.Anything)
+}
+
 // TestSuiteCanReconnect_DoesNotOverwriteCurrentZoneFromStalePASE verifies that
 // when SetupPreconditions reuses a suite zone, it must keep current_zone_id
 // bound to suite.ZoneID() and not overwrite it from unrelated stale PASE data.

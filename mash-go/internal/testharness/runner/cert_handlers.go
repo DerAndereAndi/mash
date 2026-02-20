@@ -242,23 +242,6 @@ func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Ste
 			return notFound, nil
 		}
 	} else {
-		if r.suite.ZoneID() != "" {
-			if issued := r.suite.Crypto().IssuedDeviceCert; issued != nil {
-				did := issued.Subject.CommonName
-				if idx := strings.LastIndex(did, "-"); idx >= 0 {
-					did = did[idx+1:]
-				}
-				if did != "" {
-					state.Set(StateExtractedDeviceID, did)
-					state.Set(StateDeviceID, did)
-					return map[string]any{
-						KeyDeviceID:  did,
-						KeyExtracted: true,
-					}, nil
-				}
-			}
-		}
-
 		conn = nil
 		// No explicit zone parameter: use the suite control channel as the
 		// authoritative test-session source of identity.
@@ -283,6 +266,25 @@ func (r *Runner) handleExtractCertDeviceID(ctx context.Context, step *loader.Ste
 			}
 		}
 		if conn == nil {
+			// Last fallback for degraded sessions: use suite-issued cert cache
+			// when no live connection is available.
+			if r.suite.ZoneID() != "" {
+				if issued := r.suite.Crypto().IssuedDeviceCert; issued != nil {
+					did := issued.Subject.CommonName
+					if idx := strings.LastIndex(did, "-"); idx >= 0 {
+						did = did[idx+1:]
+					}
+					if did != "" {
+						state.Set(StateExtractedDeviceID, did)
+						state.Set(StateDeviceID, did)
+						return map[string]any{
+							KeyDeviceID:  did,
+							KeyExtracted: true,
+						}, nil
+					}
+				}
+			}
+
 			conn = r.pool.Main()
 		}
 	}

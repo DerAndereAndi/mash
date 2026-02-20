@@ -562,6 +562,18 @@ func TestHandleExtractCertDeviceID_ZoneAware(t *testing.T) {
 		t.Errorf("expected dev111 via suite connection fallback, got %v", out["device_id"])
 	}
 
+	// Regression: suite-issued cert cache can be stale (from a different zone
+	// commission). Extraction must prefer the live suite TLS peer cert.
+	staleIssued := conn2.tlsConn.ConnectionState().PeerCertificates[0]
+	r.suite.Record("z1", CryptoState{IssuedDeviceCert: staleIssued})
+	out, err = r.handleExtractCertDeviceID(context.Background(), &loader.Step{}, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["device_id"] != "dev111" {
+		t.Errorf("expected dev111 from live suite conn over stale issued cert, got %v", out["device_id"])
+	}
+
 	// Without explicit zone_id, suite connection must take precedence over
 	// stale current_zone_id values.
 	state.Set(StateCurrentZoneID, "z2")
