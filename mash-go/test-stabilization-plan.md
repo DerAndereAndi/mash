@@ -273,6 +273,9 @@ After excluding environmental tests (~11), the remaining ~35 discovery tests hav
 
 Use the same hard isolation rule as Phase 1: every invocation must use
 `./stabilization/run_mash_test_fresh.sh` (fresh `mash-device -reset` each run).
+The wrapper now enforces single-owner isolation by default (`MASH_SINGLE_OWNER=1`)
+with a per-port lock (`/tmp/mash-fresh-wrapper-<port>.lock`) and a preflight
+check that rejects concurrent `mash-test` processes.
 
 #### Tool Calls / Commands
 
@@ -499,15 +502,31 @@ Validation:
 
 ```bash
 # Per-group verification
-./stabilization/run_mash_test_fresh.sh -target localhost:8443 -setup-code 20220211 -enable-key deadbeefdeadbeefdeadbeefdeadbeef \
+MASH_SINGLE_OWNER=1 ./stabilization/run_mash_test_fresh.sh -target localhost:8443 -setup-code 20220211 -enable-key deadbeefdeadbeefdeadbeefdeadbeef \
   -tags base-protocol -exclude-tags env:multi-device -filter "<GROUP_FILTER>" -json
 
 # Full suite (exclude env tests)
-./stabilization/run_mash_test_fresh.sh -target localhost:8443 -setup-code 20220211 -enable-key deadbeefdeadbeefdeadbeefdeadbeef \
+MASH_SINGLE_OWNER=1 ./stabilization/run_mash_test_fresh.sh -target localhost:8443 -setup-code 20220211 -enable-key deadbeefdeadbeefdeadbeefdeadbeef \
   -tags base-protocol -exclude-tags env:multi-device -json
 ```
 
-## Current Status (2026-02-15, evening)
+## Latest Update (2026-02-20)
+
+- Root-cause isolation found intermittent cross-run interference on shared port `8443`
+  when concurrent clients were active outside the wrapper lifecycle.
+- Added fresh-wrapper single-owner protections:
+  - per-port lock file (`/tmp/mash-fresh-wrapper-<port>.lock`)
+  - stale-lock recovery
+  - preflight rejection when another `mash-test` process is running
+- Hardened coordinator backward transition: skip strict `RemoveZone` when no live
+  commissioned connection exists to avoid cascading `remove zone: no live connection`.
+- Validation run (fresh-wrapper, strict lifecycle, single-owner):
+  - run dir: `mash-go/stabilization/phase1-runs/20260220-191447-a9-3xseq-3xshuffle-single-owner`
+  - `A9` sequential: `3/3` passed
+  - `A9` shuffled (seeds `3201..3203`): `3/3` passed
+  - aggregate: `6/6` passed
+
+## Historical Status (2026-02-15, evening)
 
 ### Phase 1 Results: 123 tests, 118 pass (95.9%), 5 fail
 - x509 cascade **fully eliminated** by fixing RemoveZone routing (coordinator.go)

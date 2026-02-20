@@ -132,18 +132,24 @@ mash-controller -zone-name "My Home" -interactive
 mash-controller -auto-commission -log-level debug
 
 # Custom zone configuration
-mash-controller -zone-name "Building A" -zone-type building
+mash-controller -zone-name "Grid EMS" -zone-type grid
 ```
 
 **Flags:**
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-zone-name` | Zone name for this controller | `Home Energy` |
-| `-zone-type` | Zone type: `grid`, `building`, `home`, `user` | `home` |
+| `-zone-type` | Zone type: `grid`, `local` | `local` |
 | `-interactive` | Enable interactive command mode | `false` |
 | `-auto-commission` | Automatically commission discovered devices | `false` |
 | `-log-level` | Log level: `debug`, `info`, `warn`, `error` | `info` |
 | `-config` | Configuration file path | - |
+
+`-log-level` is authoritative for `mash-controller` runtime output:
+- `debug`: includes debug/service internals
+- `info`: normal lifecycle/events
+- `warn`: warnings and errors only
+- `error`: errors only
 
 **Interactive Commands:**
 | Command | Description |
