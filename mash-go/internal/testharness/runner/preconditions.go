@@ -436,6 +436,16 @@ func (r *Runner) setupPreconditions(ctx context.Context, tc *loader.TestCase, st
 	return nil
 }
 
+// requireCommissioningAvailable enforces that the device is currently
+// advertising a commissionable service before starting a commissioning step.
+// This avoids racing TLS connects against transient mode transitions.
+func (r *Runner) requireCommissioningAvailable(ctx context.Context, phase string) error {
+	if err := r.waitForCommissioningAvailable(ctx, 3*time.Second); err != nil {
+		return fmt.Errorf("%s: %w", phase, err)
+	}
+	return nil
+}
+
 // sendClearLimitInvoke sends a ClearLimit invoke (direction=nil, i.e. clear both)
 // to endpoint 1 / EnergyControl on the device. Used by the no_existing_limits
 // precondition to ensure the device has no stale limits from prior tests.
@@ -1199,15 +1209,16 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 				}
 				if r.config.Target != "" {
 					r.debugf("two_zones_connected: commissioning against real device")
-					if !r.connMgr.LastDeviceConnClose().IsZero() {
-						if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
-							r.debugf("two_zones_connected: %v (continuing)", err)
-						}
+					if err := r.requireCommissioningAvailable(ctx, "two_zones_connected: commissioning unavailable before zone setup"); err != nil {
+						return err
 					}
 					for i, z := range zones {
 						if _, exists := ct.zoneConnections[z.name]; exists {
 							r.debugf("two_zones_connected: zone %s already exists, skipping", z.name)
 							continue
+						}
+						if err := r.requireCommissioningAvailable(ctx, fmt.Sprintf("two_zones_connected: commissioning unavailable before zone %s", z.name)); err != nil {
+							return err
 						}
 						r.debugf("two_zones_connected: commissioning zone %s (type=%d)", z.name, z.zt)
 						r.debugSnapshot("two_zones_connected BEFORE commission " + z.name)
@@ -1271,12 +1282,6 @@ func (r *Runner) HandlePreconditionCases(ctx context.Context, tc *loader.TestCas
 						}
 
 						r.pool.SetMain(&Connection{})
-
-						if i < len(zones)-1 {
-							if err := r.waitForCommissioningMode(ctx, 3*time.Second); err != nil {
-								r.debugf("two_zones_connected: %v (continuing)", err)
-							}
-						}
 					}
 					firstZone := zones[0]
 					if zc, ok := ct.zoneConnections[firstZone.name]; ok && zc.isConnected() {
