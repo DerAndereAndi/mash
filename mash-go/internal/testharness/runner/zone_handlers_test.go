@@ -231,6 +231,32 @@ func TestAddZoneAndVerifyBinding(t *testing.T) {
 	}
 }
 
+func TestVerifyZoneBinding_UsesSuiteZoneWhenPoolAndStateAreEmpty(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+	ds := getDiscoveryState(state)
+	ds.services = []discoveredService{
+		{
+			TXTRecords: map[string]string{
+				"ZI": "suite-zone-1234abcd",
+			},
+		},
+	}
+
+	r.suite.Record("suite-zone-1234abcd", CryptoState{})
+
+	out, err := r.handleVerifyZoneBinding(context.Background(), &loader.Step{}, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["zone_id_matches"] != true {
+		t.Fatalf("expected zone_id_matches=true, got %v", out["zone_id_matches"])
+	}
+	if out[KeyBindingValid] != true {
+		t.Fatalf("expected binding_valid=true, got %v", out[KeyBindingValid])
+	}
+}
+
 func TestVerifyZoneIDDerivation(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()

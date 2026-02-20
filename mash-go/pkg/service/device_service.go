@@ -63,12 +63,12 @@ type DeviceService struct {
 	// Single unified listener with ALPN-based routing (DEC-067).
 	// Commissioning (mash-comm/1) and operational (mash/1) connections share
 	// one port. GetConfigForClient routes based on the client's ALPN.
-	listener           net.Listener
+	listener             net.Listener
 	operationalTLSConfig *tls.Config
-	commissioningOpen  atomic.Bool         // true when commissioning window is open
-	commissioningEpoch atomic.Uint64      // incremented on each EnterCommissioningMode
-	commissioningCert  tls.Certificate     // Stable, generated once at startup
-	tlsCert            tls.Certificate     // Operational cert (from zone CA)
+	commissioningOpen    atomic.Bool     // true when commissioning window is open
+	commissioningEpoch   atomic.Uint64   // incremented on each EnterCommissioningMode
+	commissioningCert    tls.Certificate // Stable, generated once at startup
+	tlsCert              tls.Certificate // Operational cert (from zone CA)
 
 	// PASE commissioning
 	verifier *commissioning.Verifier
@@ -156,17 +156,17 @@ func NewDeviceService(device *model.Device, config DeviceConfig) (*DeviceService
 	}
 
 	svc := &DeviceService{
-		config:         config,
-		device:         device,
-		state:          StateIdle,
-		connectedZones: make(map[string]*ConnectedZone),
-		zoneSessions:   make(map[string]*ZoneSession),
-		failsafeTimers: make(map[string]*failsafe.Timer),
-		zoneIndexMap:   make(map[string]uint8),
-		connTracker:    newConnTracker(),
-		certStore:      cert.NewMemoryStore(),
-		logger:         config.Logger,
-		protocolLogger: config.ProtocolLogger,
+		config:                   config,
+		device:                   device,
+		state:                    StateIdle,
+		connectedZones:           make(map[string]*ConnectedZone),
+		zoneSessions:             make(map[string]*ZoneSession),
+		failsafeTimers:           make(map[string]*failsafe.Timer),
+		zoneIndexMap:             make(map[string]uint8),
+		connTracker:              newConnTracker(),
+		certStore:                cert.NewMemoryStore(),
+		logger:                   config.Logger,
+		protocolLogger:           config.ProtocolLogger,
 		disconnectReentryHoldoff: defaultDisconnectReentryHoldoff,
 	}
 
@@ -1117,6 +1117,14 @@ func (s *DeviceService) handleCommissioningConnection(rawConn net.Conn, conn *tl
 			return errCommissionTestZoneDisabled
 		}
 
+		// TEST zones are infrastructure-only observer channels. If a previous
+		// TEST controller disconnected without RemoveZone, recycle that stale
+		// disconnected TEST zone before duplicate-type validation so a new test
+		// harness session can bootstrap cleanly.
+		if zoneType == cert.ZoneTypeTest && s.isEnableKeyValid() {
+			s.evictDisconnectedZonesOfType(cert.ZoneTypeTest)
+		}
+
 		// Reject zones when a zone of the same type already exists (DEC-043).
 		// Each device supports max 1 zone per type.
 		if s.hasZoneOfType(zoneType) {
@@ -1572,6 +1580,58 @@ func (s *DeviceService) handleCertRenewalSuccess(zoneID string, handler *DeviceR
 		"zoneID", zoneID,
 		"subject", newCert.Subject.CommonName,
 		"notAfter", newCert.NotAfter)
+
+	renewedDeviceID, err := cert.ExtractDeviceID(newCert)
+	if err != nil {
+		s.debugLog("handleCertRenewalSuccess: failed to extract renewed device ID", "zoneID", zoneID, "error", err)
+		return
+	}
+
+	var (
+		dm     *discovery.DiscoveryManager
+		port   uint16
+		ctx    context.Context
+		update bool
+	)
+
+	s.mu.Lock()
+	s.tlsCert = opCert.TLSCertificate()
+	s.buildOperationalTLSConfig()
+	s.deviceID = renewedDeviceID
+
+	if s.discoveryManager != nil {
+		dm = s.discoveryManager
+		port = parsePort(s.config.OperationalListenAddress)
+		if s.listener != nil {
+			port = parsePort(s.listener.Addr().String())
+		}
+		ctx = s.ctx
+		update = true
+	}
+	s.mu.Unlock()
+
+	if !update {
+		return
+	}
+
+	opInfo := &discovery.OperationalInfo{
+		ZoneID:        zoneID,
+		DeviceID:      renewedDeviceID,
+		VendorProduct: fmt.Sprintf("%04x:%04x", s.device.VendorID(), s.device.ProductID()),
+		EndpointCount: uint8(s.device.EndpointCount()),
+		Port:          port,
+	}
+	if err := dm.UpdateZone(opInfo); err != nil {
+		if errors.Is(err, discovery.ErrNotFound) {
+			if addErr := dm.AddZone(ctx, opInfo); addErr != nil {
+				s.debugLog("handleCertRenewalSuccess: failed to add operational advertising after renewal",
+					"zoneID", zoneID, "error", addErr)
+			}
+			return
+		}
+		s.debugLog("handleCertRenewalSuccess: failed to update operational advertising after renewal",
+			"zoneID", zoneID, "error", err)
+	}
 }
 
 // makeWriteCallback creates a write callback that emits events for attribute changes.
@@ -3099,6 +3159,28 @@ func (s *DeviceService) evictDisconnectedZone() string {
 	return first
 }
 
+// evictDisconnectedZonesOfType removes disconnected zones of the provided
+// type. Returns the first evicted zone ID, or "" if none were evicted.
+func (s *DeviceService) evictDisconnectedZonesOfType(zt cert.ZoneType) string {
+	s.mu.Lock()
+	var toEvict []string
+	for zoneID, cz := range s.connectedZones {
+		if !cz.Connected && cz.Type == zt {
+			toEvict = append(toEvict, zoneID)
+		}
+	}
+	s.mu.Unlock()
+
+	var first string
+	for _, zoneID := range toEvict {
+		s.debugLog("evictDisconnectedZonesOfType: removing", "zoneID", zoneID, "zoneType", zt)
+		_ = s.RemoveZone(zoneID)
+		if first == "" {
+			first = zoneID
+		}
+	}
+	return first
+}
 
 // releaseCommissioningConnection marks the commissioning connection as complete
 // and starts the cooldown timer. The generation parameter must match the value

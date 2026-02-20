@@ -441,6 +441,9 @@ func (r *Runner) handleVerifyZoneBinding(ctx context.Context, step *loader.Step,
 
 	// Check if the discovered zone ID matches any active zone.
 	zoneMatches := false
+	if r.suite.ZoneID() != "" && r.suite.ZoneID() == zoneID {
+		zoneMatches = true
+	}
 	for _, key := range r.pool.ZoneKeys() {
 		if r.pool.ZoneID(key) == zoneID {
 			zoneMatches = true

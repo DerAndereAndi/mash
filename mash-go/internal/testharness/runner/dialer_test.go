@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"math/big"
 	"testing"
 
@@ -58,6 +59,20 @@ func TestDialer_OperationalTLSConfig_WithCerts_IncludesCertificates(t *testing.T
 	}
 	if len(cfg.NextProtos) != 1 || cfg.NextProtos[0] != transport.ALPNProtocol {
 		t.Errorf("expected ALPN [%s], got %v", transport.ALPNProtocol, cfg.NextProtos)
+	}
+}
+
+func TestDialer_OperationalTLSConfig_UsesIssuedDeviceIDAsServerName(t *testing.T) {
+	const deviceID = "4f6b17c046db7831"
+	crypto := CryptoState{
+		IssuedDeviceCert: makeTestLeafCertWithCN(t, deviceID),
+	}
+
+	nop := func(string, ...any) {}
+	cfg := buildOperationalTLSConfig(crypto, false, nop)
+
+	if cfg.ServerName != deviceID {
+		t.Fatalf("expected ServerName %q, got %q", deviceID, cfg.ServerName)
 	}
 }
 
@@ -126,4 +141,28 @@ func makeTestOperationalCert(t *testing.T) *cert.OperationalCert {
 		Certificate: leafCert,
 		PrivateKey:  key,
 	}
+}
+
+func makeTestLeafCertWithCN(t *testing.T, cn string) *x509.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject: pkix.Name{
+			CommonName: cn,
+		},
+	}
+	derBytes, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafCert, err := x509.ParseCertificate(derBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return leafCert
 }

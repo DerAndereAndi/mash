@@ -1073,3 +1073,34 @@ func TestTriggerResetTestState_RemovesLeakedZones(t *testing.T) {
 		t.Fatalf("expected 0 zones after reset, got %d: %v", len(zoneIDs), zoneIDs)
 	}
 }
+
+func TestTriggerResetTestState_RemovesDisconnectedZoneWithStaleSessionEntry(t *testing.T) {
+	svc := newDeviceServiceWithAllFeatures(t)
+	ctx := context.Background()
+
+	// Reproduces teardown race: zone is already marked disconnected, but
+	// zoneSessions still carries an entry until async close completes.
+	zoneID := "disconnected-stale-session-zone"
+	svc.mu.Lock()
+	svc.connectedZones[zoneID] = &ConnectedZone{
+		ID:        zoneID,
+		Type:      cert.ZoneTypeLocal,
+		Priority:  2,
+		Connected: false,
+	}
+	svc.zoneSessions[zoneID] = NewZoneSession(zoneID, newMockSendableConnection(), svc.device)
+	svc.mu.Unlock()
+
+	if len(svc.ListZoneIDs()) != 1 {
+		t.Fatalf("expected 1 zone before reset, got %d", len(svc.ListZoneIDs()))
+	}
+
+	if err := svc.dispatchTrigger(ctx, features.TriggerResetTestState); err != nil {
+		t.Fatalf("dispatchTrigger(ResetTestState): %v", err)
+	}
+
+	zoneIDs := svc.ListZoneIDs()
+	if len(zoneIDs) != 0 {
+		t.Fatalf("expected 0 zones after reset, got %d: %v", len(zoneIDs), zoneIDs)
+	}
+}

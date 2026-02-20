@@ -8,6 +8,12 @@ import (
 
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
+	"github.com/mash-protocol/mash-go/pkg/discovery"
+	discMocks "github.com/mash-protocol/mash-go/pkg/discovery/mocks"
+	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 // TestDeviceRenewalHandler_HandleRequest verifies CSR generation.
@@ -270,6 +276,89 @@ func TestDeviceRenewalHandler_NoRenewalInProgress(t *testing.T) {
 	if ack.Status == commissioning.RenewalStatusSuccess {
 		t.Error("Expected failure when no renewal in progress")
 	}
+}
+
+func TestHandleCertRenewalSuccess_UpdatesOperationalAdvertisingDeviceID(t *testing.T) {
+	const (
+		zoneID      = "bbcc210c3829120f"
+		oldDeviceID = "792c69cad816d9e9"
+		newDeviceID = "d863640a642816ec"
+	)
+
+	device := model.NewDevice("test-device", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	svc, err := NewDeviceService(device, config)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = svc.Stop() })
+
+	store := cert.NewMemoryStore()
+	svc.certStore = store
+	svc.connectedZones[zoneID] = &ConnectedZone{
+		ID:   zoneID,
+		Type: cert.ZoneTypeLocal,
+	}
+	svc.deviceID = oldDeviceID
+
+	zoneCA, err := cert.GenerateZoneCA(zoneID, cert.ZoneTypeLocal)
+	require.NoError(t, err)
+	require.NoError(t, store.SetZoneCACert(zoneID, zoneCA.Certificate))
+
+	advertiser := discMocks.NewMockAdvertiser(t)
+	advertiser.EXPECT().
+		AdvertiseOperational(mock.Anything, mock.MatchedBy(func(info *discovery.OperationalInfo) bool {
+			return info != nil && info.ZoneID == zoneID && info.DeviceID == oldDeviceID
+		})).
+		Return(nil).
+		Once()
+	advertiser.EXPECT().
+		UpdateOperational(zoneID, mock.MatchedBy(func(info *discovery.OperationalInfo) bool {
+			return info != nil && info.ZoneID == zoneID && info.DeviceID == newDeviceID
+		})).
+		Return(nil).
+		Once()
+	svc.discoveryManager = discovery.NewDiscoveryManager(advertiser)
+	require.NoError(t, svc.discoveryManager.AddZone(svc.ctx, &discovery.OperationalInfo{
+		ZoneID:   zoneID,
+		DeviceID: oldDeviceID,
+		Port:     8443,
+	}))
+
+	kpOld, err := cert.GenerateKeyPair()
+	require.NoError(t, err)
+	csrOld, err := cert.CreateCSR(kpOld, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: oldDeviceID, VendorID: 0x1234, ProductID: 0x5678},
+		ZoneID:   zoneID,
+	})
+	require.NoError(t, err)
+	oldCert, err := cert.SignCSR(zoneCA, csrOld)
+	require.NoError(t, err)
+	require.NoError(t, store.SetOperationalCert(&cert.OperationalCert{
+		Certificate: oldCert,
+		PrivateKey:  kpOld.PrivateKey,
+		ZoneID:      zoneID,
+		ZoneType:    cert.ZoneTypeLocal,
+	}))
+
+	kpNew, err := cert.GenerateKeyPair()
+	require.NoError(t, err)
+	csrNew, err := cert.CreateCSR(kpNew, &cert.CSRInfo{
+		Identity: cert.DeviceIdentity{DeviceID: newDeviceID, VendorID: 0x1234, ProductID: 0x5678},
+		ZoneID:   zoneID,
+	})
+	require.NoError(t, err)
+	newCert, err := cert.SignCSR(zoneCA, csrNew)
+	require.NoError(t, err)
+
+	handler := NewDeviceRenewalHandler(&cert.DeviceIdentity{DeviceID: newDeviceID})
+	handler.SetActiveCert(newCert, kpNew.PrivateKey, 2)
+
+	svc.handleCertRenewalSuccess(zoneID, handler)
+
+	got, err := store.GetOperationalCert(zoneID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, newDeviceID, got.Certificate.Subject.CommonName)
+	assert.Equal(t, newDeviceID, svc.deviceID)
 }
 
 // TestDeviceRenewalHandler_RejectStaleNonce verifies nonce binding per DEC-047.

@@ -2133,3 +2133,76 @@ func TestEvictDisconnectedZone_NoEvictionWhenOnlyTESTZone(t *testing.T) {
 		t.Error("TEST zone should still exist after eviction attempt")
 	}
 }
+
+func TestEvictDisconnectedZonesOfType_EvictsOnlyDisconnectedRequestedType(t *testing.T) {
+	device := model.NewDevice("test-evict-by-type", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService: %v", err)
+	}
+
+	svc.mu.Lock()
+	svc.connectedZones["test-disconnected"] = &ConnectedZone{
+		Type:      cert.ZoneTypeTest,
+		Connected: false,
+	}
+	svc.connectedZones["test-connected"] = &ConnectedZone{
+		Type:      cert.ZoneTypeTest,
+		Connected: true,
+	}
+	svc.connectedZones["grid-disconnected"] = &ConnectedZone{
+		Type:      cert.ZoneTypeGrid,
+		Connected: false,
+	}
+	svc.mu.Unlock()
+
+	first := svc.evictDisconnectedZonesOfType(cert.ZoneTypeTest)
+
+	svc.mu.RLock()
+	_, hasTestDisconnected := svc.connectedZones["test-disconnected"]
+	_, hasTestConnected := svc.connectedZones["test-connected"]
+	_, hasGridDisconnected := svc.connectedZones["grid-disconnected"]
+	svc.mu.RUnlock()
+
+	if first != "test-disconnected" {
+		t.Fatalf("expected first evicted TEST zone to be test-disconnected, got %q", first)
+	}
+	if hasTestDisconnected {
+		t.Fatal("expected disconnected TEST zone to be evicted")
+	}
+	if !hasTestConnected {
+		t.Fatal("expected connected TEST zone to remain")
+	}
+	if !hasGridDisconnected {
+		t.Fatal("expected disconnected GRID zone to remain")
+	}
+}
+
+func TestEvictDisconnectedZonesOfType_NoMatch(t *testing.T) {
+	device := model.NewDevice("test-evict-by-type-none", 0x1234, 0x5678)
+	config := validDeviceConfig()
+	svc, err := NewDeviceService(device, config)
+	if err != nil {
+		t.Fatalf("NewDeviceService: %v", err)
+	}
+
+	svc.mu.Lock()
+	svc.connectedZones["test-connected"] = &ConnectedZone{
+		Type:      cert.ZoneTypeTest,
+		Connected: true,
+	}
+	svc.mu.Unlock()
+
+	first := svc.evictDisconnectedZonesOfType(cert.ZoneTypeTest)
+	if first != "" {
+		t.Fatalf("expected no evictions, got %q", first)
+	}
+
+	svc.mu.RLock()
+	_, hasTestConnected := svc.connectedZones["test-connected"]
+	svc.mu.RUnlock()
+	if !hasTestConnected {
+		t.Fatal("expected connected TEST zone to remain")
+	}
+}

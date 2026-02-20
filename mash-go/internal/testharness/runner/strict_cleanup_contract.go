@@ -114,16 +114,14 @@ func (r *Runner) runStrictCleanupContract(ctx context.Context, state *engine.Exe
 	var visibleZoneCount *int
 	if expectCommissioned {
 		if snap := r.requestDeviceState(ctx, state); snap != nil {
-			if rawCount, ok := snap[KeyZoneCount]; ok {
-				v := r.visibleZoneCount(toIntValue(rawCount))
+			if v, ok := visibleNonSuiteZoneCountFromSnapshot(snap, r.suite.ZoneID()); ok {
 				visibleZoneCount = &v
 			}
 		}
 		// Retry once after a successful probe if the first snapshot was unavailable.
 		if visibleZoneCount == nil && probeErr == nil {
 			if snap := r.requestDeviceState(ctx, state); snap != nil {
-				if rawCount, ok := snap[KeyZoneCount]; ok {
-					v := r.visibleZoneCount(toIntValue(rawCount))
+				if v, ok := visibleNonSuiteZoneCountFromSnapshot(snap, r.suite.ZoneID()); ok {
 					visibleZoneCount = &v
 				}
 			}
@@ -131,4 +129,50 @@ func (r *Runner) runStrictCleanupContract(ctx context.Context, state *engine.Exe
 	}
 
 	return evaluateStrictCleanupContract(expectCommissioned, commissioningState, visibleZoneCount, probeErr)
+}
+
+// visibleNonSuiteZoneCountFromSnapshot derives the number of non-suite zones
+// from a device test-state snapshot.
+//
+// Prefer the detailed "zones" list when present, because "zone_count" can be a
+// transient aggregate during reconnect churn. Fall back to zone_count only when
+// the list is unavailable.
+func visibleNonSuiteZoneCountFromSnapshot(snap DeviceStateSnapshot, suiteZoneID string) (int, bool) {
+	if snap == nil {
+		return 0, false
+	}
+
+	if rawZones, ok := snap["zones"]; ok {
+		if list, ok := rawZones.([]any); ok {
+			if suiteZoneID != "" {
+				return len(nonSuiteZoneIDsFromSnapshot(snap, suiteZoneID)), true
+			}
+			seen := map[string]struct{}{}
+			for _, entry := range list {
+				m, ok := entry.(map[string]any)
+				if !ok {
+					continue
+				}
+				id, _ := m["id"].(string)
+				if id == "" {
+					continue
+				}
+				seen[id] = struct{}{}
+			}
+			return len(seen), true
+		}
+	}
+
+	rawCount, ok := snap[KeyZoneCount]
+	if !ok {
+		return 0, false
+	}
+	count := toIntValue(rawCount)
+	if suiteZoneID != "" && count > 0 {
+		count--
+	}
+	if count < 0 {
+		count = 0
+	}
+	return count, true
 }

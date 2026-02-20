@@ -86,6 +86,9 @@ func buildOperationalTLSConfig(crypto CryptoState, insecureSkipVerify bool, debu
 	if crypto.ControllerCert != nil {
 		tlsConfig.Certificates = []tls.Certificate{crypto.ControllerCert.TLSCertificate()}
 	}
+	if crypto.IssuedDeviceCert != nil && crypto.IssuedDeviceCert.Subject.CommonName != "" {
+		tlsConfig.ServerName = crypto.IssuedDeviceCert.Subject.CommonName
+	}
 
 	return tlsConfig
 }

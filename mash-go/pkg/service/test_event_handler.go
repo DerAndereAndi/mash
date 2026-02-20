@@ -142,10 +142,10 @@ func (s *DeviceService) collectTestState() map[string]any {
 	s.mu.RUnlock()
 
 	snapshot := map[string]any{
-		"zone_count":      len(zones),
-		"zones":           zones,
-		"failsafe_timers": failsafeStates,
-		"clock_offset_s":  clockOffset,
+		"zone_count":         len(zones),
+		"zones":              zones,
+		"failsafe_timers":    failsafeStates,
+		"clock_offset_s":     clockOffset,
 		"commissioning_open": s.commissioningOpen.Load(),
 		"auto_reentry":       autoReentry,
 		"pairing_active":     pairingActive,
@@ -260,21 +260,22 @@ func (s *DeviceService) handleCommissioningTrigger(_ context.Context, trigger ui
 					uint8(features.ProcessStateNone))
 			}
 		}
-		// Remove leaked/partial zones that have no active session. These
-		// arise when a PASE handshake creates a zone record but the
-		// connection dies before operational TLS completes (e.g. EOF).
+		// Remove leaked/partial non-TEST zones.
+		// 1) Zones without an active session (classic failed-PASE leak).
+		// 2) Zones marked disconnected, even if a stale session map entry
+		//    still exists due close-order races during teardown.
 		// TEST zones are preserved: the suite zone is the persistent control
-		// channel and may be temporarily disconnected between tests. It gets
-		// removed only by explicit RemoveZone during suite teardown.
+		// channel and may be temporarily disconnected between tests.
 		// Collect IDs under RLock, then remove outside the lock because
 		// RemoveZone takes s.mu.Lock internally and calls slow operations.
 		s.mu.RLock()
 		var staleZoneIDs []string
-		for id := range s.connectedZones {
-			if _, hasSession := s.zoneSessions[id]; !hasSession {
-				if cz := s.connectedZones[id]; cz != nil && cz.Type == cert.ZoneTypeTest {
-					continue
-				}
+		for id, cz := range s.connectedZones {
+			if cz != nil && cz.Type == cert.ZoneTypeTest {
+				continue
+			}
+			_, hasSession := s.zoneSessions[id]
+			if !hasSession || (cz != nil && !cz.Connected) {
 				staleZoneIDs = append(staleZoneIDs, id)
 			}
 		}
