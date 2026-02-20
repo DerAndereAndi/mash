@@ -102,6 +102,7 @@ type DeviceService struct {
 	// for a short period after explicit commissioning exit.
 	disconnectReentryHoldoff      time.Duration
 	disconnectReentryBlockedUntil time.Time
+	disconnectReentryTimer        *time.Timer
 
 	// Logger for debug output (optional)
 	logger *slog.Logger
@@ -1672,6 +1673,10 @@ func (s *DeviceService) Stop() error {
 
 	// Stop all failsafe timers
 	s.mu.Lock()
+	if s.disconnectReentryTimer != nil {
+		s.disconnectReentryTimer.Stop()
+		s.disconnectReentryTimer = nil
+	}
 	for _, timer := range s.failsafeTimers {
 		timer.Reset()
 	}
@@ -1725,6 +1730,11 @@ func (s *DeviceService) EnterCommissioningMode() error {
 	// The epoch lets exitCommissioningForEpoch detect that a new window
 	// opened between decision time and execution time, preventing a stale
 	// exit from overriding a newer enter.
+	if s.disconnectReentryTimer != nil {
+		s.disconnectReentryTimer.Stop()
+		s.disconnectReentryTimer = nil
+	}
+	s.disconnectReentryBlockedUntil = time.Time{}
 	s.commissioningOpen.Store(true)
 	s.commissioningEpoch.Add(1)
 	s.mu.Unlock()
@@ -2045,12 +2055,54 @@ func (s *DeviceService) HandleZoneDisconnect(zoneID string) {
 			if !blockedUntil.IsZero() && time.Now().Before(blockedUntil) {
 				s.debugLog("HandleZoneDisconnect: auto-reentry suppressed during post-exit holdoff",
 					"blockedUntil", blockedUntil.Format(time.RFC3339Nano))
+				s.scheduleDisconnectReentry(blockedUntil)
 				return
 			}
 			s.debugLog("HandleZoneDisconnect: all zones disconnected, re-entering commissioning mode")
 			_ = s.EnterCommissioningMode()
 		}
 	}
+}
+
+func (s *DeviceService) scheduleDisconnectReentry(blockedUntil time.Time) {
+	delay := time.Until(blockedUntil)
+	if delay <= 0 {
+		go s.tryAutoReenterCommissioningAfterHoldoff()
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.disconnectReentryTimer != nil {
+		s.disconnectReentryTimer.Stop()
+	}
+	s.disconnectReentryTimer = time.AfterFunc(delay, s.tryAutoReenterCommissioningAfterHoldoff)
+}
+
+func (s *DeviceService) tryAutoReenterCommissioningAfterHoldoff() {
+	s.mu.Lock()
+	s.disconnectReentryTimer = nil
+	blockedUntil := s.disconnectReentryBlockedUntil
+	allDisconnected := true
+	for _, cz := range s.connectedZones {
+		if cz.Connected {
+			allDisconnected = false
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if !s.isEnableKeyValid() || !allDisconnected {
+		return
+	}
+	if !blockedUntil.IsZero() && time.Now().Before(blockedUntil) {
+		s.scheduleDisconnectReentry(blockedUntil)
+		return
+	}
+
+	s.debugLog("HandleZoneDisconnect: holdoff expired, re-entering commissioning mode")
+	_ = s.EnterCommissioningMode()
 }
 
 // handleFailsafe handles a failsafe timer trigger.

@@ -3,11 +3,14 @@ package runner
 import (
 	"context"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/transport"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 func TestHandleChangeState(t *testing.T) {
@@ -598,4 +601,73 @@ func TestHandleDeviceSetValue_PrefersSuiteOverMain(t *testing.T) {
 	if out[KeyValueSet] != true || out[KeyTriggerSent] != true {
 		t.Fatalf("expected suite trigger success, got out=%v", out)
 	}
+}
+
+// Multi-zone preconditions intentionally remove suite TEST control to free
+// device slots. In strict lifecycle mode, trigger delivery must still work
+// via active main connection when no suite zone exists.
+func TestHandleChangeState_StrictLifecycle_AllowsMainWhenSuiteAbsent(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+
+	r.config.StrictLifecycle = true
+	r.suite.Clear() // No suite zone commissioned/connected in this scenario.
+
+	go serverEchoResponse(server)
+
+	step := &loader.Step{Params: map[string]any{
+		"operating_state": "RUNNING",
+	}}
+	out, err := r.handleChangeState(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyStateChanged] != true {
+		t.Fatalf("expected state_changed=true, got out=%v", out)
+	}
+	if out[StateOperatingState] != "RUNNING" {
+		t.Fatalf("expected operating_state=RUNNING, got out=%v", out)
+	}
+}
+
+func TestHandleChangeState_StrictLifecycle_MainFallbackReturnsTriggerStatusError(t *testing.T) {
+	r, state, server := newTriggerTestRunner()
+	defer server.Close()
+
+	r.config.StrictLifecycle = true
+	r.suite.Clear() // No suite zone commissioned/connected in this scenario.
+
+	go echoErrorStatusResponse(server, wire.StatusNotAuthorized)
+
+	step := &loader.Step{Params: map[string]any{
+		"operating_state": "RUNNING",
+	}}
+	_, err := r.handleChangeState(context.Background(), step, state)
+	if err == nil {
+		t.Fatal("expected trigger status error when main fallback receives NOT_AUTHORIZED")
+	}
+	if !strings.Contains(err.Error(), "status 8") {
+		t.Fatalf("expected trigger status code in error, got: %v", err)
+	}
+}
+
+func echoErrorStatusResponse(server net.Conn, status wire.Status) {
+	fr := transport.NewFramer(server)
+	reqData, err := fr.ReadFrame()
+	if err != nil {
+		return
+	}
+	req, err := wire.DecodeRequest(reqData)
+	if err != nil {
+		return
+	}
+	resp := &wire.Response{
+		MessageID: req.MessageID,
+		Status:    status,
+	}
+	respData, err := wire.EncodeResponse(resp)
+	if err != nil {
+		return
+	}
+	_ = fr.WriteFrame(respData)
 }

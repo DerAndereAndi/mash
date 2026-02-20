@@ -497,13 +497,13 @@ func (r *Runner) sendTriggerViaZone(ctx context.Context, trigger uint64, state *
 		}
 	}
 
-	if r.config != nil && r.config.StrictLifecycle {
+	if r.config != nil && r.config.StrictLifecycle && r.suite.ZoneID() != "" {
 		return fmt.Errorf("strict lifecycle: no suite zone connection available for trigger")
 	}
 
 	// Fall back to pool.Main() (L3 tests where Main is the operational connection).
 	if r.pool.Main() != nil && r.pool.Main().isConnected() && r.pool.Main().framer != nil {
-		_, err := r.sendTrigger(ctx, trigger, state)
+		err := r.sendTriggerOnConn(ctx, trigger, r.pool.Main())
 		if err == nil {
 			r.connMgr.SetDeviceStateModified(true)
 		}

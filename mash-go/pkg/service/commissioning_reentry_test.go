@@ -251,3 +251,35 @@ func TestHandleZoneDisconnect_ReenablesAutoReentryAfterPostExitHoldoff(t *testin
 	assert.True(t, svc.commissioningOpen.Load(),
 		"auto-reentry should resume after post-exit holdoff expires")
 }
+
+func TestHandleZoneDisconnect_SchedulesDeferredAutoReentryAfterHoldoff(t *testing.T) {
+	svc := startDeviceWithEnableKey(t)
+	svc.disconnectReentryHoldoff = 20 * time.Millisecond
+
+	require.NoError(t, svc.EnterCommissioningMode())
+
+	zoneID := "1234432112344321"
+	svc.RegisterZoneAwaitingConnection(zoneID, cert.ZoneTypeTest)
+	svc.mu.Lock()
+	if cz := svc.connectedZones[zoneID]; cz != nil {
+		cz.Connected = true
+	}
+	svc.mu.Unlock()
+
+	require.NoError(t, svc.ExitCommissioningMode())
+	assert.False(t, svc.commissioningOpen.Load(), "gate should be closed after explicit exit")
+
+	// Single disconnect inside holdoff: no second disconnect edge occurs.
+	// Device must still re-open commissioning after holdoff elapses.
+	svc.HandleZoneDisconnect(zoneID)
+	assert.False(t, svc.commissioningOpen.Load(), "holdoff should suppress immediate auto-reentry")
+
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if svc.commissioningOpen.Load() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("expected deferred auto-reentry after holdoff expiry")
+}
