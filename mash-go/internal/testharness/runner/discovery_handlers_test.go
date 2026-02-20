@@ -292,6 +292,22 @@ func TestHandleAnnouncePairingRequest_AnnouncementSent(t *testing.T) {
 	}
 }
 
+func TestHandleAnnouncePairingRequest_MissingZoneIDWithoutFallbackFails(t *testing.T) {
+	r := newTestRunner()
+	defer r.Close()
+	state := newTestState()
+
+	step := &loader.Step{
+		Params: map[string]any{
+			"discriminator": float64(2048),
+		},
+	}
+	_, err := r.handleAnnouncePairingRequest(context.Background(), step, state)
+	if err == nil {
+		t.Fatal("expected error for missing zone_id")
+	}
+}
+
 func TestHandleStopPairingRequest(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()
@@ -762,6 +778,37 @@ func TestBrowseViaObserver_ExistingAndNew(t *testing.T) {
 	}
 	if services[0].InstanceName != "MASH-OLD" {
 		t.Errorf("expected MASH-OLD, got %s", services[0].InstanceName)
+	}
+}
+
+func TestBrowseViaObserver_TimeoutRecoversWithFreshWindow(t *testing.T) {
+	r := newTestRunner()
+	fb := &freshWindowBrowser{
+		commissionableByCall: map[int][]*discovery.CommissionableService{
+			// Call #1: observer session start -> no event in snapshot.
+			1: {},
+			// Call #2: fresh-window fallback -> live service observed.
+			2: {{
+				InstanceName:  "MASH-RECOVERED",
+				Discriminator: 1234,
+			}},
+		},
+	}
+	r.observer = newMDNSObserver(fb, r.debugf)
+	defer r.observer.Stop()
+
+	services, err := r.browseViaObserver(context.Background(), ServiceAliasCommissionable, 120, 1)
+	if err != nil {
+		t.Fatalf("browseViaObserver error: %v", err)
+	}
+	if len(services) != 1 {
+		t.Fatalf("expected 1 recovered service, got %d", len(services))
+	}
+	if services[0].InstanceName != "MASH-RECOVERED" {
+		t.Fatalf("expected MASH-RECOVERED, got %s", services[0].InstanceName)
+	}
+	if fb.commCalls < 2 {
+		t.Fatalf("expected fresh browse fallback call, commCalls=%d", fb.commCalls)
 	}
 }
 

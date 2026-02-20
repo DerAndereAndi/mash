@@ -55,9 +55,24 @@ func (r *Runner) browseViaObserver(ctx context.Context, serviceType string, time
 	defer cancel()
 
 	// Wait for at least minCount services, or until timeout.
-	services, _ := obs.WaitFor(browseCtx, serviceType, func(svcs []discoveredService) bool {
+	services, waitErr := obs.WaitFor(browseCtx, serviceType, func(svcs []discoveredService) bool {
 		return len(svcs) >= minCount
 	})
+	if waitErr != nil {
+		// Timeout can happen even while service is still advertising when no
+		// observer change event arrives in the browse window. Recover using the
+		// current snapshot and a short fresh browse window.
+		services = obs.Snapshot(serviceType)
+		if len(services) < minCount && errors.Is(waitErr, context.DeadlineExceeded) {
+			freshTimeout := timeoutMs
+			if freshTimeout > 1000 {
+				freshTimeout = 1000
+			}
+			if fresh, freshErr := r.browseFreshWindow(ctx, serviceType, freshTimeout); freshErr == nil && len(fresh) >= minCount {
+				services = fresh
+			}
+		}
+	}
 
 	// Store discovered discriminator for {{ device_discriminator }}.
 	resolved := resolveServiceType(serviceType)

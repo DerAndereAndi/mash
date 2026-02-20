@@ -52,6 +52,7 @@ steps:
     action: verify_mdns_advertising
     params:
       service_type: "_mash-comm._tcp"
+      timeout_ms: 1000
     expect:
       advertising: true
 
@@ -122,7 +123,7 @@ steps:
     params:
       service_type: "_mashp._udp"
       discriminator: "{{ device_discriminator }}"
-      zone_id: "{{ local_zone_id }}"
+      zone_id: "{{ current_zone_id }}"
     expect:
       announcement_sent: true
 
