@@ -56,6 +56,49 @@ func TestZoneCreateHasListCount(t *testing.T) {
 	}
 }
 
+func TestSetLogicalZone(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	step := &loader.Step{Params: map[string]any{
+		KeyZoneID:   "logical-grid",
+		KeyZoneType: ZoneTypeGrid,
+		KeyConnected: true,
+	}}
+	out, err := r.handleSetLogicalZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyLogicalZoneSet] != true {
+		t.Fatalf("expected logical_zone_set=true, got %v", out)
+	}
+
+	zs := getZoneState(state)
+	z, ok := zs.zones["logical-grid"]
+	if !ok {
+		t.Fatal("expected logical zone tracked in state")
+	}
+	if z.ZoneType != ZoneTypeGrid {
+		t.Fatalf("expected zone_type=GRID, got %s", z.ZoneType)
+	}
+	if !z.Connected {
+		t.Fatal("expected logical zone connected")
+	}
+}
+
+func TestSetLogicalZone_MissingZoneID(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	out, err := r.handleSetLogicalZone(context.Background(), &loader.Step{Params: map[string]any{}}, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyLogicalZoneSet] != false {
+		t.Fatalf("expected logical_zone_set=false on missing zone_id, got %v", out)
+	}
+}
+
 func TestZoneDuplicateTypeError(t *testing.T) {
 	r := newTestRunner()
 	state := newTestState()

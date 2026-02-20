@@ -288,6 +288,7 @@ const (
 const (
 	KeyZoneID              = "zone_id"
 	KeySaveZoneID          = "save_zone_id"
+	KeyLogicalZoneSet      = "logical_zone_set"
 	KeyZoneCreated         = "zone_created"
 	KeyZoneType            = "zone_type"
 	KeyFingerprint         = "fingerprint"
@@ -1162,6 +1163,7 @@ const (
 // Zone actions (zone_handlers.go).
 const (
 	ActionCreateZone                 = "create_zone"
+	ActionSetLogicalZone             = "set_logical_zone"
 	ActionAddZone                    = "add_zone"
 	ActionDeleteZone                 = "delete_zone"
 	ActionRemoveZone                 = "remove_zone"

@@ -23,6 +23,7 @@ func (r *Runner) registerZoneHandlers() {
 	r.engine.RegisterChecker(KeySaveZoneID, r.checkSaveZoneID)
 
 	r.engine.RegisterHandler(ActionCreateZone, r.handleCreateZone)
+	r.engine.RegisterHandler(ActionSetLogicalZone, r.handleSetLogicalZone)
 	r.engine.RegisterHandler(ActionAddZone, r.handleAddZone)
 	r.engine.RegisterHandler(ActionDeleteZone, r.handleDeleteZone)
 	r.engine.RegisterHandler(ActionRemoveZone, r.handleRemoveZone)
@@ -42,6 +43,59 @@ func (r *Runner) registerZoneHandlers() {
 	r.engine.RegisterHandler(ActionVerifyBidirectionalActive, r.handleVerifyBidirectionalActive)
 	r.engine.RegisterHandler(ActionVerifyRestoreSequence, r.handleVerifyRestoreSequence)
 	r.engine.RegisterHandler(ActionVerifyTLSState, r.handleVerifyTLSState)
+}
+
+// handleSetLogicalZone marks a logical zone context in harness state without
+// creating any transport connection.
+func (r *Runner) handleSetLogicalZone(ctx context.Context, step *loader.Step, state *engine.ExecutionState) (map[string]any, error) {
+	_ = ctx
+	params := engine.InterpolateParams(step.Params, state)
+	zs := getZoneState(state)
+
+	zoneID, _ := params[KeyZoneID].(string)
+	if zoneID == "" {
+		return map[string]any{
+			KeyLogicalZoneSet: false,
+			KeyError:          "missing zone_id",
+		}, nil
+	}
+
+	zoneType, _ := params[KeyZoneType].(string)
+	if zoneType == "" {
+		zoneType = ZoneTypeTest
+	}
+
+	connected := true
+	if v, ok := params[KeyConnected].(bool); ok {
+		connected = v
+	}
+
+	z, ok := zs.zones[zoneID]
+	if !ok {
+		z = &zoneInfo{
+			ZoneID:         zoneID,
+			ZoneType:       zoneType,
+			Priority:       zonePriority[zoneType],
+			Metadata:       make(map[string]any),
+			DeviceIDs:      make([]string, 0),
+			CommissionedAt: time.Now(),
+		}
+		zs.zones[zoneID] = z
+		zs.zoneOrder = append(zs.zoneOrder, zoneID)
+	}
+
+	z.ZoneType = zoneType
+	z.Priority = zonePriority[zoneType]
+	z.Connected = connected
+	z.LastSeen = time.Now()
+	z.LastSeenUpdated = true
+
+	return map[string]any{
+		KeyLogicalZoneSet: true,
+		KeyZoneID:         zoneID,
+		KeyZoneType:       z.ZoneType,
+		KeyConnected:      z.Connected,
+	}, nil
 }
 
 // handleCreateZone creates a new zone with a CA.
@@ -765,4 +819,3 @@ func (r *Runner) checkSaveZoneID(key string, expected interface{}, state *engine
 		Message:  fmt.Sprintf("saved zone_id %v as %q", zoneID, targetKey),
 	}
 }
-

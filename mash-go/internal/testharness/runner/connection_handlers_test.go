@@ -528,6 +528,49 @@ func TestConnectAsZone_ZoneLimit(t *testing.T) {
 	}
 }
 
+func TestConnectAsZone_RejectsNonOperationalZoneID(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+
+	step := &loader.Step{Params: map[string]any{
+		KeyZoneID: "grid-1",
+	}}
+	out, err := r.handleConnectAsZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyConnectionEstablished] != false {
+		t.Fatalf("expected connect_as_zone to reject non-operational ID, got out=%v", out)
+	}
+	if out[KeyErrorCode] != "INVALID_ZONE_ID" {
+		t.Fatalf("expected INVALID_ZONE_ID, got out=%v", out)
+	}
+}
+
+func TestConnectAsZone_ResolvesZoneTypeToCommissionedID(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+	realGridID := "0011223344556677"
+	state.Set(StateGridZoneID, realGridID)
+
+	ct := getConnectionTracker(state)
+	ct.zoneConnections[realGridID] = &Connection{state: ConnOperational}
+
+	step := &loader.Step{Params: map[string]any{
+		ParamZone: "GRID",
+	}}
+	out, err := r.handleConnectAsZone(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyConnectionEstablished] != true {
+		t.Fatalf("expected zone connect reuse success, got out=%v", out)
+	}
+	if out[KeyZoneID] != realGridID {
+		t.Fatalf("expected resolved grid zone id %s, got %v", realGridID, out[KeyZoneID])
+	}
+}
+
 // C10: send_ping routes to zone-specific connection.
 func TestPing_ZoneRouting(t *testing.T) {
 	r := newTestRunner()
@@ -1688,4 +1731,3 @@ func TestCheckInterfaceCorrect(t *testing.T) {
 		t.Error("expected true for nil addr")
 	}
 }
-

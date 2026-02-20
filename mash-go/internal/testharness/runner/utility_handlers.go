@@ -435,6 +435,22 @@ func (r *Runner) handleWaitNotification(ctx context.Context, step *loader.Step, 
 		// Not a valid notification -- ignore and continue to wire read.
 	}
 
+	// Check notifications buffered directly on Main() connection. Some paths
+	// (e.g., sendTriggerOnConn) append to conn.pendingNotifications.
+	if r.pool.Main() != nil && len(r.pool.Main().pendingNotifications) > 0 {
+		data := r.pool.Main().pendingNotifications[0]
+		r.pool.Main().pendingNotifications = r.pool.Main().pendingNotifications[1:]
+		r.debugf("receive_notification: using main pending notification frame (%d bytes)", len(data))
+		notif, err := wire.DecodeNotification(data)
+		if err == nil {
+			out, outErr := r.buildNotificationOutput(notif.Changes, eventType, state, false)
+			if out != nil {
+				out[KeySubscriptionID] = notif.SubscriptionID
+			}
+			return out, outErr
+		}
+	}
+
 	if r.pool.Main() == nil || !r.pool.Main().isConnected() {
 		return map[string]any{
 			KeyNotificationReceived: false,

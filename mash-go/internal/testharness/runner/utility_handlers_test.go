@@ -2,11 +2,15 @@ package runner
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
+	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/transport"
+	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 func newTestRunner() *Runner {
@@ -154,6 +158,49 @@ func TestHandleEvaluate(t *testing.T) {
 	}
 	if out["result"] != false {
 		t.Error("expected result=false for missing key")
+	}
+}
+
+func TestHandleWaitNotification_ConsumesMainPendingNotifications(t *testing.T) {
+	r := newTestRunner()
+	state := newTestState()
+	state.Set(StateSubscribedFeatureID, int(model.FeatureMeasurement))
+
+	client, server := net.Pipe()
+	// Ensure fallback wire read won't block if pending buffer is ignored.
+	_ = server.Close()
+	conn := &Connection{
+		conn:   client,
+		framer: transport.NewFramer(client),
+		state:  ConnOperational,
+	}
+	defer client.Close()
+
+	notif, err := wire.EncodeNotification(&wire.Notification{
+		SubscriptionID: 7,
+		EndpointID:     1,
+		FeatureID:      uint8(model.FeatureMeasurement),
+		Changes: map[uint16]any{
+			1: int64(4000000),
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode notification: %v", err)
+	}
+	conn.pendingNotifications = [][]byte{notif}
+	r.pool.SetMain(conn)
+
+	out, err := r.handleWaitNotification(context.Background(), &loader.Step{
+		Params: map[string]any{"timeout": "50ms"},
+	}, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyNotificationReceived] != true {
+		t.Fatalf("expected notification_received=true, got out=%v", out)
+	}
+	if out[KeySubscriptionID] != uint32(7) {
+		t.Fatalf("expected subscription_id=7, got out=%v", out)
 	}
 }
 

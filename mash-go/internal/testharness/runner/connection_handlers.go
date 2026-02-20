@@ -86,7 +86,8 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 	params := engine.InterpolateParams(step.Params, state)
 	ct := getConnectionTracker(state)
 
-	zoneID := resolveZoneParam(params)
+	rawZoneID := resolveZoneParam(params)
+	zoneID := rawZoneID
 
 	// Reuse an existing connected zone from a precondition (e.g.,
 	// two_zones_connected) instead of creating a duplicate connection
@@ -100,6 +101,17 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 		}, nil
 	}
 
+	zoneID = resolveOperationalZoneID(zoneID, state)
+	if zoneID != rawZoneID {
+		if existing, ok := ct.zoneConnections[zoneID]; ok && existing.isConnected() {
+			return map[string]any{
+				KeyConnectionEstablished: true,
+				KeyZoneID:                zoneID,
+				KeyState:                 ConnectionStateOperational,
+			}, nil
+		}
+	}
+
 	// Enforce 5-zone connection limit.
 	if len(ct.zoneConnections) >= 5 {
 		return map[string]any{
@@ -107,6 +119,15 @@ func (r *Runner) handleConnectAsZone(ctx context.Context, step *loader.Step, sta
 			KeyZoneID:                zoneID,
 			KeyError:                 ErrCodeMaxConnsExceeded,
 			KeyErrorCode:             ErrCodeMaxConnsExceeded,
+		}, nil
+	}
+
+	if zoneID == "" || !isOperationalZoneID(zoneID) {
+		return map[string]any{
+			KeyConnectionEstablished: false,
+			KeyZoneID:                zoneID,
+			KeyError:                 "INVALID_ZONE_ID",
+			KeyErrorCode:             "INVALID_ZONE_ID",
 		}, nil
 	}
 
@@ -175,6 +196,39 @@ func resolveZoneParam(params map[string]any) string {
 		return z
 	}
 	return ""
+}
+
+func resolveOperationalZoneID(zoneID string, state *engine.ExecutionState) string {
+	switch strings.ToUpper(zoneID) {
+	case ZoneTypeGrid:
+		if id, ok := state.Get(StateGridZoneID); ok {
+			if s, ok := id.(string); ok && s != "" {
+				return s
+			}
+		}
+	case ZoneTypeLocal:
+		if id, ok := state.Get(StateLocalZoneID); ok {
+			if s, ok := id.(string); ok && s != "" {
+				return s
+			}
+		}
+	case ZoneTypeTest:
+		if id, ok := state.Get(StateTestZoneID); ok {
+			if s, ok := id.(string); ok && s != "" {
+				return s
+			}
+		}
+	}
+	return zoneID
+}
+
+func isOperationalZoneID(zoneID string) bool {
+	// Operational zone IDs are 8-byte hex strings (16 hex chars).
+	if len(zoneID) != 16 {
+		return false
+	}
+	_, err := hex.DecodeString(zoneID)
+	return err == nil
 }
 
 func (r *Runner) getZoneConnection(state *engine.ExecutionState, params map[string]any) (*Connection, string, error) {

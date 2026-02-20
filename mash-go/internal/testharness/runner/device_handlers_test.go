@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
@@ -520,5 +521,81 @@ func TestDeviceStateModified_SetByTrigger(t *testing.T) {
 
 	if !r.connMgr.DeviceStateModified() {
 		t.Error("expected deviceStateModified=true after trigger send")
+	}
+}
+
+// Regression for G15 subscription failures:
+// device_set_value must route TriggerTestEvent over the suite TEST control
+// channel, not require pool.Main().
+func TestHandleDeviceSetValue_UsesSuiteControlChannel(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "127.0.0.1:8443"
+	r.config.EnableKey = "00112233445566778899aabbccddeeff"
+
+	// Main is disconnected; suite control channel is available.
+	r.pool.Main().state = ConnDisconnected
+	suiteConn, suiteServer := newPipeConnection()
+	r.suite.SetConn(suiteConn)
+	defer suiteServer.Close()
+
+	state := newTestState()
+	step := &loader.Step{Params: map[string]any{
+		"endpoint":  float64(1),
+		"feature":   "Measurement",
+		"attribute": "acActivePower",
+		"value":     float64(4000000),
+	}}
+
+	go echoSuccessResponse(suiteServer)
+
+	out, err := r.handleDeviceSetValue(context.Background(), step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyValueSet] != true {
+		t.Fatalf("expected value_set=true, got out=%v", out)
+	}
+	if out[KeyTriggerSent] != true {
+		t.Fatalf("expected trigger_sent=true, got out=%v", out)
+	}
+	if got, _ := state.Get("acActivePower"); got != float64(4000000) {
+		t.Fatalf("expected state acActivePower=4000000, got %v", got)
+	}
+}
+
+// Ensure device_set_value does not regress to main-path usage when both are
+// present; suite must be preferred to avoid non-TEST NOT_AUTHORIZED behavior.
+func TestHandleDeviceSetValue_PrefersSuiteOverMain(t *testing.T) {
+	r := newTestRunner()
+	r.config.Target = "127.0.0.1:8443"
+	r.config.EnableKey = "00112233445566778899aabbccddeeff"
+
+	// Main is live but has no responder; if used, request would block/fail.
+	mainConn, mainServer := newPipeConnection()
+	r.pool.SetMain(mainConn)
+	defer mainServer.Close()
+
+	suiteConn, suiteServer := newPipeConnection()
+	r.suite.SetConn(suiteConn)
+	defer suiteServer.Close()
+
+	state := newTestState()
+	step := &loader.Step{Params: map[string]any{
+		"endpoint":  float64(1),
+		"feature":   "Measurement",
+		"attribute": "acActivePower",
+		"value":     float64(8888000),
+	}}
+
+	go echoSuccessResponse(suiteServer)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := r.handleDeviceSetValue(ctx, step, state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out[KeyValueSet] != true || out[KeyTriggerSent] != true {
+		t.Fatalf("expected suite trigger success, got out=%v", out)
 	}
 }

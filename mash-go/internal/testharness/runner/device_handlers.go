@@ -204,7 +204,7 @@ func (r *Runner) handleDeviceSetValue(ctx context.Context, step *loader.Step, st
 		}
 
 		// Invoke TriggerTestEvent on the device.
-		result, err := r.invokeTriggerTestEvent(trigger)
+		result, err := r.invokeTriggerTestEvent(ctx, state, trigger)
 		if err != nil {
 			return map[string]any{
 				KeyValueSet: false,
@@ -282,44 +282,14 @@ func (r *Runner) resolveTriggerForSetValue(featureRaw any, attribute string, val
 }
 
 // invokeTriggerTestEvent sends a TriggerTestEvent invoke to the device's TestControl feature.
-func (r *Runner) invokeTriggerTestEvent(trigger uint64) (string, error) {
-	if !r.pool.Main().isConnected() {
-		return "", fmt.Errorf("not connected")
-	}
-
-	// Build invoke payload: {1: "triggerTestEvent", 2: {1: enableKey, 2: eventTrigger}}
-	invokePayload := &wire.InvokePayload{
-		CommandID: features.TestControlCmdTriggerTestEvent,
-		Parameters: map[string]any{
-			"enableKey":    r.config.EnableKey,
-			"eventTrigger": trigger,
-		},
-	}
-
-	req := &wire.Request{
-		MessageID:  r.nextMessageID(),
-		Operation:  wire.OpInvoke,
-		EndpointID: 0, // Device root
-		FeatureID:  uint8(model.FeatureTestControl),
-		Payload:    invokePayload,
-	}
-
-	data, err := wire.EncodeRequest(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode trigger request: %w", err)
-	}
-
-	resp, err := r.sendRequest(data, "triggerTestEvent", req.MessageID)
-	if err != nil {
-		r.debugf("invokeTriggerTestEvent: sendRequest error: %v", err)
+func (r *Runner) invokeTriggerTestEvent(ctx context.Context, state *engine.ExecutionState, trigger uint64) (string, error) {
+	// Route test-control mutations through the authoritative suite control
+	// channel. This avoids non-TEST zone invocation (NOT_AUTHORIZED) when
+	// Main() points to an operational GRID/LOCAL connection.
+	if err := r.sendTriggerViaZone(ctx, trigger, state); err != nil {
+		r.debugf("invokeTriggerTestEvent: sendTriggerViaZone error: %v", err)
 		return "", err
 	}
-
-	r.debugf("invokeTriggerTestEvent: response status=%v payload=%v", resp.Status, resp.Payload)
-	if !resp.IsSuccess() {
-		return resp.Status.String(), fmt.Errorf("triggerTestEvent failed: %v", resp.Status)
-	}
-
 	return "SUCCESS", nil
 }
 
@@ -351,7 +321,7 @@ func (r *Runner) handleDeviceSetValuesRapid(ctx context.Context, step *loader.St
 			continue
 		}
 
-		if _, err := r.invokeTriggerTestEvent(trigger); err != nil {
+		if _, err := r.invokeTriggerTestEvent(ctx, state, trigger); err != nil {
 			r.debugf("device_set_values_rapid: trigger failed for change %d: %v", i, err)
 			continue
 		}

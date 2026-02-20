@@ -472,13 +472,13 @@ steps:
     expect:
       notification_received: true
 
-  - name: Connect another zone
-    action: connect_as_zone
+  - name: Set logical secondary zone context
+    action: set_logical_zone
     params:
       zone_type: GRID
-      zone_id: "grid-1"
+      zone_id: "logical-grid-secondary"
     expect:
-      connection_established: true
+      logical_zone_set: true
 
   - name: Trigger change
     action: device_set_value
