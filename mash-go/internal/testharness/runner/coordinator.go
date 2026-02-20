@@ -173,6 +173,11 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		}
 		c.ops.SetDeviceStateModified(false)
 
+		// Normalize leaked non-suite zones before capturing the baseline.
+		// Otherwise the next teardown can fail on a "fixed leak" diff
+		// (before had leaked zones, after cleanup removed them).
+		c.normalizeResidualNonSuiteZones(state)
+
 		// Capture device state snapshot AFTER reset, BEFORE preconditions.
 		snapCtx, snapCancel := context.WithTimeout(ctx, 3*time.Second)
 		if before := c.ops.RequestDeviceState(snapCtx, state); before != nil {
@@ -198,20 +203,26 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 	tier := connectionTierFor(tc)
 	c.debugf("preconditions: tier=%s needed=%d current=%d for %s", tier, needed, current, tc.ID)
 	forceFreshForCommissionStep := needed <= precondLevelConnected && testCaseHasAction(tc, ActionCommission)
+	restoreCommissionZoneType := c.ops.CommissionZoneType()
+	restoreCommissionZoneTypeSet := false
+	defer func() {
+		if restoreCommissionZoneTypeSet {
+			c.ops.SetCommissionZoneType(restoreCommissionZoneType)
+		}
+	}()
 	if forceFreshForCommissionStep && c.suite.ZoneID() != "" && c.ops.CommissionZoneType() == cert.ZoneTypeTest {
 		// Keep suite on TEST; commission-step tests use a disposable non-suite zone.
 		c.debugf("commission-step: overriding test session zone type to LOCAL (suite TEST preserved)")
 		c.ops.SetCommissionZoneType(cert.ZoneTypeLocal)
+		restoreCommissionZoneTypeSet = true
 	}
 	needsIsolatedConnectSession := testCaseNeedsIsolatedCommissionedSession(tc)
-	restoreCommissionZoneType := cert.ZoneTypeTest
-	restoreCommissionZoneTypeSet := false
 	if needed >= precondLevelCommissioned && needsIsolatedConnectSession && c.suite.ZoneID() != "" {
 		// Connection-probing tests must not mutate the suite control channel.
 		// Force a disposable commissioned session for this test.
 		if c.ops.CommissionZoneType() == cert.ZoneTypeTest {
-			restoreCommissionZoneTypeSet = true
 			c.ops.SetCommissionZoneType(cert.ZoneTypeLocal)
+			restoreCommissionZoneTypeSet = true
 		}
 		if m := c.pool.Main(); m != nil && m == c.suite.Conn() {
 			detachMainControlChannel(c.pool, state)
@@ -220,11 +231,6 @@ func (c *coordinatorImpl) SetupPreconditions(ctx context.Context, tc *loader.Tes
 		}
 		c.ops.SetPASEState(nil)
 		c.ops.ClearWorkingCrypto()
-		defer func() {
-			if restoreCommissionZoneTypeSet {
-				c.ops.SetCommissionZoneType(restoreCommissionZoneType)
-			}
-		}()
 	}
 
 	// Session reuse decision: only application-tier tests can reuse.
@@ -956,6 +962,44 @@ func nonSuiteZoneIDsFromSnapshot(snap DeviceStateSnapshot, suiteZoneID string) [
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+func (c *coordinatorImpl) normalizeResidualNonSuiteZones(state *engine.ExecutionState) {
+	if c.config == nil || !c.config.StrictLifecycle || c.config.Target == "" || c.config.EnableKey == "" {
+		return
+	}
+	suiteZoneID := c.suite.ZoneID()
+	if suiteZoneID == "" {
+		return
+	}
+
+	sc := c.suite.Conn()
+	if sc == nil || !sc.isConnected() || sc.framer == nil {
+		if err := c.ops.ReconnectToZone(state); err != nil {
+			c.debugf("setup: residual zone normalize reconnect failed: %v", err)
+			return
+		}
+		sc = c.suite.Conn()
+	}
+	if sc == nil || !sc.isConnected() || sc.framer == nil {
+		return
+	}
+
+	checkCtx, checkCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	snap := c.ops.RequestDeviceState(checkCtx, state)
+	checkCancel()
+	if snap == nil {
+		return
+	}
+
+	ids := nonSuiteZoneIDsFromSnapshot(snap, suiteZoneID)
+	if len(ids) == 0 {
+		return
+	}
+	c.debugf("setup: removing %d residual non-suite zones before baseline", len(ids))
+	for _, zoneID := range ids {
+		c.ops.SendRemoveZoneOnConn(sc, zoneID)
+	}
 }
 
 // CurrentLevel returns the runner's current precondition level based on

@@ -188,6 +188,7 @@ func TestCoordSetup_CommissionStepAtConnectedLevel_ForcesFreshCommission(t *test
 	s.EXPECT().Conn().Return(&Connection{state: ConnOperational, framer: &transport.Framer{}}).Maybe()
 	s.EXPECT().ConnKey().Return("main-suite-1").Maybe()
 	o.EXPECT().SetCommissionZoneType(cert.ZoneTypeLocal).Return().Once()
+	o.EXPECT().SetCommissionZoneType(cert.ZoneTypeTest).Return().Once()
 	p.EXPECT().CloseZonesExcept("main-suite-1").Return(time.Time{}).Maybe()
 	o.EXPECT().DisconnectConnection().Return().Once()
 	o.EXPECT().ClearWorkingCrypto().Return().Once()
@@ -195,6 +196,47 @@ func TestCoordSetup_CommissionStepAtConnectedLevel_ForcesFreshCommission(t *test
 
 	allMaybe(s, p, o)
 	assert.NoError(t, c.SetupPreconditions(context.Background(), tc, st()))
+}
+
+func TestCoordSetup_StrictLifecycle_NormalizesResidualZonesBeforeBaseline(t *testing.T) {
+	c, s, p, o := newCoord(t, &Config{
+		Target:          "localhost:8443",
+		EnableKey:       "0011",
+		StrictLifecycle: true,
+	})
+	tc := tcWith("TC-BASELINE-NORMALIZE", cond(PrecondDeviceInCommissioningMode, true))
+	state := st()
+	suiteConn := &Connection{state: ConnOperational, framer: &transport.Framer{}}
+
+	s.EXPECT().ZoneID().Return("suite-zone-1").Maybe()
+	s.EXPECT().Conn().Return(suiteConn).Maybe()
+	s.EXPECT().ConnKey().Return("main-suite-zone-1").Maybe()
+
+	// First snapshot: leaked non-suite zone exists and must be removed.
+	leaked := DeviceStateSnapshot{
+		"zones": []any{
+			map[string]any{"id": "suite-zone-1"},
+			map[string]any{"id": "zone-leak-1"},
+		},
+	}
+	// Second snapshot: captured baseline after cleanup.
+	clean := DeviceStateSnapshot{
+		"zones": []any{
+			map[string]any{"id": "suite-zone-1"},
+		},
+	}
+	o.EXPECT().RequestDeviceState(mock.Anything, mock.Anything).Return(leaked).Once()
+	o.EXPECT().SendRemoveZoneOnConn(suiteConn, "zone-leak-1").Return().Once()
+	o.EXPECT().RequestDeviceState(mock.Anything, mock.Anything).Return(clean).Once()
+
+	allMaybe(s, p, o)
+	assert.NoError(t, c.SetupPreconditions(context.Background(), tc, state))
+
+	beforeRaw, ok := state.Custom[engine.StateKeyDeviceStateBefore]
+	assert.True(t, ok, "baseline snapshot should be captured")
+	before, ok := beforeRaw.(map[string]any)
+	assert.True(t, ok, "baseline snapshot must be map[string]any")
+	assert.NotNil(t, before["zones"], "baseline zones should be present")
 }
 
 func TestCoordSessionReuse_NoReuseWithGridZone(t *testing.T) {

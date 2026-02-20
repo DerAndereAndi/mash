@@ -197,3 +197,61 @@ func TestRequestDeviceState_DoesNotBlockOnWriteToUnresponsivePeer(t *testing.T) 
 		t.Fatal("requestDeviceState blocked on write to unresponsive peer")
 	}
 }
+
+func TestRequestDeviceState_PrefersSuiteConnectionOverMain(t *testing.T) {
+	r := newTestRunner()
+	r.config.EnableKey = "deadbeefdeadbeefdeadbeefdeadbeef"
+
+	mainClient, mainServer := net.Pipe()
+	defer mainClient.Close()
+	defer mainServer.Close()
+	r.pool.SetMain(&Connection{
+		conn:   mainClient,
+		framer: transport.NewFramer(mainClient),
+		state:  ConnOperational,
+	})
+
+	suiteClient, suiteServer := net.Pipe()
+	defer suiteClient.Close()
+	defer suiteServer.Close()
+	r.suite.SetConn(&Connection{
+		conn:   suiteClient,
+		framer: transport.NewFramer(suiteClient),
+		state:  ConnOperational,
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srvFramer := transport.NewFramer(suiteServer)
+		reqData, err := srvFramer.ReadFrame()
+		if err != nil {
+			return
+		}
+		req, err := wire.DecodeRequest(reqData)
+		if err != nil {
+			return
+		}
+		resp := &wire.Response{
+			MessageID: req.MessageID,
+			Status:    wire.StatusSuccess,
+			Payload: map[string]any{
+				"zone_count": 1,
+			},
+		}
+		respData, _ := wire.EncodeResponse(resp)
+		_ = srvFramer.WriteFrame(respData)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	snap := r.requestDeviceState(ctx, engine.NewExecutionState(context.Background()))
+	<-done
+
+	if snap == nil {
+		t.Fatal("expected non-nil snapshot from suite connection")
+	}
+	if got, ok := snap["zone_count"]; !ok || got != uint64(1) {
+		t.Fatalf("expected zone_count=1 from suite response, got %v", snap["zone_count"])
+	}
+}
