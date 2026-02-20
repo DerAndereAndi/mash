@@ -55,6 +55,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -80,12 +81,12 @@ import (
 // Config holds the controller configuration.
 // It implements interactive.ControllerConfig.
 type Config struct {
-	ConfigFile       string
-	ZoneNameValue    string
-	ZoneTypeValue    string
-	LogLevel         string
-	Interactive      bool
-	AutoCommission   bool
+	ConfigFile     string
+	ZoneNameValue  string
+	ZoneTypeValue  string
+	LogLevel       string
+	Interactive    bool
+	AutoCommission bool
 
 	// Persistence settings
 	StateDir string
@@ -111,6 +112,39 @@ var (
 	svc    *service.ControllerService
 )
 
+type levelFilterWriter struct {
+	out      io.Writer
+	minLevel slog.Level
+}
+
+func (w *levelFilterWriter) Write(p []byte) (int, error) {
+	msg := strings.TrimSpace(string(p))
+	if msg == "" {
+		return len(p), nil
+	}
+	level := classifyLogMessageLevel(msg)
+	if level < w.minLevel {
+		return len(p), nil
+	}
+	_, err := fmt.Fprintln(w.out, msg)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func classifyLogMessageLevel(msg string) slog.Level {
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "fatal"), strings.Contains(lower, "error"):
+		return slog.LevelError
+	case strings.Contains(lower, "warning"), strings.Contains(lower, "warn"):
+		return slog.LevelWarn
+	default:
+		return slog.LevelInfo
+	}
+}
+
 func init() {
 	flag.StringVar(&config.ConfigFile, "config", "", "Configuration file path")
 	flag.StringVar(&config.ZoneNameValue, "zone-name", "Home Energy", "Zone name for this controller")
@@ -129,7 +163,11 @@ func main() {
 	flag.Parse()
 
 	// Setup logging
-	setupLogging(config.LogLevel)
+	minLogLevel := setupLogging(config.LogLevel)
+	appLogger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: minLogLevel,
+	}))
+	slog.SetDefault(appLogger)
 
 	log.Println("MASH Reference Controller")
 	log.Println("=========================")
@@ -157,13 +195,7 @@ func main() {
 	svcConfig := service.DefaultControllerConfig()
 	svcConfig.ZoneName = config.ZoneNameValue
 	svcConfig.ZoneType = zoneType
-
-	// Set up service logger based on log level
-	if config.LogLevel == "debug" {
-		svcConfig.Logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
-		}))
-	}
+	svcConfig.Logger = appLogger
 
 	// Set up protocol logging if requested
 	var protocolLogger *mashlog.FileLogger
@@ -290,14 +322,33 @@ func main() {
 	log.Println("Goodbye!")
 }
 
-func setupLogging(level string) {
+func setupLogging(level string) slog.Level {
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
+	minLevel := parseLogLevel(level)
+	log.SetOutput(&levelFilterWriter{
+		out:      os.Stdout,
+		minLevel: minLevel,
+	})
 
-	switch level {
-	case "debug":
+	if minLevel <= slog.LevelDebug {
 		log.SetFlags(log.Ltime | log.Lmicroseconds | log.Lshortfile)
-	case "warn", "error":
+	}
+	if minLevel >= slog.LevelWarn {
 		log.SetFlags(log.Ltime)
+	}
+	return minLevel
+}
+
+func parseLogLevel(level string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
 }
 
@@ -522,4 +573,3 @@ func runMonitoringLoop(ctx context.Context) {
 		}
 	}
 }
-
