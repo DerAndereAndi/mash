@@ -10,6 +10,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/service/dispatch"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -36,7 +37,7 @@ type ProtocolHandler struct {
 	peerZoneType cert.ZoneType // The remote peer's zone type (GRID, LOCAL, etc.)
 
 	// Subscription management
-	subscriptions *SessionSubscriptionTracker
+	subscriptions *dispatch.SessionSubscriptionTracker
 
 	// Send function for notifications
 	sendNotification NotificationSender
@@ -57,7 +58,7 @@ type ProtocolHandler struct {
 func NewProtocolHandler(device DeviceModel) *ProtocolHandler {
 	return &ProtocolHandler{
 		device:        device,
-		subscriptions: NewSessionSubscriptionTracker(),
+		subscriptions: dispatch.NewSessionSubscriptionTracker(),
 	}
 }
 
@@ -65,7 +66,7 @@ func NewProtocolHandler(device DeviceModel) *ProtocolHandler {
 func NewProtocolHandlerWithSend(device DeviceModel, send NotificationSender) *ProtocolHandler {
 	return &ProtocolHandler{
 		device:           device,
-		subscriptions:    NewSessionSubscriptionTracker(),
+		subscriptions:    dispatch.NewSessionSubscriptionTracker(),
 		sendNotification: send,
 	}
 }
@@ -76,7 +77,7 @@ func (h *ProtocolHandler) Device() DeviceModel {
 }
 
 // SessionSubscriptions returns the session subscription tracker for this handler.
-func (h *ProtocolHandler) SessionSubscriptions() *SessionSubscriptionTracker {
+func (h *ProtocolHandler) SessionSubscriptions() *dispatch.SessionSubscriptionTracker {
 	return h.subscriptions
 }
 
@@ -679,7 +680,7 @@ func (h *ProtocolHandler) handleInvoke(req *wire.Request) *wire.Response {
 }
 
 // GetSubscription returns an inbound subscription by ID.
-func (h *ProtocolHandler) GetSubscription(id uint32) (*Subscription, bool) {
+func (h *ProtocolHandler) GetSubscription(id uint32) (*dispatch.Subscription, bool) {
 	sub := h.subscriptions.GetInbound(id)
 	return sub, sub != nil
 }

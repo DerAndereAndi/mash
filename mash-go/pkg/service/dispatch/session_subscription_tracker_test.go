@@ -1,4 +1,4 @@
-package service
+package dispatch
 
 import (
 	"sync"
