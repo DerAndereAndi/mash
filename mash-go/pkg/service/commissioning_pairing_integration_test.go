@@ -232,6 +232,18 @@ func (b *pairingRequestMockBrowser) FindByDiscriminator(ctx context.Context, dis
 	return nil, discovery.ErrNotFound
 }
 
+func (b *pairingRequestMockBrowser) FindAllByDiscriminator(ctx context.Context, discriminator uint16) ([]*discovery.CommissionableService, error) {
+	b.mu.Lock()
+	visible := b.deviceVisible
+	device := b.pendingDevice
+	b.mu.Unlock()
+
+	if visible && device != nil && device.Discriminator == discriminator {
+		return []*discovery.CommissionableService{device}, nil
+	}
+	return nil, nil
+}
+
 func (b *pairingRequestMockBrowser) Stop() {}
 
 func (b *pairingRequestMockBrowser) SetPendingDevice(device *discovery.CommissionableService) {

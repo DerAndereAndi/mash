@@ -182,6 +182,10 @@ func (m *mockBrowser) FindByDiscriminator(ctx context.Context, discriminator uin
 	return nil, discovery.ErrNotFound
 }
 
+func (m *mockBrowser) FindAllByDiscriminator(ctx context.Context, discriminator uint16) ([]*discovery.CommissionableService, error) {
+	return nil, nil
+}
+
 func (m *mockBrowser) Stop() {
 	// Nothing to stop in mock
 }
