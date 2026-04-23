@@ -4044,6 +4044,37 @@ Failsafe-limit attributes are writable only on endpoints that expose EnergyContr
 
 ---
 
+### DEC-076: Retain In-Session Certificate Renewal
+
+**Date:** 2026-04-23
+**Status:** Accepted (re-examines DEC-015)
+
+**Context:**
+The v3 KISS analysis flagged MASH's in-session certificate renewal subprotocol (MsgTypes 30–33, 814 LOC production + 1,203 LOC tests) as a candidate for simplification: could reconnect-based renewal do the same job with less code? DEC-076 is the explicit re-examination of that question. The full comparison lives in `docs/design/cert-renewal-comparison.md`.
+
+**Decision:**
+Keep the current in-session renewal design. Do not switch to a reconnect-based alternative.
+
+**Rationale:**
+1. **LOC savings are partial and mostly illusory.** Deleting the 814 LOC of renewal code costs ~300–400 LOC of new proactive-reconnect orchestration. Net savings: ~400 LOC — within a ~30 KLOC service package.
+2. **Zero-downtime matters for energy control.** In-session renewal is invisible to EMS operations. Reconnect-based renewal introduces a ~200–1000 ms disconnect window in which `SetLimit` writes race against the rotation, which is a new operational fragility the spec currently doesn't have.
+3. **PASE reuse is a tax.** Reconnect-based renewal is only simpler if the re-auth channel skips PASE. Any variant that re-runs PASE turns the setup code into a long-lived secret, weakening the one-shot commissioning posture (DEC-068).
+4. **Asymmetric reversibility.** Switching away from in-session renewal is easy (delete 814 LOC). Switching back is hard (reintroduce MsgType allocations, state machine, nonce binding). The door stays open to re-evaluate; the door doesn't stay open to go back. So the bias is toward keeping it.
+5. **The sub-protocol is the short-circuited reconnect.** MsgTypes 31/32 (CSR, cert install) would exist in either flow. The extra cost of in-session is MsgTypes 30 (request) and 33 (ack) plus the state-machine bookkeeping — not a large gain to unwind.
+
+**Declined alternatives:**
+ - **Full reconnect with PASE reuse.** Extends setup-code lifetime; weakens commissioning's one-shot posture.
+ - **Full reconnect without PASE (TLS-only re-auth via operational cert).** Requires new ALPN routing for "accept operational cert, want CSR" — new complexity roughly matching what it deletes.
+ - **Pre-derive renewal secret from session.** Equivalent in spirit to the current nonce-binding (DEC-047); just reshuffles code rather than removing it.
+
+**Follow-ups (not part of this DEC):**
+ - Consider shortening the 30-day renewal initiation window to 7 days; this is a constant change + test adjustment and reduces the window an attacker with a stolen operational cert has for abuse (Watchlist W7).
+ - When §E (pkg/service split) lands, relocate the renewal files into the appropriate sub-package for locality.
+
+**Related:** DEC-015 (original operational cert lifecycle), DEC-047 (commissioning security; nonce binding), DEC-066 (close commissioning connection after cert exchange), DEC-067 (single-port ALPN routing). Full evidence: `docs/design/cert-renewal-comparison.md`.
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)
