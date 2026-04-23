@@ -103,7 +103,7 @@ All messages are length-prefixed:
 
 - 4 bytes, unsigned, big-endian
 - Represents payload length (not including the 4-byte length field itself)
-- Maximum message size: 65536 bytes (64KB)
+- Maximum message size: 8192 bytes (8 KB) — see DEC-069
 
 ### 4.2 Example
 
@@ -387,9 +387,9 @@ Final effectiveLimit = min(5000, 3000) = 3000
 
 | Limit | Value | Rationale |
 |-------|-------|-----------|
-| Max message size | 64 KB | Fits in constrained device memory |
+| Max message size | 8 KB | Fits in 256 KB MCU memory budget (DEC-003, DEC-069) |
 | Typical message | < 2 KB | Most operations are small |
-| Max subscription batch | 10 KB | Prevent flooding |
+| Max subscription batch | 4 KB | Bounded under max message size; prevents flooding |
 
 ---
 

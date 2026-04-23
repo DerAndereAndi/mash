@@ -760,7 +760,7 @@ MASH.C.TRANS.BACKOFF_JITTER=10            # Jitter percentage (+/-)
 # Resource limits
 MASH.S.TRANS.MAX_CONNECTIONS=5            # Maximum concurrent connections
 MASH.S.TRANS.MAX_SUBSCRIPTIONS=100        # Maximum total subscriptions
-MASH.S.TRANS.MAX_MSG_SIZE=65536           # Maximum message size in bytes
+MASH.S.TRANS.MAX_MSG_SIZE=8192            # Maximum message size in bytes (DEC-069)
 MASH.S.TRANS.MAX_IN_FLIGHT=30             # Maximum pending requests
 
 # Graceful close

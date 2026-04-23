@@ -11,6 +11,34 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/log"
 )
 
+// TestFraming_NewDefaultIs8K asserts the default max message size is 8 KB (8192 bytes).
+// See DEC-069: aligns the default with 256KB MCU memory budget (DEC-003); callers
+// that need larger frames must opt in via NewFramerWithMaxSize / NewFrameWriterWithMaxSize.
+func TestFraming_NewDefaultIs8K(t *testing.T) {
+	if DefaultMaxMessageSize != 8192 {
+		t.Errorf("DefaultMaxMessageSize = %d, want 8192 (8 KB, DEC-069)", DefaultMaxMessageSize)
+	}
+}
+
+// TestFraming_AcceptAt8192Bytes confirms exactly-at-boundary is accepted.
+func TestFraming_AcceptAt8192Bytes(t *testing.T) {
+	buf := new(bytes.Buffer)
+	writer := NewFrameWriter(buf)
+	if err := writer.WriteFrame(bytes.Repeat([]byte("z"), 8192)); err != nil {
+		t.Fatalf("WriteFrame at 8192 bytes failed: %v", err)
+	}
+}
+
+// TestFraming_RejectAt8193Bytes confirms one byte over boundary is rejected.
+func TestFraming_RejectAt8193Bytes(t *testing.T) {
+	buf := new(bytes.Buffer)
+	writer := NewFrameWriter(buf)
+	err := writer.WriteFrame(bytes.Repeat([]byte("z"), 8193))
+	if !errors.Is(err, ErrMessageTooLarge) {
+		t.Errorf("WriteFrame at 8193 bytes: want ErrMessageTooLarge, got %v", err)
+	}
+}
+
 func TestFrameWriterReader(t *testing.T) {
 	tests := []struct {
 		name    string

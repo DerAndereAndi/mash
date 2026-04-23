@@ -3828,6 +3828,36 @@ Matter specification 5.1.7.1 defines 12 prohibited setup codes that devices MUST
 
 ---
 
+### DEC-069: Max Message Size 8 KB
+
+**Date:** 2026-04-23
+**Status:** Accepted
+
+**Context:**
+`DefaultMaxMessageSize` was 65536 bytes (64 KB), chosen as a safe upper bound early in design. DEC-003 targets 256 KB RAM MCUs (ESP32-class). A single in-flight 64 KB buffer is 25% of total RAM, which leaves little room for TLS, stack, and application state. Analysis (`kiss-analysis.html` §MSG) found no protocol message in MASH that approaches 8 KB: typical messages are <2 KB, `attributeList` is ~300 bytes for the largest feature, and use-case declarations fit comfortably. The 64 KB ceiling was spending headroom the protocol does not need.
+
+**Decision:**
+Lower `DefaultMaxMessageSize` from 65536 to 8192 bytes (8 KB). The `NewFramerWithMaxSize` / `NewFrameWriterWithMaxSize` / `NewFrameReaderWithMaxSize` opt-in remains available for callers with a legitimate reason to allow larger frames (e.g., specific conformance tests exercising negative bounds).
+
+**Rationale:**
+- 8 KB fits the 256 KB MCU budget with substantial headroom (~3% of RAM per buffer, vs. 25%).
+- No current protocol payload needs more than 8 KB; every feature's `attributeList`, use-case list, and notification batch fits well under.
+- Lowering the default makes it a forcing function: new features that want to exceed must surface the cost (DEC-072 codifies attributeList size bounds as a consequence).
+- Opt-in callers (`WithMaxMessageSize`-shaped factories) keep escape hatches for test harnesses and negative-bound conformance checks.
+
+**Implementation notes:**
+- `pkg/transport/framing.go`: `DefaultMaxMessageSize = 8192`.
+- `pkg/commissioning/session.go`: sanity check at `readMessage` now references `transport.DefaultMaxMessageSize` instead of a hard-coded 65536.
+- `pkg/transport/framing_test.go`: `TestFraming_NewDefaultIs8K`, `TestFraming_AcceptAt8192Bytes`, `TestFraming_RejectAt8193Bytes` enforce the boundary.
+- `internal/testharness/runner/connection_handlers_test.go`: `TestHandleSendRawFrame_MaxSizePayload` now uses `transport.DefaultMaxMessageSize` so the boundary test tracks the constant.
+- Spec updates: `docs/transport.md` §4.1 + §9 (max subscription batch reduced from 10 KB to 4 KB to stay strictly under new cap), `docs/testing/behavior/message-framing.md`, `docs/testing/behavior/connection-state-machine.md`, PICS code `MASH.S.TRANS.MAX_MSG_SIZE` in pairing registry + all example .pics files, `mash-go/ARCHITECTURE-STACK.md`.
+
+**Rollback trigger:** If ≥3 protocol payloads legitimately need >8 KB, reconsider 16 KB as the compromise — do not silently return to 64 KB.
+
+**Related:** DEC-003 (256 KB MCU target). Follow-up: DEC-072 (planned — attributeList size bound; `kiss-implementation-plan.md` §L#3) will codify that feature attributeList responses must fit in a single message.
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)

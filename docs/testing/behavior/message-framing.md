@@ -39,8 +39,8 @@ Every MASH message is framed as:
 ### 2.2 Length Field Rules
 
 - **Format:** 32-bit unsigned integer, network byte order (big-endian)
-- **Value:** Number of bytes in CBOR payload (0 to 65536)
-- **Maximum:** 65536 bytes (64 KB)
+- **Value:** Number of bytes in CBOR payload (1 to 8192)
+- **Maximum:** 8192 bytes (8 KB) — see DEC-069
 - **Minimum:** 1 byte (empty CBOR map is still 1 byte: 0xA0)
 
 **Parsing algorithm:**
@@ -48,7 +48,7 @@ Every MASH message is framed as:
 1. Read exactly 4 bytes
 2. If fewer than 4 bytes available: Wait for more data
 3. Interpret as big-endian uint32
-4. If value > 65536: FATAL ERROR, close connection
+4. If value > 8192: FATAL ERROR, close connection
 5. If value == 0: FATAL ERROR, close connection
 6. Read exactly `value` bytes for payload
 7. If fewer bytes available: Wait for more data
@@ -67,9 +67,9 @@ Every MASH message is framed as:
 00 00 01 F4 [500 bytes of CBOR]
 ```
 
-**Maximum message (65536 bytes):**
+**Maximum message (8192 bytes):**
 ```
-00 01 00 00 [65536 bytes of CBOR]
+00 00 20 00 [8192 bytes of CBOR]
 ```
 
 ---
@@ -282,16 +282,16 @@ JavaScript's safe integer range is -2^53 to 2^53.
 
 | Limit | Value | Enforcement Point |
 |-------|-------|-------------------|
-| Maximum frame size | 65536 bytes | Length field parsing |
-| Maximum payload size | 65536 bytes | Same as frame size |
+| Maximum frame size | 8192 bytes | Length field parsing (DEC-069) |
+| Maximum payload size | 8192 bytes | Same as frame size |
 | Minimum frame size | 1 byte | Length field parsing |
 
 ### 6.2 Oversized Message Handling
 
-**Receiver behavior when length > 65536:**
+**Receiver behavior when length > 8192:**
 
 1. Read the 4-byte length field
-2. Detect value > 65536
+2. Detect value > 8192
 3. DO NOT attempt to read payload
 4. Close connection immediately (FATAL)
 5. Log error: "Message too large: {length} bytes"
@@ -301,10 +301,10 @@ JavaScript's safe integer range is -2^53 to 2^53.
 ### 6.3 Sender Responsibility
 
 Senders MUST NOT:
-- Send messages larger than 65536 bytes
+- Send messages larger than 8192 bytes
 - Send arrays with more than 1000 elements
 - Send maps with more than 500 keys
-- Send strings longer than 10000 bytes
+- Send strings longer than 4000 bytes
 
 If data exceeds limits, sender should:
 - Split into multiple messages (if applicable)
@@ -318,7 +318,7 @@ If data exceeds limits, sender should:
 
 | Error | Severity | Action |
 |-------|----------|--------|
-| Length > 65536 | FATAL | Close connection |
+| Length > 8192 | FATAL | Close connection |
 | Length == 0 | FATAL | Close connection |
 | CBOR parse failure | FATAL | Close connection |
 | Missing required field | RECOVERABLE | Error response |
@@ -439,7 +439,7 @@ To ensure implementations remain compatible with future protocol versions:
 
 ```
 # Frame format
-MASH.S.FRAME.MAX_SIZE=65536           # Maximum message size in bytes
+MASH.S.FRAME.MAX_SIZE=8192            # Maximum message size in bytes (DEC-069)
 MASH.S.FRAME.LENGTH_BYTES=4           # Length field size
 MASH.S.FRAME.BYTE_ORDER=BIG_ENDIAN    # Length field byte order
 
@@ -458,7 +458,7 @@ MASH.S.INT.BIGINT_REQUIRED=0          # BigInt not required if within int53
 # Limits
 MASH.S.LIMIT.MAX_ARRAY_ELEMENTS=1000  # Maximum array elements
 MASH.S.LIMIT.MAX_MAP_KEYS=500         # Maximum map keys
-MASH.S.LIMIT.MAX_STRING_BYTES=10000   # Maximum string length
+MASH.S.LIMIT.MAX_STRING_BYTES=4000    # Maximum string length (bounded by 8 KB msg; DEC-069)
 ```
 
 ---
@@ -470,8 +470,8 @@ MASH.S.LIMIT.MAX_STRING_BYTES=10000   # Maximum string length
 | ID | Description | Input | Expected |
 |----|-------------|-------|----------|
 | TC-FRAME-1 | Valid small message | 00 00 00 05 + 5 bytes | Parse success |
-| TC-FRAME-2 | Valid large message | 00 01 00 00 + 65536 bytes | Parse success |
-| TC-FRAME-3 | Oversized length | 00 01 00 01 | FATAL, close |
+| TC-FRAME-2 | Valid large message | 00 00 20 00 + 8192 bytes | Parse success |
+| TC-FRAME-3 | Oversized length | 00 00 20 01 | FATAL, close |
 | TC-FRAME-4 | Zero length | 00 00 00 00 | FATAL, close |
 | TC-FRAME-5 | Truncated length | 00 00 00 | Wait for more data |
 | TC-FRAME-6 | Truncated payload | 00 00 00 10 + 5 bytes | Wait for more data |

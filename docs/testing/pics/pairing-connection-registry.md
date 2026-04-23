@@ -49,7 +49,7 @@ This registry defines PICS codes for the pairing and connection layer of MASH. T
 
 | PICS Code | Description | Values | Conformance |
 |-----------|-------------|--------|-------------|
-| MASH.S.TRANS.MAX_MSG_SIZE | Maximum message size (bytes) | 65536 | M |
+| MASH.S.TRANS.MAX_MSG_SIZE | Maximum message size (bytes) | 8192 | M |
 | MASH.S.TRANS.LENGTH_PREFIX | 4-byte length prefix | 1 | M |
 
 ### 2.5 Keep-Alive

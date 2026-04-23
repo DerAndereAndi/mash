@@ -16,8 +16,11 @@ const (
 	// LengthPrefixSize is the size of the length prefix in bytes.
 	LengthPrefixSize = 4
 
-	// DefaultMaxMessageSize is the default maximum message size (64 KB).
-	DefaultMaxMessageSize = 65536
+	// DefaultMaxMessageSize is the default maximum message size (8 KB).
+	// See DEC-069: bounded to fit 256 KB MCU memory budget (DEC-003).
+	// Callers needing larger frames must opt in via NewFramerWithMaxSize
+	// or NewFrameWriterWithMaxSize / NewFrameReaderWithMaxSize.
+	DefaultMaxMessageSize = 8192
 
 	// MinMessageSize is the minimum valid message size.
 	MinMessageSize = 1

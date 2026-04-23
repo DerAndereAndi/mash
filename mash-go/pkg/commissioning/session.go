@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+
+	"github.com/mash-protocol/mash-go/pkg/transport"
 )
 
 // PASEClientSession manages the client side of a PASE handshake.
@@ -313,7 +315,7 @@ func readMessage(conn net.Conn) (interface{}, error) {
 	}
 
 	msgLen := binary.BigEndian.Uint32(length)
-	if msgLen > 65536 { // Sanity check
+	if msgLen > transport.DefaultMaxMessageSize { // Sanity check (DEC-069)
 		return nil, fmt.Errorf("message too large: %d bytes", msgLen)
 	}
 

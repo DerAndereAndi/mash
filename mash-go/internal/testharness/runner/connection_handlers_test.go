@@ -970,7 +970,7 @@ func TestHandleSendRawFrame_MaxSizePayload(t *testing.T) {
 	state := newTestState()
 
 	go func() {
-		framer := transport.NewFramerWithMaxSize(server, 70000)
+		framer := transport.NewFramer(server)
 		_, err := framer.ReadFrame()
 		if err != nil {
 			return
@@ -981,7 +981,7 @@ func TestHandleSendRawFrame_MaxSizePayload(t *testing.T) {
 	}()
 
 	step := &loader.Step{Params: map[string]any{
-		"payload_size": float64(65536),
+		"payload_size": float64(transport.DefaultMaxMessageSize),
 		"valid_cbor":   true,
 	}}
 	out, err := r.handleSendRawFrame(context.Background(), step, state)

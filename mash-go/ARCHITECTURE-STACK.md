@@ -72,7 +72,7 @@ Provides TLS 1.3 connections with length-prefixed binary framing and keep-alive 
 
 Constants:
 - `LengthPrefixSize = 4`
-- `DefaultMaxMessageSize = 65536` (64 KB)
+- `DefaultMaxMessageSize = 8192` (8 KB, DEC-069)
 - `MinMessageSize = 1`
 
 ### TLS Configuration
