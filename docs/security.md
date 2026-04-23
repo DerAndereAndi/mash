@@ -103,7 +103,7 @@ separate from their CA signing capability.
 ### 3.1 Device Operational Certificate Renewal
 
 1. Controller tracks certificate expiry for each device
-2. 30 days before expiry, controller initiates renewal
+2. 7 days before expiry, controller initiates renewal (DEC-077; narrowed from 30 days)
 3. Device generates new key pair and CSR
 4. Controller signs new certificate with Zone CA
 5. Device installs new certificate atomically
@@ -112,7 +112,7 @@ separate from their CA signing capability.
 ### 3.2 Controller Operational Certificate Renewal
 
 1. Controller monitors its own certificate expiry
-2. 30 days before expiry, controller self-renews
+2. 7 days before expiry, controller self-renews (DEC-077; narrowed from 30 days)
 3. Controller generates new key pair
 4. Controller signs new certificate with Zone CA
 5. New certificate replaces old one

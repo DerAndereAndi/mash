@@ -4074,10 +4074,42 @@ Keep the current in-session renewal design. Do not switch to a reconnect-based a
  - **Pre-derive renewal secret from session.** Equivalent in spirit to the current nonce-binding (DEC-047); just reshuffles code rather than removing it.
 
 **Follow-ups (not part of this DEC):**
- - Consider shortening the 30-day renewal initiation window to 7 days; this is a constant change + test adjustment and reduces the window an attacker with a stolen operational cert has for abuse (Watchlist W7).
+ - ~~Consider shortening the 30-day renewal initiation window to 7 days~~ — landed as DEC-077.
  - When §E (pkg/service split) lands, relocate the renewal files into the appropriate sub-package for locality.
 
 **Related:** DEC-015 (original operational cert lifecycle), DEC-047 (commissioning security; nonce binding), DEC-066 (close commissioning connection after cert exchange), DEC-067 (single-port ALPN routing). Full evidence: `docs/design/cert-renewal-comparison.md`.
+
+---
+
+### DEC-077: Shorten Renewal Window to 7 Days
+
+**Date:** 2026-04-23
+**Status:** Accepted (follows W7 watchlist from `kiss-implementation-plan.md`)
+
+**Context:**
+DEC-015 established a 30-day renewal window — the controller initiates cert renewal when the device's operational certificate has 30 days or less remaining on its 1-year validity. The window was inherited from "reasonable default for industrial equipment" thinking rather than derived from MASH's specific threat model. W7 of the KISS implementation plan flagged it for re-examination after DEC-076 kept in-session renewal.
+
+The window serves two competing pressures:
+ - **Longer** (30 days): more slack for controllers to encounter a device that's been offline, cycle it back through renewal before any cert expires. Resilience to intermittent connectivity.
+ - **Shorter** (7 days): a compromised device whose operational cert is stolen by an adversary has to be renewed AND a second usable cert has to coexist (both signed by the Zone CA, both valid) for the window's duration. Narrowing the window narrows the abuse period in which a stolen cert still has a validly-issued partner.
+
+**Decision:**
+Narrow `RenewalWindow` from 30 days to 7 days across both `pkg/cert/types.go` and `pkg/service/renewal_tracker.go`. Operational cert validity (`OperationalCertValidity`) remains 1 year. Grace period (`GracePeriod`) remains 7 days.
+
+**Rationale:**
+- MASH devices are IPv6-LAN-attached; intermittent multi-week disconnects are not a realistic operational mode (the device is offline in that case, and post-reconnection will refresh within a week).
+- The 30-day "slack" was spending security budget on a resilience problem we don't have.
+- 7 days aligns the renewal-initiation window with the grace period — the whole "expires-soon" window on both sides of nominal expiry is exactly 14 days. Easy to reason about.
+- In-session renewal (DEC-076) has zero downtime; a 7-day window is more than enough for a controller to reach every connected device once during normal operation.
+- If intermittent-disconnect evidence ever surfaces (e.g., a device class that parks offline for weeks), the constant is a single-line change.
+
+**Implementation notes:**
+- `pkg/cert/types.go`: `RenewalWindow = 7 * 24 * time.Hour`.
+- `pkg/service/renewal_tracker.go`: same constant (intentional duplication — two packages, one value; merging the duplication is a follow-up for §E).
+- Tests updated: `TestRenewalTracker_NeedsRenewal` now uses 5 days / 30 days split (was 25 / 100); `TestRenewalTracker_NeedsRenewalIndividual` boundary case is 7 days (was 30); other test cases adjusted to bracket the new window.
+- `docs/security.md §3.1` + `§3.2` now say "7 days before expiry" with DEC-077 cross-reference.
+
+**Related:** DEC-015 (cert lifecycle), DEC-076 (keep in-session renewal); closes Watchlist W7 in `kiss-implementation-plan.md`.
 
 ---
 

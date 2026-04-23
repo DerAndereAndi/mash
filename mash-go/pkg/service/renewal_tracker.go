@@ -7,7 +7,8 @@ import (
 
 // RenewalWindow is the default window before expiry when renewal should occur.
 // Certificates expiring within this window are considered as needing renewal.
-const RenewalWindow = 30 * 24 * time.Hour
+// See DEC-077 for rationale (shortened from 30 days to 7 days).
+const RenewalWindow = 7 * 24 * time.Hour
 
 // RenewalTracker tracks certificate expiry for connected devices.
 // It is safe for concurrent use.

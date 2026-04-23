@@ -17,7 +17,10 @@ const (
 	OperationalCertValidity = 365 * 24 * time.Hour // 1 year
 
 	// RenewalWindow is how long before expiry to start renewal.
-	RenewalWindow = 30 * 24 * time.Hour // 30 days
+	// DEC-077 (was 30 days): shorter window narrows the period in which a
+	// compromised device holding a still-valid operational cert can abuse it
+	// alongside its renewal counterpart.
+	RenewalWindow = 7 * 24 * time.Hour // 7 days
 
 	// GracePeriod is the optional grace period after expiry.
 	GracePeriod = 7 * 24 * time.Hour // 7 days

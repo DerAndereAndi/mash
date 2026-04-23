@@ -66,12 +66,12 @@ func TestRenewalTracker_TrackUpdate(t *testing.T) {
 func TestRenewalTracker_NeedsRenewal(t *testing.T) {
 	tracker := service.NewRenewalTracker()
 
-	// Device expiring in 25 days (within 30-day window)
-	expiresSoon := time.Now().Add(25 * 24 * time.Hour)
+	// Device expiring in 5 days (within 7-day window; DEC-077)
+	expiresSoon := time.Now().Add(5 * 24 * time.Hour)
 	tracker.Track("device-soon", "zone-1", expiresSoon, 1)
 
-	// Device expiring in 100 days (outside window)
-	expiresLater := time.Now().Add(100 * 24 * time.Hour)
+	// Device expiring in 30 days (outside 7-day window; DEC-077)
+	expiresLater := time.Now().Add(30 * 24 * time.Hour)
 	tracker.Track("device-later", "zone-1", expiresLater, 1)
 
 	// Device already expired
@@ -109,10 +109,12 @@ func TestRenewalTracker_NeedsRenewalIndividual(t *testing.T) {
 		daysUntil    int
 		needsRenewal bool
 	}{
+		// DEC-077: renewal window narrowed from 30 days to 7 days.
 		{"365 days", 365, false},
-		{"31 days", 31, false},
-		{"30 days", 30, true}, // Boundary
-		{"29 days", 29, true},
+		{"30 days", 30, false},
+		{"8 days", 8, false},
+		{"7 days", 7, true}, // Boundary
+		{"6 days", 6, true},
 		{"1 day", 1, true},
 		{"0 days", 0, true},
 		{"-1 day (expired)", -1, true},
