@@ -234,11 +234,8 @@ Certificate Lifecycle:
 │
 ├── Day 0: Certificate issued (commissionedAt)
 │
-├── Day 335: Renewal window opens (30 days before expiry)
-│   └── Controller should initiate renewal
-│
-├── Day 358: Warning period (7 days before expiry)
-│   └── Device sends CERT_EXPIRING notification
+├── Day 358: Renewal window opens (7 days before expiry, per DEC-077)
+│   └── Controller initiates renewal; device sends CERT_EXPIRING notification
 │
 ├── Day 365: Certificate expires
 │   └── See section 4.4 for expiry handling
@@ -719,7 +716,7 @@ MASH.S.D2D.PUBLISHES_ZONE_ID=0        # Zone ID in mDNS TXT
 |----|-------------|-------|----------|
 | TC-CTRL-CERT-1 | Auto-generate on zone creation | New controller, no existing cert | Controller cert generated with Zone CA |
 | TC-CTRL-CERT-2 | Load existing on restart | Controller restarts with existing cert | Same controller cert loaded (not regenerated) |
-| TC-CTRL-CERT-3 | Renewal triggers at 30 days | Cert expires in 25 days | New cert generated automatically |
+| TC-CTRL-CERT-3 | Renewal triggers at 7 days | Cert expires in 5 days | New cert generated automatically |
 | TC-CTRL-CERT-4 | Renewal does not disrupt sessions | Active device connections during renewal | Sessions continue uninterrupted |
 | TC-CTRL-CERT-5 | Controller ID stable across renewal | Renew controller cert | Same SKI/controller ID maintained |
 | TC-CTRL-CERT-6 | Cert matches Zone CA | Zone CA rotated | Old controller cert invalid, new one generated |

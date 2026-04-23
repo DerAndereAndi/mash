@@ -314,7 +314,7 @@ Subscriptions are lost on disconnect. Clients must re-subscribe after reconnecti
 
 MASH runs over IPv6 with TCP and TLS 1.3 (mutual authentication).
 Messages are length-prefixed (4-byte big-endian header) CBOR payloads.
-Maximum message size is 64 KB. Keep-alive uses application-layer
+Maximum message size is 8 KB (per DEC-069). Keep-alive uses application-layer
 ping/pong every 30 seconds.
 
 > **Full specification:** [Transport](transport.md)
@@ -380,7 +380,7 @@ Controller and device operational certificates are **siblings** -- both signed b
 
 | Certificate | Validity | Renewal | Revocation |
 |-------------|----------|---------|------------|
-| Device Operational | 1 year | Auto by controller (30 days before expiry) | RemoveZone command |
+| Device Operational | 1 year | Auto by controller (7 days before expiry, per DEC-077) | RemoveZone command |
 | Controller Operational | 1 year | Auto (self-renewal) | Zone CA rotation |
 | Zone CA | 20 years | Manual | Zone dissolution |
 

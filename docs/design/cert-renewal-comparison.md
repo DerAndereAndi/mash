@@ -8,7 +8,7 @@
 
 ## 1. Motivation
 
-MASH operational certificates renew 30 days before expiry (`docs/security.md §3`). The reference implementation performs renewal **in-session** via a dedicated sub-protocol (MsgTypes 30–33). The v3 KISS analysis flagged this as a candidate for simplification: "is a dedicated renewal subprotocol worth it, or could reconnection-based renewal do the same job with less code?"
+MASH operational certificates renew 7 days before expiry (per DEC-077; `docs/security.md §3`). The reference implementation performs renewal **in-session** via a dedicated sub-protocol (MsgTypes 30–33). The v3 KISS analysis flagged this as a candidate for simplification: "is a dedicated renewal subprotocol worth it, or could reconnection-based renewal do the same job with less code?"
 
 This document measures the current design, sketches a reconnect-based alternative, and recommends a direction.
 
@@ -45,7 +45,7 @@ Nonce-binding (DEC-047): the 16-byte truncated SHA-256 hash in the CSR proves th
 ### 2.3 Flow
 
 ```
-T0  Controller checks cert ttl < 30 days
+T0  Controller checks cert ttl < 7 days
 T1  Controller → Device: CertRenewalRequest(nonce)  [over existing operational TLS]
 T2  Device generates new keypair; CSR = signed(pub, NonceHash(nonce))
 T3  Device → Controller: CertRenewalCSR(csr, nonceHash)
@@ -88,7 +88,7 @@ Rough code added: ~300–400 LOC (new orchestration on both sides) + new design/
 ### 3.4 Flow (option: reuse setup code)
 
 ```
-T0  Device checks own cert ttl < 30 days
+T0  Device checks own cert ttl < 7 days
 T1  Device → Controller: RenewalNotify (new MsgType, pre-reconnect)  [optional]
 T2  Device closes operational TLS session
 T3  Device generates new keypair locally
@@ -146,7 +146,7 @@ Evidence:
 
 **Follow-up within the current design (non-§J, optional future work):**
 
-- Consider shortening the 30-day renewal window to 7 days. Rationale: shorter overlap period reduces the window in which an active attacker with a stolen operational cert can reach renewal. This is a single-constant change plus adjusted tests. Tracked in Watchlist W7 of the implementation plan.
+- **Adopted as DEC-077:** shortened the renewal window from 30 to 7 days. Rationale: shorter overlap period reduces the window in which an active attacker with a stolen operational cert can reach renewal. (Originally tracked in Watchlist W7 of the implementation plan.)
 - When §E lands (`pkg/service` split), move the three renewal files into the new `pkg/service/zone/` or `pkg/service/renewal/` sub-package for locality.
 
 **Follow-up if evidence changes:**

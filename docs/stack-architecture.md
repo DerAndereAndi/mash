@@ -475,7 +475,7 @@ classDiagram
 
 ```
 +---+---+---+---+---+---+---+---+---+---+---+
-| Length (4B BE) |     CBOR Payload (1-64KB)   |
+| Length (4B BE) |     CBOR Payload (1-8KB)    |
 +---+---+---+---+---+---+---+---+---+---+---+
 
 Example:
@@ -909,7 +909,7 @@ sequenceDiagram
     participant D as Device
 
     Note over C,D: Existing TLS session active
-    Note over C: Device cert expires in 30 days
+    Note over C: Device cert expires in 7 days
 
     C->>D: CertRenewalRequest (MsgType=30)<br/>nonce=32 random bytes
     Note over D: Generate NEW P-256 key pair<br/>Create PKCS#10 CSR

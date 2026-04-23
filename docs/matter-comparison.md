@@ -193,7 +193,7 @@ Controller                              Device
 ```
 
 - Automatic, controller-initiated
-- 30 days before expiry
+- 7 days before expiry (DEC-077)
 - In-session (no TLS reconnection)
 - Device generates fresh key pair each time
 

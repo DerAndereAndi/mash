@@ -722,7 +722,7 @@ Events that occurred during disconnection are NOT replayed. However:
 | Error | Action | Connection State |
 |-------|--------|------------------|
 | Invalid length prefix | Close immediately | Transition to reconnect |
-| Message too large (>64KB) | Close immediately | Transition to reconnect |
+| Message too large (>8KB) | Close immediately | Transition to reconnect |
 | TLS alert | Close immediately | Transition to reconnect |
 | Protocol version mismatch | Close with error | Transition to DISCONNECTED |
 | Zone mismatch on reconnect | Close with error | Transition to DISCONNECTED |

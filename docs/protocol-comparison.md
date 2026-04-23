@@ -194,7 +194,7 @@ Approximate message sizes for reading a power measurement value:
 | TLS version | 1.3 (mandatory) | 1.3 (for TCP-based TLS) | 1.2+ |
 | Authentication | Mutual TLS | CASE sessions (custom crypto layer) | Mutual TLS (SKI verification) |
 | Framing | 4-byte length prefix + CBOR | Message counter + protocol header | WebSocket frames |
-| Max message size | 64 KB | ~1,280 bytes (UDP/MRP), larger over TCP | No explicit limit |
+| Max message size | 8 KB | ~1,280 bytes (UDP/MRP), larger over TCP | No explicit limit |
 | Reliability | TCP (inherent) | MRP over UDP / TCP inherent | WebSocket + TCP (inherent) |
 | Keep-alive | App-layer ping/pong (30s) | MRP retransmission / subscription heartbeat | SHIP ping mechanism |
 | Connection model | Controller initiates, 1 per zone | Any node can connect, multi-session | Either side initiates (race condition possible) |
@@ -267,7 +267,7 @@ EEBUS:   Node A ◄──WebSocket/TLS──► Node B (either side can initiate
 | Aspect | MASH | Matter 1.5 | EEBUS |
 |--------|------|------------|-------|
 | Mechanism | Auto-renewal (controller-initiated) | Manual UpdateNOC command | No renewal mechanism |
-| Trigger | 30 days before expiry | Administrator action | N/A (self-signed, no expiry) |
+| Trigger | 7 days before expiry (DEC-077) | Administrator action | N/A (self-signed, no expiry) |
 | Key rotation | Fresh key pair each renewal | Fresh key pair | Not defined |
 | In-session renewal | Yes (no TLS reconnect) | Requires fail-safe context | N/A |
 | Revocation | Zone removal + natural expiry | DCL + fabric reset | Trust removal (SKI un-trust) |

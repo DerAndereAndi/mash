@@ -387,7 +387,7 @@ Client                              Server
 
 | Limit | Value | Rationale |
 |-------|-------|-----------|
-| Max message size | 64 KB | Fits in RAM on 256KB device |
+| Max message size | 8 KB | Fits comfortably in 256KB MCU RAM (revised from 64 KB by DEC-069) |
 | Max in-flight requests | 16 | Prevent resource exhaustion |
 | Max subscriptions | 32 | Per connection |
 | Max path depth | 3 | endpoint/cluster/attribute |

@@ -897,7 +897,7 @@ MASH.S.PASE.RETRY_BACKOFF=0          # No backoff between retries
 ### 12.3 Certificate Security
 
 - **Zone isolation:** Each zone has independent CA
-- **Rotation:** 1-year validity with 30-day renewal window
+- **Rotation:** 1-year validity with 7-day renewal window (DEC-077)
 - **Revocation:** Immediate via RemoveZone command
 - **Path validation:** Maximum path length = 2 (Zone CA → Op Cert)
 

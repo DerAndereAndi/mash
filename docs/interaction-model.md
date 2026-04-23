@@ -144,7 +144,7 @@ To "change" a parameter like duration, re-send the entire command with new value
 | Metric | Target |
 |--------|--------|
 | Typical message | < 2 KB |
-| Maximum message | 64 KB |
+| Maximum message | 8 KB |
 | EEBUS comparison | 4 KB+ typical |
 
 ---
