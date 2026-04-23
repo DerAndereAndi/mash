@@ -903,6 +903,35 @@ func TestAttributeRangeValidation(t *testing.T) {
 			t.Error("SetFailsafeDuration(100000) must fail (above max=86400, DEC-070)")
 		}
 	})
+
+	t.Run("ChargingSession/evStateOfCharge", func(t *testing.T) {
+		cs := NewChargingSession()
+		if err := cs.SetEVStateOfCharge(50); err != nil {
+			t.Fatalf("SetEVStateOfCharge(50) unexpected error: %v", err)
+		}
+		if err := cs.SetEVStateOfCharge(0); err != nil {
+			t.Errorf("SetEVStateOfCharge(0) must succeed (boundary); got %v", err)
+		}
+		if err := cs.SetEVStateOfCharge(100); err != nil {
+			t.Errorf("SetEVStateOfCharge(100) must succeed (boundary); got %v", err)
+		}
+		if err := cs.SetEVStateOfCharge(101); err == nil {
+			t.Error("SetEVStateOfCharge(101) must fail (above max=100, DEC-070)")
+		}
+	})
+
+	t.Run("Measurement/acFrequency", func(t *testing.T) {
+		m := NewMeasurement()
+		if err := m.SetACFrequency(50000); err != nil {
+			t.Fatalf("SetACFrequency(50000) unexpected error: %v", err)
+		}
+		if err := m.SetACFrequency(30000); err == nil {
+			t.Error("SetACFrequency(30000) must fail (below min=45000, DEC-070)")
+		}
+		if err := m.SetACFrequency(70000); err == nil {
+			t.Error("SetACFrequency(70000) must fail (above max=65000, DEC-070)")
+		}
+	})
 }
 
 // TestAttributeList_FitsInSingleMessage enforces DEC-072: a feature's

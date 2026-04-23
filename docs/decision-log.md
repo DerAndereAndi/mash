@@ -3875,6 +3875,12 @@ Seed annotations landed in this DEC:
  - `EnergyControl.failsafeDuration`: `min: 7200, max: 86400` (s) — 2h floor, 24h cap (already described in the attribute's prose)
  - (Pre-existing: `Electrical.phaseCount`: `min: 1, max: 3`)
 
+Expanded rollout (same commit series):
+ - `ChargingSession.evStateOfCharge`: `min: 0, max: 100` (%)
+ - `ChargingSession.evMinStateOfCharge`: `min: 0, max: 100` (%)
+ - `ChargingSession.evTargetStateOfCharge`: `min: 0, max: 100` (%)
+ - `Measurement.acFrequency`: `min: 45000, max: 65000` (mHz) — matches Electrical.nominalFrequency envelope at millihertz resolution
+
 **Rationale:**
 - Treats range as a property of the attribute, not a property of the caller. A single device-side bug that sets nominalFrequency to 0 is caught immediately instead of propagating through the EMS's forecasting code.
 - Leverages existing plumbing — the DEC costs a YAML annotation and a generator regen, not new code.
@@ -3882,9 +3888,9 @@ Seed annotations landed in this DEC:
 - Avoids adding a "lint all attributes" step with false positives on attributes whose range is genuinely open-ended (instantaneous power, session energy, etc.).
 
 **Rollout (not part of this DEC, but recorded so the next pass knows where to start):**
- 1. ChargingSession: `evStateOfCharge`, `evMinStateOfCharge`, `evTargetStateOfCharge` (0..100 %)
+ 1. ~~ChargingSession: `evStateOfCharge`, `evMinStateOfCharge`, `evTargetStateOfCharge` (0..100 %)~~ — landed in the expanded rollout above.
  2. EnergyControl failsafe limits — bounded by nameplate when device is fully commissioned (needs per-device evaluation, not a static range).
- 3. Measurement AC quantities have physics-plausible ranges (e.g., frequency deviation) — worth at most ±20 Hz from nominal.
+ 3. ~~Measurement AC quantities have physics-plausible ranges (e.g., frequency deviation) — worth at most ±20 Hz from nominal.~~ — `acFrequency` landed in the expanded rollout; voltage/current ranges still pending per-endpoint evaluation.
 
 **Implementation notes:**
 - YAML key: `min:` / `max:`. Generator emits `MinValue: <typedLit>, MaxValue: <typedLit>` into `AttributeMetadata`.

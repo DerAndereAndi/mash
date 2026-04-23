@@ -135,8 +135,10 @@ func NewMeasurement() *Measurement {
 		Type:        model.DataTypeUint32,
 		Access:      model.AccessReadOnly,
 		Nullable:    true,
+		MinValue:    uint32(45000),
+		MaxValue:    uint32(65000),
 		Unit:        "mHz",
-		Description: "Grid frequency (e.g., 50000 = 50.000 Hz)",
+		Description: "Grid frequency in millihertz (DEC-070 range: 45000-65000 mHz covers 50/60 Hz with headroom)",
 	}))
 
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
@@ -394,7 +396,7 @@ func (m *Measurement) ACVoltagePhaseToPhasePair() (map[PhasePair]uint32, bool) {
 	return nil, false
 }
 
-// ACFrequency returns the grid frequency (e.g., 50000 = 50.000 Hz).
+// ACFrequency returns the grid frequency in millihertz (DEC-070 range: 45000-65000 mHz covers 50/60 Hz with headroom).
 func (m *Measurement) ACFrequency() (uint32, bool) {
 	val, err := m.ReadAttribute(MeasurementAttrACFrequency)
 	if err != nil || val == nil {
@@ -808,7 +810,7 @@ func (m *Measurement) SetACVoltagePhaseToPhasePairPtr(v *map[PhasePair]uint32) e
 	return m.SetACVoltagePhaseToPhasePair(*v)
 }
 
-// SetACFrequency sets the grid frequency (e.g., 50000 = 50.000 Hz).
+// SetACFrequency sets the grid frequency in millihertz (DEC-070 range: 45000-65000 mHz covers 50/60 Hz with headroom).
 func (m *Measurement) SetACFrequency(acFrequency uint32) error {
 	attr, err := m.GetAttribute(MeasurementAttrACFrequency)
 	if err != nil {
@@ -817,7 +819,7 @@ func (m *Measurement) SetACFrequency(acFrequency uint32) error {
 	return attr.SetValueInternal(acFrequency)
 }
 
-// ClearACFrequency clears the grid frequency (e.g., 50000 = 50.000 Hz).
+// ClearACFrequency clears the grid frequency in millihertz (DEC-070 range: 45000-65000 mHz covers 50/60 Hz with headroom).
 func (m *Measurement) ClearACFrequency() error {
 	attr, err := m.GetAttribute(MeasurementAttrACFrequency)
 	if err != nil {
@@ -826,7 +828,7 @@ func (m *Measurement) ClearACFrequency() error {
 	return attr.SetValueInternal(nil)
 }
 
-// SetACFrequencyPtr sets or clears the grid frequency (e.g., 50000 = 50.000 Hz) from a pointer.
+// SetACFrequencyPtr sets or clears the grid frequency in millihertz (DEC-070 range: 45000-65000 mHz covers 50/60 Hz with headroom) from a pointer.
 func (m *Measurement) SetACFrequencyPtr(v *uint32) error {
 	if v == nil {
 		return m.ClearACFrequency()

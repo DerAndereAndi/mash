@@ -252,8 +252,10 @@ func NewChargingSession() *ChargingSession {
 		Type:        model.DataTypeUint8,
 		Access:      model.AccessReadOnly,
 		Nullable:    true,
+		MinValue:    uint8(0),
+		MaxValue:    uint8(100),
 		Unit:        "%",
-		Description: "Current EV state of charge",
+		Description: "Current EV state of charge (DEC-070 range: percent 0..100)",
 	}))
 
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
@@ -272,8 +274,10 @@ func NewChargingSession() *ChargingSession {
 		Type:        model.DataTypeUint8,
 		Access:      model.AccessReadOnly,
 		Nullable:    true,
+		MinValue:    uint8(0),
+		MaxValue:    uint8(100),
 		Unit:        "%",
-		Description: "Minimum SoC to charge ASAP",
+		Description: "Minimum SoC to charge ASAP (DEC-070 range: percent 0..100)",
 	}))
 
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
@@ -282,8 +286,10 @@ func NewChargingSession() *ChargingSession {
 		Type:        model.DataTypeUint8,
 		Access:      model.AccessReadOnly,
 		Nullable:    true,
+		MinValue:    uint8(0),
+		MaxValue:    uint8(100),
 		Unit:        "%",
-		Description: "User-defined target SoC",
+		Description: "User-defined target SoC (DEC-070 range: percent 0..100)",
 	}))
 
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
@@ -529,7 +535,7 @@ func (c *ChargingSession) EVIdentifications() ([]EVIdentification, bool) {
 	return result, true
 }
 
-// EVStateOfCharge returns the current EV state of charge.
+// EVStateOfCharge returns the current EV state of charge (DEC-070 range: percent 0..100).
 func (c *ChargingSession) EVStateOfCharge() (uint8, bool) {
 	val, err := c.ReadAttribute(ChargingSessionAttrEVStateOfCharge)
 	if err != nil || val == nil {
@@ -553,7 +559,7 @@ func (c *ChargingSession) EVBatteryCapacity() (uint64, bool) {
 	return 0, false
 }
 
-// EVMinStateOfCharge returns the minimum SoC to charge ASAP.
+// EVMinStateOfCharge returns the minimum SoC to charge ASAP (DEC-070 range: percent 0..100).
 func (c *ChargingSession) EVMinStateOfCharge() (uint8, bool) {
 	val, err := c.ReadAttribute(ChargingSessionAttrEVMinStateOfCharge)
 	if err != nil || val == nil {
@@ -565,7 +571,7 @@ func (c *ChargingSession) EVMinStateOfCharge() (uint8, bool) {
 	return 0, false
 }
 
-// EVTargetStateOfCharge returns the user-defined target SoC.
+// EVTargetStateOfCharge returns the user-defined target SoC (DEC-070 range: percent 0..100).
 func (c *ChargingSession) EVTargetStateOfCharge() (uint8, bool) {
 	val, err := c.ReadAttribute(ChargingSessionAttrEVTargetStateOfCharge)
 	if err != nil || val == nil {
@@ -871,7 +877,7 @@ func (c *ChargingSession) ClearEVIdentifications() error {
 	return attr.SetValueInternal(nil)
 }
 
-// SetEVStateOfCharge sets the current EV state of charge.
+// SetEVStateOfCharge sets the current EV state of charge (DEC-070 range: percent 0..100).
 func (c *ChargingSession) SetEVStateOfCharge(evStateOfCharge uint8) error {
 	attr, err := c.GetAttribute(ChargingSessionAttrEVStateOfCharge)
 	if err != nil {
@@ -880,7 +886,7 @@ func (c *ChargingSession) SetEVStateOfCharge(evStateOfCharge uint8) error {
 	return attr.SetValueInternal(evStateOfCharge)
 }
 
-// ClearEVStateOfCharge clears the current EV state of charge.
+// ClearEVStateOfCharge clears the current EV state of charge (DEC-070 range: percent 0..100).
 func (c *ChargingSession) ClearEVStateOfCharge() error {
 	attr, err := c.GetAttribute(ChargingSessionAttrEVStateOfCharge)
 	if err != nil {
@@ -889,7 +895,7 @@ func (c *ChargingSession) ClearEVStateOfCharge() error {
 	return attr.SetValueInternal(nil)
 }
 
-// SetEVStateOfChargePtr sets or clears the current EV state of charge from a pointer.
+// SetEVStateOfChargePtr sets or clears the current EV state of charge (DEC-070 range: percent 0..100) from a pointer.
 func (c *ChargingSession) SetEVStateOfChargePtr(v *uint8) error {
 	if v == nil {
 		return c.ClearEVStateOfCharge()
@@ -923,7 +929,7 @@ func (c *ChargingSession) SetEVBatteryCapacityPtr(v *uint64) error {
 	return c.SetEVBatteryCapacity(*v)
 }
 
-// SetEVMinStateOfCharge sets the minimum SoC to charge ASAP.
+// SetEVMinStateOfCharge sets the minimum SoC to charge ASAP (DEC-070 range: percent 0..100).
 func (c *ChargingSession) SetEVMinStateOfCharge(evMinStateOfCharge uint8) error {
 	attr, err := c.GetAttribute(ChargingSessionAttrEVMinStateOfCharge)
 	if err != nil {
@@ -932,7 +938,7 @@ func (c *ChargingSession) SetEVMinStateOfCharge(evMinStateOfCharge uint8) error 
 	return attr.SetValueInternal(evMinStateOfCharge)
 }
 
-// ClearEVMinStateOfCharge clears the minimum SoC to charge ASAP.
+// ClearEVMinStateOfCharge clears the minimum SoC to charge ASAP (DEC-070 range: percent 0..100).
 func (c *ChargingSession) ClearEVMinStateOfCharge() error {
 	attr, err := c.GetAttribute(ChargingSessionAttrEVMinStateOfCharge)
 	if err != nil {
@@ -941,7 +947,7 @@ func (c *ChargingSession) ClearEVMinStateOfCharge() error {
 	return attr.SetValueInternal(nil)
 }
 
-// SetEVMinStateOfChargePtr sets or clears the minimum SoC to charge ASAP from a pointer.
+// SetEVMinStateOfChargePtr sets or clears the minimum SoC to charge ASAP (DEC-070 range: percent 0..100) from a pointer.
 func (c *ChargingSession) SetEVMinStateOfChargePtr(v *uint8) error {
 	if v == nil {
 		return c.ClearEVMinStateOfCharge()
@@ -949,7 +955,7 @@ func (c *ChargingSession) SetEVMinStateOfChargePtr(v *uint8) error {
 	return c.SetEVMinStateOfCharge(*v)
 }
 
-// SetEVTargetStateOfCharge sets the user-defined target SoC.
+// SetEVTargetStateOfCharge sets the user-defined target SoC (DEC-070 range: percent 0..100).
 func (c *ChargingSession) SetEVTargetStateOfCharge(evTargetStateOfCharge uint8) error {
 	attr, err := c.GetAttribute(ChargingSessionAttrEVTargetStateOfCharge)
 	if err != nil {
@@ -958,7 +964,7 @@ func (c *ChargingSession) SetEVTargetStateOfCharge(evTargetStateOfCharge uint8) 
 	return attr.SetValueInternal(evTargetStateOfCharge)
 }
 
-// ClearEVTargetStateOfCharge clears the user-defined target SoC.
+// ClearEVTargetStateOfCharge clears the user-defined target SoC (DEC-070 range: percent 0..100).
 func (c *ChargingSession) ClearEVTargetStateOfCharge() error {
 	attr, err := c.GetAttribute(ChargingSessionAttrEVTargetStateOfCharge)
 	if err != nil {
@@ -967,7 +973,7 @@ func (c *ChargingSession) ClearEVTargetStateOfCharge() error {
 	return attr.SetValueInternal(nil)
 }
 
-// SetEVTargetStateOfChargePtr sets or clears the user-defined target SoC from a pointer.
+// SetEVTargetStateOfChargePtr sets or clears the user-defined target SoC (DEC-070 range: percent 0..100) from a pointer.
 func (c *ChargingSession) SetEVTargetStateOfChargePtr(v *uint8) error {
 	if v == nil {
 		return c.ClearEVTargetStateOfCharge()

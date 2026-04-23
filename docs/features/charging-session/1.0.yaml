@@ -112,8 +112,10 @@ attributes:
     type: uint8
     access: readOnly
     nullable: true
+    min: 0
+    max: 100
     unit: "%"
-    description: "Current EV state of charge"
+    description: "Current EV state of charge (DEC-070 range: percent 0..100)"
 
   - id: 31
     name: evBatteryCapacity
@@ -128,16 +130,20 @@ attributes:
     type: uint8
     access: readOnly
     nullable: true
+    min: 0
+    max: 100
     unit: "%"
-    description: "Minimum SoC to charge ASAP"
+    description: "Minimum SoC to charge ASAP (DEC-070 range: percent 0..100)"
 
   - id: 33
     name: evTargetStateOfCharge
     type: uint8
     access: readOnly
     nullable: true
+    min: 0
+    max: 100
     unit: "%"
-    description: "User-defined target SoC"
+    description: "User-defined target SoC (DEC-070 range: percent 0..100)"
 
   # EV energy demands (40-49)
   - id: 40
