@@ -3892,6 +3892,43 @@ DEC-035 introduced a Matter-inspired `featureMap` bitmap for capability discover
 
 ---
 
+### DEC-075: Process Lifecycle Is Opt-In
+
+**Date:** 2026-04-23
+**Status:** Accepted (clarifies DEC-034)
+
+**Context:**
+DEC-034 introduced ProcessStateEnum and the Pause/Resume/Stop/AdjustStartTime commands to cover EEBUS OHPCF-style "optional process" flexibility. The decision text called the process lifecycle "optional" but the enforcement surface was never spelled out. Readers interpreting the spec assumed a conformant EnergyControl had to participate in the whole lifecycle, including emitting meaningful `processState` transitions.
+
+Inspection of real device types exposed the gap: a grid-tied EVSE that only understands "limit me to N watts" has no notion of AVAILABLE → SCHEDULED → RUNNING. Requiring it to expose the lifecycle would force spurious state reporting and add controller-side branches that never fire in practice. Worse, the 15 TC-INTERACTION conformance tests conflated "device implements EnergyControl" with "device implements the full process lifecycle", producing false negatives on simple-but-conformant devices.
+
+**Decision:**
+1. The process lifecycle — `processState` attribute plus `Pause` / `Resume` / `Stop` / `AdjustStartTime` commands — is **opt-in** at the per-feature level.
+2. Devices that do not participate leave:
+   - `isPausable = false` (id 14)
+   - `isShiftable = false` (id 15)
+   - `isStoppable = false` (id 16)
+   - `processState = NONE` (id 80, already the default)
+3. Controllers MUST check the corresponding capability flag before issuing a lifecycle command. Devices MAY respond to an unsolicited lifecycle command with `wire.StatusUnsupported`.
+4. Conformance test suites MUST include profiles for EnergyControl **with** and **without** the process lifecycle. A test asserting lifecycle behavior must only apply to devices whose capability flag is true.
+5. The capability flags are authoritative. `processState = NONE` alone is NOT a reliable opt-out signal (NONE is also a valid transient state for a lifecycle-participating device between tasks).
+
+**Rationale:**
+- Matches the shape of real hardware: EVSEs, grid inverters, sub-meters have no "optional process"; heat pumps and water heaters do.
+- Keeps the single EnergyControl feature covering every load-control case in the MASH catalog without fragmenting into "EnergyControl-basic" vs "EnergyControl-lifecycle" variants.
+- Makes the opt-out signal a local, cheap attribute read — no external profile lookup, no subscription, no handshake.
+- Aligns with EEBUS OHPCF's actual usage: OHPCF is one of ~10 use cases, not the universal shape.
+
+**Implementation notes:**
+- `pkg/features/energy_control_gen.go` already defaults `isPausable`, `isShiftable`, `isStoppable` to `false` and `processState` to `NONE`. The generated `handlePause` / `handleResume` / `handleStop` guards against a nil handler without panicking. This DEC ratifies that design rather than changing code.
+- Regression guard: `TestEnergyControl_ProcessLifecycleOptIn` in `pkg/features/features_test.go` locks in: default flag values, processState default, and non-panic behavior of handlePause/handleResume/handleStop when no handler is registered.
+- Spec: `docs/features/energy-control.md` ProcessStateEnum section now has an explicit "ProcessStateEnum is Opt-In" subsection with the capability-flag table.
+- Follow-up when §E service split lands: wire the unregistered-handler path to return `wire.StatusUnsupported` (code 10) at the dispatcher instead of `{success: false}`. Currently cleaner to address during the service restructure than in this DEC's scope.
+
+**Related:** clarifies DEC-034 (ControlStateEnum + ProcessStateEnum). Follow-up for dispatcher: §E (pkg/service split).
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)

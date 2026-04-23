@@ -776,6 +776,23 @@ When in OVERRIDE state, `overrideDirection` indicates which direction triggered 
 
 **Orthogonal state machines:** ControlStateEnum and ProcessStateEnum are independent. A device can be `controlState=LIMITED` while `processState=RUNNING`.
 
+### ProcessStateEnum is Opt-In (DEC-075)
+
+Process lifecycle (the `processState` attribute plus the `Pause` / `Resume` / `Stop` / `AdjustStartTime` commands) is **not required** for an EnergyControl feature to be conformant. A device that only has a notion of "being limited" — an EVSE, a grid inverter, a sub-meter — simply leaves `isPausable = false`, `isShiftable = false`, `isStoppable = false`, and `processState = NONE`. The process lifecycle commands are ignored by such devices; the controller-facing response surfaces as `wire.StatusUnsupported`.
+
+The opt-in signals on the wire are the capability-flag attributes:
+
+| Flag | Default | When true |
+|------|---------|-----------|
+| `isPausable` (id 14) | false | Device accepts `Pause` / `Resume` |
+| `isShiftable` (id 15) | false | Device accepts `AdjustStartTime` |
+| `isStoppable` (id 16) | false | Device accepts `Stop` |
+| `processState` (id 80) | NONE | Device exposes a full process lifecycle (AVAILABLE / SCHEDULED / RUNNING / PAUSED / COMPLETED / ABORTED) |
+
+A controller that wants to drive a process lifecycle first reads the relevant flag and only issues the command if it's `true`. This is the natural feature-discovery path and removes the ambiguity of "is this device compliant with OHPCF?" — conformance is a local read, not a global profile.
+
+Conformance suites include profiles for both "EnergyControl with process lifecycle" and "EnergyControl without process lifecycle"; neither should cause conformance failure on the other's targeted device class.
+
 ---
 
 ## EEBUS Use Case Mapping

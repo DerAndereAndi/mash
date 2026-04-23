@@ -846,6 +846,61 @@ func TestEnergyControl(t *testing.T) {
 	})
 }
 
+// TestEnergyControl_ProcessLifecycleOptIn locks in DEC-075: process lifecycle
+// support (pause/resume/stop/adjustStartTime) is opt-in. A fresh EnergyControl
+// exposes isPausable/isShiftable/isStoppable = false and processState = NONE.
+// Pause/Resume/Stop invoked against a device that hasn't registered a handler
+// are gracefully rejected (success=false) rather than panicking — leaving
+// room for the dispatcher to surface wire.StatusUnsupported to the caller.
+func TestEnergyControl_ProcessLifecycleOptIn(t *testing.T) {
+	ec := NewEnergyControl()
+
+	t.Run("DefaultsSignalOptOut", func(t *testing.T) {
+		if ec.IsPausable() {
+			t.Error("isPausable default must be false (opt-in; DEC-075)")
+		}
+		if ec.IsShiftable() {
+			t.Error("isShiftable default must be false (opt-in; DEC-075)")
+		}
+		if ec.IsStoppable() {
+			t.Error("isStoppable default must be false (opt-in; DEC-075)")
+		}
+		if ec.ProcessState() != ProcessStateNone {
+			t.Errorf("processState default must be NONE (opt-in; DEC-075), got %v", ec.ProcessState())
+		}
+	})
+
+	t.Run("PauseWithoutHandlerIsNonPanicking", func(t *testing.T) {
+		out, err := ec.handlePause(context.Background(), map[string]any{})
+		if err != nil {
+			t.Fatalf("handlePause on opt-out device must not error; got %v", err)
+		}
+		if ok, _ := out["success"].(bool); ok {
+			t.Errorf("handlePause on opt-out device must report success=false; got out=%v", out)
+		}
+	})
+
+	t.Run("ResumeWithoutHandlerIsNonPanicking", func(t *testing.T) {
+		out, err := ec.handleResume(context.Background(), map[string]any{})
+		if err != nil {
+			t.Fatalf("handleResume on opt-out device must not error; got %v", err)
+		}
+		if ok, _ := out["success"].(bool); ok {
+			t.Errorf("handleResume on opt-out device must report success=false; got out=%v", out)
+		}
+	})
+
+	t.Run("StopWithoutHandlerIsNonPanicking", func(t *testing.T) {
+		out, err := ec.handleStop(context.Background(), map[string]any{})
+		if err != nil {
+			t.Fatalf("handleStop on opt-out device must not error; got %v", err)
+		}
+		if ok, _ := out["success"].(bool); ok {
+			t.Errorf("handleStop on opt-out device must report success=false; got out=%v", out)
+		}
+	})
+}
+
 func TestChargingSession(t *testing.T) {
 	cs := NewChargingSession()
 
