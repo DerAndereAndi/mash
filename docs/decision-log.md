@@ -3858,6 +3858,44 @@ Lower `DefaultMaxMessageSize` from 65536 to 8192 bytes (8 KB). The `NewFramerWit
 
 ---
 
+### DEC-070: Attribute Range Validation via YAML `min` / `max`
+
+**Date:** 2026-04-23
+**Status:** Accepted
+
+**Context:**
+Feature attributes declared in YAML had no schema-level way to express a physical range (e.g., `nominalFrequency` is either ~50 Hz or ~60 Hz — writing `0` or `250` is meaningless and likely a bug). The reference implementation's attribute store *did* have runtime range-checking plumbing (`pkg/model/attribute.go` `checkRange`) that honors `MinValue` / `MaxValue` in `AttributeMetadata`, and the generator *did* support `min:` / `max:` in YAML (`phaseCount` was the only attribute using them). The plumbing was idle because authors never populated the YAMLs.
+
+**Decision:**
+Numeric attributes whose physical or semantic range is well-defined SHOULD declare `min:` and/or `max:` in the feature YAML. The generator propagates these to `AttributeMetadata.MinValue` / `MaxValue`; the attribute store enforces on every `SetValue` / `SetValueInternal` call and returns `ErrAttributeOutOfRange` for violations. External wire writes that violate a range surface as the corresponding wire status.
+
+Seed annotations landed in this DEC:
+ - `Electrical.nominalVoltage`: `min: 85, max: 600` (V) — typical low- and low-kV grid envelope
+ - `Electrical.nominalFrequency`: `min: 45, max: 65` (Hz) — 50/60 Hz grids with headroom
+ - `EnergyControl.failsafeDuration`: `min: 7200, max: 86400` (s) — 2h floor, 24h cap (already described in the attribute's prose)
+ - (Pre-existing: `Electrical.phaseCount`: `min: 1, max: 3`)
+
+**Rationale:**
+- Treats range as a property of the attribute, not a property of the caller. A single device-side bug that sets nominalFrequency to 0 is caught immediately instead of propagating through the EMS's forecasting code.
+- Leverages existing plumbing — the DEC costs a YAML annotation and a generator regen, not new code.
+- Scales incrementally. Add `min`/`max` where bugs have cost us (or would cost us); don't retrofit the entire attribute catalog in one pass. §H's generator refactor is a natural checkpoint to sweep the remaining numeric attributes.
+- Avoids adding a "lint all attributes" step with false positives on attributes whose range is genuinely open-ended (instantaneous power, session energy, etc.).
+
+**Rollout (not part of this DEC, but recorded so the next pass knows where to start):**
+ 1. ChargingSession: `evStateOfCharge`, `evMinStateOfCharge`, `evTargetStateOfCharge` (0..100 %)
+ 2. EnergyControl failsafe limits — bounded by nameplate when device is fully commissioned (needs per-device evaluation, not a static range).
+ 3. Measurement AC quantities have physics-plausible ranges (e.g., frequency deviation) — worth at most ±20 Hz from nominal.
+
+**Implementation notes:**
+- YAML key: `min:` / `max:`. Generator emits `MinValue: <typedLit>, MaxValue: <typedLit>` into `AttributeMetadata`.
+- Runtime path: `pkg/model/attribute.go` `validateValue` → `checkRange`.
+- Regression test: `TestAttributeRangeValidation` in `pkg/features/features_test.go` asserts the three seed annotations reject out-of-range writes.
+- No change to the wire envelope; errors surface through the existing `ErrAttributeOutOfRange` → status mapping.
+
+**Related:** DEC-051 (static attributeList — ranges are part of the static schema), DEC-072 (attributeList size bound — range metadata does not leave the device).
+
+---
+
 ### DEC-074: featureMap Bit Semantics
 
 **Date:** 2026-04-23
@@ -3926,6 +3964,83 @@ Inspection of real device types exposed the gap: a grid-tied EVSE that only unde
 - Follow-up when §E service split lands: wire the unregistered-handler path to return `wire.StatusUnsupported` (code 10) at the dispatcher instead of `{success: false}`. Currently cleaner to address during the service restructure than in this DEC's scope.
 
 **Related:** clarifies DEC-034 (ControlStateEnum + ProcessStateEnum). Follow-up for dispatcher: §E (pkg/service split).
+
+---
+
+### DEC-071: Subscription Notification Ordering Across Connections
+
+**Date:** 2026-04-23
+**Status:** Accepted
+
+**Context:**
+A write arrives on one connection; a subscriber on a different connection is configured to observe the attribute that the write mutates. The spec did not say whether the subscriber's notification lands before the writer's response or after. Both orderings are physically realizable on a concurrent server. Without a rule:
+ - Writer A can issue a follow-on command assuming "the fleet has observed the change" while subscriber B hasn't received the notification yet.
+ - Conformance tests that race a write against a subscription produce nondeterministic pass/fail.
+
+**Decision:**
+The device MUST deliver a notification caused by an acknowledged write on the subscriber's stream **before** sending the write response on the writer's stream. Notifications from an acknowledged write cannot "lag" the response.
+
+**Rationale:**
+- Gives both sides (writer and subscriber) a consistent view without requiring additional handshakes or sequence numbers.
+- Matches the reference implementation's current dispatcher flow (notification fan-out happens inside the write's commit step, before the response is sent). This DEC ratifies that rather than changing behavior.
+- Keeps the guarantee narrow — only notifications *caused by* the acknowledged write are ordered. Unrelated notifications follow §8.3 (in-order per subscriber, no cross-subscriber ordering).
+- Delivery failure on a subscriber's stream does NOT block the write response; subscription semantics continue to handle missed notifications via reconnect/priming report.
+
+**Implementation notes:**
+- Spec text lives in `docs/transport.md §8.4 Write-Then-Notify Ordering`.
+- Reference implementation: notification fan-out in `pkg/service/session_subscription_tracker.go` executes synchronously before the write handler returns.
+- Testing: a multi-connection YAML test (writer zone + subscriber zone) is feasible with the existing harness; deferred alongside §E's integration-coverage strengthening (E-1), where the test fits naturally with other cross-cutting invariants.
+
+**Related:** transport.md §8.3 (in-order per subscriber), DEC-052 (feature-level subscription).
+
+---
+
+### DEC-072: AttributeList Must Fit in a Single Message
+
+**Date:** 2026-04-23
+**Status:** Accepted
+
+**Context:**
+DEC-069 lowered the transport frame cap from 64 KB to 8 KB. A feature's `attributeList` (0xFFFB) is a CBOR array of uint16 IDs; on very wide features this could in principle approach the cap. The protocol has no chunking mechanism — a response that cannot fit in one frame has no compliant on-wire representation.
+
+**Decision:**
+An `attributeList` read response MUST fit in a single transport frame (≤ 8 KB). Feature designers keep the attribute count within budget. A feature whose natural attribute set would exceed the cap MUST be split across endpoints (multiple feature instances, each with a distinct attribute subset) rather than serialized through chunking.
+
+Practical numbers:
+- Observed: largest feature (EnergyControl) has <100 attributes; encoded `attributeList` is well under 1 KB.
+- Safe cap: ~3000 attribute IDs per feature (2 bytes per ID + CBOR overhead, well under 8 KB).
+- Reference implementation regression guard: `TestAttributeList_FitsInSingleMessage` in `pkg/features/features_test.go` encodes every built-in feature's `AttributeList()` as CBOR and asserts `len(encoded) ≤ 6144 bytes` (leaving 2 KB for Response envelope overhead).
+
+**Rationale:**
+- Avoids introducing chunking — a complexity premium with no real demand.
+- Makes the per-feature attribute-count limit concrete and self-checkable.
+- Aligns with the broader KISS posture: when a feature would exceed the cap, the design signal ("split endpoints") is the correct answer rather than a new protocol mechanism.
+
+**Related:** DEC-069 (8 KB frame cap), DEC-051 (static attributeList).
+
+---
+
+### DEC-073: Failsafe-Limit Attributes Gated on acceptsLimits
+
+**Date:** 2026-04-23
+**Status:** Accepted
+
+**Context:**
+EnergyControl exposes `failsafeConsumptionLimit`, `failsafeProductionLimit`, and `failsafeDuration` as ReadWrite attributes so a controller can configure the fallback policy at commissioning time. Read-only endpoint types — `SUB_METER`, `PV_STRING`, `GRID_CONNECTION` — don't accept active limits, but the spec didn't say what should happen when a controller *tries* to write a failsafe-limit attribute on such an endpoint. Behavior was unspecified.
+
+**Decision:**
+Failsafe-limit attributes are writable only on endpoints that expose EnergyControl with `acceptsLimits = true`. On any other endpoint — including read-only endpoint types and any EnergyControl instance with `acceptsLimits = false` — a write to a failsafe-limit attribute MUST be rejected with `wire.StatusUnsupported` (status code 10). Read access remains unaffected.
+
+**Rationale:**
+- Mirrors the shape already established in DEC-075 for process-lifecycle commands: capability-flag attributes gate both commands *and* attribute writes that are semantically meaningless without the capability.
+- Keeps the feature schema stable — no need for per-endpoint-type attribute pruning — while making the enforcement surface explicit.
+- Read-only endpoint types (grid connection, PV string, sub-meter) shouldn't be controlled by a failsafe policy; they have no knob to turn when a controller disappears.
+
+**Implementation notes:**
+- Spec text: `docs/multi-zone.md §7 Failsafe Behavior` now includes the applicability paragraph.
+- Enforcement surface: the reference implementation currently accepts these writes unconditionally (attributes are declared ReadWrite in the generated feature). Wiring the `acceptsLimits=false` rejection at the dispatcher level is deferred to §E alongside the similar DEC-075 follow-up for process-lifecycle commands — both want the same "capability-flag gate → StatusUnsupported" plumbing.
+
+**Related:** DEC-026 (EnergyControl / acceptsLimits), DEC-034 (failsafe semantics), DEC-075 (process-lifecycle opt-in uses the same shape).
 
 ---
 

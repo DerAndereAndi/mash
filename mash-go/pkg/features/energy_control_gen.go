@@ -625,8 +625,10 @@ func NewEnergyControl() *EnergyControl {
 		Type:        model.DataTypeUint32,
 		Access:      model.AccessReadWrite,
 		Default:     uint32(7200),
+		MinValue:    uint32(7200),
+		MaxValue:    uint32(86400),
 		Unit:        "s",
-		Description: "Time in FAILSAFE before returning to AUTONOMOUS (2-24h)",
+		Description: "Time in FAILSAFE before returning to AUTONOMOUS (DEC-070: 2h floor, 24h cap)",
 	}))
 
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
@@ -1056,7 +1058,7 @@ func (e *EnergyControl) FailsafeProductionLimit() (int64, bool) {
 	return 0, false
 }
 
-// FailsafeDuration returns the time in FAILSAFE before returning to AUTONOMOUS (2-24h).
+// FailsafeDuration returns the time in FAILSAFE before returning to AUTONOMOUS (DEC-070: 2h floor, 24h cap).
 func (e *EnergyControl) FailsafeDuration() uint32 {
 	val, _ := e.ReadAttribute(EnergyControlAttrFailsafeDuration)
 	if v, ok := val.(uint32); ok {
@@ -1761,7 +1763,7 @@ func (e *EnergyControl) SetFailsafeProductionLimitPtr(v *int64) error {
 	return e.SetFailsafeProductionLimit(*v)
 }
 
-// SetFailsafeDuration sets the time in FAILSAFE before returning to AUTONOMOUS (2-24h).
+// SetFailsafeDuration sets the time in FAILSAFE before returning to AUTONOMOUS (DEC-070: 2h floor, 24h cap).
 func (e *EnergyControl) SetFailsafeDuration(failsafeDuration uint32) error {
 	attr, err := e.GetAttribute(EnergyControlAttrFailsafeDuration)
 	if err != nil {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/fxamacker/cbor/v2"
+
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
 
@@ -852,6 +854,102 @@ func TestEnergyControl(t *testing.T) {
 // Pause/Resume/Stop invoked against a device that hasn't registered a handler
 // are gracefully rejected (success=false) rather than panicking — leaving
 // room for the dispatcher to surface wire.StatusUnsupported to the caller.
+// TestAttributeRangeValidation enforces DEC-070: int/uint attributes declaring
+// `min:` / `max:` in YAML MUST reject out-of-range writes at runtime. This
+// locks in the three seed attributes annotated as part of §L#1:
+//   - Electrical.nominalVoltage (85..600 V)
+//   - Electrical.nominalFrequency (45..65 Hz)
+//   - EnergyControl.failsafeDuration (7200..86400 s)
+//
+// The range-checking plumbing already existed in pkg/model/attribute.go
+// (`checkRange`); DEC-070 is primarily a YAML-annotation convention so that
+// the plumbing is actually populated per attribute.
+func TestAttributeRangeValidation(t *testing.T) {
+	t.Run("Electrical/nominalVoltage", func(t *testing.T) {
+		el := NewElectrical()
+		if err := el.SetNominalVoltage(230); err != nil {
+			t.Fatalf("SetNominalVoltage(230) unexpected error: %v", err)
+		}
+		if err := el.SetNominalVoltage(50); err == nil {
+			t.Error("SetNominalVoltage(50) must fail (below min=85, DEC-070)")
+		}
+		if err := el.SetNominalVoltage(800); err == nil {
+			t.Error("SetNominalVoltage(800) must fail (above max=600, DEC-070)")
+		}
+	})
+
+	t.Run("Electrical/nominalFrequency", func(t *testing.T) {
+		el := NewElectrical()
+		if err := el.SetNominalFrequency(50); err != nil {
+			t.Fatalf("SetNominalFrequency(50) unexpected error: %v", err)
+		}
+		if err := el.SetNominalFrequency(40); err == nil {
+			t.Error("SetNominalFrequency(40) must fail (below min=45, DEC-070)")
+		}
+		if err := el.SetNominalFrequency(70); err == nil {
+			t.Error("SetNominalFrequency(70) must fail (above max=65, DEC-070)")
+		}
+	})
+
+	t.Run("EnergyControl/failsafeDuration", func(t *testing.T) {
+		ec := NewEnergyControl()
+		if err := ec.SetFailsafeDuration(7200); err != nil {
+			t.Fatalf("SetFailsafeDuration(7200) unexpected error: %v", err)
+		}
+		if err := ec.SetFailsafeDuration(3600); err == nil {
+			t.Error("SetFailsafeDuration(3600) must fail (below min=7200, DEC-070)")
+		}
+		if err := ec.SetFailsafeDuration(100000); err == nil {
+			t.Error("SetFailsafeDuration(100000) must fail (above max=86400, DEC-070)")
+		}
+	})
+}
+
+// TestAttributeList_FitsInSingleMessage enforces DEC-072: a feature's
+// attributeList response MUST fit in a single transport frame (8 KB per
+// DEC-069). The protocol deliberately has no chunking mechanism. This test
+// encodes the attributeList of every built-in feature as CBOR and asserts
+// the encoded size is well below the 8192-byte cap, leaving headroom for
+// Response envelope fields (messageId, status, path). Features that grow
+// past ~6 KB attributeList MUST either split across endpoints or drop
+// attributes — they cannot be advertised whole.
+func TestAttributeList_FitsInSingleMessage(t *testing.T) {
+	const budgetBytes = 6144 // ~6 KB leaves 2 KB for Response envelope overhead
+
+	type feat interface {
+		AttributeList() []uint16
+	}
+
+	cases := []struct {
+		name string
+		f    feat
+	}{
+		{"DeviceInfo", NewDeviceInfo()},
+		{"Status", NewStatus()},
+		{"Electrical", NewElectrical()},
+		{"Measurement", NewMeasurement()},
+		{"EnergyControl", NewEnergyControl()},
+		{"ChargingSession", NewChargingSession()},
+		{"Signals", NewSignals()},
+		{"Tariff", NewTariff()},
+		{"Plan", NewPlan()},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ids := tc.f.AttributeList()
+			encoded, err := cbor.Marshal(ids)
+			if err != nil {
+				t.Fatalf("cbor.Marshal(%s attributeList): %v", tc.name, err)
+			}
+			if len(encoded) > budgetBytes {
+				t.Errorf("%s attributeList encoded to %d bytes, exceeds %d-byte budget (DEC-072)",
+					tc.name, len(encoded), budgetBytes)
+			}
+		})
+	}
+}
+
 func TestEnergyControl_ProcessLifecycleOptIn(t *testing.T) {
 	ec := NewEnergyControl()
 

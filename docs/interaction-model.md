@@ -360,6 +360,15 @@ When subscribed attributes change:
 
 This applies to all features. Controllers can read `attributeList` once at discovery time and build a stable data model.
 
+#### AttributeList Size Bound (DEC-072)
+
+An `attributeList` read response MUST fit in a single transport frame (8 KB per DEC-069). There is no chunking mechanism. Feature designers are responsible for keeping a feature's attribute count within budget:
+
+- Current maximum observed (EnergyControl): <100 attributes, encoded `attributeList` well under 1 KB.
+- Practical cap: ~3000 attribute IDs per feature (at 2 bytes each + CBOR overhead, well under 8 KB).
+- If a feature's attribute set would exceed the cap: split across endpoints (one feature instance per endpoint, with distinct attribute subsets) rather than chunking the response.
+- Reference implementation regression guard: `TestAttributeList_FitsInSingleMessage` in `pkg/features/features_test.go`.
+
 #### Feature-Level Subscription (DEC-052)
 
 The default subscription model is **subscribe to all attributes** of a feature:

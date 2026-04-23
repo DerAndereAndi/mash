@@ -381,6 +381,33 @@ Final effectiveLimit = min(5000, 3000) = 3000
 - Coalescing may combine multiple changes (see subscription semantics)
 - Notifications from different subscriptions have no ordering guarantee relative to each other
 
+### 8.4 Write-Then-Notify Ordering (DEC-071)
+
+When a write from **one** connection causes a value change that a subscriber on **another** connection observes, the device MUST deliver the triggered notification(s) on the subscriber's stream **before** sending the write response on the writer's stream. That is, from the device's perspective:
+
+```
+writer stream:     ... Request(write) ─────────────────► [Response] ─►
+subscriber stream: .................... Notification ────────────────►
+```
+
+`Notification → Response` is the required order on the wire.
+
+**Why this matters:**
+
+Controller A writes `SetLimit(3000)` on its connection. Controller B is subscribed to `effectiveConsumptionLimit` on its own connection.
+- **Allowed:** B sees the notification, then A sees the write succeed.
+- **Forbidden:** A sees the write succeed, then B eventually sees the notification. Because A may now issue a follow-on command assuming the whole fleet has observed the change, a late-arriving notification on B's stream leaves B transiently out of sync with A's reality. Making the notification precede the response eliminates the race at the protocol level and lets both sides reason about causality without additional handshakes.
+
+**Scope and non-guarantees:**
+
+- This ordering applies **only** to notifications *caused by* the acknowledged write. Unrelated notifications on the subscriber's stream follow §8.3 rules.
+- Ordering across multiple subscribers on different connections is per-subscriber: each subscriber sees its notification before the writer's response is sent to the writer. There is no cross-subscriber ordering guarantee (none of the subscribers observe each other's streams).
+- If delivering the notification fails (e.g., subscriber connection is broken), the device still completes the write and sends the response on the writer's stream. Subscription semantics (minInterval batching, delta notifications) continue to apply. Failure to deliver a notification MUST NOT block the write response.
+
+**Implementation guidance:**
+
+The reference implementation's dispatcher submits notification frames to all subscriber sessions synchronously as part of the write's commit step, before returning control to the write handler to emit the response. See `pkg/service/session_subscription_tracker.go` in the Go reference.
+
 ---
 
 ## 9. Message Size Limits

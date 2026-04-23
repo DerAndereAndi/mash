@@ -58,8 +58,10 @@ func NewElectrical() *Electrical {
 		Type:        model.DataTypeUint16,
 		Access:      model.AccessReadOnly,
 		Default:     uint16(230),
+		MinValue:    uint16(85),
+		MaxValue:    uint16(600),
 		Unit:        "V",
-		Description: "Nominal voltage",
+		Description: "Nominal voltage (phase-to-neutral RMS; DEC-070 range = typical LV / low-kV grid envelope)",
 	}))
 
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
@@ -68,8 +70,10 @@ func NewElectrical() *Electrical {
 		Type:        model.DataTypeUint8,
 		Access:      model.AccessReadOnly,
 		Default:     uint8(50),
+		MinValue:    uint8(45),
+		MaxValue:    uint8(65),
 		Unit:        "Hz",
-		Description: "Nominal frequency",
+		Description: "Nominal frequency (DEC-070 range = standard 50/60 Hz grids with headroom)",
 	}))
 
 	f.AddAttribute(model.NewAttribute(&model.AttributeMetadata{
@@ -174,7 +178,7 @@ func (e *Electrical) PhaseMapping() (map[Phase]GridPhase, bool) {
 	return nil, false
 }
 
-// NominalVoltage returns the nominal voltage.
+// NominalVoltage returns the nominal voltage (phase-to-neutral RMS; DEC-070 range = typical LV / low-kV grid envelope).
 func (e *Electrical) NominalVoltage() uint16 {
 	val, _ := e.ReadAttribute(ElectricalAttrNominalVoltage)
 	if v, ok := val.(uint16); ok {
@@ -183,7 +187,7 @@ func (e *Electrical) NominalVoltage() uint16 {
 	return uint16(230)
 }
 
-// NominalFrequency returns the nominal frequency.
+// NominalFrequency returns the nominal frequency (DEC-070 range = standard 50/60 Hz grids with headroom).
 func (e *Electrical) NominalFrequency() uint8 {
 	val, _ := e.ReadAttribute(ElectricalAttrNominalFrequency)
 	if v, ok := val.(uint8); ok {
@@ -282,7 +286,7 @@ func (e *Electrical) SetPhaseMapping(phaseMapping map[Phase]GridPhase) error {
 	return attr.SetValueInternal(phaseMapping)
 }
 
-// SetNominalVoltage sets the nominal voltage.
+// SetNominalVoltage sets the nominal voltage (phase-to-neutral RMS; DEC-070 range = typical LV / low-kV grid envelope).
 func (e *Electrical) SetNominalVoltage(nominalVoltage uint16) error {
 	attr, err := e.GetAttribute(ElectricalAttrNominalVoltage)
 	if err != nil {
@@ -291,7 +295,7 @@ func (e *Electrical) SetNominalVoltage(nominalVoltage uint16) error {
 	return attr.SetValueInternal(nominalVoltage)
 }
 
-// SetNominalFrequency sets the nominal frequency.
+// SetNominalFrequency sets the nominal frequency (DEC-070 range = standard 50/60 Hz grids with headroom).
 func (e *Electrical) SetNominalFrequency(nominalFrequency uint8) error {
 	attr, err := e.GetAttribute(ElectricalAttrNominalFrequency)
 	if err != nil {

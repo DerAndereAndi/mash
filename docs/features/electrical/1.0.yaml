@@ -30,16 +30,20 @@ attributes:
     type: uint16
     access: readOnly
     default: 230
+    min: 85
+    max: 600
     unit: "V"
-    description: "Nominal voltage"
+    description: "Nominal voltage (phase-to-neutral RMS; DEC-070 range = typical LV / low-kV grid envelope)"
 
   - id: 4
     name: nominalFrequency
     type: uint8
     access: readOnly
     default: 50
+    min: 45
+    max: 65
     unit: "Hz"
-    description: "Nominal frequency"
+    description: "Nominal frequency (DEC-070 range = standard 50/60 Hz grids with headroom)"
 
   # Direction capability
   - id: 5

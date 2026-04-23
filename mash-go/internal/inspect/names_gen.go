@@ -59,24 +59,36 @@ func initGeneratedNameTables() {
 	}
 	attributeNames[uint8(model.FeatureStatus)] = statusAttrs
 
-	electricalAttrs := map[string]uint16{
-		"phaseCount":            features.ElectricalAttrPhaseCount,
-		"phaseMapping":          features.ElectricalAttrPhaseMapping,
-		"nominalVoltage":        features.ElectricalAttrNominalVoltage,
-		"nominalFrequency":      features.ElectricalAttrNominalFrequency,
-		"supportedDirections":   features.ElectricalAttrSupportedDirections,
-		"nominalMaxConsumption": features.ElectricalAttrNominalMaxConsumption,
-		"nominalMaxProduction":  features.ElectricalAttrNominalMaxProduction,
-		"nominalMinPower":       features.ElectricalAttrNominalMinPower,
-		"maxCurrentPerPhase":    features.ElectricalAttrMaxCurrentPerPhase,
-		"minCurrentPerPhase":    features.ElectricalAttrMinCurrentPerPhase,
-		"supportsAsymmetric":    features.ElectricalAttrSupportsAsymmetric,
-		"energyCapacity":        features.ElectricalAttrEnergyCapacity,
+	measurementAttrs := map[string]uint16{
+		"acActivePower":             features.MeasurementAttrACActivePower,
+		"acReactivePower":           features.MeasurementAttrACReactivePower,
+		"acApparentPower":           features.MeasurementAttrACApparentPower,
+		"acActivePowerPerPhase":     features.MeasurementAttrACActivePowerPerPhase,
+		"acReactivePowerPerPhase":   features.MeasurementAttrACReactivePowerPerPhase,
+		"acApparentPowerPerPhase":   features.MeasurementAttrACApparentPowerPerPhase,
+		"acCurrentPerPhase":         features.MeasurementAttrACCurrentPerPhase,
+		"acVoltagePerPhase":         features.MeasurementAttrACVoltagePerPhase,
+		"acVoltagePhaseToPhasePair": features.MeasurementAttrACVoltagePhaseToPhasePair,
+		"acFrequency":               features.MeasurementAttrACFrequency,
+		"powerFactor":               features.MeasurementAttrPowerFactor,
+		"acEnergyConsumed":          features.MeasurementAttrACEnergyConsumed,
+		"acEnergyProduced":          features.MeasurementAttrACEnergyProduced,
+		"dcPower":                   features.MeasurementAttrDCPower,
+		"dcCurrent":                 features.MeasurementAttrDCCurrent,
+		"dcVoltage":                 features.MeasurementAttrDCVoltage,
+		"dcEnergyIn":                features.MeasurementAttrDCEnergyIn,
+		"dcEnergyOut":               features.MeasurementAttrDCEnergyOut,
+		"stateOfCharge":             features.MeasurementAttrStateOfCharge,
+		"stateOfHealth":             features.MeasurementAttrStateOfHealth,
+		"stateOfEnergy":             features.MeasurementAttrStateOfEnergy,
+		"useableCapacity":           features.MeasurementAttrUseableCapacity,
+		"cycleCount":                features.MeasurementAttrCycleCount,
+		"temperature":               features.MeasurementAttrTemperature,
 	}
 	for k, v := range globalAttrs {
-		electricalAttrs[k] = v
+		measurementAttrs[k] = v
 	}
-	attributeNames[uint8(model.FeatureElectrical)] = electricalAttrs
+	attributeNames[uint8(model.FeatureMeasurement)] = measurementAttrs
 
 	chargingSessionAttrs := map[string]uint16{
 		"state":                           features.ChargingSessionAttrState,
@@ -111,32 +123,13 @@ func initGeneratedNameTables() {
 	}
 	attributeNames[uint8(model.FeatureChargingSession)] = chargingSessionAttrs
 
-	signalsAttrs := map[string]uint16{
-		"signalSource":    features.SignalsAttrSignalSource,
-		"startTime":       features.SignalsAttrStartTime,
-		"validUntil":      features.SignalsAttrValidUntil,
-		"priceSlots":      features.SignalsAttrPriceSlots,
-		"constraintSlots": features.SignalsAttrConstraintSlots,
-		"forecastSlots":   features.SignalsAttrForecastSlots,
+	testControlAttrs := map[string]uint16{
+		"testEventTriggersEnabled": features.TestControlAttrTestEventTriggersEnabled,
 	}
 	for k, v := range globalAttrs {
-		signalsAttrs[k] = v
+		testControlAttrs[k] = v
 	}
-	attributeNames[uint8(model.FeatureSignals)] = signalsAttrs
-
-	planAttrs := map[string]uint16{
-		"planId":             features.PlanAttrPlanID,
-		"planVersion":        features.PlanAttrPlanVersion,
-		"commitment":         features.PlanAttrCommitment,
-		"startTime":          features.PlanAttrStartTime,
-		"endTime":            features.PlanAttrEndTime,
-		"totalEnergyPlanned": features.PlanAttrTotalEnergyPlanned,
-		"slots":              features.PlanAttrSlots,
-	}
-	for k, v := range globalAttrs {
-		planAttrs[k] = v
-	}
-	attributeNames[uint8(model.FeaturePlan)] = planAttrs
+	attributeNames[uint8(model.FeatureTestControl)] = testControlAttrs
 
 	deviceInfoAttrs := map[string]uint16{
 		"deviceId":        features.DeviceInfoAttrDeviceID,
@@ -159,36 +152,24 @@ func initGeneratedNameTables() {
 	}
 	attributeNames[uint8(model.FeatureDeviceInfo)] = deviceInfoAttrs
 
-	measurementAttrs := map[string]uint16{
-		"acActivePower":             features.MeasurementAttrACActivePower,
-		"acReactivePower":           features.MeasurementAttrACReactivePower,
-		"acApparentPower":           features.MeasurementAttrACApparentPower,
-		"acActivePowerPerPhase":     features.MeasurementAttrACActivePowerPerPhase,
-		"acReactivePowerPerPhase":   features.MeasurementAttrACReactivePowerPerPhase,
-		"acApparentPowerPerPhase":   features.MeasurementAttrACApparentPowerPerPhase,
-		"acCurrentPerPhase":         features.MeasurementAttrACCurrentPerPhase,
-		"acVoltagePerPhase":         features.MeasurementAttrACVoltagePerPhase,
-		"acVoltagePhaseToPhasePair": features.MeasurementAttrACVoltagePhaseToPhasePair,
-		"acFrequency":               features.MeasurementAttrACFrequency,
-		"powerFactor":               features.MeasurementAttrPowerFactor,
-		"acEnergyConsumed":          features.MeasurementAttrACEnergyConsumed,
-		"acEnergyProduced":          features.MeasurementAttrACEnergyProduced,
-		"dcPower":                   features.MeasurementAttrDCPower,
-		"dcCurrent":                 features.MeasurementAttrDCCurrent,
-		"dcVoltage":                 features.MeasurementAttrDCVoltage,
-		"dcEnergyIn":                features.MeasurementAttrDCEnergyIn,
-		"dcEnergyOut":               features.MeasurementAttrDCEnergyOut,
-		"stateOfCharge":             features.MeasurementAttrStateOfCharge,
-		"stateOfHealth":             features.MeasurementAttrStateOfHealth,
-		"stateOfEnergy":             features.MeasurementAttrStateOfEnergy,
-		"useableCapacity":           features.MeasurementAttrUseableCapacity,
-		"cycleCount":                features.MeasurementAttrCycleCount,
-		"temperature":               features.MeasurementAttrTemperature,
+	electricalAttrs := map[string]uint16{
+		"phaseCount":            features.ElectricalAttrPhaseCount,
+		"phaseMapping":          features.ElectricalAttrPhaseMapping,
+		"nominalVoltage":        features.ElectricalAttrNominalVoltage,
+		"nominalFrequency":      features.ElectricalAttrNominalFrequency,
+		"supportedDirections":   features.ElectricalAttrSupportedDirections,
+		"nominalMaxConsumption": features.ElectricalAttrNominalMaxConsumption,
+		"nominalMaxProduction":  features.ElectricalAttrNominalMaxProduction,
+		"nominalMinPower":       features.ElectricalAttrNominalMinPower,
+		"maxCurrentPerPhase":    features.ElectricalAttrMaxCurrentPerPhase,
+		"minCurrentPerPhase":    features.ElectricalAttrMinCurrentPerPhase,
+		"supportsAsymmetric":    features.ElectricalAttrSupportsAsymmetric,
+		"energyCapacity":        features.ElectricalAttrEnergyCapacity,
 	}
 	for k, v := range globalAttrs {
-		measurementAttrs[k] = v
+		electricalAttrs[k] = v
 	}
-	attributeNames[uint8(model.FeatureMeasurement)] = measurementAttrs
+	attributeNames[uint8(model.FeatureElectrical)] = electricalAttrs
 
 	energyControlAttrs := map[string]uint16{
 		"deviceType":                           features.EnergyControlAttrDeviceType,
@@ -249,28 +230,40 @@ func initGeneratedNameTables() {
 	}
 	attributeNames[uint8(model.FeatureTariff)] = tariffAttrs
 
-	testControlAttrs := map[string]uint16{
-		"testEventTriggersEnabled": features.TestControlAttrTestEventTriggersEnabled,
+	signalsAttrs := map[string]uint16{
+		"signalSource":    features.SignalsAttrSignalSource,
+		"startTime":       features.SignalsAttrStartTime,
+		"validUntil":      features.SignalsAttrValidUntil,
+		"priceSlots":      features.SignalsAttrPriceSlots,
+		"constraintSlots": features.SignalsAttrConstraintSlots,
+		"forecastSlots":   features.SignalsAttrForecastSlots,
 	}
 	for k, v := range globalAttrs {
-		testControlAttrs[k] = v
+		signalsAttrs[k] = v
 	}
-	attributeNames[uint8(model.FeatureTestControl)] = testControlAttrs
+	attributeNames[uint8(model.FeatureSignals)] = signalsAttrs
+
+	planAttrs := map[string]uint16{
+		"planId":             features.PlanAttrPlanID,
+		"planVersion":        features.PlanAttrPlanVersion,
+		"commitment":         features.PlanAttrCommitment,
+		"startTime":          features.PlanAttrStartTime,
+		"endTime":            features.PlanAttrEndTime,
+		"totalEnergyPlanned": features.PlanAttrTotalEnergyPlanned,
+		"slots":              features.PlanAttrSlots,
+	}
+	for k, v := range globalAttrs {
+		planAttrs[k] = v
+	}
+	attributeNames[uint8(model.FeaturePlan)] = planAttrs
 
 	commandNames[uint8(model.FeatureChargingSession)] = map[string]uint8{
 		"setChargingMode": features.ChargingSessionCmdSetChargingMode,
 	}
 
-	commandNames[uint8(model.FeatureSignals)] = map[string]uint8{
-		"sendPriceSignal":      features.SignalsCmdSendPriceSignal,
-		"sendConstraintSignal": features.SignalsCmdSendConstraintSignal,
-		"sendForecastSignal":   features.SignalsCmdSendForecastSignal,
-		"clearSignals":         features.SignalsCmdClearSignals,
-	}
-
-	commandNames[uint8(model.FeaturePlan)] = map[string]uint8{
-		"requestPlan": features.PlanCmdRequestPlan,
-		"acceptPlan":  features.PlanCmdAcceptPlan,
+	commandNames[uint8(model.FeatureTestControl)] = map[string]uint8{
+		"triggerTestEvent":               features.TestControlCmdTriggerTestEvent,
+		"setCommissioningWindowDuration": features.TestControlCmdSetCommissioningWindowDuration,
 	}
 
 	commandNames[uint8(model.FeatureDeviceInfo)] = map[string]uint8{
@@ -295,9 +288,16 @@ func initGeneratedNameTables() {
 		"setTariff": features.TariffCmdSetTariff,
 	}
 
-	commandNames[uint8(model.FeatureTestControl)] = map[string]uint8{
-		"triggerTestEvent":               features.TestControlCmdTriggerTestEvent,
-		"setCommissioningWindowDuration": features.TestControlCmdSetCommissioningWindowDuration,
+	commandNames[uint8(model.FeatureSignals)] = map[string]uint8{
+		"sendPriceSignal":      features.SignalsCmdSendPriceSignal,
+		"sendConstraintSignal": features.SignalsCmdSendConstraintSignal,
+		"sendForecastSignal":   features.SignalsCmdSendForecastSignal,
+		"clearSignals":         features.SignalsCmdClearSignals,
+	}
+
+	commandNames[uint8(model.FeaturePlan)] = map[string]uint8{
+		"requestPlan": features.PlanCmdRequestPlan,
+		"acceptPlan":  features.PlanCmdAcceptPlan,
 	}
 
 }

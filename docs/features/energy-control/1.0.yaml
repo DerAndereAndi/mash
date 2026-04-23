@@ -339,8 +339,10 @@ attributes:
     access: readWrite
     mandatory: true
     default: 7200
+    min: 7200
+    max: 86400
     unit: "s"
-    description: "Time in FAILSAFE before returning to AUTONOMOUS (2-24h)"
+    description: "Time in FAILSAFE before returning to AUTONOMOUS (DEC-070: 2h floor, 24h cap)"
 
   # Contractual limits (73-74) - EMS/CEM only
   - id: 73

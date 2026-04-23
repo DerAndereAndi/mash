@@ -256,6 +256,8 @@ When a zone's connection is lost, the device transitions to `FAILSAFE` state for
 - `failsafeDuration` is shared between consumption and production (one value for both)
 - Other zones' connections and limits are unaffected by one zone's connection loss
 
+**Applicability (DEC-073):** Failsafe-limit attributes (`failsafeConsumptionLimit`, `failsafeProductionLimit`, `failsafeDuration`) are writable only on endpoints that expose EnergyControl with `acceptsLimits = true`. Read-only endpoint types — `SUB_METER`, `PV_STRING`, `GRID_CONNECTION`, and any endpoint whose EnergyControl sets `acceptsLimits = false` — do not carry failsafe-limit semantics. A controller that attempts to write a failsafe-limit attribute on such an endpoint MUST receive `wire.StatusUnsupported` (status code 10). This matches the broader pattern that capability-gated attributes are only writable when the gate flag is true; see DEC-075 for the analogous treatment of the process-lifecycle commands.
+
 For detailed timing requirements, see [Failsafe Timing](testing/behavior/failsafe-timing.md).
 
 ---
