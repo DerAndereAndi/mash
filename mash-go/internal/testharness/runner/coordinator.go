@@ -759,27 +759,33 @@ func (c *coordinatorImpl) TeardownTest(_ context.Context, tc *loader.TestCase, s
 
 	// Clean architecture invariant: RemoveZone is controller authority. Always
 	// issue non-suite removals through the suite control channel when available.
-	sc := c.suite.Conn()
-	if (sc == nil || !sc.isConnected() || sc.framer == nil) && c.suite.ZoneID() != "" {
-		if err := c.ops.ReconnectToZone(state); err != nil {
-			c.debugf("teardown: zone cleanup suite reconnect failed: %v", err)
+	// Skip entirely when nothing needs removing -- reconnecting the suite just
+	// to send zero commands is wasted work (and creates spurious failures in
+	// tests that mock an "alive but framer-less" suite connection).
+	if len(removedZoneIDs) > 0 || len(zoneRemovalFallbackConns) > 0 {
+		sc := c.suite.Conn()
+		if !suiteRemovedDuringTest && (sc == nil || !sc.isConnected() || sc.framer == nil) && c.suite.ZoneID() != "" {
+			if err := c.ops.ReconnectToZone(state); err != nil {
+				c.debugf("teardown: zone cleanup suite reconnect failed: %v", err)
+			}
+			sc = c.suite.Conn()
 		}
-		sc = c.suite.Conn()
-	}
-	if sc != nil && sc.isConnected() && sc.framer != nil {
-		for zoneID := range removedZoneIDs {
-			c.ops.SendRemoveZoneOnConn(sc, zoneID)
-		}
-	} else {
-		for zoneID, conn := range zoneRemovalFallbackConns {
-			c.ops.SendRemoveZoneOnConn(conn, zoneID)
+		if sc != nil && sc.isConnected() && sc.framer != nil {
+			for zoneID := range removedZoneIDs {
+				c.ops.SendRemoveZoneOnConn(sc, zoneID)
+			}
+		} else {
+			for zoneID, conn := range zoneRemovalFallbackConns {
+				c.ops.SendRemoveZoneOnConn(conn, zoneID)
+			}
 		}
 	}
 
 	// Retry non-suite zone removals once based on device-reported zone IDs.
 	// This is the authoritative source: tracked pool IDs can be stale if a test
-	// replaced connections mid-step.
-	if c.config != nil && c.config.StrictLifecycle &&
+	// replaced connections mid-step. Skip when the test itself removed the
+	// suite -- there is no authoritative control channel to reconnect to.
+	if !suiteRemovedDuringTest && c.config != nil && c.config.StrictLifecycle &&
 		c.config.Target != "" && c.config.EnableKey != "" {
 		sc := c.suite.Conn()
 		if (sc == nil || !sc.isConnected() || sc.framer == nil) && c.suite.ZoneID() != "" {

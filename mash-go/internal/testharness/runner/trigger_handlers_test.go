@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,13 +272,18 @@ func TestSendTriggerViaZone_FallsBackToMainWhenNoSuite(t *testing.T) {
 }
 
 // TestSendTriggerViaZone_StrictMode_RejectsFallbackToMain verifies that strict
-// lifecycle mode refuses implicit fallback to pool.Main() when suite.Conn() is absent.
+// lifecycle mode refuses implicit fallback to pool.Main() when a suite zone is
+// expected (ZoneID recorded) but its control connection is absent. When no
+// suite is expected at all, fallback is permitted -- see
+// TestHandleChangeState_StrictLifecycle_AllowsMainWhenSuiteAbsent.
 func TestSendTriggerViaZone_StrictMode_RejectsFallbackToMain(t *testing.T) {
 	r := newTestRunner()
 	r.config.EnableKey = "00112233445566778899aabbccddeeff"
 	r.config.StrictLifecycle = true
 
-	// No suite connection, but main is live.
+	// Suite zone expected but disconnected; main is live but must not be used.
+	r.suite.Record("suite-zone-strict", CryptoState{})
+
 	mainConn, mainServer := newPipeConnection()
 	r.pool.SetMain(mainConn)
 	defer mainServer.Close()
@@ -290,6 +296,9 @@ func TestSendTriggerViaZone_StrictMode_RejectsFallbackToMain(t *testing.T) {
 	err := r.sendTriggerViaZone(ctx, features.TriggerEnterCommissioningMode, state)
 	if err == nil {
 		t.Fatal("expected strict mode to reject fallback to main connection")
+	}
+	if !strings.Contains(err.Error(), "strict lifecycle") {
+		t.Fatalf("expected strict-lifecycle error, got: %v", err)
 	}
 }
 
