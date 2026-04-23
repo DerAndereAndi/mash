@@ -31,65 +31,61 @@ func DeriveSpecManifest(features []*specparse.RawFeatureDef, version, descriptio
 	return b.String(), nil
 }
 
+// specItem is a normalized attribute-or-command row for spec-manifest writing.
+type specItem struct {
+	ID        string
+	Name      string
+	Mandatory bool
+}
+
 func writeFeatureSpec(b *strings.Builder, def *specparse.RawFeatureDef) {
 	fmt.Fprintf(b, "  %s:\n", def.Name)
 	fmt.Fprintf(b, "    id: 0x%02X\n", def.ID)
 	fmt.Fprintf(b, "    revision: %d\n", def.Revision)
 	fmt.Fprintf(b, "    mandatory: %v\n", def.Mandatory)
 
-	// Partition attributes into mandatory and optional
-	var mandatory, optional []specparse.RawAttributeDef
-	for _, attr := range def.Attributes {
-		if attr.Mandatory {
-			mandatory = append(mandatory, attr)
-		} else {
-			optional = append(optional, attr)
-		}
+	attrs := make([]specItem, len(def.Attributes))
+	for i, a := range def.Attributes {
+		attrs[i] = specItem{ID: formatAttrID(a.ID), Name: a.Name, Mandatory: a.Mandatory}
 	}
+	writeSpecItems(b, "attributes", attrs)
 
-	if len(mandatory) > 0 || len(optional) > 0 {
-		b.WriteString("    attributes:\n")
-		if len(mandatory) > 0 {
-			b.WriteString("      mandatory:\n")
-			for _, attr := range mandatory {
-				fmt.Fprintf(b, "        - { id: %s, name: %s }\n", formatAttrID(attr.ID), attr.Name)
-			}
-		}
-		if len(optional) > 0 {
-			b.WriteString("      optional:\n")
-			for _, attr := range optional {
-				fmt.Fprintf(b, "        - { id: %s, name: %s }\n", formatAttrID(attr.ID), attr.Name)
-			}
-		}
+	cmds := make([]specItem, len(def.Commands))
+	for i, c := range def.Commands {
+		cmds[i] = specItem{ID: formatCmdID(c.ID), Name: c.Name, Mandatory: c.Mandatory}
 	}
-
-	// Partition commands into mandatory and optional
-	var mandatoryCmds, optionalCmds []specparse.RawCommandDef
-	for _, cmd := range def.Commands {
-		if cmd.Mandatory {
-			mandatoryCmds = append(mandatoryCmds, cmd)
-		} else {
-			optionalCmds = append(optionalCmds, cmd)
-		}
-	}
-
-	if len(mandatoryCmds) > 0 || len(optionalCmds) > 0 {
-		b.WriteString("    commands:\n")
-		if len(mandatoryCmds) > 0 {
-			b.WriteString("      mandatory:\n")
-			for _, cmd := range mandatoryCmds {
-				fmt.Fprintf(b, "        - { id: %s, name: %s }\n", formatCmdID(cmd.ID), cmd.Name)
-			}
-		}
-		if len(optionalCmds) > 0 {
-			b.WriteString("      optional:\n")
-			for _, cmd := range optionalCmds {
-				fmt.Fprintf(b, "        - { id: %s, name: %s }\n", formatCmdID(cmd.ID), cmd.Name)
-			}
-		}
-	}
+	writeSpecItems(b, "commands", cmds)
 
 	b.WriteString("\n")
+}
+
+// writeSpecItems emits a "label:" block partitioning items into mandatory/optional
+// sub-blocks. Skips the label entirely when items is empty.
+func writeSpecItems(b *strings.Builder, label string, items []specItem) {
+	var mandatory, optional []specItem
+	for _, it := range items {
+		if it.Mandatory {
+			mandatory = append(mandatory, it)
+		} else {
+			optional = append(optional, it)
+		}
+	}
+	if len(mandatory) == 0 && len(optional) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "    %s:\n", label)
+	writeSpecSection(b, "mandatory", mandatory)
+	writeSpecSection(b, "optional", optional)
+}
+
+func writeSpecSection(b *strings.Builder, header string, items []specItem) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "      %s:\n", header)
+	for _, it := range items {
+		fmt.Fprintf(b, "        - { id: %s, name: %s }\n", it.ID, it.Name)
+	}
 }
 
 // formatAttrID formats an attribute ID, using plain decimal for small IDs

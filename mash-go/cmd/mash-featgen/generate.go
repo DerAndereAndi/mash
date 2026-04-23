@@ -329,7 +329,7 @@ func generateSetters(b *strings.Builder, def *specparse.RawFeatureDef) {
 			}
 			if attr.Items.Type == "object" {
 				structType := attr.Items.StructName
-				paramName := firstLowerIdent(attr.Name)
+				paramName := attr.Name
 				fmt.Fprintf(b, "// %s sets the %s.\n", methodName, firstLower(attr.Description))
 				fmt.Fprintf(b, "func (%s *%s) %s(%s []%s) error {\n", recv, name, methodName, paramName, structType)
 				fmt.Fprintf(b, "attr, err := %s.GetAttribute(%s)\n", recv, constName)
@@ -356,7 +356,7 @@ func generateSetters(b *strings.Builder, def *specparse.RawFeatureDef) {
 				fmt.Fprintf(b, "}\n\n")
 			} else if attr.Items.Enum != "" {
 				enumType := attr.Items.Enum
-				paramName := firstLowerIdent(attr.Name)
+				paramName := attr.Name
 				fmt.Fprintf(b, "// %s sets the %s.\n", methodName, firstLower(attr.Description))
 				fmt.Fprintf(b, "func (%s *%s) %s(%s []%s) error {\n", recv, name, methodName, paramName, enumType)
 				fmt.Fprintf(b, "attr, err := %s.GetAttribute(%s)\n", recv, constName)
@@ -388,7 +388,7 @@ func generateSetters(b *strings.Builder, def *specparse.RawFeatureDef) {
 
 		if attr.Enum != "" {
 			enumType := attr.Enum
-			paramName := firstLowerIdent(attr.Name)
+			paramName := attr.Name
 			fmt.Fprintf(b, "// %s sets the %s.\n", methodName, firstLower(attr.Description))
 			fmt.Fprintf(b, "func (%s *%s) %s(%s %s) error {\n", recv, name, methodName, paramName, enumType)
 			fmt.Fprintf(b, "attr, err := %s.GetAttribute(%s)\n", recv, constName)
@@ -401,7 +401,7 @@ func generateSetters(b *strings.Builder, def *specparse.RawFeatureDef) {
 			goKey := attr.MapKeyType
 			goVal := goTypeName(attr.MapValueType)
 			mapType := fmt.Sprintf("map[%s]%s", goKey, goVal)
-			paramName := firstLowerIdent(attr.Name)
+			paramName := attr.Name
 
 			fmt.Fprintf(b, "// %s sets the %s.\n", methodName, firstLower(attr.Description))
 			fmt.Fprintf(b, "func (%s *%s) %s(%s %s) error {\n", recv, name, methodName, paramName, mapType)
@@ -413,7 +413,7 @@ func generateSetters(b *strings.Builder, def *specparse.RawFeatureDef) {
 			fmt.Fprintf(b, "}\n\n")
 		} else {
 			goType := goTypeName(attr.Type)
-			paramName := firstLowerIdent(attr.Name)
+			paramName := attr.Name
 
 			fmt.Fprintf(b, "// %s sets the %s.\n", methodName, firstLower(attr.Description))
 			fmt.Fprintf(b, "func (%s *%s) %s(%s %s) error {\n", recv, name, methodName, paramName, goType)
@@ -726,15 +726,6 @@ func firstLower(s string) string {
 	return string(runes)
 }
 
-// firstLowerIdent returns a parameter name from an attribute name.
-func firstLowerIdent(s string) string {
-	if s == "" {
-		return s
-	}
-	// Already camelCase, just return as-is
-	return s
-}
-
 // enumValueSuffix converts "UNKNOWN" to "Unknown", "SHUTTING_DOWN" to "ShuttingDown".
 // It is initialism-aware: "PCID" -> "PCID", "MAC_EUI48" -> "MACEUI48", "CONTRACT_ID" -> "ContractID".
 func enumValueSuffix(name string) string {
@@ -766,80 +757,49 @@ func enumValueSuffix(name string) string {
 	return result.String()
 }
 
+// yamlTypeSpec bundles the outputs each YAML primitive type maps into.
+// Single source of truth for the per-type mapping — the helper funcs below
+// just project one field out.
+type yamlTypeSpec struct {
+	GoType    string // e.g. "uint8", "[]byte", "map[string]any"
+	ModelType string // e.g. "model.DataTypeUint8"
+	WireFunc  string // wire.ToXxx coercion func name; "" = none
+	ZeroValue string // zero-value literal
+	Numeric   bool   // typedLiteral emits Type(val) for numeric; Sprintf "%v" otherwise
+}
+
+var yamlTypes = map[string]yamlTypeSpec{
+	"uint8":   {GoType: "uint8", ModelType: "model.DataTypeUint8", WireFunc: "wire.ToUint8Public", ZeroValue: "0", Numeric: true},
+	"uint16":  {GoType: "uint16", ModelType: "model.DataTypeUint16", ZeroValue: "0", Numeric: true},
+	"uint32":  {GoType: "uint32", ModelType: "model.DataTypeUint32", WireFunc: "wire.ToUint32", ZeroValue: "0", Numeric: true},
+	"uint64":  {GoType: "uint64", ModelType: "model.DataTypeUint64", ZeroValue: "0", Numeric: true},
+	"int8":    {GoType: "int8", ModelType: "model.DataTypeInt8", ZeroValue: "0", Numeric: true},
+	"int16":   {GoType: "int16", ModelType: "model.DataTypeInt16", ZeroValue: "0", Numeric: true},
+	"int32":   {GoType: "int32", ModelType: "model.DataTypeInt32", ZeroValue: "0", Numeric: true},
+	"int64":   {GoType: "int64", ModelType: "model.DataTypeInt64", WireFunc: "wire.ToInt64", ZeroValue: "0", Numeric: true},
+	"float32": {GoType: "float32", ModelType: "model.DataTypeFloat32", ZeroValue: "0", Numeric: true},
+	"float64": {GoType: "float64", ModelType: "model.DataTypeFloat64", ZeroValue: "0", Numeric: true},
+	"bool":    {GoType: "bool", ModelType: "model.DataTypeBool", ZeroValue: "false"},
+	"string":  {GoType: "string", ModelType: "model.DataTypeString", ZeroValue: `""`},
+	"bytes":   {GoType: "[]byte", ModelType: "model.DataTypeBytes", ZeroValue: "nil"},
+	"array":   {GoType: "[]any", ModelType: "model.DataTypeArray", ZeroValue: "nil"},
+	"map":     {GoType: "map[string]any", ModelType: "model.DataTypeMap", ZeroValue: "nil"},
+}
+
 // goTypeName converts YAML type strings to Go type names.
 func goTypeName(yamlType string) string {
-	switch yamlType {
-	case "uint8":
-		return "uint8"
-	case "uint16":
-		return "uint16"
-	case "uint32":
-		return "uint32"
-	case "uint64":
-		return "uint64"
-	case "int8":
-		return "int8"
-	case "int16":
-		return "int16"
-	case "int32":
-		return "int32"
-	case "int64":
-		return "int64"
-	case "float32":
-		return "float32"
-	case "float64":
-		return "float64"
-	case "bool":
-		return "bool"
-	case "string":
-		return "string"
-	case "bytes":
-		return "[]byte"
-	case "array":
-		return "[]any"
-	case "map":
-		return "map[string]any"
-	default:
-		return yamlType
+	if spec, ok := yamlTypes[yamlType]; ok {
+		return spec.GoType
 	}
+	return yamlType
 }
 
 // modelDataType converts YAML type to model.DataTypeXxx constant.
 func modelDataType(yamlType string) string {
-	switch yamlType {
-	case "uint8":
-		return "model.DataTypeUint8"
-	case "uint16":
-		return "model.DataTypeUint16"
-	case "uint32":
-		return "model.DataTypeUint32"
-	case "uint64":
-		return "model.DataTypeUint64"
-	case "int8":
-		return "model.DataTypeInt8"
-	case "int16":
-		return "model.DataTypeInt16"
-	case "int32":
-		return "model.DataTypeInt32"
-	case "int64":
-		return "model.DataTypeInt64"
-	case "float32":
-		return "model.DataTypeFloat32"
-	case "float64":
-		return "model.DataTypeFloat64"
-	case "bool":
-		return "model.DataTypeBool"
-	case "string":
-		return "model.DataTypeString"
-	case "bytes":
-		return "model.DataTypeBytes"
-	case "array":
-		return "model.DataTypeArray"
-	case "map":
-		return "model.DataTypeMap"
-	default:
-		return "model.DataTypeUnknown"
+	if spec, ok := yamlTypes[yamlType]; ok {
+		return spec.ModelType
 	}
+	return "model.DataTypeUnknown"
 }
 
 // accessConst converts YAML access to model.AccessXxx constant.
@@ -858,60 +818,24 @@ func accessConst(yamlAccess string) string {
 
 // wireCoercionFunc maps YAML type to wire.ToXxx coercion function name.
 func wireCoercionFunc(yamlType string) string {
-	switch yamlType {
-	case "int64":
-		return "wire.ToInt64"
-	case "uint32":
-		return "wire.ToUint32"
-	case "uint8":
-		return "wire.ToUint8Public"
-	default:
-		return ""
-	}
+	return yamlTypes[yamlType].WireFunc
 }
 
 // goZeroValue returns the zero value literal for a Go type.
 func goZeroValue(yamlType string) string {
-	switch yamlType {
-	case "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32", "int64":
-		return "0"
-	case "float32", "float64":
-		return "0"
-	case "bool":
-		return "false"
-	case "string":
-		return `""`
-	default:
-		return "nil"
+	if spec, ok := yamlTypes[yamlType]; ok {
+		return spec.ZeroValue
 	}
+	return "nil"
 }
 
 // typedLiteral converts a parsed YAML value to a typed Go literal.
 func typedLiteral(yamlType string, val any) string {
-	switch yamlType {
-	case "uint8":
-		return fmt.Sprintf("uint8(%v)", val)
-	case "uint16":
-		return fmt.Sprintf("uint16(%v)", val)
-	case "uint32":
-		return fmt.Sprintf("uint32(%v)", val)
-	case "uint64":
-		return fmt.Sprintf("uint64(%v)", val)
-	case "int8":
-		return fmt.Sprintf("int8(%v)", val)
-	case "int16":
-		return fmt.Sprintf("int16(%v)", val)
-	case "int32":
-		return fmt.Sprintf("int32(%v)", val)
-	case "int64":
-		return fmt.Sprintf("int64(%v)", val)
-	case "float32":
-		return fmt.Sprintf("float32(%v)", val)
-	case "float64":
-		return fmt.Sprintf("float64(%v)", val)
-	case "bool":
-		return fmt.Sprintf("%v", val)
-	case "string":
+	spec, ok := yamlTypes[yamlType]
+	switch {
+	case ok && spec.Numeric:
+		return fmt.Sprintf("%s(%v)", spec.GoType, val)
+	case yamlType == "string":
 		return fmt.Sprintf("%q", val)
 	default:
 		return fmt.Sprintf("%v", val)
