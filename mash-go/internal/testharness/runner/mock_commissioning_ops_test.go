@@ -41,50 +41,6 @@ func (_m *MockCommissioningOps) EXPECT() *MockCommissioningOps_Expecter {
 	return &MockCommissioningOps_Expecter{mock: &_m.Mock}
 }
 
-// AdoptMainAsSuiteIfPossible provides a mock function for the type MockCommissioningOps
-func (_mock *MockCommissioningOps) AdoptMainAsSuiteIfPossible() bool {
-	ret := _mock.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for AdoptMainAsSuiteIfPossible")
-	}
-
-	var r0 bool
-	if returnFunc, ok := ret.Get(0).(func() bool); ok {
-		r0 = returnFunc()
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-	return r0
-}
-
-// MockCommissioningOps_AdoptMainAsSuiteIfPossible_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AdoptMainAsSuiteIfPossible'
-type MockCommissioningOps_AdoptMainAsSuiteIfPossible_Call struct {
-	*mock.Call
-}
-
-// AdoptMainAsSuiteIfPossible is a helper method to define mock.On call
-func (_e *MockCommissioningOps_Expecter) AdoptMainAsSuiteIfPossible() *MockCommissioningOps_AdoptMainAsSuiteIfPossible_Call {
-	return &MockCommissioningOps_AdoptMainAsSuiteIfPossible_Call{Call: _e.mock.On("AdoptMainAsSuiteIfPossible")}
-}
-
-func (_c *MockCommissioningOps_AdoptMainAsSuiteIfPossible_Call) Run(run func()) *MockCommissioningOps_AdoptMainAsSuiteIfPossible_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockCommissioningOps_AdoptMainAsSuiteIfPossible_Call) Return(b bool) *MockCommissioningOps_AdoptMainAsSuiteIfPossible_Call {
-	_c.Call.Return(b)
-	return _c
-}
-
-func (_c *MockCommissioningOps_AdoptMainAsSuiteIfPossible_Call) RunAndReturn(run func() bool) *MockCommissioningOps_AdoptMainAsSuiteIfPossible_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // ClearAllCrypto provides a mock function for the type MockCommissioningOps
 func (_mock *MockCommissioningOps) ClearAllCrypto() {
 	_mock.Called()
