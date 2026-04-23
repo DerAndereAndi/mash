@@ -5,7 +5,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/mash-protocol/mash-go/pkg/specparse"
+	"github.com/mash-protocol/mash-go/internal/specparse"
 )
 
 // funcMap provides helper functions available to all templates.

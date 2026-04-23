@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mash-protocol/mash-go/pkg/specparse"
+	"github.com/mash-protocol/mash-go/internal/specparse"
 )
 
 // featureSlug converts "DeviceInfo" to "device-info".

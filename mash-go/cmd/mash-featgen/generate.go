@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/mash-protocol/mash-go/pkg/specparse"
+	"github.com/mash-protocol/mash-go/internal/specparse"
 )
 
 // GenerateFeature produces the full generated Go source for a feature.

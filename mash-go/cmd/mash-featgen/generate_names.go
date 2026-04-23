@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mash-protocol/mash-go/pkg/specparse"
+	"github.com/mash-protocol/mash-go/internal/specparse"
 )
 
 // GenerateNameTables produces Go source for pkg/inspect/names_gen.go.

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mash-protocol/mash-go/pkg/specparse"
+	"github.com/mash-protocol/mash-go/internal/specparse"
 	"golang.org/x/tools/imports"
 )
 

@@ -8,7 +8,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/discovery/mocks"
-	"github.com/mash-protocol/mash-go/pkg/examples"
+	"github.com/mash-protocol/mash-go/internal/examples"
 	"github.com/mash-protocol/mash-go/pkg/failsafe"
 	"github.com/stretchr/testify/mock"
 )

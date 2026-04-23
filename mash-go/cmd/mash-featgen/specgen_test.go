@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mash-protocol/mash-go/pkg/specparse"
+	"github.com/mash-protocol/mash-go/internal/specparse"
 )
 
 func TestDeriveSpecManifest_StatusFeature(t *testing.T) {

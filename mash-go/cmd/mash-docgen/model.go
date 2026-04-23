@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mash-protocol/mash-go/pkg/specparse"
+	"github.com/mash-protocol/mash-go/internal/specparse"
 	"github.com/mash-protocol/mash-go/pkg/usecase"
 )
 

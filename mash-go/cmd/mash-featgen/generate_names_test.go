@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mash-protocol/mash-go/pkg/specparse"
+	"github.com/mash-protocol/mash-go/internal/specparse"
 )
 
 func loadTestData(t *testing.T) ([]specparse.RawModelTypeDef, []specparse.RawModelTypeDef, []*specparse.RawFeatureDef) {

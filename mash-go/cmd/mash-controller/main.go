@@ -68,7 +68,7 @@ import (
 	"github.com/mash-protocol/mash-go/cmd/mash-controller/interactive"
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
-	"github.com/mash-protocol/mash-go/pkg/examples"
+	"github.com/mash-protocol/mash-go/internal/examples"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	mashlog "github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"

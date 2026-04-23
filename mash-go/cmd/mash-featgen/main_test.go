@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mash-protocol/mash-go/pkg/specparse"
+	"github.com/mash-protocol/mash-go/internal/specparse"
 )
 
 var multiSpace = regexp.MustCompile(`\s+`)

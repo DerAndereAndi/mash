@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mash-protocol/mash-go/pkg/specparse"
+	"github.com/mash-protocol/mash-go/internal/specparse"
 )
 
 // DeriveSpecManifest produces the spec manifest YAML from parsed feature definitions.

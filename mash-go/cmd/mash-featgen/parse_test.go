@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/mash-protocol/mash-go/pkg/specparse"
+	"github.com/mash-protocol/mash-go/internal/specparse"
 )
 
 // docsDir returns the absolute path to docs/features/ relative to this test file.
