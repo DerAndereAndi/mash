@@ -26,6 +26,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/service"
+	"github.com/mash-protocol/mash-go/pkg/service/dispatch"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
@@ -310,14 +311,14 @@ func TestE2E_Failsafe(t *testing.T) {
 
 	// Create a valid DeviceConfig
 	config := service.DeviceConfig{
-		ListenAddress: "127.0.0.1:0",
-		Discriminator: 1234,
-		SetupCode:     "20202021",
-		SerialNumber:  "SN-FAILSAFE-001",
-		Brand:         "TestBrand",
-		Model:         "TestModel",
-		DeviceName:    "Failsafe Test Device",
-		Categories:    []discovery.DeviceCategory{discovery.CategoryEMobility},
+		ListenAddress:   "127.0.0.1:0",
+		Discriminator:   1234,
+		SetupCode:       "20202021",
+		SerialNumber:    "SN-FAILSAFE-001",
+		Brand:           "TestBrand",
+		Model:           "TestModel",
+		DeviceName:      "Failsafe Test Device",
+		Categories:      []discovery.DeviceCategory{discovery.CategoryEMobility},
 		FailsafeTimeout: 4 * time.Hour, // Will be replaced with test timer
 	}
 
@@ -481,8 +482,8 @@ func TestE2E_MultiZone(t *testing.T) {
 	})
 
 	// Create protocol handler and notification dispatcher for the device
-	handler := service.NewProtocolHandler(device)
-	dispatcher := service.NewNotificationDispatcher(handler)
+	handler := dispatch.NewProtocolHandler(device)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	dispatcher.SetProcessingInterval(50 * time.Millisecond)
 	defer dispatcher.Stop()
 
@@ -1050,8 +1051,8 @@ func TestE2E_SubscribeNotify(t *testing.T) {
 	device := createTestDeviceModel()
 
 	// Create protocol handler and notification dispatcher
-	handler := service.NewProtocolHandler(device)
-	dispatcher := service.NewNotificationDispatcher(handler)
+	handler := dispatch.NewProtocolHandler(device)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	dispatcher.SetProcessingInterval(50 * time.Millisecond) // Fast for testing
 	defer dispatcher.Stop()
 
@@ -1253,7 +1254,7 @@ func TestE2E_ReadWrite(t *testing.T) {
 	device := createTestDeviceModel()
 
 	// Create protocol handler
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// Generate test certificates
 	serverCert, err := generateSelfSignedCert("device.mash.local")

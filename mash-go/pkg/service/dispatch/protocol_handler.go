@@ -1,4 +1,4 @@
-package service
+package dispatch
 
 import (
 	"context"
@@ -10,8 +10,8 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/cert"
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
-	"github.com/mash-protocol/mash-go/pkg/service/dispatch"
 	"github.com/mash-protocol/mash-go/pkg/wire"
+	"github.com/mash-protocol/mash-go/pkg/zonecontext"
 )
 
 // NotificationSender is a function that sends a notification to the remote peer.
@@ -37,7 +37,7 @@ type ProtocolHandler struct {
 	peerZoneType cert.ZoneType // The remote peer's zone type (GRID, LOCAL, etc.)
 
 	// Subscription management
-	subscriptions *dispatch.SessionSubscriptionTracker
+	subscriptions *SessionSubscriptionTracker
 
 	// Send function for notifications
 	sendNotification NotificationSender
@@ -58,7 +58,7 @@ type ProtocolHandler struct {
 func NewProtocolHandler(device DeviceModel) *ProtocolHandler {
 	return &ProtocolHandler{
 		device:        device,
-		subscriptions: dispatch.NewSessionSubscriptionTracker(),
+		subscriptions: NewSessionSubscriptionTracker(),
 	}
 }
 
@@ -66,7 +66,7 @@ func NewProtocolHandler(device DeviceModel) *ProtocolHandler {
 func NewProtocolHandlerWithSend(device DeviceModel, send NotificationSender) *ProtocolHandler {
 	return &ProtocolHandler{
 		device:           device,
-		subscriptions:    dispatch.NewSessionSubscriptionTracker(),
+		subscriptions:    NewSessionSubscriptionTracker(),
 		sendNotification: send,
 	}
 }
@@ -77,7 +77,7 @@ func (h *ProtocolHandler) Device() DeviceModel {
 }
 
 // SessionSubscriptions returns the session subscription tracker for this handler.
-func (h *ProtocolHandler) SessionSubscriptions() *dispatch.SessionSubscriptionTracker {
+func (h *ProtocolHandler) SessionSubscriptions() *SessionSubscriptionTracker {
 	return h.subscriptions
 }
 
@@ -310,10 +310,10 @@ func (h *ProtocolHandler) handleRead(req *wire.Request) *wire.Response {
 	// Build context with caller zone identity
 	ctx := context.Background()
 	if h.peerID != "" {
-		ctx = ContextWithCallerZoneID(ctx, h.peerID)
+		ctx = zonecontext.ContextWithCallerZoneID(ctx, h.peerID)
 	}
 	if h.peerZoneType != 0 {
-		ctx = ContextWithCallerZoneType(ctx, h.peerZoneType)
+		ctx = zonecontext.ContextWithCallerZoneType(ctx, h.peerZoneType)
 	}
 
 	// Read attributes using context-aware methods
@@ -487,10 +487,10 @@ func (h *ProtocolHandler) handleSubscribe(req *wire.Request) *wire.Response {
 	// Build context with caller zone identity for priming report
 	ctx := context.Background()
 	if h.peerID != "" {
-		ctx = ContextWithCallerZoneID(ctx, h.peerID)
+		ctx = zonecontext.ContextWithCallerZoneID(ctx, h.peerID)
 	}
 	if h.peerZoneType != 0 {
-		ctx = ContextWithCallerZoneType(ctx, h.peerZoneType)
+		ctx = zonecontext.ContextWithCallerZoneType(ctx, h.peerZoneType)
 	}
 
 	// Read current values for priming report using context-aware methods
@@ -637,10 +637,10 @@ func (h *ProtocolHandler) handleInvoke(req *wire.Request) *wire.Response {
 	// Invoke the command with caller zone ID and type in context
 	ctx := context.Background()
 	if h.peerID != "" {
-		ctx = ContextWithCallerZoneID(ctx, h.peerID)
+		ctx = zonecontext.ContextWithCallerZoneID(ctx, h.peerID)
 	}
 	if h.peerZoneType != 0 {
-		ctx = ContextWithCallerZoneType(ctx, h.peerZoneType)
+		ctx = zonecontext.ContextWithCallerZoneType(ctx, h.peerZoneType)
 	}
 	result, err := feature.InvokeCommand(ctx, commandID, params)
 	if err != nil {
@@ -680,7 +680,7 @@ func (h *ProtocolHandler) handleInvoke(req *wire.Request) *wire.Response {
 }
 
 // GetSubscription returns an inbound subscription by ID.
-func (h *ProtocolHandler) GetSubscription(id uint32) (*dispatch.Subscription, bool) {
+func (h *ProtocolHandler) GetSubscription(id uint32) (*Subscription, bool) {
 	sub := h.subscriptions.GetInbound(id)
 	return sub, sub != nil
 }

@@ -1,4 +1,4 @@
-package service_test
+package dispatch_test
 
 import (
 	"context"
@@ -9,8 +9,9 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
-	"github.com/mash-protocol/mash-go/pkg/service"
+	"github.com/mash-protocol/mash-go/pkg/service/dispatch"
 	"github.com/mash-protocol/mash-go/pkg/wire"
+	"github.com/mash-protocol/mash-go/pkg/zonecontext"
 )
 
 // capturingLogger records log events for testing.
@@ -82,7 +83,7 @@ func createTestDevice() *model.Device {
 
 func TestProtocolHandler_HandleRead_DeviceInfo(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// Create read request for DeviceInfo (endpoint 0, feature 1)
 	req := &wire.Request{
@@ -121,7 +122,7 @@ func TestProtocolHandler_HandleRead_DeviceInfo(t *testing.T) {
 
 func TestProtocolHandler_HandleRead_SpecificAttributes(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// Request only specific attributes
 	req := &wire.Request{
@@ -153,7 +154,7 @@ func TestProtocolHandler_HandleRead_SpecificAttributes(t *testing.T) {
 
 func TestProtocolHandler_HandleRead_InvalidEndpoint(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	req := &wire.Request{
 		MessageID:  3,
@@ -175,7 +176,7 @@ func TestProtocolHandler_HandleRead_InvalidEndpoint(t *testing.T) {
 
 func TestProtocolHandler_HandleRead_InvalidFeature(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	req := &wire.Request{
 		MessageID:  4,
@@ -197,7 +198,7 @@ func TestProtocolHandler_HandleRead_InvalidFeature(t *testing.T) {
 
 func TestProtocolHandler_HandleWrite(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// Write request - try to write to a writable attribute
 	// DeviceInfo attributes are generally read-only, so this should fail
@@ -221,7 +222,7 @@ func TestProtocolHandler_HandleWrite(t *testing.T) {
 
 func TestProtocolHandler_HandleSubscribe(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	req := &wire.Request{
 		MessageID:  6,
@@ -258,7 +259,7 @@ func TestProtocolHandler_HandleSubscribe(t *testing.T) {
 
 func TestProtocolHandler_HandleUnsubscribe(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// First create a subscription
 	subReq := &wire.Request{
@@ -299,7 +300,7 @@ func TestProtocolHandler_HandleUnsubscribe(t *testing.T) {
 
 func TestProtocolHandler_HandleInvoke(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// Try to invoke a command on DeviceInfo
 	// DeviceInfo typically doesn't have commands, so this should fail
@@ -323,7 +324,7 @@ func TestProtocolHandler_HandleInvoke(t *testing.T) {
 
 func TestProtocolHandler_InvalidOperation(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	req := &wire.Request{
 		MessageID:  10,
@@ -345,7 +346,7 @@ func TestProtocolHandler_InvalidOperation(t *testing.T) {
 
 func TestProtocolHandler_ReadElectrical(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// Read Electrical feature on endpoint 1
 	req := &wire.Request{
@@ -378,7 +379,7 @@ func TestProtocolHandler_ReadElectrical(t *testing.T) {
 
 func TestProtocolHandler_ZoneID(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// Set zone context
 	handler.SetZoneID("zone-123")
@@ -390,7 +391,7 @@ func TestProtocolHandler_ZoneID(t *testing.T) {
 
 func TestProtocolHandler_SetPeerID(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// Set peer ID
 	handler.SetPeerID("peer-456")
@@ -402,7 +403,7 @@ func TestProtocolHandler_SetPeerID(t *testing.T) {
 
 func TestProtocolHandler_SubscriptionManagerIntegration(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// Create a subscription
 	req := &wire.Request{
@@ -450,7 +451,7 @@ func TestProtocolHandler_NotifyAttributeChange(t *testing.T) {
 		return nil
 	}
 
-	handler := service.NewProtocolHandlerWithSend(device, sendFunc)
+	handler := dispatch.NewProtocolHandlerWithSend(device, sendFunc)
 
 	// Create a subscription to all attributes
 	req := &wire.Request{
@@ -503,7 +504,7 @@ func TestProtocolHandler_NotifyAttributeChange_WithAttributeFilter(t *testing.T)
 		return nil
 	}
 
-	handler := service.NewProtocolHandlerWithSend(device, sendFunc)
+	handler := dispatch.NewProtocolHandlerWithSend(device, sendFunc)
 
 	// Create a subscription to specific attributes only (attribute 1 and 2)
 	req := &wire.Request{
@@ -552,7 +553,7 @@ func TestProtocolHandler_NotifyAttributeChange_MultipleSubscriptions(t *testing.
 		return nil
 	}
 
-	handler := service.NewProtocolHandlerWithSend(device, sendFunc)
+	handler := dispatch.NewProtocolHandlerWithSend(device, sendFunc)
 
 	// Create two subscriptions to the same feature
 	for i := 0; i < 2; i++ {
@@ -590,7 +591,7 @@ func TestProtocolHandler_CustomSendFunction(t *testing.T) {
 		return nil
 	}
 
-	handler := service.NewProtocolHandlerWithSend(device, sendFunc)
+	handler := dispatch.NewProtocolHandlerWithSend(device, sendFunc)
 
 	// Verify handler was created with send function
 	if handler == nil {
@@ -616,7 +617,7 @@ func TestProtocolHandler_CustomSendFunction(t *testing.T) {
 
 func TestProtocolHandler_UnsubscribeRemovesFromManager(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// Create a subscription
 	subReq := &wire.Request{
@@ -669,7 +670,7 @@ func TestProtocolHandler_UnsubscribeRemovesFromManager(t *testing.T) {
 
 func TestProtocolHandler_LogsRequest(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	logger := newCapturingLogger()
 	handler.SetLogger(logger, "conn-123")
@@ -720,7 +721,7 @@ func TestProtocolHandler_LogsRequest(t *testing.T) {
 
 func TestProtocolHandler_LogsResponse(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	logger := newCapturingLogger()
 	handler.SetLogger(logger, "conn-456")
@@ -763,7 +764,7 @@ func TestProtocolHandler_LogsResponse(t *testing.T) {
 
 func TestProtocolHandler_LogsProcessingTime(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	logger := newCapturingLogger()
 	handler.SetLogger(logger, "conn-789")
@@ -798,7 +799,7 @@ func TestProtocolHandler_LogsProcessingTime(t *testing.T) {
 
 func TestProtocolHandler_NoLoggerNoPanic(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	// No logger set - should not panic
 	req := &wire.Request{
@@ -818,7 +819,7 @@ func TestProtocolHandler_NoLoggerNoPanic(t *testing.T) {
 
 func TestProtocolHandler_LogsErrorResponse(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 
 	logger := newCapturingLogger()
 	handler.SetLogger(logger, "conn-err")
@@ -888,7 +889,7 @@ func createDeviceWithReadHook(hookCalled *bool, capturedZoneID *string) *model.D
 
 	feature.SetReadHook(func(ctx context.Context, attrID uint16) (any, bool) {
 		*hookCalled = true
-		*capturedZoneID = service.CallerZoneIDFromContext(ctx)
+		*capturedZoneID = zonecontext.CallerZoneIDFromContext(ctx)
 		if attrID == testAttrID {
 			return "hook-value-for-" + *capturedZoneID, true
 		}
@@ -906,7 +907,7 @@ func TestProtocolHandler_HandleRead_PassesZoneContext(t *testing.T) {
 	var capturedZoneID string
 	device := createDeviceWithReadHook(&hookCalled, &capturedZoneID)
 
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 	handler.SetPeerID("zone-alpha")
 
 	// Read all attributes
@@ -972,7 +973,7 @@ func TestProtocolHandler_HandleRead_NoPeerID(t *testing.T) {
 	var capturedZoneID string
 	device := createDeviceWithReadHook(&hookCalled, &capturedZoneID)
 
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 	// Do NOT set peerID
 
 	resp := handler.HandleRequest(&wire.Request{
@@ -1012,7 +1013,7 @@ func TestProtocolHandler_HandleSubscribe_PrimingUsesContext(t *testing.T) {
 	var capturedZoneID string
 	device := createDeviceWithReadHook(&hookCalled, &capturedZoneID)
 
-	handler := service.NewProtocolHandler(device)
+	handler := dispatch.NewProtocolHandler(device)
 	handler.SetPeerID("zone-beta")
 
 	// Subscribe to all attributes - the priming report should use context-aware reads

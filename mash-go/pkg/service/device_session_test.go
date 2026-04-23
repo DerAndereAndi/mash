@@ -9,6 +9,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/interaction"
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/service/dispatch"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -40,13 +41,13 @@ func (l *testCapturingLogger) Events() []log.Event {
 type mockResponseConnection struct {
 	mu        sync.Mutex
 	sent      [][]byte
-	handler   *ProtocolHandler
+	handler   *dispatch.ProtocolHandler
 	onMessage func([]byte) // Callback for outgoing messages
 }
 
 func newMockResponseConnection(device *model.Device) *mockResponseConnection {
 	return &mockResponseConnection{
-		handler: NewProtocolHandler(device),
+		handler: dispatch.NewProtocolHandler(device),
 	}
 }
 

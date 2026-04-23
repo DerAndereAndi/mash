@@ -16,6 +16,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/discovery"
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/persistence"
+	"github.com/mash-protocol/mash-go/pkg/service/dispatch"
 	"github.com/mash-protocol/mash-go/pkg/subscription"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 )
@@ -51,7 +52,7 @@ type ControllerService struct {
 	deviceSessions map[string]*DeviceSession
 
 	// Subscription management
-	subscriptionManager SubscriptionTracker
+	subscriptionManager dispatch.SubscriptionTracker
 
 	// Event handlers
 	eventHandlers []EventHandler

@@ -27,6 +27,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
 	"github.com/mash-protocol/mash-go/pkg/persistence"
+	"github.com/mash-protocol/mash-go/pkg/service/dispatch"
 	"github.com/mash-protocol/mash-go/pkg/subscription"
 	"github.com/mash-protocol/mash-go/pkg/transport"
 	"github.com/mash-protocol/mash-go/pkg/wire"
@@ -79,7 +80,7 @@ type DeviceService struct {
 	durationManager *duration.Manager
 
 	// Subscription management
-	subscriptionManager SubscriptionTracker
+	subscriptionManager dispatch.SubscriptionTracker
 
 	// Connected zones
 	connectedZones map[string]*ConnectedZone
@@ -1635,7 +1636,7 @@ func (s *DeviceService) handleCertRenewalSuccess(zoneID string, handler *DeviceR
 }
 
 // makeWriteCallback creates a write callback that emits events for attribute changes.
-func (s *DeviceService) makeWriteCallback(zoneID string) WriteCallback {
+func (s *DeviceService) makeWriteCallback(zoneID string) dispatch.WriteCallback {
 	return func(endpointID uint8, featureID uint8, attrs map[uint16]any) {
 		// Emit an event for each written attribute
 		for attrID, value := range attrs {
@@ -1652,7 +1653,7 @@ func (s *DeviceService) makeWriteCallback(zoneID string) WriteCallback {
 }
 
 // makeInvokeCallback creates an invoke callback that emits events for command invocations.
-func (s *DeviceService) makeInvokeCallback(zoneID string) InvokeCallback {
+func (s *DeviceService) makeInvokeCallback(zoneID string) dispatch.InvokeCallback {
 	return func(endpointID uint8, featureID uint8, commandID uint8, params map[string]any, result any) {
 		s.emitEvent(Event{
 			Type:          EventCommandInvoked,

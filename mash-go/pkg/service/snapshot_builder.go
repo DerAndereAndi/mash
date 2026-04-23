@@ -6,12 +6,13 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
+	"github.com/mash-protocol/mash-go/pkg/service/dispatch"
 )
 
 // buildDeviceSnapshot creates a DeviceSnapshot from a model.Device.
 // It captures the complete capability state: endpoints, features,
 // featureMaps, attributeLists, commandLists, specVersion, and use cases.
-func buildDeviceSnapshot(device DeviceModel) *log.DeviceSnapshot {
+func buildDeviceSnapshot(device dispatch.DeviceModel) *log.DeviceSnapshot {
 	if device == nil {
 		return nil
 	}

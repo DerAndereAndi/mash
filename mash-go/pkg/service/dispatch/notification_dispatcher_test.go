@@ -1,4 +1,4 @@
-package service_test
+package dispatch_test
 
 import (
 	"sync"
@@ -7,15 +7,15 @@ import (
 
 	"github.com/mash-protocol/mash-go/pkg/log"
 	"github.com/mash-protocol/mash-go/pkg/model"
-	"github.com/mash-protocol/mash-go/pkg/service"
+	"github.com/mash-protocol/mash-go/pkg/service/dispatch"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
 // TestNotificationDispatcher_Subscribe tests that subscribing returns current values.
 func TestNotificationDispatcher_Subscribe(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
-	dispatcher := service.NewNotificationDispatcher(handler)
+	handler := dispatch.NewProtocolHandler(device)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	defer dispatcher.Stop()
 
 	// Create a mock connection sender
@@ -68,8 +68,8 @@ func TestNotificationDispatcher_Subscribe(t *testing.T) {
 // TestNotificationDispatcher_NotifyChange tests that changes trigger notifications.
 func TestNotificationDispatcher_NotifyChange(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
-	dispatcher := service.NewNotificationDispatcher(handler)
+	handler := dispatch.NewProtocolHandler(device)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	dispatcher.SetProcessingInterval(50 * time.Millisecond) // Speed up for testing
 	defer dispatcher.Stop()
 
@@ -136,8 +136,8 @@ func TestNotificationDispatcher_NotifyChange(t *testing.T) {
 // TestNotificationDispatcher_Unsubscribe tests that unsubscribe stops notifications.
 func TestNotificationDispatcher_Unsubscribe(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
-	dispatcher := service.NewNotificationDispatcher(handler)
+	handler := dispatch.NewProtocolHandler(device)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	defer dispatcher.Stop()
 
 	// Create a mock connection sender
@@ -197,8 +197,8 @@ func TestNotificationDispatcher_Unsubscribe(t *testing.T) {
 // TestNotificationDispatcher_ConnectionDisconnect tests cleanup on disconnect.
 func TestNotificationDispatcher_ConnectionDisconnect(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
-	dispatcher := service.NewNotificationDispatcher(handler)
+	handler := dispatch.NewProtocolHandler(device)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	defer dispatcher.Stop()
 
 	sender := func(data []byte) error { return nil }
@@ -238,8 +238,8 @@ func TestNotificationDispatcher_ConnectionDisconnect(t *testing.T) {
 // TestNotificationDispatcher_MultipleConnections tests multiple connections with subscriptions.
 func TestNotificationDispatcher_MultipleConnections(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
-	dispatcher := service.NewNotificationDispatcher(handler)
+	handler := dispatch.NewProtocolHandler(device)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	defer dispatcher.Stop()
 
 	sender1 := func(data []byte) error { return nil }
@@ -290,8 +290,8 @@ func TestNotificationDispatcher_MultipleConnections(t *testing.T) {
 // TestNotificationDispatcher_Heartbeat tests heartbeat notifications.
 func TestNotificationDispatcher_Heartbeat(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
-	dispatcher := service.NewNotificationDispatcher(handler)
+	handler := dispatch.NewProtocolHandler(device)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	dispatcher.SetProcessingInterval(50 * time.Millisecond)
 	defer dispatcher.Stop()
 
@@ -347,8 +347,8 @@ func TestNotificationDispatcher_Heartbeat(t *testing.T) {
 // TestNotificationDispatcher_NotificationEncoding tests that notifications are properly encoded.
 func TestNotificationDispatcher_NotificationEncoding(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
-	dispatcher := service.NewNotificationDispatcher(handler)
+	handler := dispatch.NewProtocolHandler(device)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	dispatcher.SetProcessingInterval(50 * time.Millisecond)
 	defer dispatcher.Stop()
 
@@ -433,8 +433,8 @@ func TestNotificationDispatcher_NotificationEncoding(t *testing.T) {
 
 func TestNotificationDispatcher_LogsNotification(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
-	dispatcher := service.NewNotificationDispatcher(handler)
+	handler := dispatch.NewProtocolHandler(device)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	dispatcher.SetProcessingInterval(50 * time.Millisecond)
 	defer dispatcher.Stop()
 
@@ -523,8 +523,8 @@ func TestNotificationDispatcher_LogsNotification(t *testing.T) {
 
 func TestNotificationDispatcher_NoLoggerNoPanic(t *testing.T) {
 	device := createTestDevice()
-	handler := service.NewProtocolHandler(device)
-	dispatcher := service.NewNotificationDispatcher(handler)
+	handler := dispatch.NewProtocolHandler(device)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	dispatcher.SetProcessingInterval(50 * time.Millisecond)
 	defer dispatcher.Stop()
 

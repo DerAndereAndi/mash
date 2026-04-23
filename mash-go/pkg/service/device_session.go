@@ -10,6 +10,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
 	"github.com/mash-protocol/mash-go/pkg/log"
+	"github.com/mash-protocol/mash-go/pkg/service/dispatch"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -41,7 +42,7 @@ type DeviceSession struct {
 
 	// Bidirectional support: handler for incoming requests from the device.
 	// Optional - only set if controller exposes features to devices.
-	handler *ProtocolHandler
+	handler *dispatch.ProtocolHandler
 
 	// Renewal handling
 	renewalHandler *ControllerRenewalHandler
@@ -372,11 +373,11 @@ func (s *DeviceSession) Conn() Sendable {
 // can query the controller's features (e.g., read meter data from an SMGW).
 //
 // If not called, incoming requests from the device will receive StatusUnsupported.
-func (s *DeviceSession) SetExposedDevice(device DeviceModel) {
+func (s *DeviceSession) SetExposedDevice(device dispatch.DeviceModel) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.handler = NewProtocolHandler(device)
+	s.handler = dispatch.NewProtocolHandler(device)
 	s.handler.SetPeerID(s.deviceID)
 
 	// Wire up notification sender so NotifyAttributeChange can send to device
@@ -500,7 +501,7 @@ func (s *DeviceSession) SendNotification(notif *wire.Notification) error {
 
 // Handler returns the session's ProtocolHandler (for testing and diagnostics).
 // Returns nil if no exposed device is configured.
-func (s *DeviceSession) Handler() *ProtocolHandler {
+func (s *DeviceSession) Handler() *dispatch.ProtocolHandler {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.handler

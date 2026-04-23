@@ -10,6 +10,7 @@ import (
 	"github.com/mash-protocol/mash-go/pkg/commissioning"
 	"github.com/mash-protocol/mash-go/pkg/interaction"
 	"github.com/mash-protocol/mash-go/pkg/log"
+	"github.com/mash-protocol/mash-go/pkg/service/dispatch"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 
@@ -25,12 +26,12 @@ type ZoneSession struct {
 
 	zoneID  string
 	conn    Sendable
-	handler *ProtocolHandler
+	handler *dispatch.ProtocolHandler
 	closed  bool
 	logger  *slog.Logger
 
 	// Notification dispatcher for subscription heartbeats and coalescing
-	dispatcher       *NotificationDispatcher
+	dispatcher       *dispatch.NotificationDispatcher
 	dispatcherConnID uint64
 
 	// Protocol logging (optional)
@@ -46,20 +47,20 @@ type ZoneSession struct {
 	sender *TransportRequestSender
 
 	// Renewal handling
-	renewalHandler         *DeviceRenewalHandler
-	onCertRenewalSuccess   func(zoneID string, handler *DeviceRenewalHandler)
+	renewalHandler       *DeviceRenewalHandler
+	onCertRenewalSuccess func(zoneID string, handler *DeviceRenewalHandler)
 }
 
 // NewZoneSession creates a new zone session.
-func NewZoneSession(zoneID string, conn Sendable, device DeviceModel) *ZoneSession {
-	handler := NewProtocolHandler(device)
+func NewZoneSession(zoneID string, conn Sendable, device dispatch.DeviceModel) *ZoneSession {
+	handler := dispatch.NewProtocolHandler(device)
 	handler.SetZoneID(zoneID)
 
 	// Create notification dispatcher for subscription heartbeats and coalescing.
 	// Attribute changes are routed here by DeviceService.notifyZoneSessions
 	// (via featureChangeSubscriber), which covers both protocol Writes and
 	// internal SetAttributeInternal calls (e.g. from TriggerTestEvent).
-	dispatcher := NewNotificationDispatcher(handler)
+	dispatcher := dispatch.NewNotificationDispatcher(handler)
 	dispatcher.SetProcessingInterval(100 * time.Millisecond)
 	connSender := func(data []byte) error { return conn.Send(data) }
 	dispatcherConnID := dispatcher.RegisterConnection(connSender)
@@ -413,13 +414,13 @@ func (s *ZoneSession) ClearSubscriptions() {
 // The callback receives the endpoint ID, feature ID, and written attributes.
 // Note: subscription notifications are handled by DeviceService.notifyZoneSessions
 // (via featureChangeSubscriber), not by this callback.
-func (s *ZoneSession) SetOnWrite(cb WriteCallback) {
+func (s *ZoneSession) SetOnWrite(cb dispatch.WriteCallback) {
 	s.handler.SetOnWrite(cb)
 }
 
 // SetOnInvoke sets the callback for invoke operations.
 // The callback receives the endpoint ID, feature ID, command ID, parameters, and result.
-func (s *ZoneSession) SetOnInvoke(cb InvokeCallback) {
+func (s *ZoneSession) SetOnInvoke(cb dispatch.InvokeCallback) {
 	s.handler.SetOnInvoke(cb)
 }
 
@@ -456,7 +457,7 @@ func (s *ZoneSession) clearSubscriptions() {
 	}
 	// Fallback: recreate handler to clear subscriptions
 	device := s.handler.Device()
-	s.handler = NewProtocolHandler(device)
+	s.handler = dispatch.NewProtocolHandler(device)
 	s.handler.SetZoneID(s.zoneID)
 }
 
