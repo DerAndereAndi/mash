@@ -3858,6 +3858,40 @@ Lower `DefaultMaxMessageSize` from 65536 to 8192 bytes (8 KB). The `NewFramerWit
 
 ---
 
+### DEC-074: featureMap Bit Semantics
+
+**Date:** 2026-04-23
+**Status:** Accepted (supersedes DEC-035's ambiguous framing)
+
+**Context:**
+DEC-035 introduced a Matter-inspired `featureMap` bitmap for capability discovery. Two downstream implementations conflated orthogonal ideas:
+ 1. Operational mDNS TXT carried an `FM` key echoing the feature-map hex — but mDNS packets are constrained, the key duplicated information present on the wire (`featureMap` attribute 0xFFFC, per feature), and bit semantics differ per feature so a single device-level "FM" hex number is lossy.
+ 2. The reference implementation's inspector rendered bits as symbolic names (e.g. `0x000B (CORE|FLEX|EMOB)`), which readers interpreted as "this device has an EMOB feature." That's wrong: EMOB is a capability variant of the Electrical/ChargingSession features, not a feature that exists alongside them. Bits encode **variants within** a feature, not feature presence.
+
+**Decision:**
+1. `featureMap` bits encode **capability variants within a feature**. Same feature type (e.g. Electrical) can carry different bits on different devices: EVSE → `CORE|FLEX|EMOB|V2X`, battery inverter → `CORE|FLEX|BATTERY`.
+2. Each bit maps to a PICS conformance point (F00–F1F). Auto-PICS enumerates bits as individual conformance items — this is the primary downstream consumer.
+3. **Feature presence** is discovered via the endpoint's `featureList` and the per-feature existence check, NOT by inspecting featureMap bits.
+4. Operational mDNS TXT **MUST NOT** advertise a featureMap / FM key. Capability discovery requires a wire read of `featureMap` (0xFFFC) per feature.
+5. Display tools render `featureMap` as raw hex (`0x0003`) without symbolic bit-name decoration. Symbolic names remain in per-feature specs where semantics are scoped to that feature.
+
+**Rationale:**
+- Matter's featureMap is scoped to a cluster (feature), not a device. DEC-035's cross-feature unification was a premature flattening.
+- mDNS TXT budget is scarce; duplicated data is pure cost.
+- Symbolic rendering looked helpful but actively misled readers about topology ("device has EMOB" vs "Electrical feature supports EMOB variant").
+- Bits are still load-bearing: PICS derives them, conformance tests gate on them, per-feature attributes cross-reference them. Dropping bits would regress conformance. We drop the *advertisement* and *cross-feature symbolic rendering*, not the bits themselves.
+
+**Implementation notes:**
+- Removed: `pkg/discovery/types.go` `TXTKeyFeatureMap` constant, `OperationalInfo.FeatureMap`, `OperationalService.FeatureMap`; `pkg/discovery/txtrecord.go` encode/decode FM blocks; copy-through lines in `pkg/discovery/browser.go` and `pkg/discovery/mdns.go`.
+- Removed: `internal/inspect/formatter.go` `FormatFeatureMap` function + its test; call site in `internal/inspect/inspector.go` now renders `Capabilities: 0x%04X` inline.
+- Preserved: `pkg/model/feature.go` `Feature.FeatureMap()` method; per-feature featureMap attribute (0xFFFC) as wire source of truth; `internal/testharness/runner/auto_pics.go` bit enumeration (load-bearing for PICS auto-discovery); feature YAMLs declaring bits.
+- Test: `TestOperationalTXT_OmitsFeatureMap` (pkg/discovery) regression-guards the TXT omission; `TestInspector_FeatureMapHex` (internal/inspect) regression-guards the hex-only rendering.
+- docs/features/README.md updated with corrected semantics.
+
+**Related:** supersedes DEC-035's device-level framing; pairs with DEC-072 (planned) for attributeList capability discovery path.
+
+---
+
 ## Open Questions (To Be Addressed)
 
 ### OPEN-001: Feature Definitions (RESOLVED)

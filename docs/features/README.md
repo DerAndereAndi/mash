@@ -46,7 +46,9 @@ MASH features are organized by concern:
 
 ## Feature Map Bits
 
-The `featureMap` global attribute is a **32-bit bitmap** indicating high-level capability categories. It enables quick capability discovery without reading all feature details.
+The `featureMap` global attribute (ID `0xFFFC`) is a per-feature **32-bit bitmap** indicating capability **variants** within that feature. Same feature, different bits: e.g. an EVSE Electrical feature carries `CORE|FLEX|EMOB|V2X`, a battery inverter's Electrical feature carries `CORE|FLEX|BATTERY`. Bits are NOT a feature-presence bitmap — use the endpoint's `featureList` for "is this feature here".
+
+Each bit corresponds to a PICS conformance point (F00–F1F). Auto-PICS reads the `featureMap` attribute per feature and enumerates the bits as individual conformance items. See [DEC-074](../decision-log.md#dec-074-featuremap-bit-semantics) for the clarified semantics and the 2026-04-23 cleanup that removed mDNS TXT advertisement + symbolic display rendering.
 
 ```
 bit 0  (0x0001): CORE       - EnergyCore basics (always set)
@@ -64,7 +66,7 @@ bit 10 (0x0400): V2X        - Vehicle-to-grid/home (bidirectional EV)
 
 ### Capability Discovery Pattern
 
-FeatureMap bits indicate **high-level categories**. Detailed capability information is in feature attributes:
+Capability discovery reads the `featureMap` attribute directly (wire-level attribute 0xFFFC) on each feature; the mDNS TXT record does not duplicate this. Bits below map to feature-attribute details:
 
 | FeatureMap Bit | Quick Check | Details In |
 |----------------|-------------|------------|

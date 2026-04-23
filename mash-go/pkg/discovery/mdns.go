@@ -962,7 +962,6 @@ func (b *MDNSBrowser) entryToOperational(entry *zeroconf.ServiceEntry) *Operatio
 		DeviceID:      info.DeviceID,
 		VendorProduct: info.VendorProduct,
 		Firmware:      info.Firmware,
-		FeatureMap:    info.FeatureMap,
 		EndpointCount: info.EndpointCount,
 	}
 }

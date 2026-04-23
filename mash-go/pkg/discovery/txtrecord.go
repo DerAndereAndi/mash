@@ -92,9 +92,6 @@ func EncodeOperationalTXT(info *OperationalInfo) TXTRecordMap {
 	if info.Firmware != "" {
 		txt[TXTKeyFirmware] = info.Firmware
 	}
-	if info.FeatureMap != "" {
-		txt[TXTKeyFeatureMap] = info.FeatureMap
-	}
 	if info.EndpointCount > 0 {
 		txt[TXTKeyEndpoints] = strconv.FormatUint(uint64(info.EndpointCount), 10)
 	}
@@ -128,7 +125,6 @@ func DecodeOperationalTXT(txt TXTRecordMap) (*OperationalInfo, error) {
 	// Optional fields
 	info.VendorProduct = txt[TXTKeyVendorProd]
 	info.Firmware = txt[TXTKeyFirmware]
-	info.FeatureMap = txt[TXTKeyFeatureMap]
 
 	if epStr, ok := txt[TXTKeyEndpoints]; ok {
 		ep, err := strconv.ParseUint(epStr, 10, 8)

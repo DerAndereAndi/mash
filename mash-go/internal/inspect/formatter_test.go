@@ -254,45 +254,28 @@ func TestFormatterIndent(t *testing.T) {
 	}
 }
 
-func TestFormatFeatureMap(t *testing.T) {
-	tests := []struct {
-		name     string
-		fm       uint32
-		expected string
-	}{
-		{
-			name:     "zero",
-			fm:       0,
-			expected: "0x0 (none)",
-		},
-		{
-			name:     "core only",
-			fm:       uint32(model.FeatureMapCore),
-			expected: "0x0001 (CORE)",
-		},
-		{
-			name:     "core and flex",
-			fm:       uint32(model.FeatureMapCore) | uint32(model.FeatureMapFlex),
-			expected: "0x0003 (CORE|FLEX)",
-		},
-		{
-			name:     "emob charger",
-			fm:       uint32(model.FeatureMapCore) | uint32(model.FeatureMapFlex) | uint32(model.FeatureMapEMob),
-			expected: "0x000B (CORE|FLEX|EMOB)",
-		},
-		{
-			name:     "v2x bidirectional",
-			fm:       uint32(model.FeatureMapCore) | uint32(model.FeatureMapFlex) | uint32(model.FeatureMapEMob) | uint32(model.FeatureMapV2X),
-			expected: "0x040B (CORE|FLEX|EMOB|V2X)",
-		},
+// TestInspector_FeatureMapHex asserts that post-DEC-074, the inspector renders
+// per-feature featureMap bits as raw hex without symbolic capability names.
+// featureMap bits encode capability variants WITHIN a feature (e.g. Electrical
+// with/without V2X); they are not a feature-presence bitmap. Symbolic rendering
+// ("CORE|FLEX|EMOB") conflated these semantics.
+func TestInspector_FeatureMapHex(t *testing.T) {
+	feat := &FeatureInfo{
+		ID:         1,
+		Type:       model.FeatureElectrical,
+		Revision:   1,
+		FeatureMap: uint32(model.FeatureMapCore) | uint32(model.FeatureMapFlex),
 	}
+	insp := &Inspector{}
+	out := insp.FormatFeature(feat, NewFormatter())
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := FormatFeatureMap(tt.fm)
-			if got != tt.expected {
-				t.Errorf("FormatFeatureMap(0x%04X) = %q, want %q", tt.fm, got, tt.expected)
-			}
-		})
+	if !strings.Contains(out, "0x0003") {
+		t.Errorf("expected hex rendering '0x0003' in output; got:\n%s", out)
+	}
+	for _, symbolic := range []string{"CORE", "FLEX", "BATTERY", "EMOB", "V2X"} {
+		if strings.Contains(out, symbolic) {
+			t.Errorf("post-DEC-074: featureMap must not render symbolic bit name %q; got:\n%s", symbolic, out)
+		}
 	}
 }
+

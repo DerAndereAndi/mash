@@ -192,7 +192,6 @@ func (e *ServiceEntry) ToOperationalService() (*OperationalService, error) {
 		DeviceID:      info.DeviceID,
 		VendorProduct: info.VendorProduct,
 		Firmware:      info.Firmware,
-		FeatureMap:    info.FeatureMap,
 		EndpointCount: info.EndpointCount,
 	}, nil
 }

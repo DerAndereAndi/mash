@@ -347,7 +347,6 @@ func TestOperationalTXTRoundtrip(t *testing.T) {
 		DeviceID:      "F9E8D7C6B5A49382",
 		VendorProduct: "1234:5678",
 		Firmware:      "1.2.3",
-		FeatureMap:    "0x001B",
 		EndpointCount: 2,
 	}
 
@@ -370,11 +369,27 @@ func TestOperationalTXTRoundtrip(t *testing.T) {
 	if decoded.Firmware != info.Firmware {
 		t.Errorf("Firmware = %q, want %q", decoded.Firmware, info.Firmware)
 	}
-	if decoded.FeatureMap != info.FeatureMap {
-		t.Errorf("FeatureMap = %q, want %q", decoded.FeatureMap, info.FeatureMap)
-	}
 	if decoded.EndpointCount != info.EndpointCount {
 		t.Errorf("EndpointCount = %d, want %d", decoded.EndpointCount, info.EndpointCount)
+	}
+}
+
+// TestOperationalTXT_OmitsFeatureMap enforces DEC-074: operational mDNS TXT
+// MUST NOT carry featureMap bits. Capability discovery is performed through
+// the wire-level featureMap attribute (0xFFFC) per feature, not via mDNS
+// broadcast — where the encoding is ambiguous (raw bits don't map 1:1 to
+// feature presence) and wastes constrained announce-packet budget.
+func TestOperationalTXT_OmitsFeatureMap(t *testing.T) {
+	info := &OperationalInfo{
+		ZoneID:        "A1B2C3D4E5F6A7B8",
+		DeviceID:      "F9E8D7C6B5A49382",
+		VendorProduct: "1234:5678",
+		Firmware:      "1.2.3",
+		EndpointCount: 2,
+	}
+	txt := EncodeOperationalTXT(info)
+	if v, ok := txt["FM"]; ok {
+		t.Errorf("Operational TXT must not include FM key (DEC-074); got FM=%q", v)
 	}
 }
 

@@ -41,9 +41,8 @@ const (
 	TXTKeyZoneID     = "ZI" // Zone ID (first 64 bits of SHA-256)
 	TXTKeyDeviceID   = "DI" // Device ID (first 64 bits of SHA-256)
 	TXTKeyVendorProd = "VP" // Vendor:Product ID (optional)
-	TXTKeyFirmware   = "FW" // Firmware version (optional)
-	TXTKeyFeatureMap = "FM" // Feature map hex (optional)
-	TXTKeyEndpoints  = "EP" // Endpoint count (optional)
+	TXTKeyFirmware  = "FW" // Firmware version (optional)
+	TXTKeyEndpoints = "EP" // Endpoint count (optional)
 
 	// Commissioner TXT keys
 	TXTKeyZoneName    = "ZN" // Zone name (user-friendly)
@@ -280,9 +279,6 @@ type OperationalService struct {
 	// Firmware is optional firmware version (from TXT "FW").
 	Firmware string
 
-	// FeatureMap is optional feature map hex (from TXT "FM").
-	FeatureMap string
-
 	// EndpointCount is optional endpoint count (from TXT "EP").
 	EndpointCount uint8
 }
@@ -357,9 +353,6 @@ type OperationalInfo struct {
 
 	// Firmware is optional firmware version.
 	Firmware string
-
-	// FeatureMap is optional feature map as hex string.
-	FeatureMap string
 
 	// EndpointCount is optional endpoint count.
 	EndpointCount uint8

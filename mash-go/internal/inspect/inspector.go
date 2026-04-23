@@ -317,9 +317,11 @@ func (i *Inspector) formatFeature(feat *FeatureInfo, f *Formatter, depth int) st
 	header := fmt.Sprintf("%s (ID: %d, Rev: %d)", FormatFeatureType(feat.ID), feat.ID, feat.Revision)
 	result += f.Indent(depth, header) + "\n"
 
-	// Show FeatureMap if non-zero (indicates capabilities)
+	// DEC-074: render featureMap bits as raw hex. Bits encode capability
+	// variants within a feature (PICS conformance points F00-F1F), not
+	// feature presence; symbolic rendering conflated those semantics.
 	if feat.FeatureMap != 0 {
-		result += f.Indent(depth+1, "Capabilities: "+FormatFeatureMap(feat.FeatureMap)) + "\n"
+		result += f.Indent(depth+1, fmt.Sprintf("Capabilities: 0x%04X", feat.FeatureMap)) + "\n"
 	}
 
 	// Attributes
