@@ -106,10 +106,21 @@ func run(featuresDir, sharedPath, protocolPath, version, outputDir, modelOutput,
 	}
 	fmt.Printf("  generated %s\n", sharedOutPath)
 
-	// Load and generate each feature
+	// Load and generate each feature.
+	// Iterate in canonical order from ver.FeatureTypes (a slice with stable
+	// YAML-declared order) rather than ranging featureVersions (a map, whose
+	// iteration order is nondeterministic and caused names_gen.go drift on
+	// every `make generate`).
 	var allDefs []*specparse.RawFeatureDef
 
-	for featureName, featureVer := range featureVersions {
+	for _, ft := range ver.FeatureTypes {
+		featureName := ft.Name
+		featureVer, ok := featureVersions[featureName]
+		if !ok {
+			// Feature type declared in the protocol registry but no version
+			// specified for this protocol version — skip.
+			continue
+		}
 		// Convert feature name to directory name (e.g., "DeviceInfo" -> "device-info")
 		dirName := specparse.FeatureDirName(featureName)
 		yamlPath := filepath.Join(featuresDir, dirName, featureVer+".yaml")

@@ -48,6 +48,27 @@ func initGeneratedNameTables() {
 		"commandList":   model.AttrIDCommandList,
 	}
 
+	deviceInfoAttrs := map[string]uint16{
+		"deviceId":        features.DeviceInfoAttrDeviceID,
+		"vendorName":      features.DeviceInfoAttrVendorName,
+		"productName":     features.DeviceInfoAttrProductName,
+		"serialNumber":    features.DeviceInfoAttrSerialNumber,
+		"vendorId":        features.DeviceInfoAttrVendorID,
+		"productId":       features.DeviceInfoAttrProductID,
+		"softwareVersion": features.DeviceInfoAttrSoftwareVersion,
+		"hardwareVersion": features.DeviceInfoAttrHardwareVersion,
+		"specVersion":     features.DeviceInfoAttrSpecVersion,
+		"endpoints":       features.DeviceInfoAttrEndpoints,
+		"useCases":        features.DeviceInfoAttrUseCases,
+		"location":        features.DeviceInfoAttrLocation,
+		"label":           features.DeviceInfoAttrLabel,
+		"zoneCount":       features.DeviceInfoAttrZoneCount,
+	}
+	for k, v := range globalAttrs {
+		deviceInfoAttrs[k] = v
+	}
+	attributeNames[uint8(model.FeatureDeviceInfo)] = deviceInfoAttrs
+
 	statusAttrs := map[string]uint16{
 		"operatingState": features.StatusAttrOperatingState,
 		"stateDetail":    features.StatusAttrStateDetail,
@@ -58,6 +79,25 @@ func initGeneratedNameTables() {
 		statusAttrs[k] = v
 	}
 	attributeNames[uint8(model.FeatureStatus)] = statusAttrs
+
+	electricalAttrs := map[string]uint16{
+		"phaseCount":            features.ElectricalAttrPhaseCount,
+		"phaseMapping":          features.ElectricalAttrPhaseMapping,
+		"nominalVoltage":        features.ElectricalAttrNominalVoltage,
+		"nominalFrequency":      features.ElectricalAttrNominalFrequency,
+		"supportedDirections":   features.ElectricalAttrSupportedDirections,
+		"nominalMaxConsumption": features.ElectricalAttrNominalMaxConsumption,
+		"nominalMaxProduction":  features.ElectricalAttrNominalMaxProduction,
+		"nominalMinPower":       features.ElectricalAttrNominalMinPower,
+		"maxCurrentPerPhase":    features.ElectricalAttrMaxCurrentPerPhase,
+		"minCurrentPerPhase":    features.ElectricalAttrMinCurrentPerPhase,
+		"supportsAsymmetric":    features.ElectricalAttrSupportsAsymmetric,
+		"energyCapacity":        features.ElectricalAttrEnergyCapacity,
+	}
+	for k, v := range globalAttrs {
+		electricalAttrs[k] = v
+	}
+	attributeNames[uint8(model.FeatureElectrical)] = electricalAttrs
 
 	measurementAttrs := map[string]uint16{
 		"acActivePower":             features.MeasurementAttrACActivePower,
@@ -89,87 +129,6 @@ func initGeneratedNameTables() {
 		measurementAttrs[k] = v
 	}
 	attributeNames[uint8(model.FeatureMeasurement)] = measurementAttrs
-
-	chargingSessionAttrs := map[string]uint16{
-		"state":                           features.ChargingSessionAttrState,
-		"sessionStartTime":                features.ChargingSessionAttrSessionStartTime,
-		"sessionEndTime":                  features.ChargingSessionAttrSessionEndTime,
-		"sessionEnergyCharged":            features.ChargingSessionAttrSessionEnergyCharged,
-		"sessionEnergyDischarged":         features.ChargingSessionAttrSessionEnergyDischarged,
-		"evIdentifications":               features.ChargingSessionAttrEVIdentifications,
-		"evStateOfCharge":                 features.ChargingSessionAttrEVStateOfCharge,
-		"evBatteryCapacity":               features.ChargingSessionAttrEVBatteryCapacity,
-		"evMinStateOfCharge":              features.ChargingSessionAttrEVMinStateOfCharge,
-		"evTargetStateOfCharge":           features.ChargingSessionAttrEVTargetStateOfCharge,
-		"evDemandMode":                    features.ChargingSessionAttrEVDemandMode,
-		"evMinEnergyRequest":              features.ChargingSessionAttrEVMinEnergyRequest,
-		"evMaxEnergyRequest":              features.ChargingSessionAttrEVMaxEnergyRequest,
-		"evTargetEnergyRequest":           features.ChargingSessionAttrEVTargetEnergyRequest,
-		"evDepartureTime":                 features.ChargingSessionAttrEVDepartureTime,
-		"evMinDischargingRequest":         features.ChargingSessionAttrEVMinDischargingRequest,
-		"evMaxDischargingRequest":         features.ChargingSessionAttrEVMaxDischargingRequest,
-		"evDischargeBelowTargetPermitted": features.ChargingSessionAttrEVDischargeBelowTargetPermitted,
-		"estimatedTimeToMinSoC":           features.ChargingSessionAttrEstimatedTimeToMinSoC,
-		"estimatedTimeToTargetSoC":        features.ChargingSessionAttrEstimatedTimeToTargetSoC,
-		"estimatedTimeToFullSoC":          features.ChargingSessionAttrEstimatedTimeToFullSoC,
-		"chargingMode":                    features.ChargingSessionAttrChargingMode,
-		"supportedChargingModes":          features.ChargingSessionAttrSupportedChargingModes,
-		"surplusThreshold":                features.ChargingSessionAttrSurplusThreshold,
-		"startDelay":                      features.ChargingSessionAttrStartDelay,
-		"stopDelay":                       features.ChargingSessionAttrStopDelay,
-	}
-	for k, v := range globalAttrs {
-		chargingSessionAttrs[k] = v
-	}
-	attributeNames[uint8(model.FeatureChargingSession)] = chargingSessionAttrs
-
-	testControlAttrs := map[string]uint16{
-		"testEventTriggersEnabled": features.TestControlAttrTestEventTriggersEnabled,
-	}
-	for k, v := range globalAttrs {
-		testControlAttrs[k] = v
-	}
-	attributeNames[uint8(model.FeatureTestControl)] = testControlAttrs
-
-	deviceInfoAttrs := map[string]uint16{
-		"deviceId":        features.DeviceInfoAttrDeviceID,
-		"vendorName":      features.DeviceInfoAttrVendorName,
-		"productName":     features.DeviceInfoAttrProductName,
-		"serialNumber":    features.DeviceInfoAttrSerialNumber,
-		"vendorId":        features.DeviceInfoAttrVendorID,
-		"productId":       features.DeviceInfoAttrProductID,
-		"softwareVersion": features.DeviceInfoAttrSoftwareVersion,
-		"hardwareVersion": features.DeviceInfoAttrHardwareVersion,
-		"specVersion":     features.DeviceInfoAttrSpecVersion,
-		"endpoints":       features.DeviceInfoAttrEndpoints,
-		"useCases":        features.DeviceInfoAttrUseCases,
-		"location":        features.DeviceInfoAttrLocation,
-		"label":           features.DeviceInfoAttrLabel,
-		"zoneCount":       features.DeviceInfoAttrZoneCount,
-	}
-	for k, v := range globalAttrs {
-		deviceInfoAttrs[k] = v
-	}
-	attributeNames[uint8(model.FeatureDeviceInfo)] = deviceInfoAttrs
-
-	electricalAttrs := map[string]uint16{
-		"phaseCount":            features.ElectricalAttrPhaseCount,
-		"phaseMapping":          features.ElectricalAttrPhaseMapping,
-		"nominalVoltage":        features.ElectricalAttrNominalVoltage,
-		"nominalFrequency":      features.ElectricalAttrNominalFrequency,
-		"supportedDirections":   features.ElectricalAttrSupportedDirections,
-		"nominalMaxConsumption": features.ElectricalAttrNominalMaxConsumption,
-		"nominalMaxProduction":  features.ElectricalAttrNominalMaxProduction,
-		"nominalMinPower":       features.ElectricalAttrNominalMinPower,
-		"maxCurrentPerPhase":    features.ElectricalAttrMaxCurrentPerPhase,
-		"minCurrentPerPhase":    features.ElectricalAttrMinCurrentPerPhase,
-		"supportsAsymmetric":    features.ElectricalAttrSupportsAsymmetric,
-		"energyCapacity":        features.ElectricalAttrEnergyCapacity,
-	}
-	for k, v := range globalAttrs {
-		electricalAttrs[k] = v
-	}
-	attributeNames[uint8(model.FeatureElectrical)] = electricalAttrs
 
 	energyControlAttrs := map[string]uint16{
 		"deviceType":                           features.EnergyControlAttrDeviceType,
@@ -219,6 +178,39 @@ func initGeneratedNameTables() {
 	}
 	attributeNames[uint8(model.FeatureEnergyControl)] = energyControlAttrs
 
+	chargingSessionAttrs := map[string]uint16{
+		"state":                           features.ChargingSessionAttrState,
+		"sessionStartTime":                features.ChargingSessionAttrSessionStartTime,
+		"sessionEndTime":                  features.ChargingSessionAttrSessionEndTime,
+		"sessionEnergyCharged":            features.ChargingSessionAttrSessionEnergyCharged,
+		"sessionEnergyDischarged":         features.ChargingSessionAttrSessionEnergyDischarged,
+		"evIdentifications":               features.ChargingSessionAttrEVIdentifications,
+		"evStateOfCharge":                 features.ChargingSessionAttrEVStateOfCharge,
+		"evBatteryCapacity":               features.ChargingSessionAttrEVBatteryCapacity,
+		"evMinStateOfCharge":              features.ChargingSessionAttrEVMinStateOfCharge,
+		"evTargetStateOfCharge":           features.ChargingSessionAttrEVTargetStateOfCharge,
+		"evDemandMode":                    features.ChargingSessionAttrEVDemandMode,
+		"evMinEnergyRequest":              features.ChargingSessionAttrEVMinEnergyRequest,
+		"evMaxEnergyRequest":              features.ChargingSessionAttrEVMaxEnergyRequest,
+		"evTargetEnergyRequest":           features.ChargingSessionAttrEVTargetEnergyRequest,
+		"evDepartureTime":                 features.ChargingSessionAttrEVDepartureTime,
+		"evMinDischargingRequest":         features.ChargingSessionAttrEVMinDischargingRequest,
+		"evMaxDischargingRequest":         features.ChargingSessionAttrEVMaxDischargingRequest,
+		"evDischargeBelowTargetPermitted": features.ChargingSessionAttrEVDischargeBelowTargetPermitted,
+		"estimatedTimeToMinSoC":           features.ChargingSessionAttrEstimatedTimeToMinSoC,
+		"estimatedTimeToTargetSoC":        features.ChargingSessionAttrEstimatedTimeToTargetSoC,
+		"estimatedTimeToFullSoC":          features.ChargingSessionAttrEstimatedTimeToFullSoC,
+		"chargingMode":                    features.ChargingSessionAttrChargingMode,
+		"supportedChargingModes":          features.ChargingSessionAttrSupportedChargingModes,
+		"surplusThreshold":                features.ChargingSessionAttrSurplusThreshold,
+		"startDelay":                      features.ChargingSessionAttrStartDelay,
+		"stopDelay":                       features.ChargingSessionAttrStopDelay,
+	}
+	for k, v := range globalAttrs {
+		chargingSessionAttrs[k] = v
+	}
+	attributeNames[uint8(model.FeatureChargingSession)] = chargingSessionAttrs
+
 	tariffAttrs := map[string]uint16{
 		"tariffId":          features.TariffAttrTariffID,
 		"currency":          features.TariffAttrCurrency,
@@ -257,14 +249,13 @@ func initGeneratedNameTables() {
 	}
 	attributeNames[uint8(model.FeaturePlan)] = planAttrs
 
-	commandNames[uint8(model.FeatureChargingSession)] = map[string]uint8{
-		"setChargingMode": features.ChargingSessionCmdSetChargingMode,
+	testControlAttrs := map[string]uint16{
+		"testEventTriggersEnabled": features.TestControlAttrTestEventTriggersEnabled,
 	}
-
-	commandNames[uint8(model.FeatureTestControl)] = map[string]uint8{
-		"triggerTestEvent":               features.TestControlCmdTriggerTestEvent,
-		"setCommissioningWindowDuration": features.TestControlCmdSetCommissioningWindowDuration,
+	for k, v := range globalAttrs {
+		testControlAttrs[k] = v
 	}
+	attributeNames[uint8(model.FeatureTestControl)] = testControlAttrs
 
 	commandNames[uint8(model.FeatureDeviceInfo)] = map[string]uint8{
 		"removeZone": features.DeviceInfoCmdRemoveZone,
@@ -284,6 +275,10 @@ func initGeneratedNameTables() {
 		"stop":                  features.EnergyControlCmdStop,
 	}
 
+	commandNames[uint8(model.FeatureChargingSession)] = map[string]uint8{
+		"setChargingMode": features.ChargingSessionCmdSetChargingMode,
+	}
+
 	commandNames[uint8(model.FeatureTariff)] = map[string]uint8{
 		"setTariff": features.TariffCmdSetTariff,
 	}
@@ -298,6 +293,11 @@ func initGeneratedNameTables() {
 	commandNames[uint8(model.FeaturePlan)] = map[string]uint8{
 		"requestPlan": features.PlanCmdRequestPlan,
 		"acceptPlan":  features.PlanCmdAcceptPlan,
+	}
+
+	commandNames[uint8(model.FeatureTestControl)] = map[string]uint8{
+		"triggerTestEvent":               features.TestControlCmdTriggerTestEvent,
+		"setCommissioningWindowDuration": features.TestControlCmdSetCommissioningWindowDuration,
 	}
 
 }
