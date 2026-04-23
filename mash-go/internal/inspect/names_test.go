@@ -3,7 +3,7 @@ package inspect_test
 import (
 	"testing"
 
-	"github.com/mash-protocol/mash-go/pkg/inspect"
+	"github.com/mash-protocol/mash-go/internal/inspect"
 	"github.com/mash-protocol/mash-go/pkg/model"
 )
 

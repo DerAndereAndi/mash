@@ -10,7 +10,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/engine"
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/discovery"
-	"github.com/mash-protocol/mash-go/pkg/inspect"
+	"github.com/mash-protocol/mash-go/internal/inspect"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )
 

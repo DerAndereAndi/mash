@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mash-protocol/mash-go/pkg/inspect"
+	"github.com/mash-protocol/mash-go/internal/inspect"
 )
 
 // Resolver resolves feature and attribute names/IDs for test cases.

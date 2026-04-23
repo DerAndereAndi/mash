@@ -14,7 +14,7 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/mash-protocol/mash-go/pkg/examples"
 	"github.com/mash-protocol/mash-go/pkg/features"
-	"github.com/mash-protocol/mash-go/pkg/inspect"
+	"github.com/mash-protocol/mash-go/internal/inspect"
 	"github.com/mash-protocol/mash-go/pkg/service"
 )
 
