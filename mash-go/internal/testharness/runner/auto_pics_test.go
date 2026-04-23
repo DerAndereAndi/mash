@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/mash-protocol/mash-go/pkg/model"
-	"github.com/mash-protocol/mash-go/pkg/pics"
+	"github.com/mash-protocol/mash-go/internal/pics"
 	"github.com/mash-protocol/mash-go/pkg/usecase"
 )
 

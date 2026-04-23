@@ -10,7 +10,7 @@ import (
 	"github.com/mash-protocol/mash-go/internal/testharness/loader"
 	"github.com/mash-protocol/mash-go/pkg/features"
 	"github.com/mash-protocol/mash-go/pkg/model"
-	"github.com/mash-protocol/mash-go/pkg/pics"
+	"github.com/mash-protocol/mash-go/internal/pics"
 	"github.com/mash-protocol/mash-go/pkg/usecase"
 	"github.com/mash-protocol/mash-go/pkg/wire"
 )

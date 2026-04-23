@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mash-protocol/mash-go/pkg/pics"
+	"github.com/mash-protocol/mash-go/internal/pics"
 )
 
 // RegisterConformanceRules registers all endpoint conformance rules with the given registry.

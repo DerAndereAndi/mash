@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mash-protocol/mash-go/pkg/pics"
+	"github.com/mash-protocol/mash-go/internal/pics"
 )
 
 // RegisterMandatoryRules registers all mandatory attribute rules with the given registry.

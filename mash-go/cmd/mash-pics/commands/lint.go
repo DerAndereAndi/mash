@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mash-protocol/mash-go/pkg/pics"
-	"github.com/mash-protocol/mash-go/pkg/pics/rules"
+	"github.com/mash-protocol/mash-go/internal/pics"
+	"github.com/mash-protocol/mash-go/internal/pics/rules"
 )
 
 // LintOptions configures the lint command.

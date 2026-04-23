@@ -3,7 +3,7 @@ package rules
 import (
 	"testing"
 
-	"github.com/mash-protocol/mash-go/pkg/pics"
+	"github.com/mash-protocol/mash-go/internal/pics"
 )
 
 func TestMAN001_ProtocolDeclaration(t *testing.T) {

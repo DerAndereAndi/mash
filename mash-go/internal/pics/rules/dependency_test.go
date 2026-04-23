@@ -3,7 +3,7 @@ package rules
 import (
 	"testing"
 
-	"github.com/mash-protocol/mash-go/pkg/pics"
+	"github.com/mash-protocol/mash-go/internal/pics"
 )
 
 func TestDEP001_V2XRequiresEMOB(t *testing.T) {

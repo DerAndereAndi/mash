@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mash-protocol/mash-go/pkg/pics"
+	"github.com/mash-protocol/mash-go/internal/pics"
 )
 
 // ConvertOptions configures the convert command.

@@ -1,6 +1,6 @@
 package rules
 
-import "github.com/mash-protocol/mash-go/pkg/pics"
+import "github.com/mash-protocol/mash-go/internal/pics"
 
 // RegisterAllRules registers all validation rules with the given registry.
 func RegisterAllRules(registry *pics.RuleRegistry) {
